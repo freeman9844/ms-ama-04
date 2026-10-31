@@ -5,6 +5,7 @@ import argparse
 import sys
 from typing import Callable
 
+from ops import deploy as deploy_module
 from ops.azcli import OpsError, Runner, subprocess_runner
 from ops.lifecycle import pause, resume, teardown
 from ops.smoke_runner import run_smoke
@@ -12,7 +13,7 @@ from ops.window import close_window, fetch_public_ip, open_window, window_status
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m ops", description="P2 데모 환경 운영 도구")
+    parser = argparse.ArgumentParser(prog="python -m ops", description="데모 환경 운영 도구")
     commands = parser.add_subparsers(dest="command", required=True)
 
     window = commands.add_parser("window", help="배포 창(운영자 IP 한정 public access)")
@@ -26,6 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("pause", help="Service Bus Premium 삭제(비용 절감)")
     commands.add_parser("resume", help="Service Bus 다시 배포")
     commands.add_parser("smoke", help="VNet 안 smoke Job 실행")
+    deployer = commands.add_parser("deploy", help="정책·Mock 이미지(ACR Build)와 Function 코드 배포")
+    deployer.add_argument("target", nargs="?", default="all", choices=deploy_module.TARGETS)
     destroy = commands.add_parser("teardown", help="환경 전체 삭제")
     destroy.add_argument("--confirm", required=True, help="삭제할 리소스 그룹 이름")
     return parser
@@ -60,6 +63,9 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
         elif args.command == "resume":
             resume(runner)
             print("Service Bus를 다시 배포했습니다.", file=out)
+        elif args.command == "deploy":
+            deployed = deploy_module.deploy(runner, args.target, root=deploy_module.ROOT)
+            print("배포했습니다: " + ", ".join(deployed), file=out)
         elif args.command == "smoke":
             print(f"smoke 성공: {run_smoke(runner)}", file=out)
         elif args.command == "teardown":
