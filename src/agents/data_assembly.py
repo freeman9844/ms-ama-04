@@ -252,6 +252,9 @@ class AssemblySession:
             return {"error": self.last_error[source], "retryable": False}
         if not self.can_retry(source):
             return {"error": "retry_budget_exhausted"}
+        # 적요 속 상호·대표자명 가명처리는 profile에 의존하므로, 호출 순서와 무관하게 profile을 먼저 받는다.
+        if source == "transactions" and "profile" not in self.parsed and self.can_retry("profile"):
+            self.fetch("profile", by)
         self.attempts[source] = self.attempts.get(source, 0) + 1
         try:
             raw = self._api.fetch(source, self._token)
@@ -270,7 +273,12 @@ class AssemblySession:
         self.parsed[source] = parsed
         self.fetched_by[source] = by
         self.last_error.pop(source, None)
-        self.summaries[source] = _mask(_summarize(source, parsed), self._pseudonymizer())
+        summary = _summarize(source, parsed)
+        if source == "transactions" and "profile" not in self.parsed:
+            # profile 없이는 적요 속 상호·대표자명을 가릴 수 없으므로 자유 문장을 보내지 않는다.
+            summary["unusual_descriptions"] = []
+            summary["unusual_descriptions_withheld"] = "profile_unavailable"
+        self.summaries[source] = _mask(summary, self._pseudonymizer())
         return self.summaries[source]
 
     def fetch_source(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -326,6 +334,9 @@ def assemble(
         except AgentError as e:
             flags.append(FLAG_AGENT_FALLBACK)
             agent_error, conversation_id = str(e), e.conversation_id
+        except Exception as e:  # noqa: BLE001 - 토큰·응답 형식 오류도 결정적 수집으로 넘긴다
+            flags.append(FLAG_AGENT_FALLBACK)
+            agent_error = f"{type(e).__name__}: {e}"[:300]
 
     for source in SOURCES:
         while session.consented(source) and source not in session.data and session.can_retry(source):
