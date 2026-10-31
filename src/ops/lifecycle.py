@@ -5,7 +5,7 @@ import json
 import time
 from typing import Callable
 
-from ops.azcli import OpsError, Runner, is_not_found
+from ops.azcli import OpsError, Runner, is_not_found, subscription_runner
 from ops.azdenv import get_env, provision, set_env
 from ops.window import ensure_caphost_skip
 
@@ -24,15 +24,16 @@ def pause(runner: Runner) -> bool:
     """Service Bus Premium(월 약 $677)을 삭제합니다. 삭제했으면 True, 이미 없으면 False."""
     env = get_env(runner)
     group, namespace = env["AZURE_RESOURCE_GROUP"], env["SERVICEBUS_NAME"]
+    az = subscription_runner(runner, env)
     ensure_caphost_skip(runner, env)
     set_env(runner, "SERVICEBUS_ENABLED", "false")
-    existing = json.loads(runner(["az", "servicebus", "namespace", "list", "-g", group,
-                                  "--query", "[].name", "-o", "json"]) or "[]")
+    existing = json.loads(az(["az", "servicebus", "namespace", "list", "-g", group,
+                              "--query", "[].name", "-o", "json"]) or "[]")
     deleted = namespace in existing
     if deleted:
-        _ignore_not_found(lambda: runner(["az", "network", "private-endpoint", "delete", "-g", group,
-                                          "-n", f"pe-{namespace}-namespace"]))
-        runner(["az", "servicebus", "namespace", "delete", "-g", group, "-n", namespace], stream=True)
+        _ignore_not_found(lambda: az(["az", "network", "private-endpoint", "delete", "-g", group,
+                                      "-n", f"pe-{namespace}-namespace"]))
+        az(["az", "servicebus", "namespace", "delete", "-g", group, "-n", namespace], stream=True)
     provision(runner)  # SERVICEBUS_FQDN, smoke 설정 등 출력을 pause 상태로 갱신
     return deleted
 
@@ -73,24 +74,25 @@ def teardown(runner: Runner, confirm: str, *, sleep: Callable[[float], None] = t
     group, location = env["AZURE_RESOURCE_GROUP"], env["AZURE_LOCATION"]
     if confirm != group:
         raise OpsError(f"--confirm 값이 리소스 그룹 이름({group})과 다릅니다")
-    subscription = runner(["az", "account", "show", "--query", "id", "-o", "tsv"]).strip()
+    az = subscription_runner(runner, env)
+    subscription = env["AZURE_SUBSCRIPTION_ID"].strip()
     account = env.get("AI_ACCOUNT_NAME")
     if account:
         base = (f"https://management.azure.com/subscriptions/{subscription}/resourceGroups/{group}"
                 f"/providers/Microsoft.CognitiveServices/accounts/{account}")
         project, caphost = env.get("AI_PROJECT_NAME"), env.get("FOUNDRY_PROJECT_CAPHOST")
         if project and caphost:
-            _delete_and_wait(runner, f"{base}/projects/{project}/capabilityHosts/{caphost}"
-                                     f"?api-version={CAPHOST_API_VERSION}", sleep, poll_wait, poll_limit)
-        _delete_and_wait(runner, f"{base}/capabilityHosts/{account}@aml_aiagentservice"
+            _delete_and_wait(az, f"{base}/projects/{project}/capabilityHosts/{caphost}"
                                  f"?api-version={CAPHOST_API_VERSION}", sleep, poll_wait, poll_limit)
-        _ignore_not_found(lambda: runner(["az", "cognitiveservices", "account", "delete", "-g", group,
-                                          "-n", account]))
-        _ignore_not_found(lambda: runner(["az", "cognitiveservices", "account", "purge", "-g", group,
-                                          "-n", account, "-l", location]))
+        _delete_and_wait(az, f"{base}/capabilityHosts/{account}@aml_aiagentservice"
+                             f"?api-version={CAPHOST_API_VERSION}", sleep, poll_wait, poll_limit)
+        _ignore_not_found(lambda: az(["az", "cognitiveservices", "account", "delete", "-g", group,
+                                      "-n", account]))
+        _ignore_not_found(lambda: az(["az", "cognitiveservices", "account", "purge", "-g", group,
+                                      "-n", account, "-l", location]))
     for attempt in range(1, group_retries + 1):
         try:
-            runner(["az", "group", "delete", "-n", group, "--yes"])
+            az(["az", "group", "delete", "-n", group, "--yes"])
             break
         except OpsError as err:
             if is_not_found(err):
@@ -100,5 +102,5 @@ def teardown(runner: Runner, confirm: str, *, sleep: Callable[[float], None] = t
             sleep(retry_wait)
     keyvault = env.get("KEYVAULT_NAME")
     if keyvault:
-        _ignore_not_found(lambda: runner(["az", "keyvault", "purge", "-n", keyvault, "-l", location]))
+        _ignore_not_found(lambda: az(["az", "keyvault", "purge", "-n", keyvault, "-l", location]))
     set_env(runner, "DEPLOY_CAPHOST", "true")  # 다음 새 배포에서는 caphost를 다시 만듭니다.

@@ -4,6 +4,7 @@ from ops.azcli import OpsError
 from ops.lifecycle import pause, resume, teardown
 
 ENV = {
+    "AZURE_SUBSCRIPTION_ID": "sub-azd",
     "AZURE_RESOURCE_GROUP": "rg-amalend",
     "AZURE_LOCATION": "koreacentral",
     "AI_ACCOUNT_NAME": "ais-x",
@@ -21,7 +22,7 @@ def test_pause_deletes_endpoint_then_namespace_then_provisions(fake_runner):
     assert pause(runner) is True
     assert runner.env["SERVICEBUS_ENABLED"] == "false"
     pe = runner.index("az", "network", "private-endpoint", "delete")
-    assert runner.calls[pe][-2:] == ["-n", "pe-sb-x-namespace"]
+    assert runner.calls[pe][runner.calls[pe].index("-n") + 1] == "pe-sb-x-namespace"
     assert pe < runner.index("az", "servicebus", "namespace", "delete") < runner.index("azd", "provision")
 
 
@@ -94,3 +95,37 @@ def test_teardown_gives_up_after_retries(fake_runner):
     with pytest.raises(OpsError, match="InUseSubnet"):
         teardown(runner, "rg-amalend", sleep=lambda s: None, group_retries=2)
     assert len(runner.commands("az", "group", "delete")) == 2
+
+
+def _assert_scoped_to(runner, subscription):
+    az_calls = [c for c in runner.calls if c[:1] == ["az"]]
+    assert az_calls
+    for call in az_calls:
+        if call[1] == "rest":
+            assert f"/subscriptions/{subscription}/" in call[call.index("--url") + 1]
+        else:
+            assert call[call.index("--subscription") + 1] == subscription, call
+
+
+def test_teardown_targets_azd_subscription_not_cli_default(fake_runner):
+    # az CLI가 다른 구독을 보고 있으면 not-found를 "이미 삭제됨"으로 오인해 성공으로 끝나거나,
+    # 같은 이름의 다른 RG를 지울 수 있습니다. 모든 az 호출을 azd 환경의 구독으로 고정합니다.
+    runner = (fake_runner(ENV)
+              .on("az", "account", "show", results=["sub-cli\n"])
+              .on("az", "rest", "--method", "get", results=[NOT_FOUND]))
+    teardown(runner, "rg-amalend", sleep=lambda s: None)
+    _assert_scoped_to(runner, "sub-azd")
+
+
+def test_pause_targets_azd_subscription(fake_runner):
+    runner = fake_runner(ENV).on("az", "servicebus", "namespace", "list", results=['["sb-x"]'])
+    pause(runner)
+    _assert_scoped_to(runner, "sub-azd")
+
+
+def test_teardown_refuses_without_azd_subscription(fake_runner):
+    env = {k: v for k, v in ENV.items() if k != "AZURE_SUBSCRIPTION_ID"}
+    runner = fake_runner(env)
+    with pytest.raises(OpsError, match="AZURE_SUBSCRIPTION_ID"):
+        teardown(runner, "rg-amalend", sleep=lambda s: None)
+    assert [c for c in runner.calls if c[:1] == ["az"]] == []

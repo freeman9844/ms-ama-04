@@ -3,7 +3,8 @@ import pytest
 from ops.azcli import OpsError
 from ops.smoke_runner import run_smoke
 
-ENV = {"AZURE_RESOURCE_GROUP": "rg-amalend", "SMOKE_JOB_NAME": "job-smoke", "LOG_ANALYTICS_CUSTOMER_ID": "law-guid"}
+ENV = {"AZURE_SUBSCRIPTION_ID": "sub-azd", "AZURE_RESOURCE_GROUP": "rg-amalend", "SMOKE_JOB_NAME": "job-smoke",
+       "LOG_ANALYTICS_CUSTOMER_ID": "law-guid"}
 
 
 def test_run_smoke_polls_until_succeeded(fake_runner):
@@ -15,6 +16,8 @@ def test_run_smoke_polls_until_succeeded(fake_runner):
     assert len(sleeps) == 2
     show = runner.commands("az", "containerapp", "job", "execution", "show")[0]
     assert show[show.index("--job-execution-name") + 1] == "job-smoke-abc12"
+    for call in runner.commands("az"):
+        assert call[call.index("--subscription") + 1] == "sub-azd"
 
 
 def test_run_smoke_failure_includes_log_query_hint(fake_runner):
