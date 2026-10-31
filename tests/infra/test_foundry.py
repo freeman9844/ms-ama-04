@@ -7,7 +7,7 @@ ROLE_COSMOS_OPERATOR = "230815da-be43-4aae-9cb4-875f7bd000aa"
 ROLE_SEARCH_INDEX_CONTRIBUTOR = "8ebe5a00-799e-43f5-93ac-243d3dce84a7"
 ROLE_SEARCH_SERVICE_CONTRIBUTOR = "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
 COSMOS_CONTRIBUTOR = "00000000-0000-0000-0000-000000000002"
-MODELS = {"gpt-5.4", "gpt-5.4-mini", "Microsoft-Decision-1"}
+MODELS = {"gpt-5.4", "gpt-5.4-mini", "decision-1"}
 
 
 def _deployments(exp) -> dict[str, dict]:
@@ -36,8 +36,14 @@ def test_model_deployments_default_to_global_standard(closed):
     deployments = _deployments(closed)
     assert set(deployments) == MODELS
     assert {d["sku"]["name"] for d in deployments.values()} == {"GlobalStandard"}
-    assert deployments["Microsoft-Decision-1"]["properties"]["model"]["format"] == "Microsoft"
+    assert deployments["decision-1"]["properties"]["model"]["format"] == "Microsoft"
+    assert deployments["decision-1"]["properties"]["model"]["name"] == "Microsoft-Decision-1"
     assert deployments["gpt-5.4"]["properties"]["model"]["version"] == "2026-03-05"
+
+
+def test_model_deployment_names_avoid_reserved_words(closed):
+    # ARM은 리소스 이름에 예약어(MICROSOFT 등)를 허용하지 않습니다(ContainsReservedWord).
+    assert not [n for n in _deployments(closed) if "microsoft" in n.lower()]
 
 
 def test_model_sku_parameters_switch_to_data_zone(variant):

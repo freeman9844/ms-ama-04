@@ -40,10 +40,11 @@ var tags = {
 }
 
 // capacity 단위는 1K TPM. 구독 쿼터(GlobalStandard): gpt-5.4 250, gpt-5.4-mini 1000.
+// ARM은 리소스 이름에 예약어 MICROSOFT를 허용하지 않으므로 Decision-1은 배포 이름을 따로 둡니다.
 var modelDeployments = [
   { name: 'gpt-5.4', format: 'OpenAI', version: '2026-03-05', sku: chatModelSku, capacity: 50 }
   { name: 'gpt-5.4-mini', format: 'OpenAI', version: '2026-03-17', sku: chatModelSku, capacity: 100 }
-  { name: 'Microsoft-Decision-1', format: 'Microsoft', version: '1', sku: decisionModelSku, capacity: 50 }
+  { name: 'Microsoft-Decision-1', deploymentName: 'decision-1', format: 'Microsoft', version: '1', sku: decisionModelSku, capacity: 50 }
 ]
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {

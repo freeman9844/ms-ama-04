@@ -8,7 +8,7 @@ param agentSubnetId string
 param peSubnetId string
 @description('services.ai, openai, cognitiveservices 순서의 Private DNS zone ID')
 param zoneIds array
-@description('[{ name, format, version, sku, capacity }]')
+@description('[{ name, deploymentName?, format, version, sku, capacity }] — deploymentName이 없으면 name을 씁니다.')
 param modelDeployments array
 @description('[{ principalId, roleId, principalType }]')
 param roleAssignments array = []
@@ -48,7 +48,7 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
 @batchSize(1)
 resource deployments 'Microsoft.CognitiveServices/accounts/deployments@2025-04-01-preview' = [for m in modelDeployments: {
   parent: account
-  name: m.name
+  name: m.?deploymentName ?? m.name
   sku: { name: m.sku, capacity: m.capacity }
   properties: {
     model: { name: m.name, format: m.format, version: m.version }

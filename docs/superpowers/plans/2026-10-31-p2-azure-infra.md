@@ -4436,5 +4436,5 @@ git commit -m "docs(infra): azure deployment runbook, ops commands and measured 
 - **Functions:** Durable Functions classic 1.x Python SDK + Azure Storage 백엔드(`AzureWebJobsStorage__*` 관리 ID 연결). 앱 설정은 `infra/modules/functions.bicep`의 `appSettings` 배열에 추가한다(Bicep이 배열을 통째로 덮어씀).
 - **Service Bus pause 허용:** `SERVICEBUS_FQDN`이 빈 문자열이면 이벤트 발행을 건너뛰고 경고 로그만 남긴다.
 - **Cosmos 컨테이너:** `lending` 데이터베이스에 P3가 만든다. 앱 ID(오케스트레이터·앱)는 이 DB 범위 Data Contributor다.
-- **모델 이름:** 배포 이름은 `gpt-5.4`(분석), `gpt-5.4-mini`(검토자/대체), `Microsoft-Decision-1`(분류). Decision-1의 데이터 평면 스키마는 P3에서 확인하고, 실패 시 `gpt-5.4-mini` 분류로 대체한다(스펙 §7).
+- **모델 이름:** 배포 이름은 `gpt-5.4`(분석), `gpt-5.4-mini`(검토자/대체), `decision-1`(분류, 모델 `Microsoft-Decision-1` — ARM 예약어 때문에 배포 이름을 분리, 실배포에서 확인). Decision-1의 데이터 평면 스키마는 P3에서 확인하고, 실패 시 `gpt-5.4-mini` 분류로 대체한다(스펙 §7).
 - **연기된 P1 보완:** 엔터티 KIND 검증, 가명화기 계좌번호 패턴 보강을 P3에서 가명화기를 쓰기 전에 처리한다.
