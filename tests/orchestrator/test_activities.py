@@ -8,17 +8,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agents.data_assembly import FLAG_AGENT_FALLBACK, SourceError
-from agents.runtime import AgentError
+from agents.runtime import AgentError, AgentRun
+from agents.underwriting import ANALYST_AGENT, FLAG_ASSESSMENT_UNAVAILABLE, REVIEWER_AGENT
 from journey.activities import (
     ACTIVITIES,
     Deps,
+    StoreCache,
     assemble_data,
+    assess_credit,
     evaluate_policy,
     request_consent,
     save_document,
     underwrite,
 )
-from journey.adapters import HttpMockApi, HttpPolicyApi, PolicyUnavailable
+from agents.txn_classify import DecisionClient
+from journey.adapters import HttpMockApi, HttpPolicyApi, PolicyUnavailable, agent_settings
 from journey.models import KST
 from mockapis.app import create_app as create_mock_app
 from mockapis.demo import build_demo_cases
@@ -240,3 +244,141 @@ def test_full_journey_sources_down_goes_incomplete(deps, mock_client, run_journe
     assert final["assembly"]["status"] == "incomplete"
     assert "data_incomplete" in final["flags"]
     assert not ctx.called("underwrite")
+
+
+class FakeDecider:
+    def __init__(self, answer=("supplier", 0.95), error=None):
+        self.answer, self.error, self.states = answer, error, []
+
+    def choose(self, state):
+        self.states.append(state)
+        if self.error:
+            raise self.error
+        return self.answer
+
+
+ANALYST_DRAFT = {
+    "recommendation": "approve",
+    "summary": "상환 여력이 충분하다.",
+    "claims": [{"text": "DSCR은 3.802다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
+    "proposed_structure": {
+        "amount_krw": 20_000_000, "tenor_months": 12, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
+    },
+    "counterfactuals": [],
+}
+REVIEW = {"verdicts": [{"claim_index": 0, "supported": True, "reason": "일치"}], "feedback": ""}
+
+
+class UnderwritingRunner:
+    def __init__(self):
+        self.names, self.deleted = [], []
+
+    def run(self, spec, input_text, handlers):
+        self.names.append(spec.name)
+        n = len(self.names)
+        out = ANALYST_DRAFT if spec.name == ANALYST_AGENT else REVIEW
+        containers = (f"cntr_{n}",) if spec.name == ANALYST_AGENT else ()
+        return AgentRun(spec.name, "1", f"conv_{n}", spec.output_model.model_validate(out), [], 10, 1, containers)
+
+    def delete_container(self, container_id):
+        self.deleted.append(container_id)
+        return True
+
+
+def with_deps(deps, **changes):
+    return Deps(**{**deps.__dict__, **changes})
+
+
+def test_underwrite_without_decider_skips_semantic_classification(deps):
+    consent, _ = assembled(deps)
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["classification"] is None and result["category_overrides"] == {}
+    assert len(result["monthly"]) == 12 and result["signals"]["semantic_overrides"] == 0
+
+
+def test_underwrite_classifies_unresolved_and_caches(deps):
+    consent, _ = assembled(deps)
+    decider = FakeDecider()
+    d = with_deps(deps, decider=decider, cache=StoreCache(deps.store))
+    first = underwrite(d, underwrite_input(consent["consent_id"]))
+    m = first["classification"]["metrics"]
+    assert m["decision_calls"] == m["unique_descriptions"] > 0 and m["cache_hits"] == 0
+    assert first["category_overrides"] == {}
+    assert {s["business_industry"] for s in decider.states} == {"카페"}
+    assert any(c == "classifications" for c, _ in deps.store.docs)
+    second = underwrite(d, underwrite_input(consent["consent_id"]))["classification"]["metrics"]
+    assert (second["decision_calls"], second["cache_hits"]) == (0, m["unique_descriptions"])
+
+
+def test_semantic_debt_label_is_conservative(deps):
+    consent, _ = assembled(deps)
+    base = underwrite(deps, underwrite_input(consent["consent_id"]))
+    d = with_deps(deps, decider=FakeDecider(("high_cost_lender", 0.95)))
+    result = underwrite(d, underwrite_input(consent["consent_id"]))
+    assert result["category_overrides"] and set(result["category_overrides"].values()) == {"high_cost_lender"}
+    assert "high_cost_lender_detected" in result["flags"]
+    assert result["features"]["dscr"] <= base["features"]["dscr"]
+    assert result["features"]["cash_buffer_days"] <= base["features"]["cash_buffer_days"]
+
+
+def test_decider_outage_falls_back_to_rules(deps):
+    consent, _ = assembled(deps)
+    base = underwrite(deps, underwrite_input(consent["consent_id"]))
+    d = with_deps(deps, decider=FakeDecider(error=RuntimeError("503")))
+    result = underwrite(d, underwrite_input(consent["consent_id"]))
+    assert result["classification"]["metrics"]["decision_errors"] > 0
+    assert result["features"] == base["features"]
+
+
+def assess_input(deps, applicant_id="demo-cafe-001"):
+    consent, _ = assembled(deps, applicant_id)
+    uw = underwrite(deps, underwrite_input(consent["consent_id"]))
+    policy = evaluate_policy(deps, uw["features"])
+    payload = {"application_id": "app-1", "consent_id": consent["consent_id"], "underwriting": uw, "policy": policy}
+    return consent, json.loads(json.dumps(payload))
+
+
+def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps):
+    consent, payload = assess_input(deps)
+    runner = UnderwritingRunner()
+    result = assess_credit(with_deps(deps, agents=runner), payload)
+    a = result["assessment"]
+    assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-5.4")
+    assert result["flags"] == [] and result["record"]["rounds"][0]["grounding_issues"] == []
+    assert runner.names == [ANALYST_AGENT, REVIEWER_AGENT] and runner.deleted == ["cntr_1"]
+    doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])
+    assert doc["foundry_conversations"] == ["conv_1", "conv_2"]
+    assert doc["foundry_containers"] == [{"id": "cntr_1", "deleted": True}]
+
+
+def test_assess_credit_without_agents_is_unavailable(deps):
+    _, payload = assess_input(deps)
+    result = assess_credit(deps, payload)
+    assert (result["assessment"], result["flags"]) == (None, [FLAG_ASSESSMENT_UNAVAILABLE])
+
+
+def test_store_cache_round_trip(deps):
+    cache = StoreCache(deps.store)
+    assert cache.get("k1") is None
+    cache.put("k1", {"label": "supplier", "confidence": 0.9})
+    assert cache.get("k1")["label"] == "supplier"
+    assert deps.store.read("classifications", "k1", "k1")["id"] == "k1"
+
+
+def test_agent_settings_disabled_without_endpoints():
+    assert agent_settings({}, lambda scope: "t") == {}
+
+
+def test_agent_settings_builds_agents_decider_and_models():
+    scopes = []
+    env = {
+        "AI_PROJECT_ENDPOINT": "https://ais.services.ai.azure.com/api/projects/p",
+        "AI_ACCOUNT_ENDPOINT": "https://ais.services.ai.azure.com",
+        "DECISION_DEPLOYMENT": "decision-1",
+        "ANALYST_MODEL": "gpt-x",
+    }
+    settings = agent_settings(env, lambda scope: scopes.append(scope) or "t")
+    assert isinstance(settings["decider"], DecisionClient)
+    assert settings["agents"] is not None
+    assert (settings["analyst_model"], settings["reviewer_model"]) == ("gpt-x", "gpt-5.4-mini")
+    assert settings["classifier_model"] == "gpt-5.4-mini"

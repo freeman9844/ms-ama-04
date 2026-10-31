@@ -19,6 +19,7 @@ class Status(StrEnum):
     DATA_ASSEMBLED = "data_assembled"
     DATA_INCOMPLETE = "data_incomplete"
     UNDERWRITTEN = "underwritten"
+    ASSESSED = "assessed"
     AWAITING_OFFICER = "awaiting_officer"
     ESCALATED = "escalated"
     APPROVED = "approved"

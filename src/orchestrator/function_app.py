@@ -61,3 +61,8 @@ def underwrite(payload: dict) -> dict:
 @app.activity_trigger(input_name="payload")
 def evaluate_policy(payload: dict) -> dict:
     return ACTIVITIES["evaluate_policy"](deps(), payload)
+
+
+@app.activity_trigger(input_name="payload")
+def assess_credit(payload: dict) -> dict:
+    return ACTIVITIES["assess_credit"](deps(), payload)
