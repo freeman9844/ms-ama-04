@@ -172,6 +172,21 @@ def check_agent(cfg: dict, http: Http, token: TokenProvider, name: str = "p2-smo
         http("DELETE", f"{base}/agents/{name}?api-version=v1", headers)
 
 
+def check_decision(cfg: dict, http: Http, token: TokenProvider) -> str:
+    """Microsoft-Decision-1 systemone 선택형 질문 1건(거래 의미 분류 경로)."""
+    url = f"{cfg['ai_account_endpoint'].rstrip('/')}/providers/microsoft/v1/systemone"
+    payload = {"model": cfg["decision_deployment"], "state": {"text": "smoke"},
+               "questions": {"ping": {"type": "choice", "instructions": "Answer yes.",
+                                      "criteria": {"yes": "always", "no": "never"}}}}
+    resp = expect(http("POST", url, _bearer(token(AUDIENCE_COGNITIVE), json_body=True), _json(payload)),
+                  200, what="decision systemone")
+    try:
+        answer = resp.json()["answers"]["ping"]
+        return f"{answer['choice']} ({float(answer['confidence']):.2f})"
+    except (KeyError, TypeError, ValueError) as e:
+        raise CheckFailed(f"decision 응답 형식 오류: {resp.body[:200]!r}") from e
+
+
 def check_health(url: str, http: Http) -> str:
     """정책 엔진·Mock API의 /healthz. 자리표시 이미지(http.server)는 404를 줍니다."""
     target = f"{url.rstrip('/')}/healthz"
@@ -217,8 +232,8 @@ def wait_for_status(read: Callable[[], dict | None], target: str, sleep: Callabl
 
 
 def check_journey(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[float], None],
-                  application_id: str, start_attempts: int = 90, decision_attempts: int = 30) -> str:
-    """신청 접수 → 동의 → 데이터 조립(에이전트) → 심사 → 정책 → 심사역 승인까지 한 바퀴."""
+                  application_id: str, start_attempts: int = 120, decision_attempts: int = 30) -> str:
+    """신청 접수 → 동의 → 데이터 조립(에이전트) → 심사 → 정책 → 심사 에이전트 → 심사역 승인까지 한 바퀴."""
     enqueue(cfg, http, token, cfg["start_queue"], {
         "application_id": application_id, "applicant_id": cfg["e2e_applicant"],
         "requested_amount_krw": E2E_REQUESTED_KRW, "requested_tenor_months": E2E_TENOR_MONTHS})
@@ -230,11 +245,17 @@ def check_journey(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[
     policy = doc.get("policy") or {}
     if policy.get("decision") not in ("eligible", "refer"):
         raise CheckFailed(f"승인할 수 없는 정책 결과: {policy.get('decision')} flags={doc.get('flags')}")
+    assessment = doc.get("assessment")
+    if not assessment:
+        raise CheckFailed(f"심사 에이전트 결과 없음: flags={doc.get('flags')} run={doc.get('assessment_run')}")
+    review = assessment["review"]
     amount = min(E2E_REQUESTED_KRW, int(policy["max_amount_krw"]))
     enqueue(cfg, http, token, cfg["decision_queue"], {"application_id": application_id, "decision": {
         "decision": "approve", "officer_id": "smoke", "amount_krw": amount, "reason": "smoke e2e"}})
     doc = wait_for_status(read, "approved", sleep, decision_attempts)
-    return f"{application_id} approved {amount:,} KRW ({len(doc.get('timeline', []))} steps)"
+    return (f"{application_id} approved {amount:,} KRW ({len(doc.get('timeline', []))} steps); "
+            f"assessment {assessment['recommendation']}, "
+            f"review {'passed' if review['passed'] else 'not passed'} in {review['rounds']} rounds")
 
 
 def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable[[str], str],
@@ -256,6 +277,7 @@ def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable
     if cfg.get("servicebus_host"):
         checks.append(("servicebus", lambda: check_servicebus(cfg, http, token)))
     checks.append(("agent", lambda: check_agent(cfg, http, token)))
+    checks.append(("decision", lambda: check_decision(cfg, http, token)))
     application_id = time.strftime("smoke-%Y%m%d-%H%M%S", time.gmtime())
     checks.append(("journey", lambda: check_journey(cfg, http, token, sleep, application_id)))
     return checks

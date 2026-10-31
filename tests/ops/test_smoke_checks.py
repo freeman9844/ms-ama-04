@@ -28,6 +28,8 @@ CFG = {
     "policy_url": "https://ca-policy.int.example",
     "mockapi_url": "https://ca-mockapi.int.example",
     "e2e_applicant": "demo-cafe-001",
+    "ai_account_endpoint": "https://ais-x.services.ai.azure.com",
+    "decision_deployment": "decision-1",
 }
 ENV = {
     "SMOKE_CONFIG": json.dumps(CFG),
@@ -66,6 +68,7 @@ class FakeHttp:
 
 
 ELIGIBLE = {"decision": "eligible", "max_amount_krw": 15_000_000}
+ASSESSMENT = {"recommendation": "conditional", "review": {"passed": True, "rounds": 2, "issues": []}}
 
 
 def app_doc(status, **extra):
@@ -74,7 +77,8 @@ def app_doc(status, **extra):
 
 def healthy_routes():
     return {
-        ("GET", "/docs/"): [sc.Response(404, b"{}"), app_doc("awaiting_officer", policy=ELIGIBLE),
+        ("GET", "/docs/"): [sc.Response(404, b"{}"),
+                            app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT),
                             app_doc("approved")],
         ("GET", "/msi/token"): ok({"access_token": "tok"}),
         ("POST", "/openai/v1/chat/completions"): ok({"model": "gpt"}),
@@ -89,6 +93,7 @@ def healthy_routes():
         ("POST", "/agents/p2-smoke/versions?api-version=v1"): ok({"name": "p2-smoke", "version": "1"}),
         ("POST", "/openai/v1/responses"): ok({"id": "resp_1", "status": "completed"}),
         ("DELETE", "/agents/p2-smoke?api-version=v1"): ok(),
+        ("POST", "/providers/microsoft/v1/systemone"): ok({"answers": {"ping": {"choice": "yes", "confidence": 0.9}}}),
     }
 
 
@@ -150,8 +155,8 @@ def test_main_succeeds_when_all_checks_pass():
     code = sc.main(ENV, http=FakeHttp(healthy_routes()), resolver=private, sleep=lambda s: None, out=out)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert code == 0
-    # dns 2 + chat 2 + blob + cosmos + keyvault + health 2 + servicebus + agent + journey
-    assert lines[-1] == {"summary": {"total": 12, "failed": 0}}
+    # dns 2 + chat 2 + blob + cosmos + keyvault + health 2 + servicebus + agent + decision + journey
+    assert lines[-1] == {"summary": {"total": 13, "failed": 0}}
 
 
 def test_main_reports_failure_and_skips_paused_service_bus():
@@ -188,9 +193,10 @@ def test_health_check_requires_status_ok_and_flags_placeholder_image():
 def test_journey_starts_application_and_approves_within_policy_limit():
     sleeps = []
     http = journey_http([sc.Response(404, b"{}"), app_doc("consent_granted"),
-                         app_doc("awaiting_officer", policy=ELIGIBLE), app_doc("approved")])
+                         app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT), app_doc("approved")])
     detail = sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test")
-    assert detail == "smoke-e2e-test approved 15,000,000 KRW (3 steps)"
+    assert detail == ("smoke-e2e-test approved 15,000,000 KRW (3 steps); "
+                      "assessment conditional, review passed in 2 rounds")
     [start] = http.find("POST", "/applications-start/messages")
     assert start["url"] == "https://stfnx.queue.core.windows.net/applications-start/messages"
     assert start["headers"]["x-ms-version"] == "2023-11-03"
@@ -214,7 +220,7 @@ def test_journey_fails_fast_when_application_fails():
 
 
 def test_journey_does_not_approve_without_eligible_policy():
-    http = journey_http(app_doc("awaiting_officer", policy=None, flags=["policy_unavailable"]))
+    http = journey_http(app_doc("awaiting_officer", policy=None, flags=["policy_unavailable"], assessment=ASSESSMENT))
     with pytest.raises(sc.CheckFailed, match="policy_unavailable"):
         sc.check_journey(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
     assert http.find("POST", "/officer-decisions/messages") == []
@@ -238,3 +244,28 @@ def test_smoke_checks_uses_only_standard_library():
         elif isinstance(node, ast.ImportFrom):
             modules.add((node.module or "").split(".")[0])
     assert modules - {"__future__"} <= set(sys.stdlib_module_names)
+
+
+def test_journey_requires_credit_assessment():
+    http = journey_http(app_doc("awaiting_officer", policy=ELIGIBLE, assessment=None,
+                                flags=["assessment_unavailable"]))
+    with pytest.raises(sc.CheckFailed, match="assessment_unavailable"):
+        sc.check_journey(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
+    assert http.find("POST", "/officer-decisions/messages") == []
+
+
+def test_decision_check_asks_systemone_choice_question():
+    http = FakeHttp(healthy_routes())
+    assert sc.check_decision(CFG, http, token_for(http)) == "yes (0.90)"
+    [call] = http.find("POST", "/providers/microsoft/v1/systemone")
+    assert call["url"] == "https://ais-x.services.ai.azure.com/providers/microsoft/v1/systemone"
+    body = json.loads(call["body"])
+    assert body["model"] == "decision-1"
+    assert body["questions"]["ping"]["type"] == "choice"
+    assert "resource=https%3A%2F%2Fcognitiveservices.azure.com" in http.find("GET", "/msi/token")[0]["url"]
+
+
+def test_decision_check_rejects_unexpected_answer():
+    http = FakeHttp({**healthy_routes(), ("POST", "/providers/microsoft/v1/systemone"): ok({"answers": {}})})
+    with pytest.raises(sc.CheckFailed, match="decision"):
+        sc.check_decision(CFG, http, token_for(http))
