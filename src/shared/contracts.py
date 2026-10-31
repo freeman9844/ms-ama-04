@@ -153,3 +153,82 @@ class PolicyDecision(Contract):
         if self.decision is not Decision.ELIGIBLE and not self.reason_codes:
             raise ValueError("ELIGIBLE이 아닌 결정은 사유 코드가 필요하다")
         return self
+
+
+class Recommendation(StrEnum):
+    APPROVE = "approve"
+    CONDITIONAL = "conditional"
+    DECLINE = "decline"
+    REFER = "refer"
+
+
+# M: 계산 지표, S: 월별 계열, P: 정책 판정 값. 예) M:dscr, S:2026-07:revenue, P:R101:threshold
+EVIDENCE_ID_PATTERN = r"^[MSP]:[A-Za-z0-9_.:-]+$"
+EvidenceId = Annotated[str, Field(pattern=EVIDENCE_ID_PATTERN)]
+
+
+class Claim(Contract):
+    """분석가 주장 1개. 근거(지표 ID 또는 거래 ID)가 하나 이상 있어야 한다."""
+
+    text: str = Field(min_length=1, max_length=400)
+    metric_ids: tuple[EvidenceId, ...] = ()
+    txn_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _grounded(self) -> "Claim":
+        if not self.metric_ids and not self.txn_ids:
+            raise ValueError("주장에는 근거 지표 ID나 거래 ID가 하나 이상 필요하다")
+        return self
+
+
+class ProposedStructure(Contract):
+    amount_krw: int = Field(gt=0)
+    tenor_months: int = Field(ge=1, le=60)
+    schedule: Literal["level", "seasonal"]
+    reduced_payment_months: tuple[Annotated[int, Field(ge=1, le=12)], ...] = ()
+    rationale: str
+
+    @model_validator(mode="after")
+    def _schedule(self) -> "ProposedStructure":
+        if (self.schedule == "seasonal") != bool(self.reduced_payment_months):
+            raise ValueError("seasonal이면 감액 월이 있어야 하고, level이면 없어야 한다")
+        return self
+
+
+class Counterfactual(Contract):
+    metric_id: EvidenceId
+    current: float
+    target: float
+    explanation: str = Field(min_length=1)
+
+
+class ReviewOutcome(Contract):
+    passed: bool
+    rounds: int = Field(ge=1, le=3)
+    issues: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _issues(self) -> "ReviewOutcome":
+        if not self.passed and not self.issues:
+            raise ValueError("검토 미통과에는 사유가 필요하다")
+        return self
+
+
+class CreditAssessment(Contract):
+    """Underwriting 에이전트 산출물(참고용 추천). 판정은 Policy Engine과 심사역이 한다."""
+
+    schema_version: SchemaV1 = "1"
+    application_id: str = Field(min_length=1)
+    recommendation: Recommendation
+    summary: str = Field(min_length=1)
+    claims: tuple[Claim, ...] = Field(min_length=1)
+    proposed_structure: ProposedStructure | None
+    counterfactuals: tuple[Counterfactual, ...] = ()
+    review: ReviewOutcome
+    models: dict[str, str]
+
+    @model_validator(mode="after")
+    def _structure(self) -> "CreditAssessment":
+        if self.recommendation in (Recommendation.APPROVE, Recommendation.CONDITIONAL) and not self.proposed_structure:
+            raise ValueError("승인·조건부 추천에는 제안 구조가 필요하다")
+        return self
