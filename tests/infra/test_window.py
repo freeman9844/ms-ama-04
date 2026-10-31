@@ -19,6 +19,7 @@ WINDOWED = [
 ALWAYS_PRIVATE: list[tuple[str, str]] = [
     ("Microsoft.Storage/storageAccounts", "stagt"),
     ("Microsoft.Search/searchServices", "srch-"),
+    ("Microsoft.ServiceBus/namespaces", "sb-"),
 ]
 
 

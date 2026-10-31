@@ -90,3 +90,6 @@ output AI_PROJECT_NAME string = resources.outputs.AI_PROJECT_NAME
 output AI_PROJECT_ENDPOINT string = resources.outputs.AI_PROJECT_ENDPOINT
 output AI_OPENAI_ENDPOINT string = resources.outputs.AI_OPENAI_ENDPOINT
 output FOUNDRY_PROJECT_CAPHOST string = resources.outputs.FOUNDRY_PROJECT_CAPHOST
+
+output SERVICEBUS_NAME string = resources.outputs.SERVICEBUS_NAME
+output SERVICEBUS_FQDN string = resources.outputs.SERVICEBUS_FQDN

@@ -330,3 +330,26 @@ output AI_PROJECT_NAME string = aiProject.outputs.name
 output AI_PROJECT_ENDPOINT string = 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
 output AI_OPENAI_ENDPOINT string = 'https://${names.ais}.openai.azure.com/'
 output FOUNDRY_PROJECT_CAPHOST string = names.projectCapHost
+
+// ── Service Bus (T5) ────────────────────────────────────────────────────
+module serviceBus 'modules/servicebus.bicep' = if (serviceBusEnabled) {
+  name: 'servicebus'
+  params: {
+    name: names.sb
+    location: location
+    tags: tags
+    peSubnetId: subnetId['snet-pe']
+    zoneId: zoneId['privatelink.servicebus.windows.net']
+    topics: [ 'consent', 'flow.updated', 'alert.raised', 'grievance' ]
+    roleAssignments: [
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.sbSender, principalType: sp }
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.sbReceiver, principalType: sp }
+      { principalId: identities.outputs.appsPrincipalId, roleId: role.sbSender, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.sbSender, principalType: sp }
+    ]
+  }
+}
+
+// 조건부 모듈의 출력을 참조하지 않도록 이름으로 계산합니다.
+output SERVICEBUS_NAME string = names.sb
+output SERVICEBUS_FQDN string = serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
