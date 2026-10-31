@@ -12,12 +12,16 @@ _TOKEN_RE = re.compile(r"\[\[[A-Z]+_[0-9a-f]{10}\]\]")
 
 _DATE = r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d)"
 
+_KIND_RE = re.compile(r"^[A-Z]+$")
+
 # 순서가 중요하다: BIZNO(3-2-5)와 PHONE(3-4-4)이 ACCOUNT 패턴에도 걸리므로 먼저 처리한다.
 # ACCOUNT는 ISO 날짜(YYYY-MM-DD)와 모양이 겹치므로 날짜는 제외한다(DSCR·계절성 계산에 날짜가 필요).
+# 하이픈 없는 10~14자리 숫자도 계좌로 본다(8자리 날짜·금액은 남긴다).
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("BIZNO", re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)")),
     ("PHONE", re.compile(r"(?<!\d)01[016789]-?\d{3,4}-?\d{4}(?!\d)")),
-    ("ACCOUNT", re.compile(rf"(?<!\d)(?!{_DATE})\d{{3,6}}-\d{{2,6}}-\d{{2,8}}(?!\d)")),
+    ("ACCOUNT", re.compile(rf"(?<!\d)(?!{_DATE})\d{{2,6}}(?:-\d{{2,8}}){{2,3}}(?!\d)")),
+    ("ACCOUNT", re.compile(r"(?<!\d)\d{10,14}(?!\d)")),
 )
 
 
@@ -48,6 +52,9 @@ class Pseudonymizer:
     def __init__(self, key: bytes, known_entities: Mapping[str, str] | None = None) -> None:
         if len(key) < 32:
             raise ValueError("가명처리 키는 32바이트 이상이어야 한다")
+        bad = sorted({kind for kind in (known_entities or {}).values() if not _KIND_RE.match(kind)})
+        if bad:
+            raise ValueError(f"엔티티 종류는 영문 대문자만 쓸 수 있다: {bad}")
         self._key = key
         self._entities = dict(known_entities or {})
         self._entity_re = _entity_regex(self._entities)
