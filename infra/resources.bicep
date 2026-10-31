@@ -435,3 +435,47 @@ module functions 'modules/functions.bicep' = {
 }
 
 output FUNCTION_APP_NAME string = functions.outputs.name
+
+// ── VNet 안 smoke Job (T8) ─────────────────────────────────────────────
+// Private Endpoint가 있는 모든 호스트. VNet 안에서 사설 IP로 해석되어야 합니다.
+var smokePrivateHosts = concat([
+  '${names.ais}.openai.azure.com'
+  '${names.ais}.services.ai.azure.com'
+  '${names.ais}.cognitiveservices.azure.com'
+  '${names.search}.search.windows.net'
+  '${names.stAgents}.blob.${storageSuffix}'
+  '${names.stData}.blob.${storageSuffix}'
+  '${names.stFunc}.blob.${storageSuffix}'
+  '${names.stFunc}.queue.${storageSuffix}'
+  '${names.stFunc}.table.${storageSuffix}'
+  '${names.cosmos}.documents.azure.com'
+  '${names.kv}${environment().suffixes.keyvaultDns}'
+  '${names.acr}${environment().suffixes.acrLoginServer}'
+  '${names.func}.azurewebsites.net'
+], serviceBusEnabled ? [ '${names.sb}.servicebus.windows.net' ] : [])
+
+module smokeJob 'modules/smoke-job.bicep' = {
+  name: 'smoke-job'
+  params: {
+    name: names.smokeJob
+    location: location
+    tags: tags
+    environmentId: acaInt.outputs.id
+    identityId: identities.outputs.smokeId
+    identityClientId: identities.outputs.smokeClientId
+    config: {
+      openai_host: '${names.ais}.openai.azure.com'
+      project_endpoint: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
+      blob_host: '${names.stData}.blob.${storageSuffix}'
+      cosmos_host: '${names.cosmos}.documents.azure.com'
+      keyvault_host: '${names.kv}${environment().suffixes.keyvaultDns}'
+      servicebus_host: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
+      servicebus_topic: 'flow.updated'
+      chat_models: map(filter(modelDeployments, m => m.format == 'OpenAI'), m => m.name)
+      agent_model: 'gpt-5.4-mini'
+      private_hosts: smokePrivateHosts
+    }
+  }
+}
+
+output SMOKE_JOB_NAME string = smokeJob.outputs.name

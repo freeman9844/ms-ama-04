@@ -103,3 +103,5 @@ output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = resources.outputs.CONTAINER_AP
 output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = resources.outputs.CONTAINER_APPS_WEB_ENVIRONMENT_NAME
 
 output FUNCTION_APP_NAME string = resources.outputs.FUNCTION_APP_NAME
+
+output SMOKE_JOB_NAME string = resources.outputs.SMOKE_JOB_NAME
