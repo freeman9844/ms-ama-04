@@ -29,7 +29,7 @@
 | 모델 배포 | **Global Standard** (Korea Central regional 배포를 쓰기 어려움) |
 | 오케스트레이션 | 접근안 A: Durable Functions 오케스트레이터 + Foundry 에이전트 + 이벤트 기반 L4 에이전트 |
 | 운영자 접근 경로 | **배포 창(deploy window)**: 배포할 때만 운영자 IP를 PaaS 방화벽에 잠시 허용하고 끝나면 닫음. Bastion·점프 VM 없음 |
-| 외부 진입(데모) | Container Apps 환경은 VNet 통합 external. **콘솔 앱만** 외부 ingress(운영자 IP 허용 + Entra ID 인증). Application Gateway(WAF v2)는 운영 아키텍처 문서에만 기술 |
+| 외부 진입(데모) | Container Apps 환경 2개: internal(Policy Engine, Mock API, smoke)과 콘솔 전용 external. **콘솔 앱만** 외부 ingress(운영자 IP 허용 + Entra ID 인증). Application Gateway(WAF v2)는 운영 아키텍처 문서에만 기술 |
 | 비용 수명주기 | 쓰지 않을 때는 pause 스크립트로 고비용 리소스(Service Bus Premium)를 내리고, 필요할 때 다시 프로비저닝 |
 
 ### 1.3 가정
@@ -73,10 +73,11 @@
 - Korea Central에 Spoke VNet 하나를 둡니다. 서브넷은 다음과 같습니다.
   - `snet-agents`: Foundry Agent Service 전용(위임 서브넷, standard agent setup BYO VNet)
   - `snet-functions`: Durable Functions VNet 통합
-  - `snet-apps`: Container Apps 환경(콘솔, Policy Engine, Mock API, smoke 작업)
+  - `snet-apps-int`: internal Container Apps 환경(Policy Engine, Mock API, smoke 작업)
+  - `snet-apps-web`: external Container Apps 환경(콘솔만)
   - `snet-pe`: Private Endpoint
   - 주소 공간은 RFC1918 class B/C 대역(`192.168.0.0/16` 안)을 씁니다. Foundry 샘플이 Korea Central에서 class A 대역을 피하라고 안내하기 때문입니다.
-- **데모 환경의 외부 진입:** Container Apps 환경은 VNet에 통합된 external 환경입니다. 외부 ingress는 **콘솔 앱만** 열고, 운영자 IP 허용목록과 Entra ID 인증(Container Apps 기본 인증)을 둘 다 적용합니다. Policy Engine과 Mock API는 `external: false` ingress로 VNet 안에서만 호출됩니다.
+- **데모 환경의 외부 진입:** Container Apps 환경을 둘로 나눕니다. internal 환경(`cae-int`, 내부 부하 분산기)에는 Policy Engine, Mock API, smoke 작업을 두고, 환경 기본 도메인의 Private DNS zone(와일드카드 A 레코드)으로 VNet 안에서만 호출합니다. external 환경(`cae-web`)에는 **콘솔 앱만** 두고, 운영자 IP 허용목록과 Entra ID 인증(Container Apps 기본 인증)을 둘 다 적용합니다. internal ingress(`external: false`)는 같은 환경 안의 앱에서만 접근할 수 있어 Functions 오케스트레이터가 호출할 수 없으므로 이 방식을 씁니다(learn.microsoft.com, Container Apps ingress overview). Consumption 전용 workload profile 환경은 기본 요금이 없어 환경을 나눠도 비용이 거의 늘지 않습니다.
 - **운영 아키텍처(문서로만 기술):** internal Container Apps 환경 앞에 **Application Gateway(WAF v2)와 Entra ID 인증**을 두고, 이것만 외부 진입 경로로 씁니다. 데모에서는 비용(월 약 $365) 때문에 구축하지 않습니다.
 - Foundry, Cosmos DB, Storage, AI Search, Key Vault, Service Bus, ACR은 모두 Private Endpoint와 Private DNS Zone으로 접근하고, 평상시 public network access는 끕니다.
 - **배포 창:** 운영자 PC에서 데이터 평면 작업(코드 배포, 이미지 빌드, 시드 데이터 적재)을 할 때만 `operatorIp` 파라미터로 public network access를 켜고 기본 거부 + 운영자 IP 허용 규칙을 적용합니다. 작업이 끝나면 다시 끕니다. ACR은 `az acr build` 에이전트가 IP 규칙 밖에 있으므로 빌드 창 동안만 전체 공개합니다.
