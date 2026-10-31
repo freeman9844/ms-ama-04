@@ -28,6 +28,9 @@
 | 환경 수준 | 엔터프라이즈: 전체 VNet 격리와 Private Endpoint |
 | 모델 배포 | **Global Standard** (Korea Central regional 배포를 쓰기 어려움) |
 | 오케스트레이션 | 접근안 A: Durable Functions 오케스트레이터 + Foundry 에이전트 + 이벤트 기반 L4 에이전트 |
+| 운영자 접근 경로 | **배포 창(deploy window)**: 배포할 때만 운영자 IP를 PaaS 방화벽에 잠시 허용하고 끝나면 닫음. Bastion·점프 VM 없음 |
+| 외부 진입(데모) | Container Apps 환경은 VNet 통합 external. **콘솔 앱만** 외부 ingress(운영자 IP 허용 + Entra ID 인증). Application Gateway(WAF v2)는 운영 아키텍처 문서에만 기술 |
+| 비용 수명주기 | 쓰지 않을 때는 pause 스크립트로 고비용 리소스(Service Bus Premium)를 내리고, 필요할 때 다시 프로비저닝 |
 
 ### 1.3 가정
 
@@ -70,12 +73,13 @@
 - Korea Central에 Spoke VNet 하나를 둡니다. 서브넷은 다음과 같습니다.
   - `snet-agents`: Foundry Agent Service 전용(위임 서브넷, standard agent setup BYO VNet)
   - `snet-functions`: Durable Functions VNet 통합
-  - `snet-apps`: Container Apps 환경(콘솔, Policy Engine, Mock API)
+  - `snet-apps`: Container Apps 환경(콘솔, Policy Engine, Mock API, smoke 작업)
   - `snet-pe`: Private Endpoint
-  - `snet-appgw`: Application Gateway
-  - `AzureBastionSubnet`, `snet-ops`: 운영용 점프 VM 또는 self-hosted runner
-- 외부에서 들어오는 경로는 **Application Gateway(WAF v2)와 Entra ID 인증**뿐입니다.
-- Foundry, Cosmos DB, Storage, AI Search, Key Vault, Service Bus, ACR은 모두 Private Endpoint와 Private DNS Zone으로만 접근하고, public network access는 끕니다.
+  - 주소 공간은 RFC1918 class B/C 대역(`192.168.0.0/16` 안)을 씁니다. Foundry 샘플이 Korea Central에서 class A 대역을 피하라고 안내하기 때문입니다.
+- **데모 환경의 외부 진입:** Container Apps 환경은 VNet에 통합된 external 환경입니다. 외부 ingress는 **콘솔 앱만** 열고, 운영자 IP 허용목록과 Entra ID 인증(Container Apps 기본 인증)을 둘 다 적용합니다. Policy Engine과 Mock API는 `external: false` ingress로 VNet 안에서만 호출됩니다.
+- **운영 아키텍처(문서로만 기술):** internal Container Apps 환경 앞에 **Application Gateway(WAF v2)와 Entra ID 인증**을 두고, 이것만 외부 진입 경로로 씁니다. 데모에서는 비용(월 약 $365) 때문에 구축하지 않습니다.
+- Foundry, Cosmos DB, Storage, AI Search, Key Vault, Service Bus, ACR은 모두 Private Endpoint와 Private DNS Zone으로 접근하고, 평상시 public network access는 끕니다.
+- **배포 창:** 운영자 PC에서 데이터 평면 작업(코드 배포, 이미지 빌드, 시드 데이터 적재)을 할 때만 `operatorIp` 파라미터로 public network access를 켜고 기본 거부 + 운영자 IP 허용 규칙을 적용합니다. 작업이 끝나면 다시 끕니다. ACR은 `az acr build` 에이전트가 IP 규칙 밖에 있으므로 빌드 창 동안만 전체 공개합니다.
 - Foundry 리소스와 VNet은 같은 리전(Korea Central)에 둡니다. 공식 문서에서 Korea Central의 Agents와 Private VNet 지원을 확인했습니다(learn.microsoft.com, Foundry Agent Service limits/quotas/regions, 2026-10-29 기준).
 
 ### 2.3 컴포넌트
@@ -89,12 +93,13 @@
 | 5 | Mock MyData·세무·PG API | Container Apps (FastAPI) | 합성 데이터 제공, 범위 제한·만료 동의 토큰 검증, 거래 흐름 이벤트 재생 | Blob(합성 데이터) |
 | 6 | Event Bus | Service Bus (Premium, Private Endpoint) | `consent.*`, `flow.updated`, `alert.raised`, `grievance.*` 이벤트 | 없음 |
 | 7 | 데이터 저장소 | Cosmos DB (NoSQL), Blob Storage | 신청, 동의 레지스트리, 판단 기록, 원천 데이터(동의 ID별 컨테이너) | 없음 |
-| 8 | 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics, AI Content Safety | 비밀 관리, 무키(keyless) 인증, 관측성, Prompt Shields | 없음 |
+| 8 | 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics, AI Content Safety(AI Services 계정에 포함) | 비밀 관리, 무키(keyless) 인증, 관측성, Prompt Shields | 없음 |
 
 **경계 원칙**
 - 컴포넌트 사이에는 `src/shared/contracts`에 정의한 **버전이 붙은 Pydantic 계약**만 오갑니다.
 - 에이전트는 다른 에이전트를 직접 호출하지 않습니다. 단계 간 handoff는 오케스트레이터나 이벤트를 통해서만 일어납니다.
 - Policy Engine은 상태를 갖지 않는 순수 함수 서비스입니다. 규칙 버전을 응답에 포함합니다.
+- **에이전트 도구 실행 방식:** Mock API·Policy Engine·데이터 조회 같은 사내 도구는 Foundry가 직접 호출하지 않습니다. 에이전트가 **함수 도구(function tool)** 호출을 요청하면, VNet 안의 오케스트레이터가 실행하고 결과를 돌려줍니다. 그래서 private standard agent setup(공식 샘플 15)만으로 충분하고, 도구 호출도 오케스트레이터 감사 로그에 남습니다. Code Interpreter는 Foundry 내장 도구로 씁니다(Korea Central 지원).
 
 ### 2.4 확장 경로와 장애 도메인
 
@@ -198,13 +203,14 @@
 
 **모델 배포와 데이터 레지던시 트레이드오프 (ADR-002)**
 - **결정:** Global Standard 배포를 씁니다. Korea Central regional 배포를 쓰기 어렵기 때문입니다.
-- **충돌:** 과제의 "processing stays in-country" 제약과 충돌합니다. Global Standard는 추론 요청이 어느 Azure 리전에서든 처리될 수 있습니다. 아시아에는 Data Zone 배포 옵션이 없습니다.
+- **충돌:** 과제의 "processing stays in-country" 제약과 충돌합니다. Global Standard는 추론 요청이 어느 Azure 리전에서든 처리될 수 있습니다.
+- **검토한 대안 — Data Zone Standard(APAC):** 2026-07-09에 GA되었습니다. 처리 범위가 APAC Data Zone(Korea Central, Japan East, Australia East, Southeast Asia, South India)으로 줄어들지만 여전히 국내 처리는 아닙니다. 그래서 제약을 해소하지 못하고, gpt-5.4 쿼터도 더 작습니다(구독 기준 100K TPM, Global Standard는 250K TPM). 데모에서는 Global Standard를 유지하고, 모델 배포 SKU를 Bicep 파라미터로 두어 바로 바꿀 수 있게 합니다.
 - **완화책:**
   1. 모델 전송 전 가명화: 상호, 대표자명, 계좌번호, 사업자번호를 토큰으로 바꾸고 응답 후 복원합니다.
   2. 최소 전송: 가능한 단계에서는 파생 지표와 집계값만 보냅니다.
   3. 저장 데이터는 국내에: standard agent setup의 BYO Cosmos, Storage, AI Search를 모두 Korea Central에 둡니다.
   4. 가명화 누락률을 측정합니다. 모델로 보내는 payload에서 PII를 스캔합니다.
-- **운영 전환 조건:** Korea Central regional 배포나 PTU로 전환합니다. abuse monitoring 데이터 처리 조건도 확인해야 합니다. README의 한계 항목에 명시합니다.
+- **운영 전환 조건:** Korea Central regional 배포나 PTU로 전환합니다. 그 전 단계로 Data Zone Standard(APAC)로 처리 범위를 줄일 수 있습니다. abuse monitoring 데이터 처리 조건도 확인해야 합니다. README의 한계 항목에 명시합니다.
 
 ### 4.3 컴플라이언스와 공정성
 
@@ -272,7 +278,7 @@ eval/             평가 하네스, 데이터셋, 결과 리포트
 docs/             아키텍처, ADR, 위협 모델, 비용 모델, 한계
 ```
 
-- **배포와 운영 경로:** 네트워크가 전부 비공개이므로 Bastion과 VNet 안의 점프 VM, 또는 VNet 안의 self-hosted runner를 통해 배포합니다. 이 경로를 README에 적습니다.
+- **배포와 운영 경로:** `azd provision`으로 제어 평면(ARM)을 배포합니다. 데이터 평면 작업은 배포 창 스크립트(`scripts/deploy-window.ps1 open|close`)로 운영자 IP만 잠시 허용한 뒤 수행합니다. 배포 후 확인은 VNet 안에서 도는 smoke 작업(Container Apps Job)이 맡습니다. 비용 절감용 pause/resume 스크립트와, Foundry capability host 삭제 순서를 지키는 teardown 스크립트를 둡니다. 이 경로를 README에 적습니다. 운영 환경에서는 VNet 안의 self-hosted runner로 바꿉니다.
 
 ### 6.3 일정 (6주)
 
@@ -290,7 +296,7 @@ docs/             아키텍처, ADR, 위협 모델, 비용 모델, 한계
 - **단위(pytest):** Policy 규칙, 계약 검증, 가명화, 삭제 멱등성, 동의 토큰 범위 검증
 - **통합:** 오케스트레이터와 Mock API, Policy Engine 연동 흐름
 - **AI 회귀:** 평가 하네스(5장)
-- **IaC:** Bicep `what-if`, 배포 후 smoke test(Private Endpoint 이름 해석, 신청 1건 E2E)
+- **IaC:** PSRule for Azure(`.bicepparam`를 펼쳐 오프라인으로 규칙 검사, 예: 배포 창이 닫혀 있으면 public network access가 꺼져 있는지), Bicep `what-if`, 배포 후 VNet 안 smoke test(Private Endpoint 이름 해석, 관리 ID 데이터 평면 호출, 신청 1건 E2E)
 
 ### 6.5 범위에서 뺀 것
 
@@ -310,6 +316,11 @@ docs/             아키텍처, ADR, 위협 모델, 비용 모델, 한계
 | Korea Central에서 모델과 도구의 가용성 차이 | 일부 도구(Code Interpreter 등) 사용 제한 가능 | 1주차에 리전·모델·도구 매트릭스 확인. 막히면 도구를 함수 도구로 대체 |
 | Microsoft-Decision-1의 한국어 적요 분류 품질과 Korea Central 배포 가능 여부 미검증 | 분류 단계 설계 변경 가능 | 1주차에 카탈로그와 배포 유형을 확인하고, 2주차에 소규모 라벨 세트로 F1을 측정. 기준 미달이면 mini급 LLM 배치 분류로 대체 |
 | 전체 비공개 네트워크의 배포 복잡도 | 일정 지연 | Foundry 공식 private network 샘플을 바탕으로 1주차에 먼저 검증 |
+| 배포 창 동안 PaaS public access 일시 허용 | 공격 표면이 잠시 넓어짐 | 운영자 /32 IP만 허용, 작업 후 즉시 닫음. PSRule로 닫힌 상태를 검사. 운영 환경은 VNet 안 runner로 대체 |
+| 콘솔 외부 ingress(App Gateway 없음) | WAF 보호 없음 | 운영자 IP 허용 + Entra ID 인증. 운영 아키텍처는 internal 환경 + App Gateway WAF로 문서화 |
+| Microsoft-Decision-1의 APAC Global Standard 배포 가능 여부 문서와 CLI 불일치 | 배포 실패 가능 | 배포 SKU를 파라미터로 두고 실패 시 Data Zone Standard로 전환(분류는 PII 없는 적요 토큰만 전송) |
+| Foundry capability host 삭제 후 서브넷이 약 20분 점유 상태 | 재배포 지연 | teardown 스크립트가 caphost → 계정 → purge 순서를 지키고 대기 |
+| Durable Functions(Flex Consumption)와 비공개 스토리지 조합 | 코드 배포 실패 가능 | 배포 창 안에서 배포. Durable 1.x Python SDK + Azure Storage 백엔드(검증된 조합) 사용 |
 | 합성 데이터의 현실성 한계 | 평가 수치의 외적 타당성 제한 | 생성 규칙과 한계를 문서화하고, 수치는 "합성 데이터 기준"으로 표기 |
 | 4~6주 일정 | 기능 축소 위험 | 2주차에 E2E 골격을 먼저 연결하고, 이후 깊이를 더하는 순서 유지 |
 
