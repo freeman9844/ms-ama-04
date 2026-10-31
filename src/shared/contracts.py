@@ -97,7 +97,12 @@ class PgSettlement(Contract):
 
 
 class CashFlowFeatures(Contract):
-    """Underwriting이 산출해 Policy Engine에 넘기는 특성 벡터."""
+    """Underwriting이 산출해 Policy Engine에 넘기는 특성 벡터.
+
+    LLM이 만든 JSON이 들어올 수 있으므로 strict로 받는다(true→1.0 같은 암묵 변환을 막아 fail-closed).
+    """
+
+    model_config = ConfigDict(strict=True)
 
     schema_version: SchemaV1 = "1"
     application_id: str = Field(min_length=1)

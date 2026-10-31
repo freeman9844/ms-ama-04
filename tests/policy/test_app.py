@@ -44,6 +44,10 @@ def test_ineligible_response_shape(client, make_features):
         {"unexpected": "x"},
         {"schema_version": "2"},
         {"dscr": None},
+        {"dscr": True},
+        {"months_of_history": True},
+        {"dscr": "1.8"},
+        {"months_of_history": "12"},
     ],
 )
 def test_invalid_input_is_422(client, make_features, patch):

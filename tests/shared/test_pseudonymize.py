@@ -59,6 +59,13 @@ def test_amounts_are_not_masked():
     assert p.mask("카드매출 1,250,000원") == "카드매출 1,250,000원"
 
 
+def test_iso_dates_are_not_masked():
+    p = Pseudonymizer(KEY)
+    text = '{"booked_on": "2026-10-31", "period_end": "2025-12-01"}'
+    assert p.mask(text) == text
+    assert find_pii(text) == []
+
+
 def test_mask_is_idempotent():
     p = Pseudonymizer(KEY, ENTITIES)
     once = p.mask("김민수 010-1234-5678 123-45-67890")

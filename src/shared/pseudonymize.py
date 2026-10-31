@@ -10,11 +10,14 @@ from collections.abc import Callable, Mapping
 
 _TOKEN_RE = re.compile(r"\[\[[A-Z]+_[0-9a-f]{10}\]\]")
 
+_DATE = r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d)"
+
 # 순서가 중요하다: BIZNO(3-2-5)와 PHONE(3-4-4)이 ACCOUNT 패턴에도 걸리므로 먼저 처리한다.
+# ACCOUNT는 ISO 날짜(YYYY-MM-DD)와 모양이 겹치므로 날짜는 제외한다(DSCR·계절성 계산에 날짜가 필요).
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("BIZNO", re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)")),
     ("PHONE", re.compile(r"(?<!\d)01[016789]-?\d{3,4}-?\d{4}(?!\d)")),
-    ("ACCOUNT", re.compile(r"(?<!\d)\d{3,6}-\d{2,6}-\d{2,8}(?!\d)")),
+    ("ACCOUNT", re.compile(rf"(?<!\d)(?!{_DATE})\d{{3,6}}-\d{{2,6}}-\d{{2,8}}(?!\d)")),
 )
 
 
