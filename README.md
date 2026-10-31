@@ -69,6 +69,7 @@ Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provisio
 | `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창). 실측 11.0분(Cosmos 갱신이 약 8분) |
 | `python -m ops window status` | 창 상태 확인. 공인 IP가 바뀌었으면 경고(종료 코드 2) |
 | `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행). 실측 10.8분 |
+| `python -m ops deploy [policy\|mockapi\|orchestrator\|all]` | 앱 배포(P3): 정책·Mock 이미지 ACR Build → 프로비저닝, Function zip. `window open --acr` 필요 |
 | `python -m ops smoke` | VNet 안 smoke Job 실행 |
 | `python -m ops pause` / `resume` | Service Bus Premium 삭제/복구(비용 절감). 실측 pause 5.8분, resume 4.7분 |
 | `python -m ops teardown --confirm rg-amalend` | capability host → Foundry 계정 purge → 리소스 그룹 삭제 → Key Vault purge |
@@ -102,3 +103,54 @@ azd 환경에 이전 `AI_ACCOUNT_NAME`이 남아 있어, `ops window/pause/resum
   `invalid_engine_error: Failed to resolve model info`로 실패합니다. 프롬프트 에이전트
   (`POST {project}/agents/{name}/versions?api-version=v1`)와 `POST {project}/openai/v1/responses`
   (`agent_reference`)를 사용하세요(P3 이후 동일).
+
+## 신청 여정(P3)
+
+흐름: `applications-start` 큐 → Durable 오케스트레이션(동의 → 데이터 조립 에이전트 → 언더라이팅 → 정책 엔진)
+→ `awaiting_officer` → `officer-decisions` 큐 → 최종 상태(`approved`, `conditionally_approved`, `declined`,
+SLA 초과 시 `escalated` → `closed_no_decision`). 신청 문서는 단계마다 Cosmos `lending/applications`에 기록됩니다.
+
+| 구성 | 위치 | 배포 방식 |
+|------|------|-----------|
+| 오케스트레이터 | Functions Flex(`FUNCTION_APP_NAME`): `src/orchestrator` + `src/agents` + `src/shared` | zip, Linux wheel 동봉(원격 빌드 없음) |
+| 정책 엔진 | `ca-policy`(internal 환경) | ACR Build → azd 환경 이미지 → 프로비저닝 |
+| Mock 마이데이터·국세청·PG | `ca-mockapi`(internal 환경, 복제본 1) | 같음 |
+
+### 배포 순서
+
+```powershell
+python -m ops resume               # 선택: Service Bus 이벤트(flow.updated)까지 보려면
+python -m ops window open --acr    # ACR·Functions·Foundry에 운영자 IP 허용
+python -m ops deploy all           # 이미지 2개 빌드 + 프로비저닝 1회 + Function zip 배포
+python -m ops window close         # 작업 후 반드시 닫기
+python -m ops smoke                # P2 점검 + health:policy, health:mockapi, journey(e2e)
+```
+
+- 하나만 다시 배포: `python -m ops deploy policy|mockapi|orchestrator`. 이미지 태그는 UTC 시각이고
+  azd 환경 `SERVICE_POLICY_IMAGE_NAME`, `SERVICE_MOCKAPI_IMAGE_NAME`에 남아 이후 프로비저닝에서도 유지됩니다.
+- 앱 비밀(`MOCK_CONSENT_SECRET`, `PSEUDONYM_KEY`)은 `ops` 명령의 프로비저닝(`window open` 등)이 비어 있으면
+  azd 환경에 생성합니다. P3 이후 첫 프로비저닝은 `azd provision` 대신 `ops` 명령으로 하세요.
+- `journey` 점검은 실행마다 `smoke-YYYYMMDD-HHMMSS` 신청을 `demo-cafe-001`(eligible)로 넣고, `awaiting_officer`에서
+  정책 한도 이하 금액으로 승인해 `approved`까지 확인합니다(최대 약 20분). smoke 신청은 Cosmos에 남습니다.
+- 신청 상태는 운영자 PC에서 직접 볼 수 없습니다(Cosmos, Storage는 MCAPS 정책으로 공용 접근 차단).
+  smoke 출력의 `journey` 결과나 Application Insights `traces`를 보세요.
+
+### 문제 대응
+
+- `ops deploy`가 "ACR 빌드 창" 오류: `python -m ops window open --acr` 후 다시 실행합니다.
+- `health:*`가 404: 앱이 아직 자리표시 이미지입니다. `azd env get-value SERVICE_POLICY_IMAGE_NAME`을 확인하고
+  `python -m ops deploy policy`(또는 `mockapi`)를 다시 실행합니다.
+- `journey`가 `awaiting_officer`에 도달하지 못함(마지막 상태 `None`): Function이 큐를 처리하지 않았습니다.
+  `az functionapp function list -g rg-amalend -n (azd env get-value FUNCTION_APP_NAME) -o table`에 큐 트리거 2개,
+  오케스트레이터, 활동이 보이는지 확인합니다. 비어 있으면 zip 배포나 함수 인덱싱 실패입니다(App Insights `exceptions`).
+- `journey`가 `failed`: 결과의 `error.stage`(`request_consent`, `assemble_data`, `underwrite`)로 구간을 찾습니다.
+  `assemble_data`는 Foundry 에이전트 호출, 나머지는 Mock API·정책 엔진 연결 문제입니다.
+
+### 알려진 제약(P3)
+
+- Mock API 동의 레지스트리는 메모리에 있어 복제본 1개로 운영합니다. 재시작하면 발급된 동의가 사라집니다.
+  기준일(`as_of`)은 컨테이너 시작일입니다(`MOCK_AS_OF`로 고정 가능).
+- 동의 토큰이 활동 입력으로 Durable 기록(사설 Storage)에 남습니다. 운영 설계는 토큰 대신 동의 ID로 조회합니다.
+- `request_consent` 재시도는 Mock에 동의를 중복 발급할 수 있습니다(멱등 키 없음).
+- 앱 비밀은 운영자 PC의 azd `.env`에 평문으로 있습니다. 운영 설계는 Key Vault 참조와 정기 교체입니다.
+- Function 의존성은 운영자 PC에서 Linux wheel로 받아 zip에 넣습니다(원격 빌드 미사용).
