@@ -1,0 +1,19 @@
+# 현금흐름 기반 소상공인 운전자금 대출 정책 v1 (데모용 수치)
+version: "2026.11-v1"
+product:
+  min_amount_krw: 3000000
+  max_amount_krw: 30000000
+  inflow_multiplier: 1.5
+knockouts:
+  - {code: R001, message: "거래 이력 6개월 미만", field: months_of_history, op: lt, threshold: 6}
+  - {code: R002, message: "DSCR 1.0 미만", field: dscr, op: lt, threshold: 1.0}
+refers:
+  - {code: R101, message: "신고매출과 계좌매출 불일치", field: tax_bank_match_ratio, op: lt, threshold: 0.7}
+  - {code: R102, message: "매출 변동성 과다", field: revenue_volatility, op: gt, threshold: 0.5}
+  - {code: R103, message: "현금 완충일수 부족", field: cash_buffer_days, op: lt, threshold: 10}
+  - {code: R104, message: "업력 12개월 미만", field: business_age_months, op: lt, threshold: 12}
+rate_bands:
+  - {band: A, min_dscr: 2.0}
+  - {band: B, min_dscr: 1.5}
+  - {band: C, min_dscr: 1.2}
+  - {band: D, min_dscr: 1.0}
