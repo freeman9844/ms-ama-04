@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+# 인프라만 정의합니다. 서비스(콘솔, Policy Engine, Mock API, 오케스트레이터)는 P3에서 추가합니다.
+name: ama-cashflow-lending
+infra:
+  provider: bicep
+  path: infra
+  module: main
