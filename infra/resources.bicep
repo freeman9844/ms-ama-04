@@ -353,3 +353,63 @@ module serviceBus 'modules/servicebus.bicep' = if (serviceBusEnabled) {
 // 조건부 모듈의 출력을 참조하지 않도록 이름으로 계산합니다.
 output SERVICEBUS_NAME string = names.sb
 output SERVICEBUS_FQDN string = serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
+
+// ── ACR, Container Apps 환경 (T6) ──────────────────────────────────────
+module acr 'modules/acr.bicep' = {
+  name: 'acr'
+  params: {
+    name: names.acr
+    location: location
+    tags: tags
+    publicAccess: acrPublic
+    peSubnetId: subnetId['snet-pe']
+    zoneId: zoneId['privatelink.azurecr.io']
+    roleAssignments: concat([
+      { principalId: identities.outputs.appsPrincipalId, roleId: role.acrPull, principalType: sp }
+    ], hasOperator ? [
+      { principalId: operatorPrincipalId, roleId: role.acrPush, principalType: 'User' }
+    ] : [])
+  }
+}
+
+module acaInt 'modules/aca-env.bicep' = {
+  name: 'aca-int'
+  params: {
+    name: names.caeInt
+    location: location
+    tags: tags
+    subnetId: subnetId['snet-apps-int']
+    internal: true
+    lawName: monitoring.outputs.lawName
+  }
+}
+
+module acaIntDns 'modules/aca-dns.bicep' = {
+  name: 'aca-int-dns'
+  params: {
+    domain: acaInt.outputs.defaultDomain
+    staticIp: acaInt.outputs.staticIp
+    vnetId: network.outputs.vnetId
+    tags: tags
+  }
+}
+
+module acaWeb 'modules/aca-env.bicep' = {
+  name: 'aca-web'
+  params: {
+    name: names.caeWeb
+    location: location
+    tags: tags
+    subnetId: subnetId['snet-apps-web']
+    internal: false
+    lawName: monitoring.outputs.lawName
+  }
+}
+
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
+output ACR_NAME string = acr.outputs.name
+output CONTAINER_APPS_INT_ENVIRONMENT_ID string = acaInt.outputs.id
+output CONTAINER_APPS_INT_ENVIRONMENT_NAME string = acaInt.outputs.name
+output CONTAINER_APPS_INT_DOMAIN string = acaInt.outputs.defaultDomain
+output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = acaWeb.outputs.id
+output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = acaWeb.outputs.name
