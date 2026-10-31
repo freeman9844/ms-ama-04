@@ -26,7 +26,7 @@ $env:MOCK_CONSENT_SECRET = "local-dev-secret-at-least-32-characters!!"
 
 Korea Central에 전체 비공개 데모 환경을 Bicep + azd로 배포합니다. 설계 근거는
 `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2, §6.2를 참고하세요.
-아직 실제 배포 전이며, 실측값(소요 시간)은 첫 배포 후 이 절에 채웁니다.
+실측값은 첫 실제 배포(MCAPS 테넌트 구독) 기준입니다.
 
 ### 준비
 
@@ -44,10 +44,13 @@ azd env new amalend --location koreacentral --subscription <구독 ID>   # 운�
 azd env set AZURE_PRINCIPAL_ID (az ad signed-in-user show --query id -o tsv)
 azd env set OPERATOR_IP closed
 azd provision --preview
-azd provision --no-prompt          # 약 45~60분 예상(capability host 포함)
+azd provision --no-prompt          # 실측: 성공 실행 7.6분(최초 실패 2회 포함 누적 약 28분)
 azd env set DEPLOY_CAPHOST false   # 이후 재프로비저닝에서 capability host 재생성 방지
-python -m ops smoke                # VNet 안에서 Private Endpoint 경로 검증
+python -m ops smoke                # VNet 안에서 Private Endpoint 경로 검증(실측 약 1.2분, 21개 점검)
 ```
+
+이후 재프로비저닝(capability host 제외)은 약 3.5분, smoke Job 스크립트(`src/ops/smoke_checks.py`)는
+Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provision`이 필요합니다.
 
 문제 대응:
 
@@ -63,11 +66,11 @@ python -m ops smoke                # VNet 안에서 Private Endpoint 경로 검�
 
 | 명령 | 용도 |
 |------|------|
-| `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창) |
+| `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창). 실측 11.0분(Cosmos 갱신이 약 8분) |
 | `python -m ops window status` | 창 상태 확인. 공인 IP가 바뀌었으면 경고(종료 코드 2) |
-| `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행) |
+| `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행). 실측 10.8분 |
 | `python -m ops smoke` | VNet 안 smoke Job 실행 |
-| `python -m ops pause` / `resume` | Service Bus Premium 삭제/복구(비용 절감) |
+| `python -m ops pause` / `resume` | Service Bus Premium 삭제/복구(비용 절감). 실측 pause 5.8분, resume 4.7분 |
 | `python -m ops teardown --confirm rg-amalend` | capability host → Foundry 계정 purge → 리소스 그룹 삭제 → Key Vault purge |
 
 teardown 뒤 같은 azd 환경으로 다시 만들 때는 **다른 `ops` 명령보다 먼저 `azd provision --no-prompt`를 실행**하세요.
@@ -90,3 +93,12 @@ azd 환경에 이전 `AI_ACCOUNT_NAME`이 남아 있어, `ops window/pause/resum
 - 콘솔은 WAF 없이 external Container Apps 환경에 둡니다(운영자 IP 허용 + Entra 인증, P3). 운영 설계는 App Gateway WAF.
 - App Insights 수집은 public 엔드포인트 + Entra 인증을 씁니다(Azure Monitor Private Link Scope 미사용).
 - 배포 창 동안에는 운영자 IP에서 데이터 평면에 접근할 수 있습니다. `window status`로 확인하고 작업 후 바로 닫으세요.
+- **테넌트 정책(MCAPS)**: `MCAPSGovDeployPolicies`의 Modify 정책이 Key Vault, Cosmos DB, Storage의
+  `publicNetworkAccess`를 `Disabled`로, Cognitive Services/Cosmos/Service Bus/Storage의 로컬 인증을 끕니다.
+  그래서 배포 창을 열어도 이 세 서비스는 IP 규칙만 들어가고 운영자 PC에서 접근할 수 없습니다(403).
+  창이 실제로 여는 것은 Foundry 계정, ACR, Functions입니다. 이 세 서비스의 데이터 작업은 VNet 안 Job으로 합니다.
+  정책을 우회하지 않습니다.
+- **에이전트 API**: 새 Foundry 프로젝트에서 클래식 Assistants API(`/assistants`, `/threads/runs`)는 모든 배포에
+  `invalid_engine_error: Failed to resolve model info`로 실패합니다. 프롬프트 에이전트
+  (`POST {project}/agents/{name}/versions?api-version=v1`)와 `POST {project}/openai/v1/responses`
+  (`agent_reference`)를 사용하세요(P3 이후 동일).
