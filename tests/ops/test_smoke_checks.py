@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import xml.etree.ElementTree as ET
+
 import pytest
 
 from ops import smoke_checks as sc
@@ -19,6 +21,13 @@ CFG = {
     "chat_models": ["gpt-5.4", "gpt-5.4-mini"],
     "agent_model": "gpt-5.4-mini",
     "private_hosts": ["ais-x.openai.azure.com", "kvx.vault.azure.net"],
+    "queue_host": "stfnx.queue.core.windows.net",
+    "start_queue": "applications-start",
+    "decision_queue": "officer-decisions",
+    "cosmos_database": "lending",
+    "policy_url": "https://ca-policy.int.example",
+    "mockapi_url": "https://ca-mockapi.int.example",
+    "e2e_applicant": "demo-cafe-001",
 }
 ENV = {
     "SMOKE_CONFIG": json.dumps(CFG),
@@ -56,14 +65,27 @@ class FakeHttp:
         return [c for c in self.calls if c["method"] == method and part in c["url"]]
 
 
+ELIGIBLE = {"decision": "eligible", "max_amount_krw": 15_000_000}
+
+
+def app_doc(status, **extra):
+    return ok({"id": "smoke-e2e-test", "status": status, "timeline": [{}, {}, {}], **extra})
+
+
 def healthy_routes():
     return {
+        ("GET", "/docs/"): [sc.Response(404, b"{}"), app_doc("awaiting_officer", policy=ELIGIBLE),
+                            app_doc("approved")],
         ("GET", "/msi/token"): ok({"access_token": "tok"}),
         ("POST", "/openai/v1/chat/completions"): ok({"model": "gpt"}),
         ("GET", "?comp=list"): ok(),
         ("GET", "/dbs"): ok({"Databases": [{"id": "lending"}]}),
         ("GET", "/secrets?"): ok({"value": []}),
+        ("GET", "ca-policy.int.example/healthz"): ok({"status": "ok", "rules_version": "r1"}),
+        ("GET", "ca-mockapi.int.example/healthz"): ok({"status": "ok"}),
         ("POST", "/flow.updated/messages"): ok(status=201),
+        ("POST", "/applications-start/messages"): ok(status=201),
+        ("POST", "/officer-decisions/messages"): ok(status=201),
         ("POST", "/agents/p2-smoke/versions?api-version=v1"): ok({"name": "p2-smoke", "version": "1"}),
         ("POST", "/openai/v1/responses"): ok({"id": "resp_1", "status": "completed"}),
         ("DELETE", "/agents/p2-smoke?api-version=v1"): ok(),
@@ -128,8 +150,8 @@ def test_main_succeeds_when_all_checks_pass():
     code = sc.main(ENV, http=FakeHttp(healthy_routes()), resolver=private, sleep=lambda s: None, out=out)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert code == 0
-    # dns 2 + chat 2 + blob + cosmos + keyvault + servicebus + agent
-    assert lines[-1] == {"summary": {"total": 9, "failed": 0}}
+    # dns 2 + chat 2 + blob + cosmos + keyvault + health 2 + servicebus + agent + journey
+    assert lines[-1] == {"summary": {"total": 12, "failed": 0}}
 
 
 def test_main_reports_failure_and_skips_paused_service_bus():
@@ -143,6 +165,67 @@ def test_main_reports_failure_and_skips_paused_service_bus():
     assert "servicebus" not in results
     assert results["keyvault"]["ok"] is False
     assert "403" in results["keyvault"]["detail"]
+
+
+def queue_text(call):
+    return json.loads(ET.fromstring(call["body"]).findtext("MessageText"))
+
+
+def journey_http(docs):
+    return FakeHttp({**healthy_routes(), ("GET", "/docs/"): docs})
+
+
+def test_health_check_requires_status_ok_and_flags_placeholder_image():
+    http = FakeHttp({("GET", "/healthz"): ok({"status": "ok", "rules_version": "2026.10"})})
+    assert sc.check_health("https://ca-policy.int.example/", http) == "2026.10"
+    assert http.calls[0]["url"] == "https://ca-policy.int.example/healthz"
+    with pytest.raises(sc.CheckFailed, match="ops deploy"):
+        sc.check_health("https://ca-policy.int.example", FakeHttp({("GET", "/healthz"): sc.Response(404, b"")}))
+    with pytest.raises(sc.CheckFailed, match="degraded"):
+        sc.check_health("https://ca-policy.int.example", FakeHttp({("GET", "/healthz"): ok({"status": "degraded"})}))
+
+
+def test_journey_starts_application_and_approves_within_policy_limit():
+    sleeps = []
+    http = journey_http([sc.Response(404, b"{}"), app_doc("consent_granted"),
+                         app_doc("awaiting_officer", policy=ELIGIBLE), app_doc("approved")])
+    detail = sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test")
+    assert detail == "smoke-e2e-test approved 15,000,000 KRW (3 steps)"
+    [start] = http.find("POST", "/applications-start/messages")
+    assert start["url"] == "https://stfnx.queue.core.windows.net/applications-start/messages"
+    assert start["headers"]["x-ms-version"] == "2023-11-03"
+    assert queue_text(start) == {"application_id": "smoke-e2e-test", "applicant_id": "demo-cafe-001",
+                                 "requested_amount_krw": 20_000_000, "requested_tenor_months": 12}
+    [decision] = http.find("POST", "/officer-decisions/messages")
+    assert queue_text(decision) == {"application_id": "smoke-e2e-test", "decision": {
+        "decision": "approve", "officer_id": "smoke", "amount_krw": 15_000_000, "reason": "smoke e2e"}}
+    read = http.find("GET", "/docs/")[0]
+    assert read["url"] == "https://cosmos-x.documents.azure.com/dbs/lending/colls/applications/docs/smoke-e2e-test"
+    assert read["headers"]["x-ms-documentdb-partitionkey"] == '["smoke-e2e-test"]'
+    assert read["headers"]["Authorization"].startswith("type%3Daad")
+    assert sleeps == [10.0, 10.0]
+
+
+def test_journey_fails_fast_when_application_fails():
+    http = journey_http(app_doc("failed", error={"stage": "assemble_data", "message": "boom"}))
+    with pytest.raises(sc.CheckFailed, match="failed.*assemble_data"):
+        sc.check_journey(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
+    assert http.find("POST", "/officer-decisions/messages") == []
+
+
+def test_journey_does_not_approve_without_eligible_policy():
+    http = journey_http(app_doc("awaiting_officer", policy=None, flags=["policy_unavailable"]))
+    with pytest.raises(sc.CheckFailed, match="policy_unavailable"):
+        sc.check_journey(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
+    assert http.find("POST", "/officer-decisions/messages") == []
+
+
+def test_journey_times_out_when_status_does_not_advance():
+    sleeps = []
+    http = journey_http(app_doc("received"))
+    with pytest.raises(sc.CheckFailed, match="awaiting_officer.*received"):
+        sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test", start_attempts=3)
+    assert sleeps == [10.0, 10.0, 10.0]
 
 
 def test_smoke_checks_uses_only_standard_library():
