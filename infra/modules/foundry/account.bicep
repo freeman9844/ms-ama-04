@@ -55,8 +55,10 @@ resource deployments 'Microsoft.CognitiveServices/accounts/deployments@2025-04-0
   }
 }]
 
+// 모델 배포 중에는 계정이 Accepted 상태라 PE를 동시에 만들면 실패하므로 배포 뒤에 만듭니다.
 module pe '../pe.bicep' = {
   name: 'pe-${name}'
+  dependsOn: [ deployments ]
   params: {
     name: 'pe-${name}-account'
     location: location

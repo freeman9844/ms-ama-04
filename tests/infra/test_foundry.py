@@ -1,3 +1,8 @@
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
 AIS = "Microsoft.CognitiveServices/accounts"
 ROLE_FOUNDRY_USER = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 ROLE_OPENAI_USER = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
@@ -44,6 +49,19 @@ def test_model_deployments_default_to_global_standard(closed):
 def test_model_deployment_names_avoid_reserved_words(closed):
     # ARM은 리소스 이름에 예약어(MICROSOFT 등)를 허용하지 않습니다(ContainsReservedWord).
     assert not [n for n in _deployments(closed) if "microsoft" in n.lower()]
+
+
+def test_account_private_endpoint_waits_for_model_deployments():
+    # 모델 배포 중에는 계정이 Accepted 상태라 PE를 동시에 만들면 AccountProvisioningStateInvalid로 실패합니다.
+    bicep = shutil.which("bicep") or str(Path.home() / ".azure" / "bin" / "bicep.exe")
+    module = Path(__file__).resolve().parents[2] / "infra" / "modules" / "foundry" / "account.bicep"
+    proc = subprocess.run([bicep, "build", str(module), "--stdout"], capture_output=True, text=True,
+                          encoding="utf-8", check=True)
+    resources = json.loads(proc.stdout)["resources"]
+    if isinstance(resources, dict):
+        resources = list(resources.values())
+    [pe] = [r for r in resources if r["type"] == "Microsoft.Resources/deployments"]
+    assert any(d == "deployments" or "/deployments'" in d for d in pe.get("dependsOn", []))
 
 
 def test_model_sku_parameters_switch_to_data_zone(variant):
