@@ -119,11 +119,11 @@ SLA 초과 시 `escalated` → `closed_no_decision`). 신청 문서는 단계마
 ### 배포 순서
 
 ```powershell
-python -m ops resume               # 선택: Service Bus 이벤트(flow.updated)까지 보려면
-python -m ops window open --acr    # ACR·Functions·Foundry에 운영자 IP 허용
-python -m ops deploy all           # 이미지 2개 빌드 + 프로비저닝 1회 + Function zip 배포
-python -m ops window close         # 작업 후 반드시 닫기
-python -m ops smoke                # P2 점검 + health:policy, health:mockapi, journey(e2e)
+python -m ops resume               # 선택: Service Bus 이벤트(flow.updated)까지 보려면(실측 4.9분)
+python -m ops window open --acr    # ACR·Functions·Foundry에 운영자 IP 허용(실측 4.8분)
+python -m ops deploy all           # 이미지 2개 빌드 + 프로비저닝 1회 + Function zip 배포(실측 10.1분)
+python -m ops window close         # 작업 후 반드시 닫기(실측 3.8분)
+python -m ops smoke                # P2 점검 + health:policy, health:mockapi, journey(e2e)(실측 2.4분, 24개 점검)
 ```
 
 - 하나만 다시 배포: `python -m ops deploy policy|mockapi|orchestrator`. 이미지 태그는 UTC 시각이고
@@ -131,7 +131,7 @@ python -m ops smoke                # P2 점검 + health:policy, health:mockapi, 
 - 앱 비밀(`MOCK_CONSENT_SECRET`, `PSEUDONYM_KEY`)은 `ops` 명령의 프로비저닝(`window open` 등)이 비어 있으면
   azd 환경에 생성합니다. P3 이후 첫 프로비저닝은 `azd provision` 대신 `ops` 명령으로 하세요.
 - `journey` 점검은 실행마다 `smoke-YYYYMMDD-HHMMSS` 신청을 `demo-cafe-001`(eligible)로 넣고, `awaiting_officer`에서
-  정책 한도 이하 금액으로 승인해 `approved`까지 확인합니다(최대 약 20분). smoke 신청은 Cosmos에 남습니다.
+  정책 한도 이하 금액으로 승인해 `approved`까지 확인합니다(최대 약 20분, 실측 52초·6단계). smoke 신청은 Cosmos에 남습니다.
 - 신청 상태는 운영자 PC에서 직접 볼 수 없습니다(Cosmos, Storage는 MCAPS 정책으로 공용 접근 차단).
   smoke 출력의 `journey` 결과나 Application Insights `traces`를 보세요.
 
