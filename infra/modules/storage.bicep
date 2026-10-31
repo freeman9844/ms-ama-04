@@ -8,6 +8,8 @@ param peSubnetId string
 @description('[{ groupId: blob|queue|table, zoneId }]')
 param endpoints array
 param containers array = []
+@description('Storage 큐 이름 목록(Functions 큐 트리거)')
+param queues array = []
 @description('blob soft delete 보존 일수. 0이면 끕니다(원천 데이터 삭제 증명용).')
 param softDeleteDays int = 7
 @description('[{ principalId, roleId, principalType }]')
@@ -48,6 +50,16 @@ resource blobContainers 'Microsoft.Storage/storageAccounts/blobServices/containe
   parent: blobService
   name: c
   properties: { publicAccess: 'None' }
+}]
+
+resource queueService 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = if (!empty(queues)) {
+  parent: st
+  name: 'default'
+}
+
+resource queueResources 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = [for q in queues: {
+  parent: queueService
+  name: q
 }]
 
 module pes 'pe.bicep' = [for e in endpoints: {

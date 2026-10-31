@@ -33,6 +33,20 @@ param chatModelSku string = 'GlobalStandard'
 @description('Microsoft-Decision-1 배포 SKU. APAC Global Standard 지원이 문서와 CLI에서 엇갈리므로 실패 시 DataZoneStandard로 전환합니다.')
 param decisionModelSku string = 'GlobalStandard'
 
+@secure()
+@description('Mock API 동의 토큰 서명 비밀(32자 이상). ops가 azd 환경에 생성합니다.')
+param mockConsentSecret string = ''
+
+@secure()
+@description('가명처리 HMAC 키(32자 이상). Key Vault 비밀 pseudonym-key로 저장합니다.')
+param pseudonymKey string = ''
+
+@description('정책 엔진 이미지. 비면 자리표시 이미지(ops deploy 전).')
+param policyImage string = ''
+
+@description('Mock API 이미지. 비면 자리표시 이미지(ops deploy 전).')
+param mockapiImage string = ''
+
 var tags = {
   'azd-env-name': environmentName
   project: 'ama-cashflow-lending'
@@ -66,6 +80,10 @@ module resources 'resources.bicep' = {
     serviceBusEnabled: serviceBusEnabled
     deployCapabilityHost: deployCapabilityHost
     modelDeployments: modelDeployments
+    mockConsentSecret: mockConsentSecret
+    pseudonymKey: pseudonymKey
+    policyImage: policyImage
+    mockapiImage: mockapiImage
   }
 }
 
@@ -103,6 +121,10 @@ output CONTAINER_APPS_INT_DOMAIN string = resources.outputs.CONTAINER_APPS_INT_D
 output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = resources.outputs.CONTAINER_APPS_WEB_ENVIRONMENT_ID
 output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = resources.outputs.CONTAINER_APPS_WEB_ENVIRONMENT_NAME
 
+output POLICY_APP_NAME string = resources.outputs.POLICY_APP_NAME
+output MOCKAPI_APP_NAME string = resources.outputs.MOCKAPI_APP_NAME
+output POLICY_URL string = resources.outputs.POLICY_URL
+output MOCKAPI_URL string = resources.outputs.MOCKAPI_URL
 output FUNCTION_APP_NAME string = resources.outputs.FUNCTION_APP_NAME
 
 output SMOKE_JOB_NAME string = resources.outputs.SMOKE_JOB_NAME

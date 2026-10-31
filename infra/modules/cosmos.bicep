@@ -5,6 +5,8 @@ param tags object
 param peSubnetId string
 param zoneId string
 param appDatabaseName string = 'lending'
+@description('[{ name, partitionKey }] — 앱 DB 컨테이너')
+param containers array = []
 @description('[{ principalId, roleDefinitionGuid, scope: account|database }] — Cosmos 데이터 평면 SQL 역할')
 param sqlRoleAssignments array = []
 
@@ -32,6 +34,17 @@ resource appDb 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2024-11-15' =
   name: appDatabaseName
   properties: { resource: { id: appDatabaseName } }
 }
+
+resource appContainers 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-11-15' = [for c in containers: {
+  parent: appDb
+  name: c.name
+  properties: {
+    resource: {
+      id: c.name
+      partitionKey: { paths: [ c.partitionKey ], kind: 'Hash', version: 2 }
+    }
+  }
+}]
 
 module pe 'pe.bicep' = {
   name: 'pe-${name}'

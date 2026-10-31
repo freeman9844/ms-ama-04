@@ -13,6 +13,8 @@ param zoneId string
 param storageName string
 param storageBlobEndpoint string
 param appInsightsConnectionString string
+@description('{ 이름: 값 } 앱 런타임 설정(P3)')
+param extraSettings object = {}
 
 var windowOpen = !empty(operatorIp)
 
@@ -47,14 +49,14 @@ resource site 'Microsoft.Web/sites@2024-04-01' = {
         { name: 'operator', ipAddress: '${operatorIp}/32', action: 'Allow', priority: 100 }
       ] : []
       scmIpSecurityRestrictionsUseMain: true
-      appSettings: [
+      appSettings: concat([
         { name: 'AzureWebJobsStorage__accountName', value: storageName }
         { name: 'AzureWebJobsStorage__credential', value: 'managedidentity' }
         { name: 'AzureWebJobsStorage__clientId', value: identityClientId }
         { name: 'AZURE_CLIENT_ID', value: identityClientId }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
         { name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING', value: 'ClientId=${identityClientId};Authorization=AAD' }
-      ]
+      ], map(items(extraSettings), s => { name: s.key, value: s.value }))
     }
     functionAppConfig: {
       deployment: {

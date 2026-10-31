@@ -6,6 +6,9 @@ param peSubnetId string
 param zoneId string
 @description('[{ principalId, roleId, principalType }]')
 param roleAssignments array = []
+@secure()
+@description('{ 비밀 이름: 값 }. 값이 빈 항목은 만들지 않습니다.')
+param secrets object = {}
 
 
 resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
@@ -27,6 +30,12 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     }
   }
 }
+
+resource secretResources 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = [for s in filter(items(secrets), s => !empty(s.value)): {
+  parent: kv
+  name: s.key
+  properties: { value: s.value }
+}]
 
 module pe 'pe.bicep' = {
   name: 'pe-${name}'

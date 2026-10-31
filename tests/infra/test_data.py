@@ -11,6 +11,7 @@ ROLE_BLOB_CONTRIBUTOR = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
 ROLE_BLOB_READER = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
 ROLE_QUEUE_CONTRIBUTOR = "974c5e8b-45b9-4653-ba55-5f855dd0fb88"
 ROLE_TABLE_CONTRIBUTOR = "0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
+ROLE_QUEUE_SENDER = "c6a89b2d-59bc-44d0-9896-0f6e12d7b80a"
 COSMOS_READER = "00000000-0000-0000-0000-000000000001"
 COSMOS_CONTRIBUTOR = "00000000-0000-0000-0000-000000000002"
 
@@ -37,7 +38,9 @@ def test_function_storage_has_deployment_container_and_durable_roles(closed):
     containers = {c["name"].split("/")[-1] for c in closed.of_type(f"{ST}/blobServices/containers")
                   if c["name"].startswith("stfn")}
     assert containers == {"deploymentpackage"}
-    assert closed.roles_on("stfn") == {ROLE_BLOB_OWNER, ROLE_QUEUE_CONTRIBUTOR, ROLE_TABLE_CONTRIBUTOR}
+    assert closed.roles_on("stfn") == {
+        ROLE_BLOB_OWNER, ROLE_QUEUE_CONTRIBUTOR, ROLE_TABLE_CONTRIBUTOR, ROLE_QUEUE_SENDER,
+    }
 
 
 def test_data_storage_has_no_soft_delete(closed):

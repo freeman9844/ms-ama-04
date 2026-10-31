@@ -21,7 +21,7 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       triggerType: 'Manual'
-      replicaTimeout: 900
+      replicaTimeout: 1800
       replicaRetryLimit: 0
       manualTriggerConfig: {
         parallelism: 1
