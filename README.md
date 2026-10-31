@@ -174,6 +174,9 @@ python -m ops smoke                # P2 점검 + health:policy, health:mockapi, 
   남습니다. 컨테이너는 실행 직후 삭제하고(`deleted` 기록), 대화는 P5 동의 만료 처리에서 지웁니다.
 - smoke에 `decision`(Decision-1 왕복) 점검이 추가되고, `journey`는 `assessment`가 있어야 통과합니다(25개 점검).
   심사 에이전트 호출 때문에 여정이 1~2분 길어집니다(로컬 실측: 분류 5~23초, 분석·검토 약 30초).
+- P4a 실제 배포 실측: `ops resume` 4.5분 → `window open` 3.6분 → `deploy orchestrator` 4.6분 →
+  `window close` 3.4분 → `ops smoke` 2.7분(25개 점검 통과; `decision` 0.8초, `journey` 72초·7단계,
+  assessment approve·검토 1라운드 통과) → `ops pause` 5.8분.
 
 ### 문제 대응(P4a)
 
