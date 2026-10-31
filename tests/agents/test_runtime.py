@@ -48,6 +48,7 @@ class FakeFoundry:
     def __init__(self, *responses):
         self.responses = list(responses)
         self.requests: list[dict] = []
+        self.delete_response = httpx.Response(200, json={"id": "cntr", "object": "container.deleted", "deleted": True})
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else None
@@ -69,6 +70,8 @@ class FakeFoundry:
             if isinstance(item, Exception):
                 raise item
             return item
+        if request.method == "DELETE" and "/containers/" in request.url.path:
+            return self.delete_response
         return httpx.Response(404)
 
     def responses_bodies(self) -> list[dict]:
@@ -175,3 +178,49 @@ def test_failure_before_conversation_has_no_conversation_id():
     with pytest.raises(AgentError) as err:
         client.run(SPEC, "x", {})
     assert err.value.conversation_id is None
+
+
+def ci(container_id: str) -> dict:
+    return {"type": "code_interpreter_call", "id": "ci_1", "container_id": container_id, "code": "print(1)", "status": "completed"}
+
+
+def test_run_records_code_interpreter_containers_across_rounds():
+    first = httpx.Response(
+        200,
+        json={"status": "completed", "output": [ci("cntr_a"), fc("c1", "fetch_source", {})], "usage": {"total_tokens": 5}},
+    )
+    final = done({"status": "ok"})
+    final_body = final.json()
+    final_body["output"] = [ci("cntr_a"), ci("cntr_b"), *final_body["output"]]
+    fake = FakeFoundry(first, httpx.Response(200, json=final_body))
+    run = agents(fake).run(SPEC, "입력", {"fetch_source": lambda a: {"ok": True}})
+    assert run.containers == ("cntr_a", "cntr_b")
+    assert run.record()["containers"] == ["cntr_a", "cntr_b"]
+
+
+def test_agent_error_carries_containers_for_cleanup():
+    body = done("not json").json()
+    body["output"] = [ci("cntr_x"), *body["output"]]
+    fake = FakeFoundry(httpx.Response(200, json=body))
+    with pytest.raises(AgentError) as e:
+        agents(fake).run(SPEC, "입력", {})
+    assert e.value.containers == ("cntr_x",)
+    assert e.value.conversation_id == "conv_1"
+
+
+def test_run_without_code_interpreter_has_no_containers():
+    run = agents(FakeFoundry(done({"status": "ok"}))).run(SPEC, "입력", {})
+    assert run.containers == ()
+
+
+def test_delete_container_calls_containers_api():
+    fake = FakeFoundry()
+    assert agents(fake).delete_container("cntr_a") is True
+    (req,) = fake.requests
+    assert (req["method"], req["path"], req["auth"]) == ("DELETE", "/api/projects/proj-lending/openai/v1/containers/cntr_a", "Bearer tok")
+
+
+def test_delete_container_failure_returns_false():
+    fake = FakeFoundry()
+    fake.delete_response = httpx.Response(404, json={"error": {"code": "not_found"}})
+    assert agents(fake).delete_container("cntr_a") is False

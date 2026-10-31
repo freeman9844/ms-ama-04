@@ -20,9 +20,12 @@ ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class AgentError(RuntimeError):
-    def __init__(self, message: str, conversation_id: str | None = None) -> None:
+    def __init__(
+        self, message: str, conversation_id: str | None = None, containers: tuple[str, ...] = ()
+    ) -> None:
         super().__init__(message)
         self.conversation_id = conversation_id
+        self.containers = containers
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,7 @@ class AgentRun:
     tool_calls: list[ToolCall]
     total_tokens: int
     rounds: int
+    containers: tuple[str, ...] = ()
 
     def record(self) -> dict[str, Any]:
         """감사 기록용 요약. 도구 출력 본문은 원천 Blob에 있으므로 남기지 않는다."""
@@ -77,6 +81,7 @@ class AgentRun:
             "conversation_id": self.conversation_id,
             "rounds": self.rounds,
             "total_tokens": self.total_tokens,
+            "containers": list(self.containers),
             "tool_calls": [
                 {"name": c.name, "arguments": c.arguments, "error": c.output.get("error")} for c in self.tool_calls
             ],
@@ -159,11 +164,39 @@ class FoundryAgents:
     ) -> AgentRun:
         version = self.ensure_agent(spec)
         conversation_id = self._call("POST", "/openai/v1/conversations", {})["id"]
+        containers: list[str] = []
+        try:
+            return self._loop(spec, version, conversation_id, input_text, handlers, max_rounds, containers)
+        except AgentError as e:
+            raise AgentError(str(e), conversation_id, tuple(containers)) from e
+
+    def delete_container(self, container_id: str) -> bool:
+        """Code Interpreter 컨테이너(가명 집계 데이터가 올라간 곳)를 즉시 삭제한다. 실패해도 예외 없음."""
+        try:
+            return bool(self._call("DELETE", f"/openai/v1/containers/{container_id}").get("deleted"))
+        except AgentError:
+            return False
+
+    def _loop(
+        self,
+        spec: AgentSpec,
+        version: str,
+        conversation_id: str,
+        input_text: str,
+        handlers: Mapping[str, ToolHandler],
+        max_rounds: int,
+        containers: list[str],
+    ) -> AgentRun:
         ref = {"type": "agent_reference", "name": spec.name}
 
         def respond(payload: Any) -> dict[str, Any]:
             body = {"agent_reference": ref, "conversation": conversation_id, "input": payload}
-            return self._call("POST", "/openai/v1/responses", body, conversation_id)
+            response = self._call("POST", "/openai/v1/responses", body, conversation_id)
+            for item in response.get("output", []):
+                cid = item.get("container_id") if item.get("type") == "code_interpreter_call" else None
+                if cid and cid not in containers:
+                    containers.append(cid)
+            return response
 
         response = respond(input_text)
         tokens = _tokens(response)
@@ -193,4 +226,4 @@ class FoundryAgents:
             output = spec.output_model.model_validate_json(_output_text(response))
         except ValidationError as e:
             raise AgentError("출력이 스키마와 맞지 않음", conversation_id) from e
-        return AgentRun(spec.name, version, conversation_id, output, tool_calls, tokens, rounds)
+        return AgentRun(spec.name, version, conversation_id, output, tool_calls, tokens, rounds, tuple(containers))
