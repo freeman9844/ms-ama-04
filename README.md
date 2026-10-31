@@ -154,3 +154,45 @@ python -m ops smoke                # P2 점검 + health:policy, health:mockapi, 
 - `request_consent` 재시도는 Mock에 동의를 중복 발급할 수 있습니다(멱등 키 없음).
 - 앱 비밀은 운영자 PC의 azd `.env`에 평문으로 있습니다. 운영 설계는 Key Vault 참조와 정기 교체입니다.
 - Function 의존성은 운영자 PC에서 Linux wheel로 받아 zip에 넣습니다(원격 빌드 미사용).
+
+## 심사 에이전트(P4a)
+
+정책 엔진 다음에 두 단계가 추가됩니다. 결정 권한은 그대로 정책 엔진과 심사역에 있습니다.
+
+1. **거래 의미 분류**(`underwrite` 활동 안): 규칙(classify-v1)으로 분류되지 않은 거래의 적요를 가명처리·정규화해
+   Microsoft-Decision-1(`decision-1`, systemone 선택형 질문)에 묻고, 기권·낮은 확신(0.7 미만)은 `gpt-5.4-mini`
+   에이전트(`txn-classifier`)가 보완합니다. 결과는 Cosmos `lending/classifications`에 캐시됩니다(토큰이 든 적요·이체 적요 제외).
+   부채 라벨(`loan_repayment`, `high_cost_lender`)만 특성에 반영하며, DSCR·현금 완충일수는 규칙 결과와 비교해
+   **더 낮은 값**을 씁니다(LLM이 상환여력을 좋게 만들 수 없음).
+2. **분석·검토 에이전트**(`assess_credit` 활동): 분석가(`underwriting-analyst`, gpt-5.4)가 도구(`get_metrics`,
+   `get_monthly_series`, `query_transactions`, Code Interpreter)로 근거를 모아 `CreditAssessment` 초안을 내고,
+   코드가 수치 근거(2% 이내)·정책 한도를 검사한 뒤 검토자(`underwriting-reviewer`, gpt-5.4-mini)가 claim별로
+   판정합니다. 지적이 있으면 최대 3라운드까지 다시 씁니다. 결과는 신청 문서 `assessment`(상태 `assessed`)에 남고,
+   실패하면 `assessment_unavailable` 플래그만 남긴 채 심사역 단계로 넘어갑니다.
+
+- 에이전트가 쓴 Foundry 대화·Code Interpreter 컨테이너 ID는 동의 문서 `foundry_conversations`, `foundry_containers`에
+  남습니다. 컨테이너는 실행 직후 삭제하고(`deleted` 기록), 대화는 P5 동의 만료 처리에서 지웁니다.
+- smoke에 `decision`(Decision-1 왕복) 점검이 추가되고, `journey`는 `assessment`가 있어야 통과합니다(25개 점검).
+  심사 에이전트 호출 때문에 여정이 1~2분 길어집니다(로컬 실측: 분류 5~23초, 분석·검토 약 30초).
+- P4a 실제 배포 실측: `ops resume` 4.5분 → `window open` 3.6분 → `deploy orchestrator` 4.6분 →
+  `window close` 3.4분 → `ops smoke` 2.7분(25개 점검 통과; `decision` 0.8초, `journey` 72초·7단계,
+  assessment approve·검토 1라운드 통과) → `ops pause` 5.8분.
+
+### 문제 대응(P4a)
+
+- `decision`이 401/403: Function·smoke 관리 ID에 Foundry 계정 `Cognitive Services User` 역할이 필요할 수 있습니다
+  (운영자 계정은 `Azure AI User`로 동작 확인). 역할을 추가하고 5분 뒤 다시 실행합니다.
+- `journey`가 "심사 에이전트 결과 없음": 결과의 `flags`에 `assessment_unavailable`이 있으면 App Insights `traces`에서
+  `assess_credit` 오류를 찾습니다. 근거 검사·검토를 3라운드 안에 통과하지 못하면 `assessment`는 남지만
+  `review.passed=false`이고 `review_not_passed` 플래그가 붙습니다(smoke는 통과, 출력에 "not passed").
+- 에이전트 정의를 바꾸면 Foundry에 새 버전이 생깁니다(같은 정의는 같은 버전).
+
+### 알려진 제약(P4a)
+
+- `assessment` 문장은 가명 토큰(`[[PERSON_…]]`)을 그대로 담습니다. 복원 표시는 심사역 콘솔(P4b)이 합니다.
+- 가명처리는 사전 기반(상호·대표자·사업자번호·급여/개인이체 적요 속 이름)이라, 규칙 미분류 이체 적요에 든 제3자 이름
+  (예: "이영희 생활비")은 Decision-1·보완 에이전트에 그대로 갑니다. 그래서 이체(`TRANSFER_IN/OUT`) 적요는 공유 캐시에
+  남기지 않습니다(데모 데이터의 해당 적요는 공급업체 상호뿐). 개인정보 탐지 서비스 연동은 후속 과제입니다.
+- 데모 데이터에서 규칙 미분류 적요는 공급업체 송금뿐이라 의미 분류가 특성을 바꾸지 않습니다. 보수적 반영은 단위 테스트로 검증합니다.
+- 수치 근거 검사는 숫자 일치만 봅니다. 해석의 타당성은 검토 에이전트 판정에 의존합니다.
+- `demo-stress-003`은 고금리 대출이 감지되어도 정책상 eligible입니다(P3 규칙). 분석가는 이를 claim·counterfactual로 드러냅니다.

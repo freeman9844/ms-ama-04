@@ -3,7 +3,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from journey.orchestration import FLAG_DATA_INCOMPLETE, FLAG_POLICY_UNAVAILABLE
+from journey.orchestration import (
+    FLAG_ASSESSMENT_UNAVAILABLE,
+    FLAG_DATA_INCOMPLETE,
+    FLAG_POLICY_UNAVAILABLE,
+)
 
 START = {
     "application_id": "app-1",
@@ -23,6 +27,8 @@ ELIGIBLE = {"application_id": "app-1", "decision": "eligible", "max_amount_krw":
 INELIGIBLE = {"application_id": "app-1", "decision": "ineligible", "max_amount_krw": 0, "rate_band": None}
 APPROVE = {"decision": "approve", "officer_id": "officer-1", "amount_krw": 20_000_000}
 DECLINE = {"decision": "decline", "officer_id": "officer-1", "reason": "정책 부적격"}
+ASSESSMENT = {"application_id": "app-1", "recommendation": "approve", "review": {"passed": True, "rounds": 1}}
+ASSESSED = {"assessment": ASSESSMENT, "flags": [], "record": {"rounds": [{"round": 1}]}}
 
 
 def acts(**overrides):
@@ -31,6 +37,7 @@ def acts(**overrides):
         "assemble_data": lambda _: COMPLETE,
         "underwrite": lambda _: UNDERWRITING,
         "evaluate_policy": lambda _: ELIGIBLE,
+        "assess_credit": lambda _: ASSESSED,
     }
     return base | overrides
 
@@ -47,7 +54,7 @@ def test_happy_path_reaches_approved(run_journey):
     result, ctx = run_journey(START, acts(), [("event", APPROVE)])
     assert result == {"application_id": "app-1", "status": "approved"}
     assert statuses(ctx) == [
-        "received", "consent_granted", "data_assembled", "underwritten", "awaiting_officer", "approved"
+        "received", "consent_granted", "data_assembled", "underwritten", "assessed", "awaiting_officer", "approved"
     ]
     doc = ctx.saved[-1]
     assert (doc["id"], doc["application_id"], doc["as_of"]) == ("app-1", "app-1", "2026-11-02")
@@ -112,6 +119,39 @@ def test_policy_unavailable_fails_closed(run_journey):
     assert result["status"] == "declined"
     assert doc["policy"] is None and FLAG_POLICY_UNAVAILABLE in doc["flags"]
     assert [a["error"] for a in doc["decision_attempts"]] == ["decline_only"]
+    assert not ctx.called("assess_credit") and FLAG_ASSESSMENT_UNAVAILABLE in doc["flags"]
+
+
+def test_assessment_runs_after_policy_without_retry(run_journey):
+    _, ctx = run_journey(START, acts(), [("event", APPROVE)])
+    (call,) = ctx.called("assess_credit")
+    assert call.retry is None
+    assert call.input == {
+        "application_id": "app-1", "consent_id": "c-1", "underwriting": UNDERWRITING, "policy": ELIGIBLE
+    }
+    names = [c.name for c in ctx.calls if c.name != "save_document"]
+    assert names.index("evaluate_policy") < names.index("assess_credit")
+    doc = ctx.saved[-1]
+    assert doc["assessment"] == ASSESSMENT and doc["assessment_run"] == ASSESSED["record"]
+
+
+def test_assessment_flags_are_recorded(run_journey):
+    not_passed = {**ASSESSED, "flags": ["review_not_passed"]}
+    _, ctx = run_journey(START, acts(assess_credit=lambda _: not_passed), [("event", APPROVE)])
+    assert "review_not_passed" in ctx.saved[-1]["flags"] and "assessed" in statuses(ctx)
+
+
+@pytest.mark.parametrize(
+    "assess",
+    [boom, lambda _: {"assessment": None, "flags": [FLAG_ASSESSMENT_UNAVAILABLE], "record": {"rounds": []}}],
+)
+def test_assessment_failure_does_not_block_officer(run_journey, assess):
+    result, ctx = run_journey(START, acts(assess_credit=assess), [("event", APPROVE)])
+    doc = ctx.saved[-1]
+    assert result["status"] == "approved"
+    assert "assessed" not in statuses(ctx)
+    assert doc["assessment"] is None
+    assert doc["flags"].count(FLAG_ASSESSMENT_UNAVAILABLE) == 1
 
 
 def test_incomplete_data_skips_underwriting_and_allows_decline_only(run_journey):
@@ -121,7 +161,7 @@ def test_incomplete_data_skips_underwriting_and_allows_decline_only(run_journey)
     )
     assert result["status"] == "declined"
     assert statuses(ctx)[:4] == ["received", "consent_granted", "data_incomplete", "awaiting_officer"]
-    assert not ctx.called("underwrite") and not ctx.called("evaluate_policy")
+    assert not ctx.called("underwrite") and not ctx.called("evaluate_policy") and not ctx.called("assess_credit")
     assert ctx.saved[-1]["flags"] == ["agent_fallback", FLAG_DATA_INCOMPLETE]
 
 

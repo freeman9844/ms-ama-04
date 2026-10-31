@@ -7,7 +7,7 @@
 
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal, Protocol
@@ -208,6 +208,22 @@ def _mask(value: Any, p: Pseudonymizer) -> Any:
     return value
 
 
+def build_pseudonymizer(
+    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction]
+) -> Pseudonymizer:
+    """상호·대표자·사업자번호와 적요 속 직원·대표자 이름을 가명 대상으로 등록한다."""
+    entities: dict[str, str] = {}
+    if profile is not None:
+        entities[profile.business_name] = "BIZNAME"
+        entities[profile.representative_name] = "PERSON"
+        entities[profile.business_reg_no] = "BIZNO"
+    for t in transactions:
+        match = _PAYROLL.match(t.description) or _OWNER.match(t.description)
+        if match:
+            entities.setdefault(match.group(1), "PERSON")
+    return Pseudonymizer(key, entities)
+
+
 class AssemblySession:
     """원천별 수집 상태. 도구 핸들러(fetch_source)와 안전망이 같은 세션을 쓴다."""
 
@@ -230,16 +246,7 @@ class AssemblySession:
         return self.attempts.get(source, 0) < MAX_ATTEMPTS and self.last_error.get(source) not in _NO_RETRY
 
     def _pseudonymizer(self) -> Pseudonymizer:
-        entities: dict[str, str] = {}
-        if profile := self.parsed.get("profile"):
-            entities[profile.business_name] = "BIZNAME"
-            entities[profile.representative_name] = "PERSON"
-            entities[profile.business_reg_no] = "BIZNO"
-        for t in self.parsed.get("transactions", []):
-            match = _PAYROLL.match(t.description) or _OWNER.match(t.description)
-            if match:
-                entities.setdefault(match.group(1), "PERSON")
-        return Pseudonymizer(self._key, entities)
+        return build_pseudonymizer(self._key, self.parsed.get("profile"), self.parsed.get("transactions", []))
 
     def fetch(self, source: str, by: str) -> dict[str, Any]:
         if source not in SOURCE_SCOPE:

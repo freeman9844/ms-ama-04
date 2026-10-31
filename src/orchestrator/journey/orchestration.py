@@ -11,6 +11,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE
 from journey.models import KST, StartRequest, Status
 from journey.validation import validate_officer_decision
 
@@ -82,6 +83,8 @@ def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
         "assembly": None,
         "underwriting": None,
         "policy": None,
+        "assessment": None,
+        "assessment_run": None,
         "flags": [],
         "sla": None,
         "decision_attempts": [],
@@ -147,8 +150,35 @@ def journey(ctx: Any, retry: Any) -> Steps:
             doc["policy"] = yield ctx.call_activity_with_retry("evaluate_policy", retry, underwriting["features"])
         except Exception:  # noqa: BLE001 - 정책 결과 없음 = 거절만 허용(fail-closed)
             doc["flags"].append(FLAG_POLICY_UNAVAILABLE)
+            doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
+        else:
+            yield from _assess(ctx, retry, doc, consent["consent_id"], underwriting)
 
     return (yield from _await_officer(ctx, retry, doc, req.sla_hours))
+
+
+def _assess(ctx: Any, retry: Any, doc: dict[str, Any], consent_id: str, underwriting: dict[str, Any]) -> Steps:
+    """정책 결과를 근거로 분석·검토 에이전트를 돌린다. 실패해도 심사역 단계로 넘어간다(결정 권한 없음)."""
+    try:
+        # 에이전트 실행은 비용이 들고 반성 루프가 안에 있으므로 활동 재시도를 걸지 않는다.
+        result = yield ctx.call_activity(
+            "assess_credit",
+            {
+                "application_id": doc["application_id"],
+                "consent_id": consent_id,
+                "underwriting": underwriting,
+                "policy": doc["policy"],
+            },
+        )
+    except Exception:  # noqa: BLE001
+        doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
+        return None
+    doc["assessment"] = result.get("assessment")
+    doc["assessment_run"] = result.get("record")
+    doc["flags"].extend(result.get("flags", []))
+    if doc["assessment"] is not None:
+        yield from _advance(ctx, retry, doc, Status.ASSESSED)
+    return None
 
 
 def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) -> Steps:

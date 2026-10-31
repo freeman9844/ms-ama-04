@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 
+from agents.classify import Category, classify
 from agents.features import FLAG_HIGH_COST_LENDER, compute_underwriting, monthly_installment
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
@@ -92,3 +93,69 @@ def test_empty_history_yields_zero_features_and_knockout(cases):
 
 def test_monthly_installment_annuity():
     assert int(monthly_installment(AMOUNT, TENOR)) == 1_739_768
+
+
+def _unclassified_out(cases, applicant_id):
+    return [t.txn_id for t in cases[applicant_id].transactions if classify(t) is Category.UNCLASSIFIED_OUT]
+
+
+def _with_overrides(cases, applicant_id, overrides):
+    case = cases[applicant_id]
+    return compute_underwriting(
+        f"app-{applicant_id}",
+        case.profile,
+        case.transactions,
+        case.tax_filings,
+        as_of=AS_OF,
+        requested_amount_krw=AMOUNT,
+        requested_tenor_months=TENOR,
+        overrides=overrides,
+    )
+
+
+def test_no_overrides_keeps_calibration_and_reports_zero(cases):
+    uw = _with_overrides(cases, "demo-cafe-001", {})
+    assert uw.features == _underwrite(cases, "demo-cafe-001").features
+    assert uw.signals["semantic_overrides"] == 0
+    assert uw.signals["dscr_rules_only"] == uw.features.dscr
+
+
+def test_monthly_series_matches_features(cases):
+    uw = _underwrite(cases, "demo-cafe-001")
+    assert len(uw.monthly) == 12
+    assert [r["month"] for r in uw.monthly] == sorted(r["month"] for r in uw.monthly)
+    assert uw.monthly[0]["month"] == "2025-11" and uw.monthly[-1]["month"] == "2026-10"
+    assert int(sum(r["revenue"] for r in uw.monthly) / 12) == uw.features.avg_monthly_inflow_krw
+    assert sum(r["debt_service"] for r in uw.monthly) / 12 == uw.signals["avg_monthly_debt_service_krw"]
+    assert all(r["operating_out"] > 0 and r["owner_draw"] >= 0 for r in uw.monthly)
+
+
+def test_debt_overrides_never_improve_dscr_or_buffer(cases):
+    base = _underwrite(cases, "demo-cafe-001")
+    ids = _unclassified_out(cases, "demo-cafe-001")
+    uw = _with_overrides(cases, "demo-cafe-001", dict.fromkeys(ids, Category.LOAN_REPAYMENT))
+    assert uw.signals["semantic_overrides"] == len(ids) > 0
+    assert uw.signals["avg_monthly_debt_service_krw"] > base.signals["avg_monthly_debt_service_krw"]
+    assert uw.features.dscr <= base.features.dscr
+    assert uw.features.cash_buffer_days <= base.features.cash_buffer_days
+    assert uw.signals["dscr_rules_only"] == base.features.dscr
+    assert uw.features.dscr == min(base.features.dscr, uw.signals["dscr_semantic"])
+    assert uw.features.model_dump(exclude={"dscr", "cash_buffer_days"}) == base.features.model_dump(
+        exclude={"dscr", "cash_buffer_days"}
+    )
+
+
+def test_high_cost_override_raises_flag(cases):
+    ids = _unclassified_out(cases, "demo-cafe-001")[:1]
+    uw = _with_overrides(cases, "demo-cafe-001", dict.fromkeys(ids, Category.HIGH_COST_LENDER))
+    assert FLAG_HIGH_COST_LENDER in uw.flags
+    assert uw.signals["high_cost_lender_count"] == 1
+
+
+def test_overrides_only_apply_to_unclassified_transactions(cases):
+    revenue_id = next(
+        t.txn_id for t in cases["demo-cafe-001"].transactions if classify(t) is Category.REVENUE
+    )
+    uw = _with_overrides(cases, "demo-cafe-001", {revenue_id: Category.LOAN_REPAYMENT, "unknown": Category.LOAN_REPAYMENT})
+    assert uw.signals["semantic_overrides"] == 0
+    assert uw.features == _underwrite(cases, "demo-cafe-001").features

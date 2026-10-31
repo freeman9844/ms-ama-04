@@ -4,11 +4,13 @@
 - DSCR = max(월평균 영업순현금, 0) / (월평균 기존 부채상환 + 신규 대출 월상환액 추정).
 - 현금 완충일수 = 최근 30일 거래 후 잔액 평균 / 일평균 영업 지출.
 - 세금 일치율 = min(신고 매출, 통장 매출) / max(...), 신고 기간 안의 통장 매출만 합산.
+- 의미 분류 override(P4a)는 규칙 미분류 출금에만 적용한다. DSCR·완충일수는 규칙만/의미 반영 중
+  작은 값을 쓴다(모델 판단이 정책 지표를 좋게 만들 수 없다). 위험 신호·플래그는 의미 반영 결과를 쓴다.
 """
 
 import statistics
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -34,7 +36,8 @@ class Underwriting:
     features: CashFlowFeatures
     signals: dict[str, int | float | str]
     flags: list[str]
-
+    monthly: list[dict[str, int | str]]
+    categories: dict[str, Category]
 
 def monthly_installment(principal: int, tenor_months: int, annual_rate: float = ANNUAL_RATE) -> float:
     r = annual_rate / 12
@@ -59,17 +62,17 @@ def _tax_match(transactions: Sequence[Transaction], categories: dict[str, Catego
     return min(declared, observed) / high if high > 0 else 0.0
 
 
-def compute_underwriting(
+def _compute(
     application_id: str,
     profile: ApplicantProfile,
     transactions: Sequence[Transaction],
     tax_filings: Sequence[TaxFiling],
+    categories: dict[str, Category],
     *,
     as_of: date,
     requested_amount_krw: int,
     requested_tenor_months: int,
 ) -> Underwriting:
-    categories = {t.txn_id: classify(t) for t in transactions}
     current = _month(as_of)
     months = sorted({_month(t.booked_on) for t in transactions if _month(t.booked_on) < current})
     totals: dict[tuple[int, int], dict[Category, int]] = defaultdict(lambda: defaultdict(int))
@@ -130,4 +133,60 @@ def compute_underwriting(
         "loan_proceeds_count": counts[Category.LOAN_PROCEEDS],
     }
     flags = [FLAG_HIGH_COST_LENDER] if counts[Category.HIGH_COST_LENDER] else []
-    return Underwriting(features=features, signals=signals, flags=flags)
+    monthly: list[dict[str, int | str]] = [
+        {
+            "month": f"{y:04d}-{mo:02d}",
+            "revenue": totals[(y, mo)][Category.REVENUE],
+            "operating_out": -sum(totals[(y, mo)][c] for c in OPERATING_OUT),
+            "debt_service": -sum(totals[(y, mo)][c] for c in DEBT_SERVICE),
+            "owner_draw": -totals[(y, mo)][Category.OWNER_TRANSFER],
+        }
+        for y, mo in months
+    ]
+    return Underwriting(features=features, signals=signals, flags=flags, monthly=monthly, categories=categories)
+
+
+def compute_underwriting(
+    application_id: str,
+    profile: ApplicantProfile,
+    transactions: Sequence[Transaction],
+    tax_filings: Sequence[TaxFiling],
+    *,
+    as_of: date,
+    requested_amount_krw: int,
+    requested_tenor_months: int,
+    overrides: Mapping[str, Category] | None = None,
+) -> Underwriting:
+    rules = {t.txn_id: classify(t) for t in transactions}
+    args = (application_id, profile, transactions, tax_filings)
+    kw = {"as_of": as_of, "requested_amount_krw": requested_amount_krw, "requested_tenor_months": requested_tenor_months}
+    base = _compute(*args, rules, **kw)
+    applied = {
+        k: v
+        for k, v in (overrides or {}).items()
+        if rules.get(k) in (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
+    }
+    adjusted = _compute(*args, rules | applied, **kw) if applied else base
+    features = _conservative(base.features, adjusted.features)
+    signals = {
+        **adjusted.signals,
+        "semantic_overrides": len(applied),
+        "dscr_rules_only": base.features.dscr,
+        "dscr_semantic": adjusted.features.dscr,
+    }
+    return Underwriting(
+        features=features,
+        signals=signals,
+        flags=adjusted.flags,
+        monthly=adjusted.monthly,
+        categories=adjusted.categories,
+    )
+
+
+def _conservative(base: CashFlowFeatures, adjusted: CashFlowFeatures) -> CashFlowFeatures:
+    return base.model_copy(
+        update={
+            "dscr": min(base.dscr, adjusted.dscr),
+            "cash_buffer_days": min(base.cash_buffer_days, adjusted.cash_buffer_days),
+        }
+    )

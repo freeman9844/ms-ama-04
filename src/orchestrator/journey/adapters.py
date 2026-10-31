@@ -2,7 +2,7 @@
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -10,11 +10,13 @@ import httpx
 
 from agents.data_assembly import DEFAULT_MODEL, SourceError
 from agents.runtime import FoundryAgents
-from journey.activities import Deps
+from agents.txn_classify import DecisionClient
+from journey.activities import ANALYST_MODEL, CLASSIFIER_MODEL, REVIEWER_MODEL, Deps, StoreCache
 from journey.models import KST
 from shared.contracts import PolicyDecision
 
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
+COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
 PSEUDONYM_SECRET = "pseudonym-key"
 SOURCE_PATHS = {
     "profile": "/mydata/profile",
@@ -140,22 +142,34 @@ def load_pseudonym_key(env: Mapping[str, str], credential: Any) -> bytes:
     return SecretClient(env["KEYVAULT_URI"], credential).get_secret(PSEUDONYM_SECRET).value.encode()
 
 
+def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[str, Any]:
+    """Foundry 에이전트·Decision-1·모델 설정. 엔드포인트가 없으면 해당 기능은 꺼진다."""
+    settings: dict[str, Any] = {}
+    if endpoint := env.get("AI_PROJECT_ENDPOINT"):
+        settings["agents"] = FoundryAgents(endpoint, lambda: token(FOUNDRY_SCOPE))
+        settings["model"] = env.get("DATA_ASSEMBLY_MODEL", DEFAULT_MODEL)
+        settings["analyst_model"] = env.get("ANALYST_MODEL", ANALYST_MODEL)
+        settings["reviewer_model"] = env.get("REVIEWER_MODEL", REVIEWER_MODEL)
+        settings["classifier_model"] = env.get("CLASSIFIER_MODEL", CLASSIFIER_MODEL)
+    if (account := env.get("AI_ACCOUNT_ENDPOINT")) and (deployment := env.get("DECISION_DEPLOYMENT")):
+        settings["decider"] = DecisionClient(account, deployment, lambda: token(COGNITIVE_SCOPE))
+    return settings
+
+
 def build_deps(env: Mapping[str, str] = os.environ) -> Deps:
     from azure.identity import ManagedIdentityCredential
 
     credential = ManagedIdentityCredential(client_id=env["AZURE_CLIENT_ID"])
-    agents = None
-    if endpoint := env.get("AI_PROJECT_ENDPOINT"):
-        agents = FoundryAgents(endpoint, lambda: credential.get_token(FOUNDRY_SCOPE).token)
     fqdn = env.get("SERVICEBUS_FQDN")
+    store = CosmosStore(env["COSMOS_ENDPOINT"], env["COSMOS_DATABASE"], credential)
     return Deps(
-        store=CosmosStore(env["COSMOS_ENDPOINT"], env["COSMOS_DATABASE"], credential),
+        store=store,
         raw=BlobRawStore(env["DATA_BLOB_ENDPOINT"], credential),
         mock=HttpMockApi(env["MOCKAPI_URL"]),
         policy=HttpPolicyApi(env["POLICY_URL"]),
         events=ServiceBusPublisher(fqdn, credential) if fqdn else None,
         pseudonym_key=load_pseudonym_key(env, credential),
         clock=lambda: datetime.now(KST),
-        agents=agents,
-        model=env.get("DATA_ASSEMBLY_MODEL", DEFAULT_MODEL),
+        cache=StoreCache(store),
+        **agent_settings(env, lambda scope: credential.get_token(scope).token),
     )

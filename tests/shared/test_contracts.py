@@ -6,12 +6,17 @@ from pydantic import ValidationError
 from shared.contracts import (
     ApplicantProfile,
     CashFlowFeatures,
+    Claim,
     ConsentGrant,
     ConsentScope,
+    CreditAssessment,
     Decision,
     PgSettlement,
     PolicyDecision,
+    ProposedStructure,
     ReasonCode,
+    Recommendation,
+    ReviewOutcome,
     TaxFiling,
     Transaction,
 )
@@ -187,3 +192,53 @@ def test_policy_decision_invariants():
 def test_reason_code_pattern():
     with pytest.raises(ValidationError):
         ReasonCode(code="X1", message="m")
+
+
+def _assessment(**kw):
+    base = dict(
+        application_id="app-1",
+        recommendation=Recommendation.APPROVE,
+        summary="현금흐름이 안정적이다.",
+        claims=(Claim(text="DSCR 3.80", metric_ids=("M:dscr",)),),
+        proposed_structure=ProposedStructure(
+            amount_krw=20_000_000, tenor_months=12, schedule="seasonal", reduced_payment_months=(1, 2), rationale="비수기 감액"
+        ),
+        counterfactuals=(),
+        review=ReviewOutcome(passed=True, rounds=1),
+        models={"analyst": "gpt-5.4", "reviewer": "gpt-5.4-mini"},
+    )
+    base.update(kw)
+    return CreditAssessment(**base)
+
+
+def test_credit_assessment_round_trip():
+    a = _assessment()
+    assert a.schema_version == "1"
+    assert CreditAssessment.model_validate_json(a.model_dump_json()) == a
+
+
+def test_claim_requires_evidence_and_known_id_shape():
+    with pytest.raises(ValidationError):
+        Claim(text="근거 없는 주장")
+    with pytest.raises(ValidationError):
+        Claim(text="x", metric_ids=("dscr",))
+    assert Claim(text="x", txn_ids=("demo-cafe-001-00012",)).metric_ids == ()
+
+
+def test_structure_schedule_consistency():
+    with pytest.raises(ValidationError):
+        ProposedStructure(amount_krw=1, tenor_months=12, schedule="seasonal", reduced_payment_months=(), rationale="r")
+    with pytest.raises(ValidationError):
+        ProposedStructure(amount_krw=1, tenor_months=12, schedule="level", reduced_payment_months=(1,), rationale="r")
+    with pytest.raises(ValidationError):
+        ProposedStructure(amount_krw=1, tenor_months=12, schedule="seasonal", reduced_payment_months=(13,), rationale="r")
+
+
+def test_approval_needs_structure_and_failed_review_needs_issues():
+    with pytest.raises(ValidationError):
+        _assessment(proposed_structure=None)
+    assert _assessment(recommendation=Recommendation.DECLINE, proposed_structure=None).proposed_structure is None
+    with pytest.raises(ValidationError):
+        _assessment(review=ReviewOutcome(passed=False, rounds=3))
+    with pytest.raises(ValidationError):
+        ReviewOutcome(passed=True, rounds=4)
