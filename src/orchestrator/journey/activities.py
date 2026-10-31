@@ -178,7 +178,9 @@ def _load(deps: Deps, consent_id: str) -> tuple[ApplicantProfile, list[Transacti
     )
 
 
-def _semantic(deps: Deps, profile: ApplicantProfile, txns: list[Transaction]) -> tuple[dict[str, Any] | None, dict[str, Category]]:
+def _semantic(
+    deps: Deps, profile: ApplicantProfile, txns: list[Transaction], consent_id: str
+) -> tuple[dict[str, Any] | None, dict[str, Category]]:
     if deps.decider is None:
         return None, {}
     fallback = LlmFallback(deps.agents, deps.classifier_model) if deps.agents is not None else None
@@ -193,12 +195,15 @@ def _semantic(deps: Deps, profile: ApplicantProfile, txns: list[Transaction]) ->
         )
     except Exception as e:  # noqa: BLE001 - 의미 분류 실패는 규칙 분류만으로 진행한다
         return {"error": f"{type(e).__name__}: {e}"[:300]}, {}
+    finally:
+        if fallback is not None:
+            _remember_foundry(deps, consent_id, fallback.conversations, [])
     return result.record(), result.overrides
 
 
 def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     profile, txns, filings = _load(deps, payload["consent_id"])
-    classification, overrides = _semantic(deps, profile, txns)
+    classification, overrides = _semantic(deps, profile, txns, payload["consent_id"])
     result = compute_underwriting(
         payload["application_id"],
         profile,

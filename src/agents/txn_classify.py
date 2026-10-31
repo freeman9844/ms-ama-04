@@ -2,7 +2,7 @@
 
 1. 결정적 규칙(classify-v1)으로 분류하고, 남은(unclassified) 거래만 대상으로 한다.
 2. 가명처리 → 정규화 → (업종, 방향, 거래유형, 적요) 단위로 중복 제거한다.
-3. 캐시에 있으면 재사용한다. 가명 토큰이 들어 있는 적요는 캐시에 넣지도 찾지도 않는다.
+3. 캐시에 있으면 재사용한다. 가명 토큰이 들어 있는 적요와 이체 적요는 캐시에 넣지도 찾지도 않는다.
 4. 고유 적요마다 Microsoft-Decision-1에 고정 선택지(+cannot_tell)로 병렬 질의한다.
 5. 기권·저신뢰·오류 항목만 mini LLM 폴백에 한 번에 묻고, 그래도 모르면 미분류로 둔다.
 6. 특성 반영은 보수적으로: 출금이 부채상환·고금리 상환으로 분류된 경우만 override를 만든다.
@@ -23,7 +23,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict
 
 from agents.classify import Category, classify
-from agents.runtime import AgentRun, AgentSpec, ToolHandler
+from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from shared.contracts import Transaction
 
 PIPELINE_VERSION = "semantic-v1"
@@ -51,6 +51,8 @@ DECISION_INSTRUCTIONS = (
     "근거가 부족하면 cannot_tell을 고르라."
 )
 _UNCLASSIFIED = (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
+# 이체 적요에는 가명 사전에 없는 제3자 이름이 들어갈 수 있어 공유 캐시에 남기지 않는다.
+_UNCACHED_TYPES = frozenset({"TRANSFER_IN", "TRANSFER_OUT"})
 _STANDALONE_NUMBER = re.compile(r"(?<!\S)\d+(?!\S)")
 _SPACES = re.compile(r"\s+")
 
@@ -167,6 +169,7 @@ FALLBACK_INSTRUCTIONS = """너는 한국 소상공인 사업자 계좌 거래의
 class LlmFallback:
     def __init__(self, runner: AgentRunner, model: str) -> None:
         self._runner, self._model = runner, model
+        self.conversations: list[str] = []  # 동의 철회 시 지울 Foundry 대화(실패 포함)
 
     def spec(self) -> AgentSpec:
         return AgentSpec(
@@ -180,7 +183,13 @@ class LlmFallback:
         )
 
     def classify(self, items: list[dict[str, str]]) -> dict[str, str]:
-        run = self._runner.run(self.spec(), json.dumps({"items": items}, ensure_ascii=False), {})
+        try:
+            run = self._runner.run(self.spec(), json.dumps({"items": items}, ensure_ascii=False), {})
+        except AgentError as e:
+            if e.conversation_id:
+                self.conversations.append(e.conversation_id)
+            raise
+        self.conversations.append(run.conversation_id)
         keys = {i["key"] for i in items}
         return {i.key: i.label for i in run.output.items if i.key in keys}
 
@@ -230,7 +239,8 @@ def _groups(transactions: Sequence[Transaction], industry: str, mask: Callable[[
         description = normalize(mask(t.description))
         key = _key(industry, direction, t.txn_type_code, description)
         if key not in groups:
-            groups[key] = _Group(key, description, direction, t.txn_type_code, "[[" not in description)
+            cacheable = "[[" not in description and t.txn_type_code not in _UNCACHED_TYPES
+            groups[key] = _Group(key, description, direction, t.txn_type_code, cacheable)
         groups[key].txn_ids.append(t.txn_id)
     return list(groups.values())
 

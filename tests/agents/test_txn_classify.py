@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from agents.classify import Category
-from agents.runtime import AgentRun
+from agents.runtime import AgentError, AgentRun
 from agents.txn_classify import (
     ABSTAIN,
     CRITERIA,
@@ -161,12 +161,12 @@ def test_fallback_failure_never_raises():
 
 def test_cache_hit_skips_model_and_new_results_are_cached():
     cache = MemoryCache()
-    first = run([txn(1, "해동주류")], FakeDecider(), cache=cache)
+    first = run([txn(1, "해동주류", code="AUTO_DEBIT")], FakeDecider(), cache=cache)
     key = first.items[0]["key"]
     assert cache.entries[key]["label"] == "supplier" and cache.entries[key]["description"] == "해동주류"
 
     decider = FakeDecider()
-    second = run([txn(2, "해동주류  ")], decider, cache=cache)
+    second = run([txn(2, "해동주류  ", code="AUTO_DEBIT")], decider, cache=cache)
     assert decider.states == [] and second.metrics["cache_hits"] == 1
     assert second.items[0]["source"] == "cache" and second.items[0]["key"] == key
 
@@ -188,8 +188,18 @@ def test_pseudonymized_descriptions_are_masked_and_never_cached():
     assert cache.gets == [] and cache.entries == {}
 
 
+def test_transfer_narratives_are_never_cached():
+    # 이체 적요에는 사전에 없는 제3자 이름이 들어갈 수 있다(예: "이영희 생활비"). 공유 캐시에 남기지 않는다.
+    cache = MemoryCache()
+    decider = FakeDecider()
+    txns = [txn(1, "이영희 생활비"), txn(2, "박철수 후원", amount=200_000, code="TRANSFER_IN")]
+    result = run(txns, decider, cache=cache)
+    assert len(decider.states) == 2 and {i["source"] for i in result.items} == {"decision"}
+    assert cache.gets == [] and cache.entries == {}
+
+
 def test_cache_failure_degrades_to_model_calls():
-    result = run([txn(1, "해동주류")], FakeDecider(), cache=MemoryCache(fail=True))
+    result = run([txn(1, "해동주류", code="AUTO_DEBIT")], FakeDecider(), cache=MemoryCache(fail=True))
     assert result.items[0]["source"] == "decision" and result.metrics["cache_errors"] == 2
 
 
@@ -271,3 +281,18 @@ def test_llm_fallback_returns_known_keys_only():
     assert spec.model == "gpt-5.4-mini" and spec.tools == () and handlers == {}
     assert "망원청과" in text and spec.output_schema == FALLBACK_SCHEMA
     assert FALLBACK_SCHEMA["properties"]["items"]["items"]["properties"]["label"]["enum"] == [*LABELS, ABSTAIN]
+
+
+class FailingFallbackRunner:
+    def run(self, spec, input_text, handlers):
+        raise AgentError("model down", "conv_e")
+
+
+def test_llm_fallback_keeps_conversation_ids_for_deletion():
+    ok = LlmFallback(ScriptedRunner({"items": []}), "gpt-5.4-mini")
+    ok.classify([{"key": "k1", "description": "x"}])
+    assert ok.conversations == ["conv_f"]
+    failing = LlmFallback(FailingFallbackRunner(), "gpt-5.4-mini")
+    with pytest.raises(AgentError):
+        failing.classify([{"key": "k1", "description": "x"}])
+    assert failing.conversations == ["conv_e"]

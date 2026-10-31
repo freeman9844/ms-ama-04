@@ -208,6 +208,21 @@ def test_agent_error_carries_containers_for_cleanup():
     assert e.value.conversation_id == "conv_1"
 
 
+@pytest.mark.parametrize(
+    "first",
+    [
+        httpx.Response(200, json={"status": "completed", "output": [ci("cntr_x"), {"type": "function_call", "name": "fetch_source"}]}),
+        httpx.Response(200, content=b"<html>gateway</html>"),
+    ],
+    ids=["call_without_call_id", "non_json_body"],
+)
+def test_unexpected_errors_become_agent_error_with_ids(first):
+    with pytest.raises(AgentError) as e:
+        agents(FakeFoundry(first)).run(SPEC, "입력", {"fetch_source": lambda a: {}})
+    assert e.value.conversation_id == "conv_1"
+    assert e.value.containers == (("cntr_x",) if first.content.startswith(b"{") else ())
+
+
 def test_run_without_code_interpreter_has_no_containers():
     run = agents(FakeFoundry(done({"status": "ok"}))).run(SPEC, "입력", {})
     assert run.containers == ()

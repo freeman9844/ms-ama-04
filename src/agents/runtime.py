@@ -169,6 +169,8 @@ class FoundryAgents:
             return self._loop(spec, version, conversation_id, input_text, handlers, max_rounds, containers)
         except AgentError as e:
             raise AgentError(str(e), conversation_id, tuple(containers)) from e
+        except Exception as e:  # noqa: BLE001 - 정리(컨테이너 삭제·대화 기록)에 필요한 ID를 잃지 않는다
+            raise AgentError(f"예상치 못한 오류: {type(e).__name__}", conversation_id, tuple(containers)) from e
 
     def delete_container(self, container_id: str) -> bool:
         """Code Interpreter 컨테이너(가명 집계 데이터가 올라간 곳)를 즉시 삭제한다. 실패해도 예외 없음."""

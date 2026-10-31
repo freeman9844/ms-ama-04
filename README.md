@@ -161,7 +161,7 @@ python -m ops smoke                # P2 점검 + health:policy, health:mockapi, 
 
 1. **거래 의미 분류**(`underwrite` 활동 안): 규칙(classify-v1)으로 분류되지 않은 거래의 적요를 가명처리·정규화해
    Microsoft-Decision-1(`decision-1`, systemone 선택형 질문)에 묻고, 기권·낮은 확신(0.7 미만)은 `gpt-5.4-mini`
-   에이전트(`txn-classifier`)가 보완합니다. 결과는 Cosmos `lending/classifications`에 캐시됩니다(토큰이 든 적요 제외).
+   에이전트(`txn-classifier`)가 보완합니다. 결과는 Cosmos `lending/classifications`에 캐시됩니다(토큰이 든 적요·이체 적요 제외).
    부채 라벨(`loan_repayment`, `high_cost_lender`)만 특성에 반영하며, DSCR·현금 완충일수는 규칙 결과와 비교해
    **더 낮은 값**을 씁니다(LLM이 상환여력을 좋게 만들 수 없음).
 2. **분석·검토 에이전트**(`assess_credit` 활동): 분석가(`underwriting-analyst`, gpt-5.4)가 도구(`get_metrics`,
@@ -190,6 +190,9 @@ python -m ops smoke                # P2 점검 + health:policy, health:mockapi, 
 ### 알려진 제약(P4a)
 
 - `assessment` 문장은 가명 토큰(`[[PERSON_…]]`)을 그대로 담습니다. 복원 표시는 심사역 콘솔(P4b)이 합니다.
+- 가명처리는 사전 기반(상호·대표자·사업자번호·급여/개인이체 적요 속 이름)이라, 규칙 미분류 이체 적요에 든 제3자 이름
+  (예: "이영희 생활비")은 Decision-1·보완 에이전트에 그대로 갑니다. 그래서 이체(`TRANSFER_IN/OUT`) 적요는 공유 캐시에
+  남기지 않습니다(데모 데이터의 해당 적요는 공급업체 상호뿐). 개인정보 탐지 서비스 연동은 후속 과제입니다.
 - 데모 데이터에서 규칙 미분류 적요는 공급업체 송금뿐이라 의미 분류가 특성을 바꾸지 않습니다. 보수적 반영은 단위 테스트로 검증합니다.
 - 수치 근거 검사는 숫자 일치만 봅니다. 해석의 타당성은 검토 에이전트 판정에 의존합니다.
 - `demo-stress-003`은 고금리 대출이 감지되어도 정책상 eligible입니다(P3 규칙). 분석가는 이를 claim·counterfactual로 드러냅니다.

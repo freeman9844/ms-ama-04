@@ -296,7 +296,7 @@ def test_underwrite_without_decider_skips_semantic_classification(deps):
     assert len(result["monthly"]) == 12 and result["signals"]["semantic_overrides"] == 0
 
 
-def test_underwrite_classifies_unresolved_and_caches(deps):
+def test_underwrite_classifies_unresolved_without_caching_transfers(deps):
     consent, _ = assembled(deps)
     decider = FakeDecider()
     d = with_deps(deps, decider=decider, cache=StoreCache(deps.store))
@@ -305,9 +305,19 @@ def test_underwrite_classifies_unresolved_and_caches(deps):
     assert m["decision_calls"] == m["unique_descriptions"] > 0 and m["cache_hits"] == 0
     assert first["category_overrides"] == {}
     assert {s["business_industry"] for s in decider.states} == {"카페"}
-    assert any(c == "classifications" for c, _ in deps.store.docs)
+    # 데모의 미분류 적요는 모두 이체(공급처 송금)라 공유 캐시에 남지 않는다.
+    assert not any(c == "classifications" for c, _ in deps.store.docs)
     second = underwrite(d, underwrite_input(consent["consent_id"]))["classification"]["metrics"]
-    assert (second["decision_calls"], second["cache_hits"]) == (0, m["unique_descriptions"])
+    assert (second["decision_calls"], second["cache_hits"]) == (m["unique_descriptions"], 0)
+
+
+def test_underwrite_records_fallback_conversation_on_consent(deps):
+    consent, _ = assembled(deps)
+    d = with_deps(deps, decider=FakeDecider(("cannot_tell", 0.5)), agents=FailingRunner())
+    result = underwrite(d, underwrite_input(consent["consent_id"]))
+    assert result["classification"]["metrics"]["fallback_errors"] == 1
+    doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])
+    assert doc["foundry_conversations"] == ["conv_x"]
 
 
 def test_semantic_debt_label_is_conservative(deps):
