@@ -413,3 +413,25 @@ output CONTAINER_APPS_INT_ENVIRONMENT_NAME string = acaInt.outputs.name
 output CONTAINER_APPS_INT_DOMAIN string = acaInt.outputs.defaultDomain
 output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = acaWeb.outputs.id
 output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = acaWeb.outputs.name
+
+// ── Functions (T7) ─────────────────────────────────────────────────────
+module functions 'modules/functions.bicep' = {
+  name: 'functions'
+  params: {
+    planName: names.plan
+    name: names.func
+    location: location
+    tags: tags
+    operatorIp: operatorIp
+    identityId: identities.outputs.orchestratorId
+    identityClientId: identities.outputs.orchestratorClientId
+    subnetId: subnetId['snet-functions']
+    peSubnetId: subnetId['snet-pe']
+    zoneId: zoneId['privatelink.azurewebsites.net']
+    storageName: stFunc.outputs.name
+    storageBlobEndpoint: stFunc.outputs.blobEndpoint
+    appInsightsConnectionString: monitoring.outputs.appiConnectionString
+  }
+}
+
+output FUNCTION_APP_NAME string = functions.outputs.name

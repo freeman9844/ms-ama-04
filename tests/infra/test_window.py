@@ -15,6 +15,7 @@ WINDOWED = [
     ("Microsoft.Storage/storageAccounts", "stfn"),
     ("Microsoft.DocumentDB/databaseAccounts", "cosmos-"),
     ("Microsoft.CognitiveServices/accounts", "ais-"),
+    ("Microsoft.Web/sites", "func-"),
 ]
 ALWAYS_PRIVATE: list[tuple[str, str]] = [
     ("Microsoft.Storage/storageAccounts", "stagt"),
