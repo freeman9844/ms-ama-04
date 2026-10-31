@@ -232,6 +232,7 @@ module cosmos 'modules/cosmos.bicep' = {
     containers: [
       { name: 'applications', partitionKey: '/application_id' }
       { name: 'consents', partitionKey: '/consent_id' }
+      { name: 'classifications', partitionKey: '/id' }
     ]
     sqlRoleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
@@ -489,6 +490,11 @@ module functions 'modules/functions.bicep' = {
       DATA_BLOB_ENDPOINT: stData.outputs.blobEndpoint
       AI_PROJECT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
       DATA_ASSEMBLY_MODEL: 'gpt-5.4-mini'
+      AI_ACCOUNT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com'
+      DECISION_DEPLOYMENT: 'decision-1'
+      ANALYST_MODEL: 'gpt-5.4'
+      REVIEWER_MODEL: 'gpt-5.4-mini'
+      CLASSIFIER_MODEL: 'gpt-5.4-mini'
       POLICY_URL: policyUrl
       MOCKAPI_URL: mockapiUrl
       SERVICEBUS_FQDN: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
@@ -544,6 +550,8 @@ module smokeJob 'modules/smoke-job.bicep' = {
       policy_url: policyUrl
       mockapi_url: mockapiUrl
       e2e_applicant: 'demo-cafe-001'
+      ai_account_endpoint: 'https://${names.ais}.services.ai.azure.com'
+      decision_deployment: 'decision-1'
     }
   }
 }

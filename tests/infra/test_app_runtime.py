@@ -40,7 +40,11 @@ def test_cosmos_app_containers(closed):
         c["name"].split("/")[-1]: c["properties"]["resource"]["partitionKey"]["paths"]
         for c in closed.of_type("Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers")
     }
-    assert containers == {"applications": ["/application_id"], "consents": ["/consent_id"]}
+    assert containers == {
+        "applications": ["/application_id"],
+        "consents": ["/consent_id"],
+        "classifications": ["/id"],
+    }
 
 
 def test_pseudonym_key_secret_only_when_provided(closed, variant):
@@ -93,6 +97,10 @@ def test_function_app_settings_point_to_runtime(closed, variant):
     assert settings["COSMOS_DATABASE"] == "lending"
     assert settings["AI_PROJECT_ENDPOINT"].endswith("/api/projects/proj-lending")
     assert settings["DATA_ASSEMBLY_MODEL"] == "gpt-5.4-mini"
+    assert settings["AI_ACCOUNT_ENDPOINT"].endswith(".services.ai.azure.com")
+    assert settings["DECISION_DEPLOYMENT"] == "decision-1"
+    assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
+    assert settings["CLASSIFIER_MODEL"] == "gpt-5.4-mini"
     assert settings["SERVICEBUS_FQDN"].endswith(".servicebus.windows.net")
     # 런타임 속성(엔드포인트)은 PSRule 펼침에서 빈 값이므로 키 존재만 확인합니다.
     assert {"COSMOS_ENDPOINT", "DATA_BLOB_ENDPOINT", "KEYVAULT_URI"} <= settings.keys()
@@ -111,3 +119,5 @@ def test_smoke_job_has_e2e_config(closed):
     assert config["policy_url"].startswith("https://ca-policy.")
     assert config["mockapi_url"].startswith("https://ca-mockapi.")
     assert config["e2e_applicant"] == "demo-cafe-001"
+    assert config["ai_account_endpoint"].endswith(".services.ai.azure.com")
+    assert config["decision_deployment"] == "decision-1"
