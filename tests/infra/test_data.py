@@ -1,3 +1,8 @@
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
 ST = "Microsoft.Storage/storageAccounts"
 COSMOS = "Microsoft.DocumentDB/databaseAccounts"
 BLOB = "privatelink.blob.core.windows.net"
@@ -76,3 +81,18 @@ def test_search_is_basic_private_and_aad_enabled(closed):
     assert search["sku"]["name"] == "basic"
     assert search["properties"]["authOptions"]["aadOrApiKey"]["aadAuthFailureMode"] == "http401WithBearerChallenge"
     assert closed.private_endpoints("srch-") == {"searchService": {"privatelink.search.windows.net"}}
+
+
+def test_cosmos_sql_role_assignments_are_serialized(closed):
+    # Cosmos는 계정 단위 배타 잠금 때문에 SQL 역할 할당을 동시에 쓰면 409로 실패합니다.
+    # PSRule 펼치기에는 copy 모드가 남지 않으므로 컴파일된 ARM 템플릿을 확인합니다.
+    bicep = shutil.which("bicep") or str(Path.home() / ".azure" / "bin" / "bicep.exe")
+    module = Path(__file__).resolve().parents[2] / "infra" / "modules" / "cosmos.bicep"
+    proc = subprocess.run([bicep, "build", str(module), "--stdout"], capture_output=True, text=True,
+                          encoding="utf-8", check=True)
+    resources = json.loads(proc.stdout)["resources"]
+    [sql_ra] = [r for r in (resources.values() if isinstance(resources, dict) else resources)
+                if r["type"] == "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments"]
+    assert sql_ra["copy"]["mode"] == "serial"
+    assert sql_ra["copy"]["batchSize"] == 1
+    assert any("'pe-" in d for d in sql_ra["dependsOn"])  # PE 승인(계정 쓰기)과도 겹치지 않게

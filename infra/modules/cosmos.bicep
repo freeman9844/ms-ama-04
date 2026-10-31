@@ -48,6 +48,8 @@ module pe 'pe.bicep' = {
   }
 }
 
+// Cosmos는 역할 할당마다 계정 단위 배타 잠금을 잡으므로 하나씩, PE 승인이 끝난 뒤에 씁니다.
+@batchSize(1)
 resource sqlRa 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11-15' = [for a in sqlRoleAssignments: {
   parent: cosmos
   name: guid(cosmos.id, a.principalId, a.roleDefinitionGuid, a.scope)
@@ -56,7 +58,7 @@ resource sqlRa 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11
     roleDefinitionId: '${cosmos.id}/sqlRoleDefinitions/${a.roleDefinitionGuid}'
     scope: a.scope == 'database' ? '${cosmos.id}/dbs/${appDatabaseName}' : cosmos.id
   }
-  dependsOn: [ appDb ]
+  dependsOn: [ appDb, pe ]
 }]
 
 output name string = cosmos.name
