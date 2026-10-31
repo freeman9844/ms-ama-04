@@ -64,10 +64,9 @@ def healthy_routes():
         ("GET", "/dbs"): ok({"Databases": [{"id": "lending"}]}),
         ("GET", "/secrets?"): ok({"value": []}),
         ("POST", "/flow.updated/messages"): ok(status=201),
-        ("POST", "/assistants?"): ok({"id": "asst_1"}),
-        ("POST", "/threads/runs?"): ok({"id": "run_1", "thread_id": "thread_1"}),
-        ("GET", "/threads/thread_1/runs/run_1"): ok({"status": "completed"}),
-        ("DELETE", "/assistants/asst_1"): ok(),
+        ("POST", "/agents/p2-smoke/versions?api-version=v1"): ok({"name": "p2-smoke", "version": "1"}),
+        ("POST", "/openai/v1/responses"): ok({"id": "resp_1", "status": "completed"}),
+        ("DELETE", "/agents/p2-smoke?api-version=v1"): ok(),
     }
 
 
@@ -102,26 +101,26 @@ def test_cosmos_check_uses_aad_authorization_header():
     assert "resource=https%3A%2F%2Fcosmos-x.documents.azure.com" in http.find("GET", "/msi/token")[0]["url"]
 
 
-def test_agent_roundtrip_polls_until_completed_and_deletes_agent():
-    routes = healthy_routes()
-    routes[("GET", "/threads/thread_1/runs/run_1")] = [
-        ok({"status": "queued"}), ok({"status": "in_progress"}), ok({"status": "completed"}),
-    ]
-    http = FakeHttp(routes)
-    sleeps = []
-    assert sc.check_agent(CFG, http, token_for(http), sleep=sleeps.append) == "run_1"
-    assert len(sleeps) == 2
-    assert json.loads(http.find("POST", "/assistants?")[0]["body"])["model"] == "gpt-5.4-mini"
-    assert len(http.find("DELETE", "/assistants/asst_1")) == 1
+def test_agent_roundtrip_uses_prompt_agent_and_responses_then_deletes_agent():
+    http = FakeHttp(healthy_routes())
+    assert sc.check_agent(CFG, http, token_for(http)) == "resp_1"
+    [create] = http.find("POST", "/agents/p2-smoke/versions?api-version=v1")
+    assert json.loads(create["body"])["definition"] == {
+        "kind": "prompt", "model": "gpt-5.4-mini", "instructions": "Reply with OK."}
+    [respond] = http.find("POST", "/openai/v1/responses")
+    assert respond["url"].startswith(CFG["project_endpoint"])
+    assert json.loads(respond["body"])["agent_reference"] == {"name": "p2-smoke", "type": "agent_reference"}
+    assert len(http.find("DELETE", "/agents/p2-smoke?api-version=v1")) == 1
 
 
-def test_agent_is_deleted_even_when_run_fails():
+def test_agent_is_deleted_even_when_response_fails():
     routes = healthy_routes()
-    routes[("GET", "/threads/thread_1/runs/run_1")] = ok({"status": "failed", "last_error": {"code": "server_error"}})
+    routes[("POST", "/openai/v1/responses")] = ok({"id": "resp_1", "status": "failed",
+                                                   "error": {"code": "server_error"}})
     http = FakeHttp(routes)
     with pytest.raises(sc.CheckFailed, match="failed"):
-        sc.check_agent(CFG, http, token_for(http), sleep=lambda s: None)
-    assert len(http.find("DELETE", "/assistants/asst_1")) == 1
+        sc.check_agent(CFG, http, token_for(http))
+    assert len(http.find("DELETE", "/agents/p2-smoke?api-version=v1")) == 1
 
 
 def test_main_succeeds_when_all_checks_pass():

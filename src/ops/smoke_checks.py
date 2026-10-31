@@ -137,34 +137,27 @@ def check_servicebus(cfg: dict, http: Http, token: TokenProvider) -> str:
     return cfg["servicebus_topic"]
 
 
-def check_agent(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[float], None] = time.sleep,
-                poll_seconds: float = 2.0, max_polls: int = 60) -> str:
-    """에이전트 생성 → 스레드 실행 → 완료 대기. 에이전트는 항상 삭제합니다.
+def check_agent(cfg: dict, http: Http, token: TokenProvider, name: str = "p2-smoke") -> str:
+    """프롬프트 에이전트 버전 생성 → responses 호출 → 완료 확인. 에이전트는 항상 삭제합니다.
 
-    capability host(Cosmos 스레드, Storage, Search)와 agent 서브넷 경로를 함께 검증합니다.
+    capability host(Cosmos 대화 저장, Storage, Search)와 agent 서브넷 경로를 함께 검증합니다.
+    클래식 Assistants API(/assistants, /threads)는 새 Foundry 프로젝트에서 invalid_engine_error로
+    실패하므로 새 Agents API를 사용합니다.
     """
     base = cfg["project_endpoint"].rstrip("/")
-    query = "api-version=v1"
     headers = _bearer(token(AUDIENCE_FOUNDRY), json_body=True)
-    agent = expect(http("POST", f"{base}/assistants?{query}", headers,
-                        _json({"name": "p2-smoke", "model": cfg["agent_model"], "instructions": "Reply with OK."})),
-                   200, 201, what="agent create").json()
+    definition = {"kind": "prompt", "model": cfg["agent_model"], "instructions": "Reply with OK."}
+    expect(http("POST", f"{base}/agents/{name}/versions?api-version=v1", headers, _json({"definition": definition})),
+           200, 201, what="agent create")
     try:
-        run = expect(http("POST", f"{base}/threads/runs?{query}", headers,
-                          _json({"assistant_id": agent["id"],
-                                 "thread": {"messages": [{"role": "user", "content": "ping"}]}})),
-                     200, 201, what="agent run create").json()
-        for _ in range(max_polls):
-            status = expect(http("GET", f"{base}/threads/{run['thread_id']}/runs/{run['id']}?{query}", headers),
-                            200, what="agent run get").json()
-            if status["status"] == "completed":
-                return run["id"]
-            if status["status"] in ("failed", "cancelled", "expired"):
-                raise CheckFailed(f"agent run {status['status']}: {status.get('last_error')}")
-            sleep(poll_seconds)
-        raise CheckFailed("agent run 대기 시간 초과")
+        resp = expect(http("POST", f"{base}/openai/v1/responses", headers,
+                           _json({"input": "ping", "agent_reference": {"name": name, "type": "agent_reference"}})),
+                      200, what="agent response").json()
+        if resp.get("status") != "completed":
+            raise CheckFailed(f"agent response {resp.get('status')}: {resp.get('error')}")
+        return resp["id"]
     finally:
-        http("DELETE", f"{base}/assistants/{agent['id']}?{query}", headers)
+        http("DELETE", f"{base}/agents/{name}?api-version=v1", headers)
 
 
 def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable[[str], str],
@@ -181,7 +174,7 @@ def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable
     ]
     if cfg.get("servicebus_host"):
         checks.append(("servicebus", lambda: check_servicebus(cfg, http, token)))
-    checks.append(("agent", lambda: check_agent(cfg, http, token, sleep)))
+    checks.append(("agent", lambda: check_agent(cfg, http, token)))
     return checks
 
 
