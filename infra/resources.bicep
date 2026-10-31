@@ -135,7 +135,6 @@ module keyVault 'modules/keyvault.bicep' = {
     name: names.kv
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     zoneId: zoneId['privatelink.vaultcore.azure.net']
     roleAssignments: concat([
@@ -164,7 +163,6 @@ module stAgents 'modules/storage.bicep' = {
     name: names.stAgents
     location: location
     tags: tags
-    operatorIp: ''  // Foundry BYO Storage는 항상 비공개
     bypass: 'AzureServices'
     peSubnetId: subnetId['snet-pe']
     endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
@@ -177,7 +175,6 @@ module stData 'modules/storage.bicep' = {
     name: names.stData
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
     softDeleteDays: 0
@@ -197,7 +194,6 @@ module stFunc 'modules/storage.bicep' = {
     name: names.stFunc
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     endpoints: [
       { groupId: 'blob', zoneId: zoneId[blobZone] }
@@ -219,7 +215,6 @@ module cosmos 'modules/cosmos.bicep' = {
     name: names.cosmos
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     zoneId: zoneId['privatelink.documents.azure.com']
     sqlRoleAssignments: concat([

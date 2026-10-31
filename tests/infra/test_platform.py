@@ -8,7 +8,8 @@ OPERATOR = "11111111-1111-1111-1111-111111111111"
 def test_key_vault_is_rbac_only_with_private_endpoint(closed):
     props = closed.one(KV, "kv")["properties"]
     assert props["enableRbacAuthorization"] is True
-    assert props["networkAcls"]["bypass"] == "None"
+    assert props["networkAcls"]["bypass"] == "AzureServices"
+    assert props["publicNetworkAccess"] == "Disabled"
     assert closed.private_endpoints("kv") == {"vault": {"privatelink.vaultcore.azure.net"}}
 
 

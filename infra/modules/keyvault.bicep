@@ -1,14 +1,12 @@
-// Key Vault(RBAC 모드). 배포 창에서만 운영자 IP를 허용합니다.
+// Key Vault(RBAC 모드). 항상 비공개(Private Endpoint 전용)입니다.
 param name string
 param location string
 param tags object
-param operatorIp string
 param peSubnetId string
 param zoneId string
 @description('[{ principalId, roleId, principalType }]')
 param roleAssignments array = []
 
-var windowOpen = !empty(operatorIp)
 
 resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: name
@@ -20,11 +18,12 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    publicNetworkAccess: windowOpen ? 'Enabled' : 'Disabled'
+    publicNetworkAccess: 'Disabled'
     networkAcls: {
       defaultAction: 'Deny'
-      bypass: 'None'
-      ipRules: windowOpen ? [ { value: operatorIp } ] : []
+      // ARM 템플릿 배포로 비밀을 기록할 때 신뢰 서비스 경로가 필요합니다(T9 pseudonym-key).
+      bypass: 'AzureServices'
+      ipRules: []
     }
   }
 }

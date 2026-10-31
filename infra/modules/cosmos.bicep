@@ -2,14 +2,12 @@
 param name string
 param location string
 param tags object
-param operatorIp string
 param peSubnetId string
 param zoneId string
 param appDatabaseName string = 'lending'
 @description('[{ principalId, roleDefinitionGuid, scope: account|database }] — Cosmos 데이터 평면 SQL 역할')
 param sqlRoleAssignments array = []
 
-var windowOpen = !empty(operatorIp)
 
 resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
   name: name
@@ -23,8 +21,8 @@ resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
     capabilities: [ { name: 'EnableServerless' } ]
     disableLocalAuth: true
     disableKeyBasedMetadataWriteAccess: true
-    publicNetworkAccess: windowOpen ? 'Enabled' : 'Disabled'
-    ipRules: windowOpen ? [ { ipAddressOrRange: operatorIp } ] : []
+    publicNetworkAccess: 'Disabled'
+    ipRules: []
     networkAclBypass: 'None'
   }
 }
