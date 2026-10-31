@@ -11,8 +11,14 @@ OPERATOR_IP = "20.30.40.50"
 
 WINDOWED = [
     ("Microsoft.KeyVault/vaults", "kv"),
+    ("Microsoft.Storage/storageAccounts", "stdat"),
+    ("Microsoft.Storage/storageAccounts", "stfn"),
+    ("Microsoft.DocumentDB/databaseAccounts", "cosmos-"),
 ]
-ALWAYS_PRIVATE: list[tuple[str, str]] = []
+ALWAYS_PRIVATE: list[tuple[str, str]] = [
+    ("Microsoft.Storage/storageAccounts", "stagt"),
+    ("Microsoft.Search/searchServices", "srch-"),
+]
 
 
 def _public(resource: dict) -> str:

@@ -156,3 +156,95 @@ output ORCHESTRATOR_IDENTITY_ID string = identities.outputs.orchestratorId
 output ORCHESTRATOR_IDENTITY_CLIENT_ID string = identities.outputs.orchestratorClientId
 output APPS_IDENTITY_ID string = identities.outputs.appsId
 output APPS_IDENTITY_CLIENT_ID string = identities.outputs.appsClientId
+
+// ── 데이터 저장소 (T3) ───────────────────────────────────────────────────
+module stAgents 'modules/storage.bicep' = {
+  name: 'storage-agents'
+  params: {
+    name: names.stAgents
+    location: location
+    tags: tags
+    operatorIp: ''  // Foundry BYO Storage는 항상 비공개
+    bypass: 'AzureServices'
+    peSubnetId: subnetId['snet-pe']
+    endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
+  }
+}
+
+module stData 'modules/storage.bicep' = {
+  name: 'storage-data'
+  params: {
+    name: names.stData
+    location: location
+    tags: tags
+    operatorIp: operatorIp
+    peSubnetId: subnetId['snet-pe']
+    endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
+    softDeleteDays: 0
+    roleAssignments: concat([
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobContributor, principalType: sp }
+      { principalId: identities.outputs.appsPrincipalId, roleId: role.blobContributor, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.blobReader, principalType: sp }
+    ], hasOperator ? [
+      { principalId: operatorPrincipalId, roleId: role.blobContributor, principalType: 'User' }
+    ] : [])
+  }
+}
+
+module stFunc 'modules/storage.bicep' = {
+  name: 'storage-functions'
+  params: {
+    name: names.stFunc
+    location: location
+    tags: tags
+    operatorIp: operatorIp
+    peSubnetId: subnetId['snet-pe']
+    endpoints: [
+      { groupId: 'blob', zoneId: zoneId[blobZone] }
+      { groupId: 'queue', zoneId: zoneId[queueZone] }
+      { groupId: 'table', zoneId: zoneId[tableZone] }
+    ]
+    containers: [ 'deploymentpackage' ]
+    roleAssignments: [
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobOwner, principalType: sp }
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.queueContributor, principalType: sp }
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.tableContributor, principalType: sp }
+    ]
+  }
+}
+
+module cosmos 'modules/cosmos.bicep' = {
+  name: 'cosmos'
+  params: {
+    name: names.cosmos
+    location: location
+    tags: tags
+    operatorIp: operatorIp
+    peSubnetId: subnetId['snet-pe']
+    zoneId: zoneId['privatelink.documents.azure.com']
+    sqlRoleAssignments: concat([
+      { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
+      { principalId: identities.outputs.appsPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
+      { principalId: identities.outputs.smokePrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000001', scope: 'account' }
+    ], hasOperator ? [
+      { principalId: operatorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'account' }
+    ] : [])
+  }
+}
+
+module search 'modules/search.bicep' = {
+  name: 'search'
+  params: {
+    name: names.search
+    location: location
+    tags: tags
+    peSubnetId: subnetId['snet-pe']
+    zoneId: zoneId['privatelink.search.windows.net']
+  }
+}
+
+output DATA_STORAGE_NAME string = stData.outputs.name
+output FUNC_STORAGE_NAME string = stFunc.outputs.name
+output COSMOS_ENDPOINT string = cosmos.outputs.endpoint
+output COSMOS_DATABASE string = cosmos.outputs.databaseName
+output SEARCH_NAME string = search.outputs.name
