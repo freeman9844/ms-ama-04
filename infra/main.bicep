@@ -84,3 +84,9 @@ output FUNC_STORAGE_NAME string = resources.outputs.FUNC_STORAGE_NAME
 output COSMOS_ENDPOINT string = resources.outputs.COSMOS_ENDPOINT
 output COSMOS_DATABASE string = resources.outputs.COSMOS_DATABASE
 output SEARCH_NAME string = resources.outputs.SEARCH_NAME
+
+output AI_ACCOUNT_NAME string = resources.outputs.AI_ACCOUNT_NAME
+output AI_PROJECT_NAME string = resources.outputs.AI_PROJECT_NAME
+output AI_PROJECT_ENDPOINT string = resources.outputs.AI_PROJECT_ENDPOINT
+output AI_OPENAI_ENDPOINT string = resources.outputs.AI_OPENAI_ENDPOINT
+output FOUNDRY_PROJECT_CAPHOST string = resources.outputs.FOUNDRY_PROJECT_CAPHOST

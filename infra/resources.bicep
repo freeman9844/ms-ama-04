@@ -248,3 +248,85 @@ output FUNC_STORAGE_NAME string = stFunc.outputs.name
 output COSMOS_ENDPOINT string = cosmos.outputs.endpoint
 output COSMOS_DATABASE string = cosmos.outputs.databaseName
 output SEARCH_NAME string = search.outputs.name
+
+// ── Foundry (T4) ────────────────────────────────────────────────────────
+module aiAccount 'modules/foundry/account.bicep' = {
+  name: 'foundry-account'
+  params: {
+    name: names.ais
+    location: location
+    tags: tags
+    operatorIp: operatorIp
+    agentSubnetId: subnetId['snet-agents']
+    peSubnetId: subnetId['snet-pe']
+    zoneIds: [
+      zoneId['privatelink.services.ai.azure.com']
+      zoneId['privatelink.openai.azure.com']
+      zoneId['privatelink.cognitiveservices.azure.com']
+    ]
+    modelDeployments: modelDeployments
+    roleAssignments: concat([
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.foundryUser, principalType: sp }
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.openAiUser, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.foundryUser, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.openAiUser, principalType: sp }
+    ], hasOperator ? [
+      { principalId: operatorPrincipalId, roleId: role.foundryUser, principalType: 'User' }
+      { principalId: operatorPrincipalId, roleId: role.openAiUser, principalType: 'User' }
+    ] : [])
+  }
+}
+
+// cosmos/stAgents/search 출력을 쓰므로 각 모듈(PE 포함)이 끝난 뒤 프로젝트가 만들어집니다.
+module aiProject 'modules/foundry/project.bicep' = {
+  name: 'foundry-project'
+  params: {
+    accountName: aiAccount.outputs.name
+    name: names.project
+    location: location
+    tags: tags
+    cosmosName: cosmos.outputs.name
+    storageName: stAgents.outputs.name
+    searchName: search.outputs.name
+  }
+}
+
+module aiRolesPre 'modules/foundry/roles-pre.bicep' = {
+  name: 'foundry-roles-pre'
+  params: {
+    projectPrincipalId: aiProject.outputs.principalId
+    cosmosName: cosmos.outputs.name
+    storageName: stAgents.outputs.name
+    searchName: search.outputs.name
+  }
+}
+
+module aiCapHost 'modules/foundry/caphost.bicep' = if (deployCapabilityHost) {
+  name: 'foundry-caphost'
+  params: {
+    accountName: aiAccount.outputs.name
+    projectName: aiProject.outputs.name
+    name: names.projectCapHost
+    cosmosConnection: aiProject.outputs.cosmosConnection
+    storageConnection: aiProject.outputs.storageConnection
+    searchConnection: aiProject.outputs.searchConnection
+  }
+  dependsOn: [ aiRolesPre ]
+}
+
+module aiRolesPost 'modules/foundry/roles-post.bicep' = if (deployCapabilityHost) {
+  name: 'foundry-roles-post'
+  params: {
+    projectPrincipalId: aiProject.outputs.principalId
+    workspaceId: aiProject.outputs.workspaceId
+    cosmosName: cosmos.outputs.name
+    storageName: stAgents.outputs.name
+  }
+  dependsOn: [ aiCapHost ]
+}
+
+output AI_ACCOUNT_NAME string = aiAccount.outputs.name
+output AI_PROJECT_NAME string = aiProject.outputs.name
+output AI_PROJECT_ENDPOINT string = 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
+output AI_OPENAI_ENDPOINT string = 'https://${names.ais}.openai.azure.com/'
+output FOUNDRY_PROJECT_CAPHOST string = names.projectCapHost
