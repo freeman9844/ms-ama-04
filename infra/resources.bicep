@@ -10,6 +10,12 @@ param operatorPrincipalId string
 param serviceBusEnabled bool
 param deployCapabilityHost bool
 param modelDeployments array
+@secure()
+param mockConsentSecret string
+@secure()
+param pseudonymKey string
+param policyImage string
+param mockapiImage string
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -36,6 +42,8 @@ var names = {
   idApps: 'id-apps-${environmentName}'
   idSmoke: 'id-smoke-${environmentName}'
   smokeJob: 'job-smoke'
+  caPolicy: 'ca-policy'
+  caMockapi: 'ca-mockapi'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -73,6 +81,7 @@ var role = {
   acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
   acrPush: '8311e382-0749-4cb8-b61a-304f252e45ec'
   metricsPublisher: '3913510d-42f4-4e42-8a64-420c390055eb'
+  queueSender: 'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a'
 }
 var sp = 'ServicePrincipal'
 var hasOperator = !empty(operatorPrincipalId)
@@ -135,9 +144,9 @@ module keyVault 'modules/keyvault.bicep' = {
     name: names.kv
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     zoneId: zoneId['privatelink.vaultcore.azure.net']
+    secrets: { 'pseudonym-key': pseudonymKey }
     roleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.appsPrincipalId, roleId: role.kvValueReader, principalType: sp }
@@ -164,7 +173,6 @@ module stAgents 'modules/storage.bicep' = {
     name: names.stAgents
     location: location
     tags: tags
-    operatorIp: ''  // Foundry BYO Storage는 항상 비공개
     bypass: 'AzureServices'
     peSubnetId: subnetId['snet-pe']
     endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
@@ -177,7 +185,6 @@ module stData 'modules/storage.bicep' = {
     name: names.stData
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
     softDeleteDays: 0
@@ -197,7 +204,6 @@ module stFunc 'modules/storage.bicep' = {
     name: names.stFunc
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     endpoints: [
       { groupId: 'blob', zoneId: zoneId[blobZone] }
@@ -205,10 +211,12 @@ module stFunc 'modules/storage.bicep' = {
       { groupId: 'table', zoneId: zoneId[tableZone] }
     ]
     containers: [ 'deploymentpackage' ]
+    queues: [ 'applications-start', 'officer-decisions' ]
     roleAssignments: [
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobOwner, principalType: sp }
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.queueContributor, principalType: sp }
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.tableContributor, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.queueSender, principalType: sp }
     ]
   }
 }
@@ -219,9 +227,12 @@ module cosmos 'modules/cosmos.bicep' = {
     name: names.cosmos
     location: location
     tags: tags
-    operatorIp: operatorIp
     peSubnetId: subnetId['snet-pe']
     zoneId: zoneId['privatelink.documents.azure.com']
+    containers: [
+      { name: 'applications', partitionKey: '/application_id' }
+      { name: 'consents', partitionKey: '/consent_id' }
+    ]
     sqlRoleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
       { principalId: identities.outputs.appsPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
@@ -414,6 +425,47 @@ output CONTAINER_APPS_INT_DOMAIN string = acaInt.outputs.defaultDomain
 output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = acaWeb.outputs.id
 output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = acaWeb.outputs.name
 
+// ── 앱 런타임: 정책 엔진·Mock API (P3) ──────────────────────────────────
+var acaIntDomain = acaInt.outputs.defaultDomain
+var policyUrl = 'https://${names.caPolicy}.${acaIntDomain}'
+var mockapiUrl = 'https://${names.caMockapi}.${acaIntDomain}'
+
+module caPolicy 'modules/container-app.bicep' = {
+  name: 'ca-policy'
+  params: {
+    name: names.caPolicy
+    location: location
+    tags: tags
+    serviceName: 'policy'
+    environmentId: acaInt.outputs.id
+    identityId: identities.outputs.appsId
+    identityClientId: identities.outputs.appsClientId
+    registryServer: acr.outputs.loginServer
+    image: policyImage
+  }
+}
+
+module caMockapi 'modules/container-app.bicep' = {
+  name: 'ca-mockapi'
+  params: {
+    name: names.caMockapi
+    location: location
+    tags: tags
+    serviceName: 'mockapi'
+    environmentId: acaInt.outputs.id
+    identityId: identities.outputs.appsId
+    identityClientId: identities.outputs.appsClientId
+    registryServer: acr.outputs.loginServer
+    image: mockapiImage
+    secretEnv: { MOCK_CONSENT_SECRET: mockConsentSecret }
+  }
+}
+
+output POLICY_APP_NAME string = caPolicy.outputs.name
+output MOCKAPI_APP_NAME string = caMockapi.outputs.name
+output POLICY_URL string = policyUrl
+output MOCKAPI_URL string = mockapiUrl
+
 // ── Functions (T7) ─────────────────────────────────────────────────────
 module functions 'modules/functions.bicep' = {
   name: 'functions'
@@ -431,6 +483,17 @@ module functions 'modules/functions.bicep' = {
     storageName: stFunc.outputs.name
     storageBlobEndpoint: stFunc.outputs.blobEndpoint
     appInsightsConnectionString: monitoring.outputs.appiConnectionString
+    extraSettings: {
+      COSMOS_ENDPOINT: cosmos.outputs.endpoint
+      COSMOS_DATABASE: cosmos.outputs.databaseName
+      DATA_BLOB_ENDPOINT: stData.outputs.blobEndpoint
+      AI_PROJECT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
+      DATA_ASSEMBLY_MODEL: 'gpt-5.4-mini'
+      POLICY_URL: policyUrl
+      MOCKAPI_URL: mockapiUrl
+      SERVICEBUS_FQDN: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
+      KEYVAULT_URI: keyVault.outputs.uri
+    }
   }
 }
 
@@ -474,6 +537,13 @@ module smokeJob 'modules/smoke-job.bicep' = {
       chat_models: map(filter(modelDeployments, m => m.format == 'OpenAI'), m => m.name)
       agent_model: 'gpt-5.4-mini'
       private_hosts: smokePrivateHosts
+      queue_host: '${names.stFunc}.queue.${storageSuffix}'
+      start_queue: 'applications-start'
+      decision_queue: 'officer-decisions'
+      cosmos_database: cosmos.outputs.databaseName
+      policy_url: policyUrl
+      mockapi_url: mockapiUrl
+      e2e_applicant: 'demo-cafe-001'
     }
   }
 }

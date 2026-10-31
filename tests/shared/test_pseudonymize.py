@@ -88,3 +88,35 @@ def test_find_pii_detects_leak_and_clean_after_mask():
     assert found == [("PERSON", "김민수"), ("PHONE", "010-1234-5678")]
     masked = Pseudonymizer(KEY, ENTITIES).mask(text)
     assert find_pii(masked, ENTITIES) == []
+
+
+def test_entity_kind_must_be_uppercase_letters():
+    # 토큰 정규식([[A-Z]+_...])과 맞지 않는 종류는 복원·유출 검사에서 빠지므로 거부합니다.
+    with pytest.raises(ValueError):
+        Pseudonymizer(KEY, {"홍길동": "person"})
+    with pytest.raises(ValueError):
+        Pseudonymizer(KEY, {"홍길동": "PERSON_1"})
+
+
+@pytest.mark.parametrize("account", ["110-123-456789-01", "12-345-678901", "3333-01-1234567"])
+def test_multi_segment_accounts_are_masked(account):
+    masked = Pseudonymizer(KEY).mask(f"입금 계좌 {account} 확인")
+    assert account not in masked
+    assert "[[ACCOUNT_" in masked
+    assert find_pii(masked) == []
+
+
+@pytest.mark.parametrize("digits", ["1101234567890", "3333012345678", "1234567890"])
+def test_hyphenless_long_numbers_are_masked_as_account(digits):
+    masked = Pseudonymizer(KEY).mask(f"계좌 {digits}")
+    assert digits not in masked
+    assert find_pii(masked) == []
+
+
+def test_phone_and_bizno_keep_priority_and_dates_stay():
+    p = Pseudonymizer(KEY)
+    text = "대표 01012345678 사업자 695-34-80677 기준일 2026-11-02 금액 20000000"
+    masked = p.mask(text)
+    assert "[[PHONE_" in masked and "[[BIZNO_" in masked
+    assert "2026-11-02" in masked and "20000000" in masked
+    assert p.restore(masked) == text

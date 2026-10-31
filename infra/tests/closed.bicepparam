@@ -7,3 +7,5 @@ param acrPublic = false
 param operatorPrincipalId = '11111111-1111-1111-1111-111111111111'
 param serviceBusEnabled = true
 param deployCapabilityHost = true
+param mockConsentSecret = 'test-mock-consent-secret-0123456789abcdef'
+param pseudonymKey = 'test-pseudonym-key-0123456789abcdef012345'

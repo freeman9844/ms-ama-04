@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.sax.saxutils
 from dataclasses import dataclass
 from typing import Callable
 
@@ -24,6 +25,10 @@ AUDIENCE_FOUNDRY = "https://ai.azure.com"
 AUDIENCE_STORAGE = "https://storage.azure.com"
 AUDIENCE_KEYVAULT = "https://vault.azure.net"
 AUDIENCE_SERVICEBUS = "https://servicebus.azure.net"
+E2E_REQUESTED_KRW = 20_000_000
+E2E_TENOR_MONTHS = 12
+E2E_INTERVAL_SECONDS = 10.0
+E2E_ENDED = ("failed", "closed_no_decision", "approved", "conditionally_approved", "declined")
 
 
 class CheckFailed(Exception):
@@ -111,15 +116,22 @@ def check_blob(cfg: dict, http: Http, token: TokenProvider) -> str:
     return "containers listed"
 
 
-def check_cosmos(cfg: dict, http: Http, token: TokenProvider, now: str | None = None) -> str:
-    host = cfg["cosmos_host"]
-    signature = token(f"https://{host}")
+def _cosmos_headers(cfg: dict, token: TokenProvider, now: str | None = None,
+                    partition_key: str | None = None) -> dict[str, str]:
+    signature = token(f"https://{cfg['cosmos_host']}")
     headers = {
         "Authorization": urllib.parse.quote(f"type=aad&ver=1.0&sig={signature}", safe=""),
         "x-ms-date": now or email.utils.formatdate(usegmt=True),
         "x-ms-version": "2018-12-31",
     }
-    resp = expect(http("GET", f"https://{host}/dbs", headers), 200, what="cosmos list databases")
+    if partition_key is not None:
+        headers["x-ms-documentdb-partitionkey"] = json.dumps([partition_key])
+    return headers
+
+
+def check_cosmos(cfg: dict, http: Http, token: TokenProvider, now: str | None = None) -> str:
+    resp = expect(http("GET", f"https://{cfg['cosmos_host']}/dbs", _cosmos_headers(cfg, token, now)),
+                  200, what="cosmos list databases")
     return ",".join(sorted(db["id"] for db in resp.json().get("Databases", [])))
 
 
@@ -160,6 +172,71 @@ def check_agent(cfg: dict, http: Http, token: TokenProvider, name: str = "p2-smo
         http("DELETE", f"{base}/agents/{name}?api-version=v1", headers)
 
 
+def check_health(url: str, http: Http) -> str:
+    """정책 엔진·Mock API의 /healthz. 자리표시 이미지(http.server)는 404를 줍니다."""
+    target = f"{url.rstrip('/')}/healthz"
+    resp = http("GET", target)
+    if resp.status == 404:
+        raise CheckFailed(f"{target}: 404 - 앱 이미지가 아직 배포되지 않았습니다(python -m ops deploy)")
+    body = expect(resp, 200, what=f"health {target}").json()
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        raise CheckFailed(f"health {target}: {body!r}")
+    return str(body.get("rules_version", "ok"))
+
+
+def enqueue(cfg: dict, http: Http, token: TokenProvider, queue: str, message: dict) -> None:
+    """Storage Queue에 JSON 원문을 넣습니다(host.json messageEncoding: none)."""
+    text = xml.sax.saxutils.escape(json.dumps(message))
+    body = f"<QueueMessage><MessageText>{text}</MessageText></QueueMessage>".encode("utf-8")
+    headers = {**_bearer(token(AUDIENCE_STORAGE)), "x-ms-version": "2023-11-03", "Content-Type": "application/xml"}
+    expect(http("POST", f"https://{cfg['queue_host']}/{queue}/messages", headers, body), 201,
+           what=f"queue {queue}")
+
+
+def read_application(cfg: dict, http: Http, token: TokenProvider, application_id: str) -> dict | None:
+    url = (f"https://{cfg['cosmos_host']}/dbs/{cfg['cosmos_database']}"
+           f"/colls/applications/docs/{application_id}")
+    resp = expect(http("GET", url, _cosmos_headers(cfg, token, partition_key=application_id)), 200, 404,
+                  what="cosmos read application")
+    return None if resp.status == 404 else resp.json()
+
+
+def wait_for_status(read: Callable[[], dict | None], target: str, sleep: Callable[[float], None],
+                    attempts: int) -> dict:
+    status = None
+    for _ in range(attempts):
+        doc = read()
+        status = doc.get("status") if doc else None
+        if status == target:
+            return doc
+        if status in E2E_ENDED:
+            raise CheckFailed(f"신청이 {status}로 끝났습니다: error={doc.get('error')} flags={doc.get('flags')}")
+        sleep(E2E_INTERVAL_SECONDS)
+    raise CheckFailed(f"{attempts * E2E_INTERVAL_SECONDS:.0f}초 안에 {target}에 도달하지 못했습니다"
+                      f"(마지막 상태: {status})")
+
+
+def check_journey(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[float], None],
+                  application_id: str, start_attempts: int = 90, decision_attempts: int = 30) -> str:
+    """신청 접수 → 동의 → 데이터 조립(에이전트) → 심사 → 정책 → 심사역 승인까지 한 바퀴."""
+    enqueue(cfg, http, token, cfg["start_queue"], {
+        "application_id": application_id, "applicant_id": cfg["e2e_applicant"],
+        "requested_amount_krw": E2E_REQUESTED_KRW, "requested_tenor_months": E2E_TENOR_MONTHS})
+
+    def read() -> dict | None:
+        return read_application(cfg, http, token, application_id)
+
+    doc = wait_for_status(read, "awaiting_officer", sleep, start_attempts)
+    policy = doc.get("policy") or {}
+    if policy.get("decision") not in ("eligible", "refer"):
+        raise CheckFailed(f"승인할 수 없는 정책 결과: {policy.get('decision')} flags={doc.get('flags')}")
+    amount = min(E2E_REQUESTED_KRW, int(policy["max_amount_krw"]))
+    enqueue(cfg, http, token, cfg["decision_queue"], {"application_id": application_id, "decision": {
+        "decision": "approve", "officer_id": "smoke", "amount_krw": amount, "reason": "smoke e2e"}})
+    doc = wait_for_status(read, "approved", sleep, decision_attempts)
+    return f"{application_id} approved {amount:,} KRW ({len(doc.get('timeline', []))} steps)"
+
+
 def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable[[str], str],
                  sleep: Callable[[float], None]) -> list[tuple[str, Callable[[], str]]]:
     checks: list[tuple[str, Callable[[], str]]] = [
@@ -172,9 +249,15 @@ def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable
         ("cosmos", lambda: check_cosmos(cfg, http, token)),
         ("keyvault", lambda: check_keyvault(cfg, http, token)),
     ]
+    checks += [
+        ("health:policy", lambda: check_health(cfg["policy_url"], http)),
+        ("health:mockapi", lambda: check_health(cfg["mockapi_url"], http)),
+    ]
     if cfg.get("servicebus_host"):
         checks.append(("servicebus", lambda: check_servicebus(cfg, http, token)))
     checks.append(("agent", lambda: check_agent(cfg, http, token)))
+    application_id = time.strftime("smoke-%Y%m%d-%H%M%S", time.gmtime())
+    checks.append(("journey", lambda: check_journey(cfg, http, token, sleep, application_id)))
     return checks
 
 

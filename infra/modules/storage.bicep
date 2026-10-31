@@ -1,21 +1,20 @@
-// 범용 Storage 계정. 공유 키를 끄고, 배포 창에서만 운영자 IP를 허용합니다.
+// 범용 Storage 계정. 공유 키를 끄고 항상 비공개(Private Endpoint 전용)입니다.
 param name string
 param location string
 param tags object
-@description('비어 있으면 public access 차단. 값이 있으면 그 IP만 허용(배포 창).')
-param operatorIp string
 @description('신뢰할 수 있는 Azure 서비스 우회. Foundry BYO Storage는 샘플대로 AzureServices.')
 param bypass string = 'None'
 param peSubnetId string
 @description('[{ groupId: blob|queue|table, zoneId }]')
 param endpoints array
 param containers array = []
+@description('Storage 큐 이름 목록(Functions 큐 트리거)')
+param queues array = []
 @description('blob soft delete 보존 일수. 0이면 끕니다(원천 데이터 삭제 증명용).')
 param softDeleteDays int = 7
 @description('[{ principalId, roleId, principalType }]')
 param roleAssignments array = []
 
-var windowOpen = !empty(operatorIp)
 
 resource st 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: name
@@ -29,11 +28,11 @@ resource st 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
     defaultToOAuthAuthentication: true
-    publicNetworkAccess: windowOpen ? 'Enabled' : 'Disabled'
+    publicNetworkAccess: 'Disabled'
     networkAcls: {
       defaultAction: 'Deny'
       bypass: bypass
-      ipRules: windowOpen ? [ { value: operatorIp, action: 'Allow' } ] : []
+      ipRules: []
       virtualNetworkRules: []
     }
   }
@@ -51,6 +50,16 @@ resource blobContainers 'Microsoft.Storage/storageAccounts/blobServices/containe
   parent: blobService
   name: c
   properties: { publicAccess: 'None' }
+}]
+
+resource queueService 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = if (!empty(queues)) {
+  parent: st
+  name: 'default'
+}
+
+resource queueResources 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = [for q in queues: {
+  parent: queueService
+  name: q
 }]
 
 module pes 'pe.bicep' = [for e in endpoints: {

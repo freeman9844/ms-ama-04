@@ -18,7 +18,7 @@ def log_hint(env: dict[str, str], execution: str) -> str:
 
 
 def run_smoke(runner: Runner, *, sleep: Callable[[float], None] = time.sleep, poll_wait: float = 10,
-              poll_limit: int = 90) -> str:
+              poll_limit: int = 185) -> str:
     env = get_env(runner)
     group, job = env["AZURE_RESOURCE_GROUP"], env["SMOKE_JOB_NAME"]
     az = subscription_runner(runner, env)

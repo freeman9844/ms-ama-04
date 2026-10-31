@@ -9,3 +9,5 @@ param serviceBusEnabled = false
 param deployCapabilityHost = false
 param chatModelSku = 'DataZoneStandard'
 param decisionModelSku = 'DataZoneStandard'
+param policyImage = 'acramatest.azurecr.io/policy:v1'
+param mockapiImage = 'acramatest.azurecr.io/mockapi:v1'

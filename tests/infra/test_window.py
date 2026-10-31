@@ -4,20 +4,21 @@
 - 창이 열려 있으면(open) WINDOWED 대상은 기본 거부 + 운영자 IP 정확히 1개만 허용한다.
 - ALWAYS_PRIVATE 대상은 창이 열려도 꺼져 있다.
 태스크마다 자기 리소스 행을 추가합니다.
+P3: 데이터 저장소(Cosmos·Key Vault·stdat·stfn)는 MCAPS 정책상 창에서도 열리지 않으므로 항상 비공개로 둡니다.
 """
 import pytest
 
 OPERATOR_IP = "20.30.40.50"
 
 WINDOWED = [
-    ("Microsoft.KeyVault/vaults", "kv"),
-    ("Microsoft.Storage/storageAccounts", "stdat"),
-    ("Microsoft.Storage/storageAccounts", "stfn"),
-    ("Microsoft.DocumentDB/databaseAccounts", "cosmos-"),
     ("Microsoft.CognitiveServices/accounts", "ais-"),
     ("Microsoft.Web/sites", "func-"),
 ]
 ALWAYS_PRIVATE: list[tuple[str, str]] = [
+    ("Microsoft.KeyVault/vaults", "kv"),
+    ("Microsoft.Storage/storageAccounts", "stdat"),
+    ("Microsoft.Storage/storageAccounts", "stfn"),
+    ("Microsoft.DocumentDB/databaseAccounts", "cosmos-"),
     ("Microsoft.Storage/storageAccounts", "stagt"),
     ("Microsoft.Search/searchServices", "srch-"),
     ("Microsoft.ServiceBus/namespaces", "sb-"),

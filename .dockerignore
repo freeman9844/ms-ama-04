@@ -1,0 +1,12 @@
+.git
+.venv
+.azure
+.pytest_cache
+**/__pycache__
+**/*.pyc
+docs
+infra
+tests
+src/orchestrator
+src/agents
+src/ops

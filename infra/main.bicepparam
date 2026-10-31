@@ -13,3 +13,7 @@ param serviceBusEnabled = readEnvironmentVariable('SERVICEBUS_ENABLED', 'true') 
 param deployCapabilityHost = readEnvironmentVariable('DEPLOY_CAPHOST', 'true') == 'true'
 param chatModelSku = readEnvironmentVariable('CHAT_MODEL_SKU', 'GlobalStandard')
 param decisionModelSku = readEnvironmentVariable('DECISION_MODEL_SKU', 'GlobalStandard')
+param mockConsentSecret = readEnvironmentVariable('MOCK_CONSENT_SECRET', '')
+param pseudonymKey = readEnvironmentVariable('PSEUDONYM_KEY', '')
+param policyImage = readEnvironmentVariable('SERVICE_POLICY_IMAGE_NAME', '')
+param mockapiImage = readEnvironmentVariable('SERVICE_MOCKAPI_IMAGE_NAME', '')
