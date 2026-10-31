@@ -100,3 +100,59 @@ var zoneId = toObject(dns.outputs.zones, z => z.name, z => z.id)
 var subnetId = network.outputs.subnetIds
 
 output VNET_NAME string = network.outputs.vnetName
+
+// ── 모니터링, 관리 ID, Key Vault (T2) ───────────────────────────────────
+module identities 'modules/identities.bicep' = {
+  name: 'identities'
+  params: {
+    names: {
+      orchestrator: names.idOrchestrator
+      apps: names.idApps
+      smoke: names.idSmoke
+    }
+    location: location
+    tags: tags
+  }
+}
+
+module monitoring 'modules/monitoring.bicep' = {
+  name: 'monitoring'
+  params: {
+    lawName: names.law
+    appiName: names.appi
+    location: location
+    tags: tags
+    roleAssignments: [
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.metricsPublisher, principalType: sp }
+      { principalId: identities.outputs.appsPrincipalId, roleId: role.metricsPublisher, principalType: sp }
+    ]
+  }
+}
+
+module keyVault 'modules/keyvault.bicep' = {
+  name: 'keyvault'
+  params: {
+    name: names.kv
+    location: location
+    tags: tags
+    operatorIp: operatorIp
+    peSubnetId: subnetId['snet-pe']
+    zoneId: zoneId['privatelink.vaultcore.azure.net']
+    roleAssignments: concat([
+      { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.kvValueReader, principalType: sp }
+      { principalId: identities.outputs.appsPrincipalId, roleId: role.kvValueReader, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.kvValueReader, principalType: sp }
+    ], hasOperator ? [
+      { principalId: operatorPrincipalId, roleId: role.kvValueAdmin, principalType: 'User' }
+    ] : [])
+  }
+}
+
+output KEYVAULT_NAME string = keyVault.outputs.name
+output KEYVAULT_URI string = keyVault.outputs.uri
+output LOG_ANALYTICS_CUSTOMER_ID string = monitoring.outputs.lawCustomerId
+output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.appiConnectionString
+output ORCHESTRATOR_IDENTITY_ID string = identities.outputs.orchestratorId
+output ORCHESTRATOR_IDENTITY_CLIENT_ID string = identities.outputs.orchestratorClientId
+output APPS_IDENTITY_ID string = identities.outputs.appsId
+output APPS_IDENTITY_CLIENT_ID string = identities.outputs.appsClientId
