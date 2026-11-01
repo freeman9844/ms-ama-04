@@ -380,3 +380,69 @@ python -m ops smoke                        # journey가 모니터링 등록까�
 - 업종 집단 통계는 코드에 고정된 합성 표입니다.
 - 인라인 모드는 13주를 한 번의 큐 트리거 안에서 처리합니다(Flex Consumption 기본 제한 30분).
 - 재조정 결정은 기록만 하고 상환 일정을 실제로 바꾸지 않습니다. 동의 만료·삭제와 이의 제기는 P5b입니다.
+
+## 동의 수명주기·삭제 증명·이의제기(P5b)
+
+동의(스펙 §3.1 Consent Lifecycle)는 받는 순간부터 끝(만료·철회)까지 추적하고, 끝나면 그 동의로 모은 데이터를 지우고
+**삭제 증명**을 남깁니다. 차주는 결정에 **이의**를 제기할 수 있고, 심사역은 판단 기록을 근거로 처리합니다(스펙 §4.1).
+
+1. **수명주기 예약**: 심사 동의(`request_consent`)와 모니터링 동의(`start_replay`)를 저장하면 `consent-lifecycle` 큐로
+   Durable 오케스트레이션 `consent_lifecycle`(인스턴스 `consent-<동의 ID>`)을 시작합니다. 큐 전송이 실패하면 동의를 `void`로 남기고
+   여정을 실패시킵니다(fail-closed). 타이머는 만료 7일 전 갱신 안내 → 만료 순서이고, 6일 단위로 나눠 겁니다.
+2. **명령**(`consent-commands` 큐): `revoke`(차주 철회), `expire_now`·`remind_now`(데모 버튼). 수명주기가 실행 중이면 외부 이벤트로,
+   없으면(P5b 이전 동의) 동의 문서의 만료일로 새로 시작하며 그 명령을 바로 처리합니다. 철회이고 신청 여정이 심사역 대기 중이면
+   여정에 `consent_withdrawn`을 보내 `withdrawn`(철회 종료)으로 끝냅니다.
+3. **삭제**(`delete_consent_data`, 결정적·멱등): 동의를 먼저 `expired`/`revoked`로 표시한 뒤 원천 Blob 컨테이너(삭제 전 파일 목록과
+   sha256 manifest 기록) → Mock 동의 레지스트리 철회 → Foundry 대화(삭제 후 조회로 확인) → 코드 실행 컨테이너 순으로 지웁니다.
+   모든 항목이 확인되어야 `complete`이고, 아니면 증명을 미완료로 남기고 재시도합니다. 신청 문서(판단 기록)는 보존 항목으로 남깁니다.
+4. **안내문 에이전트**(`consent-notice-agent`, gpt-5.4-mini, 도구 없음): 목적·범위 라벨·만료일·철회 방법·삭제 항목 수 같은 사실만 받아
+   갱신 안내와 삭제 완료 안내를 씁니다. 필수 사실이 빠지거나 근거 없는 숫자가 있으면 템플릿 문안을 씁니다. 대화는 쓰고 바로 지웁니다.
+5. **이의제기**(`grievances` 큐): 결정이 난 신청에만 받습니다. 접수 시점의 판단 기록(정책 사유 코드, 분석 요약·반사실, 심사역 결정)을
+   스냅숏으로 남깁니다. 심사역은 `원결정 유지` 또는 `재심사`(정책 한도 안에서 다시 검증)로 처리하고(`grievance-decisions` 큐),
+   **회신 에이전트**(`grievance-reply-agent`, gpt-5.4-mini)가 판단 기록만으로 회신 초안을 씁니다(차주가 쓴 글은 주지 않음, 근거 검사 실패 시 템플릿).
+
+| 저장 위치 | 내용 |
+|---|---|
+| `consents`(파티션 `/consent_id`) | 상태(`granted`·`expired`·`revoked`·`void`), 종료 시각, 안내문 사본(`notices`), 삭제 증명 ID |
+| `deletion_proofs`(파티션 `/consent_id`, id = 동의 ID) | 항목별 결과·검증, manifest와 sha256, 보존 항목, 시도 횟수, 이벤트 발행 여부 |
+| `grievances`(파티션 `/application_id`) | 이의 내용, 판단 기록 스냅숏, 처리 결과, 회신, 거부된 처리 시도 |
+
+콘솔:
+
+- 상단 `차주 시뮬레이터` → 차주 선택 → 동의 목록(범위·만료·안내문·삭제 증명 링크), `동의 철회`, 결정 난 신청에 이의제기, 회신 확인.
+- 신청 상세의 `동의` 영역: 동의별 상태와 `지금 만료(데모)`·`갱신 안내(데모)` 버튼, 삭제 증명 링크(`/consents/<동의 ID>/proof`).
+- 상단 `이의제기` → 목록 → 상세(이의 내용, 판단 기록, 처리 폼).
+- Service Bus가 켜져 있으면 `consent` 토픽에 `consent.expired`/`consent.revoked`, `grievance` 토픽에 `grievance.submitted`를 보냅니다
+  (구독은 없음, 이의 내용은 싣지 않음). 꺼져 있으면 문서에 `servicebus_disabled`만 남습니다.
+- smoke `consent`는 `journey`가 승인한 신청의 심사 동의를 `expire_now`로 끝내고, 삭제 증명이 `complete`인지, 동의가 `expired`인지,
+  신청 문서가 남았는지 확인합니다.
+
+### 배포 순서(P5b)
+
+```powershell
+python -m ops window open --acr            # 새 큐 4개·컨테이너(deletion_proofs, grievances)·함수 설정(QUEUE_ENDPOINT, NOTICE_MODEL, GRIEVANCE_MODEL)
+python -m ops deploy orchestrator          # 수명주기 오케스트레이션·명령·이의제기 트리거
+python -m ops deploy console               # 차주 시뮬레이터·동의 영역·삭제 증명·이의제기 화면
+python -m ops window close
+python -m ops smoke                        # journey 승인 뒤 consent가 삭제 증명까지 확인
+```
+
+배포 전에 실행 중인 신청 여정이 없는지 확인합니다(여정 코드가 바뀌어 실행 중 인스턴스는 replay가 어긋날 수 있음).
+
+### 문제 대응(P5b)
+
+- 동의에 `lifecycle_error: queue_disabled`: 함수 설정 `QUEUE_ENDPOINT`가 없습니다. `ops window open`으로 설정을 다시 넣습니다.
+- 삭제 증명이 `미완료`: 증명의 `items`에서 `검증 실패` 항목과 비고를 봅니다(`agents_disabled`면 Foundry 설정 없음). 오케스트레이션이 재시도하며,
+  끝내 실패하면 수명주기 결과가 `deletion_failed`입니다. 같은 동의에 아무 명령이나(예: `consent-commands` 큐에 `{"consent_id": "…", "action": "remind_now", "requested_by": "ops"}` JSON 원문) 다시 보내면 끝난 사유(철회·만료) 그대로 수명주기를 다시 시작해 검증되지 않은 항목만 다시 지웁니다.
+- 이의제기가 목록에 안 보임: 결정 전 신청이나 다른 차주의 신청이면 큐 처리기가 버립니다(App Insights `journey.grievance`).
+- 재심사가 `거부된 처리 시도`로 남음: 접수 시점 정책 한도를 넘었거나 사유가 없습니다.
+
+### 알려진 제약(P5b)
+
+- 갱신은 안내만 하고 실제 연장(재동의)은 하지 않습니다. 안내·회신 발송은 시뮬레이션이며 문서에만 남깁니다.
+- 재심사 결과는 이의제기 문서에 기록만 하고 신청 문서(원 판단 기록)나 대출을 바꾸지 않습니다.
+- Mock 동의 레지스트리는 메모리에 있어 재시작 뒤 철회는 `absent`(이미 없음)로 기록됩니다.
+- 승인 뒤 심사 동의를 끝내면 그 대출의 사후 재생을 시작할 수 없습니다(프로필 원천 데이터가 지워짐). smoke 신청도 같습니다.
+- 데이터 조립 중 철회가 오면 원천 데이터가 먼저 지워져 여정이 실패할 수 있습니다. 철회 종료(`withdrawn`)는 심사역 대기 단계에서만 처리합니다.
+- Durable 실행 기록은 지우지 않습니다(동의 ID와 상태만 있음, 개인정보 없음).
+- P5b 이전 동의는 명령이 올 때까지 수명주기가 없습니다. 이의제기 중복 확인과 저장은 원자적이지 않습니다(같은 ID 재전송만 막음).
