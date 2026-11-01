@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from pydantic import ValidationError
@@ -136,9 +137,15 @@ def delete_consent_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         raise LookupError(f"동의 문서 없음: {consent_id}")
     container = consent.get("raw_container") or raw_container(consent_id)
     manifest = existing["manifest"] if existing else (deps.raw.manifest(container) or [])
-    items = [_delete_raw(deps, container), _revoke_registry(deps, consent_id)]
-    items += [_delete_conversation(deps, c) for c in consent.get("foundry_conversations", [])]
-    items += [_delete_container(deps, c) for c in consent.get("foundry_containers", [])]
+    # 앞선 시도에서 확인된 항목은 다시 지우지 않는다(이미 지운 Foundry 컨테이너는 다시 지우면 404라 미확인이 된다).
+    # 원천 컨테이너는 늦은 쓰기가 있을 수 있어 매번 확인한다.
+    done = {(i["kind"], i["target"]): i for i in (existing or {}).get("items", []) if i["verified"]}
+    steps: list[tuple[str, str, Callable[[], dict[str, Any]]]] = [
+        ("consent_registry", consent_id, lambda: _revoke_registry(deps, consent_id))
+    ]
+    steps += [("conversation", c, partial(_delete_conversation, deps, c)) for c in consent.get("foundry_conversations", [])]
+    steps += [("container", c["id"], partial(_delete_container, deps, c)) for c in consent.get("foundry_containers", [])]
+    items = [_delete_raw(deps, container)] + [done.get((kind, target)) or run() for kind, target, run in steps]
     first = existing or payload
     application_id = consent.get("application_id")
     proof = {

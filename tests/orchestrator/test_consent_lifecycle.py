@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from agents.notices import Draft
 from agents.runtime import AgentRun
-from journey.activities import Deps, _remember_foundry, assemble_data, request_consent
+from journey.activities import ConsentEnded, Deps, _remember_foundry, assemble_data, request_consent
 from journey.adapters import BlobRawStore, HttpMockApi, HttpPolicyApi
 from journey.models import KST
 from journey.consent import (
@@ -551,3 +551,63 @@ def test_blob_store_deletes_blobs_so_pending_container_is_empty_at_once(azure_er
 
     assert store.delete_container("consent-x") is True
     assert container.delete_requested and store.manifest("consent-x") == []
+
+
+class FoundryLike(FoundryRunner):
+    """실제 Foundry처럼 이미 지운 컨테이너를 다시 지우면 404라 False, 첫 대화 확인은 일시 실패(None)."""
+
+    def __init__(self):
+        super().__init__()
+        self.checks = 0
+
+    def conversation_exists(self, conversation_id):
+        self.checks += 1
+        return None if self.checks == 1 else False
+
+    def delete_container(self, container_id):
+        if container_id in self.deleted_containers:
+            return False
+        return super().delete_container(container_id)
+
+
+def test_retry_keeps_items_verified_on_an_earlier_attempt(mock_client):
+    runner = FoundryLike()
+    deps = make_deps(mock_client, runner)
+    cid = granted(deps)["consent_id"]
+    with pytest.raises(IncompleteDeletion, match="conversation:conv_a"):
+        delete_consent_data(deps, end(cid))
+
+    assert delete_consent_data(deps, end(cid))["complete"] is True
+    assert runner.deleted_containers == ["cntr_1"]
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert proof["attempts"] == 2 and all(i["verified"] for i in proof["items"])
+
+
+class RevokeOnWriteRaw(MemoryRaw):
+    """데이터 조립 에이전트가 끝나 쓰기 직전에 철회 삭제가 먼저 끝난 경우를 흉내 낸다."""
+
+    def __init__(self):
+        super().__init__()
+        self.before_first_write = None
+
+    def put_json(self, container, name, value):
+        hook, self.before_first_write = self.before_first_write, None
+        if hook:
+            hook()
+        super().put_json(container, name, value)
+
+
+def test_raw_data_written_after_deletion_is_removed_and_assembly_stops(mock_client):
+    deps = replace(make_deps(mock_client), raw=RevokeOnWriteRaw())
+    consent = consent_for(deps)
+    cid = consent["consent_id"]
+    deps.raw.before_first_write = lambda: delete_consent_data(deps, end(cid))
+
+    with pytest.raises(ConsentEnded):
+        assemble_data(
+            deps,
+            {"application_id": "app-1", "consent_id": cid, "token": consent["token"], "scopes": consent["scopes"]},
+        )
+    assert deps.raw.manifest(f"consent-{cid}") is None
+    late = deps.store.read("consents", cid, cid)["late_cleanup"]
+    assert [(i["kind"], i["target"], i["outcome"]) for i in late] == [("raw_container", f"consent-{cid}", "deleted")]

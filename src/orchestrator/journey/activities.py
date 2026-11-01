@@ -210,6 +210,10 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     return {"consent_id": consent_id, "token": grant["token"], "scopes": scopes, "expires_at": grant["expires_at"]}
 
 
+class ConsentEnded(RuntimeError):
+    """데이터 조립 중 동의가 끝났다(철회·만료). 방금 쓴 원천 데이터를 지우고 여정을 멈춘다."""
+
+
 def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     consent_id = payload["consent_id"]
     result = assemble(
@@ -221,10 +225,26 @@ def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         runner=deps.agents,
         model=deps.model,
     )
+    container = raw_container(consent_id)
     for source, raw in result.data.items():
-        deps.raw.put_json(raw_container(consent_id), f"{source}.json", raw)
+        deps.raw.put_json(container, f"{source}.json", raw)
     _remember_foundry(deps, consent_id, [result.conversation_id] if result.conversation_id else [], [])
+    _drop_if_consent_ended(deps, consent_id, container)
     return result.report
+
+
+def _drop_if_consent_ended(deps: Deps, consent_id: str, container: str) -> None:
+    """쓰기 뒤에 확인한다. 삭제는 동의를 먼저 끝남으로 표시하므로, 조립 중 삭제가 끝났다면 여기서 보인다."""
+    consent = deps.store.read("consents", consent_id, consent_id)
+    if consent is None or consent.get("status") not in ENDED_CONSENT:
+        return
+    try:
+        outcome = "deleted" if deps.raw.delete_container(container) else "absent"
+    except Exception:  # noqa: BLE001 - 실패도 기록으로 남긴다
+        outcome = "failed"
+    entry = {"kind": "raw_container", "target": container, "outcome": outcome, "at": deps.clock().isoformat()}
+    update_doc(deps.store, "consents", consent_id, consent_id, lambda c: c.setdefault("late_cleanup", []).append(entry))
+    raise ConsentEnded(f"데이터 조립 중 동의가 끝났습니다: {consent_id}")
 
 
 def _remember_foundry(
