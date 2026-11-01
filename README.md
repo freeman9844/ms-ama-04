@@ -430,6 +430,27 @@ python -m ops smoke                        # journey 승인 뒤 consent가 삭�
 
 배포 전에 실행 중인 신청 여정이 없는지 확인합니다(여정 코드가 바뀌어 실행 중 인스턴스는 replay가 어긋날 수 있음).
 
+### 실제 배포 기록(P5b, 2026-11-01, koreacentral)
+
+| 단계 | 명령 | 시간 | 결과 |
+|---|---|---|---|
+| 배포 창 | `ops window open --acr` | 3.7분 | 큐·컨테이너·함수 설정 프로비저닝 |
+| 오케스트레이터 | `ops deploy orchestrator` | 4.6분 | 새 함수 7개(`consent_lifecycle`, `delete_consent_data`, `grievance_submitted` 등), Service Bus 트리거 없음 |
+| 콘솔 | `ops deploy console` | 4.3분 | 성공 |
+| 창 닫기 | `ops window close` | 3.7분 | 성공 |
+| smoke(1차) | `ops smoke` | 8.1분 | 23/24 — consent 실패: 삭제 증명의 `raw_container` 검증 실패 |
+| 수정 재배포 | `window open` → `deploy orchestrator` → `window close` | 4.9 + 4.7 + 3.4분 | 아래 원인 수정 |
+| smoke(2차) | `ops smoke` | 7.6분 | 24/24 통과. journey `… approved 20,000,000 KRW (7 steps) … monitoring registered`, consent `… expired; proof complete (5 items verified, 4 files in manifest); application retained`(삭제 11초) |
+| 정리 | `ops pause` | 0.5분 | Service Bus 없음(인라인 모드 유지) |
+
+1차 smoke 실패 원인: Azure의 컨테이너 삭제는 202로 끝나고 실제 제거는 비동기라, 삭제 직후 목록 조회에 blob 4개가 그대로 보여
+재시도해도 검증되지 않았습니다(App Insights의 Blob 요청 로그로 확인). 어댑터가 blob을 먼저 하나씩 지운 뒤 컨테이너를 지우고,
+검증은 "없음 또는 빈 컨테이너"로 바꿨습니다(인메모리 테스트로는 드러나지 않던 실제 Azure 동작).
+
+체크리스트 결과(데모 모드, 운영자 브라우저): 1~3(동의 영역·갱신 안내·지금 만료 → 삭제 증명), 5~7(이의제기 접수·한도 초과 422 뒤
+한도 안 재심사·원결정 유지) 정상. 4(심사역 대기 중 차주 철회 → `withdrawn`)는 데모 시나리오에 불필요하다고 판단해 브라우저 확인을
+생략했고 단위 테스트(`test_command_raises_event_and_withdraws_running_journey`, 여정의 철회 종료 테스트)로만 검증했습니다.
+
 ### 문제 대응(P5b)
 
 - 동의에 `lifecycle_error: queue_disabled`: 함수 설정 `QUEUE_ENDPOINT`가 없습니다. `ops window open`으로 설정을 다시 넣습니다.
