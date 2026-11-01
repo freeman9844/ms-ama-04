@@ -7,6 +7,7 @@ import azure.durable_functions as df
 import pytest
 
 from journey.activities import ACTIVITIES
+from journey.consent import CONSENT_ACTIVITIES, LIFECYCLE_ORCHESTRATOR
 from journey.entry import handle_decision, handle_start, should_start
 from journey.orchestration import EVENT_OFFICER_DECISION, ORCHESTRATOR
 
@@ -97,7 +98,12 @@ QUEUES = (
     ("officer_decision", "officer-decisions"),
     ("monitoring_replay", "monitoring-replay"),
     ("restructure_decision", "restructure-decisions"),
+    ("consent_lifecycle_start", "consent-lifecycle"),
+    ("consent_command", "consent-commands"),
+    ("grievance_submitted", "grievances"),
+    ("grievance_decision", "grievance-decisions"),
 )
+DURABLE_CLIENTS = ("start_application", "officer_decision", "consent_lifecycle_start", "consent_command")
 
 
 def load_app(monkeypatch, fqdn):
@@ -116,17 +122,19 @@ def test_function_app_registers_triggers(monkeypatch):
     app = load_app(monkeypatch, "")
 
     functions = {f.get_function_name(): f for f in app.get_functions()}
-    assert set(functions) == {*(name for name, _ in QUEUES), ORCHESTRATOR, *ACTIVITIES}
+    assert set(functions) == {
+        *(name for name, _ in QUEUES), ORCHESTRATOR, LIFECYCLE_ORCHESTRATOR, *ACTIVITIES, *CONSENT_ACTIVITIES
+    }
     bindings = {name: {b.type: b for b in f.get_bindings()} for name, f in functions.items()}
-    assert "orchestrationTrigger" in bindings[ORCHESTRATOR]
-    for name in ACTIVITIES:
+    assert all("orchestrationTrigger" in bindings[name] for name in (ORCHESTRATOR, LIFECYCLE_ORCHESTRATOR))
+    for name in (*ACTIVITIES, *CONSENT_ACTIVITIES):
         assert "activityTrigger" in bindings[name]
     for name, queue in QUEUES:
         trigger = json.loads(functions[name].get_function_json())["bindings"]
         queue_binding = next(b for b in trigger if b["type"] == "queueTrigger")
         assert queue_binding["queueName"] == queue
         assert queue_binding["connection"] == "AzureWebJobsStorage"
-    assert all("durableClient" in bindings[name] for name in ("start_application", "officer_decision"))
+    assert {name for name, b in bindings.items() if "durableClient" in b} == set(DURABLE_CLIENTS)
 
 
 def test_servicebus_triggers_only_when_enabled(monkeypatch):
@@ -157,6 +165,7 @@ def test_requirements_pin_runtime_sdks():
         "azure-identity",
         "azure-cosmos",
         "azure-storage-blob",
+        "azure-storage-queue",
         "azure-servicebus",
         "azure-keyvault-secrets",
         "httpx",

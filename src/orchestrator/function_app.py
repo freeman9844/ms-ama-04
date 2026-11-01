@@ -6,7 +6,10 @@ import azure.durable_functions as df
 import azure.functions as func
 
 from journey.activities import ACTIVITIES, Deps
+from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start
+from journey.consent import consent_lifecycle as lifecycle_steps
 from journey.entry import handle_decision, handle_start
+from journey.grievance import handle_grievance, handle_grievance_decision
 from journey.monitoring import (
     TOPIC_ALERT,
     TOPIC_FLOW,
@@ -82,6 +85,44 @@ def assess_credit(payload: dict) -> dict:
 @app.activity_trigger(input_name="payload")
 def register_monitoring(payload: dict) -> dict:
     return ACTIVITIES["register_monitoring"](deps(), payload)
+
+
+@app.queue_trigger(arg_name="msg", queue_name="consent-lifecycle", connection="AzureWebJobsStorage")
+@app.durable_client_input(client_name="client")
+async def consent_lifecycle_start(msg: func.QueueMessage, client: df.DurableOrchestrationClient) -> None:
+    await handle_lifecycle_start(client, msg.get_body().decode("utf-8"))
+
+
+@app.queue_trigger(arg_name="msg", queue_name="consent-commands", connection="AzureWebJobsStorage")
+@app.durable_client_input(client_name="client")
+async def consent_command(msg: func.QueueMessage, client: df.DurableOrchestrationClient) -> None:
+    await handle_consent_command(client, msg.get_body().decode("utf-8"), deps().store)
+
+
+@app.orchestration_trigger(context_name="context")
+def consent_lifecycle(context: df.DurableOrchestrationContext):
+    # 함수 이름이 오케스트레이터 이름이다(LIFECYCLE_ORCHESTRATOR).
+    return (yield from lifecycle_steps(context, RETRY))
+
+
+@app.activity_trigger(input_name="payload")
+def delete_consent_data(payload: dict) -> dict:
+    return CONSENT_ACTIVITIES["delete_consent_data"](deps(), payload)
+
+
+@app.activity_trigger(input_name="payload")
+def send_consent_notice(payload: dict) -> dict:
+    return CONSENT_ACTIVITIES["send_consent_notice"](deps(), payload)
+
+
+@app.queue_trigger(arg_name="msg", queue_name="grievances", connection="AzureWebJobsStorage")
+def grievance_submitted(msg: func.QueueMessage) -> None:
+    handle_grievance(deps(), msg.get_body().decode("utf-8"))
+
+
+@app.queue_trigger(arg_name="msg", queue_name="grievance-decisions", connection="AzureWebJobsStorage")
+def grievance_decision(msg: func.QueueMessage) -> None:
+    handle_grievance_decision(deps(), msg.get_body().decode("utf-8"))
 
 
 @app.queue_trigger(arg_name="msg", queue_name="monitoring-replay", connection="AzureWebJobsStorage")
