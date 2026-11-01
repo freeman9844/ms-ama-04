@@ -1,14 +1,25 @@
 """Azure Functions 진입점(Python v2 모델). 업무 로직은 journey 패키지에 있다."""
 
+import os
+
 import azure.durable_functions as df
 import azure.functions as func
 
 from journey.activities import ACTIVITIES, Deps
 from journey.entry import handle_decision, handle_start
+from journey.monitoring import (
+    TOPIC_ALERT,
+    TOPIC_FLOW,
+    handle_alert_raised,
+    handle_flow_update,
+    handle_replay,
+    handle_restructure_decision,
+)
 from journey.orchestration import journey
 
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 RETRY = df.RetryOptions(first_retry_interval_in_milliseconds=5000, max_number_of_attempts=3)
+SB_CONNECTION = "ServiceBusConnection"
 _deps: Deps | None = None
 
 
@@ -66,3 +77,43 @@ def evaluate_policy(payload: dict) -> dict:
 @app.activity_trigger(input_name="payload")
 def assess_credit(payload: dict) -> dict:
     return ACTIVITIES["assess_credit"](deps(), payload)
+
+
+@app.activity_trigger(input_name="payload")
+def register_monitoring(payload: dict) -> dict:
+    return ACTIVITIES["register_monitoring"](deps(), payload)
+
+
+@app.queue_trigger(arg_name="msg", queue_name="monitoring-replay", connection="AzureWebJobsStorage")
+def monitoring_replay(msg: func.QueueMessage) -> None:
+    handle_replay(deps(), msg.get_body().decode("utf-8"))
+
+
+@app.queue_trigger(arg_name="msg", queue_name="restructure-decisions", connection="AzureWebJobsStorage")
+def restructure_decision(msg: func.QueueMessage) -> None:
+    handle_restructure_decision(deps(), msg.get_body().decode("utf-8"))
+
+
+# Service Bus는 비용 때문에 평소 꺼 둔다(pause = 네임스페이스 삭제). 꺼져 있으면 트리거를 등록하지 않고
+# handle_replay가 같은 처리를 직접 한다. 설정이 바뀌면 호스트가 재시작되며 다시 색인된다.
+if os.environ.get("SERVICEBUS_FQDN"):
+
+    @app.service_bus_topic_trigger(
+        arg_name="msg",
+        connection=SB_CONNECTION,
+        topic_name=TOPIC_FLOW,
+        subscription_name="early-warning",
+        is_sessions_enabled=True,
+    )
+    def flow_updated(msg: func.ServiceBusMessage) -> None:
+        handle_flow_update(deps(), msg.get_body().decode("utf-8"))
+
+    @app.service_bus_topic_trigger(
+        arg_name="msg",
+        connection=SB_CONNECTION,
+        topic_name=TOPIC_ALERT,
+        subscription_name="collections",
+        is_sessions_enabled=True,
+    )
+    def alert_raised(msg: func.ServiceBusMessage) -> None:
+        handle_alert_raised(deps(), msg.get_body().decode("utf-8"))

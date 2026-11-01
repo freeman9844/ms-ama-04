@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% set l = v.loan %}{% set m = v.monitoring %}
+{% block head %}{% if replay_blocked %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
+{% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
+{% block main %}
+<p><a href="/loans">← 사후 모니터링</a> · <a href="/applications/{{ l.application_id|path }}">신청 상세</a></p>
+<h1>{{ l.id }} <span class="status m-{{ m.status or 'none' }}">{{ m.status|monitoring_label }}</span></h1>
+<dl class="facts">
+  <dt>신청인</dt><dd>{{ l.applicant_id }} · {{ l.industry }}</dd>
+  <dt>대출</dt><dd>{{ l.amount_krw|krw }} / {{ l.tenor_months }}개월 · {{ l.decision }} · {{ l.approved_at }}</dd>
+  <dt>기준선</dt><dd>주 평균 매출 {{ l.baseline.avg_weekly_revenue|krw }} · 현금 버퍼 {{ l.baseline.cash_buffer_days }}일</dd>
+  {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}</dd>{% endif %}
+  {% if m.error %}<dt>오류</dt><dd class="error">{{ m.error }}</dd>{% endif %}
+</dl>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if user.can_decide %}
+<form method="post" action="/loans/{{ l.id|path }}/replay">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button type="submit"{% if replay_blocked %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
+  {% if replay_blocked %}<small>재생이 진행 중입니다.</small>{% endif %}
+</form>
+{% endif %}
+{% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
+{% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
+{% else %}<p class="pii">가명 표시 중.</p>{% endif %}
+
+{% if v.weeks %}
+<section>
+<h2>주간 흐름과 탐지기</h2>
+<table>
+  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기준 대비</th><th>버퍼(일)</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
+  <tbody>
+{% for w in v.weeks %}{% set r = w.row %}
+<tr>
+  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.revenue_ratio }}</td>
+  <td>{{ r.buffer_days }}</td><td>{{ r.high_cost_count }}</td>
+  <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
+  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+<p><small>노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.</small></p>
+</section>
+{% endif %}
+
+{% for a in v.alerts %}
+<section id="{{ a.alert_id }}">
+<h2>경보 {{ a.week }}주차 <span class="status sev-{{ a.severity }}">{{ a.severity|severity_label }}</span> <small>{{ a.recommended_action|action_label }} · {{ a.status }}</small></h2>
+<p class="summary">{{ a.summary }}</p>
+<ul class="claims">
+{% for s in a.signals %}
+  <li><strong>{{ s.kind }}</strong> {{ s.text }}
+    <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else "없음" }}</span>{% endfor %}
+    {% for t in s.txn_ids %}<span class="chip txn">{{ t }}</span>{% endfor %}</div>
+  </li>
+{% endfor %}
+</ul>
+<p class="review">조사 모델: {% for role, model in a.models|dictsort %}{{ role }}={{ model }} {% endfor %}{% if a.event_error %} · <span class="error">이벤트 발행 실패: {{ a.event_error }}</span>{% endif %}</p>
+{% if a.collections %}{% set c = a.collections %}
+<h3>추심 에이전트 <small>{{ c.decision }}</small></h3>
+<p>{{ c.reason }}</p>
+{% if c.contacts %}<table>
+  <thead><tr><th>일자</th><th>스크립트</th><th>상태</th><th>사유</th></tr></thead>
+  <tbody>{% for x in c.contacts %}<tr><td>{{ x.at }}</td><td>{{ x.script_id }}</td><td>{{ x.status }}</td><td>{{ x.reason or "" }}</td></tr>{% endfor %}</tbody>
+</table>{% endif %}
+{% elif a.status == "open" %}<p>추심 에이전트 처리 대기 중.</p>{% endif %}
+{% if a.restructure %}{% set rs = a.restructure %}
+<h3>재조정 상담 요청 <small>{{ rs.status }}</small></h3>
+<p>{{ rs.category }} · {{ rs.note }}</p>
+{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason }}</p>{% endif %}
+{% if a.decidable and user.can_decide and replay_blocked %}
+<p><small>재생이 끝나면 재조정 결정을 내릴 수 있습니다.</small></p>
+{% elif a.decidable and user.can_decide %}
+<form method="post" action="/loans/{{ l.id|path }}/alerts/{{ a.alert_id|path }}/restructure" class="decision">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset><legend>재조정 결정</legend>
+    <label><input type="radio" name="decision" value="approve" checked> 승인</label>
+    <label><input type="radio" name="decision" value="decline"> 거절</label>
+  </fieldset>
+  <label>사유 <textarea name="reason" rows="2"></textarea></label>
+  <button type="submit">결정 보내기</button>
+</form>
+{% endif %}
+{% endif %}
+</section>
+{% endfor %}
+
+{% if v.transactions %}
+<section>
+<h2>근거 거래</h2>
+<table>
+  <thead><tr><th>거래 ID</th><th>일자</th><th>금액</th><th>적요</th></tr></thead>
+  <tbody>{% for t in v.transactions %}<tr><td>{{ t.txn_id }}</td><td>{{ t.booked_on }}</td><td>{{ t.amount_krw|krw }}</td><td>{{ t.description }}</td></tr>{% endfor %}</tbody>
+</table>
+</section>
+{% endif %}
+{% endblock %}

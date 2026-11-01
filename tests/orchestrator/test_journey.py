@@ -6,6 +6,7 @@ import pytest
 from journey.orchestration import (
     FLAG_ASSESSMENT_UNAVAILABLE,
     FLAG_DATA_INCOMPLETE,
+    FLAG_MONITORING_UNAVAILABLE,
     FLAG_POLICY_UNAVAILABLE,
 )
 
@@ -22,7 +23,12 @@ CONSENT = {
     "expires_at": "2027-01-30T15:00:00+00:00",
 }
 COMPLETE = {"status": "complete", "missing_sources": [], "flags": [], "conversation_id": "conv_1"}
-UNDERWRITING = {"features": {"application_id": "app-1", "dscr": 3.8}, "signals": {}, "flags": ["high_cost_lender_detected"]}
+UNDERWRITING = {
+    "features": {"application_id": "app-1", "dscr": 3.8},
+    "monthly": [{"month": "2026-10", "revenue": 1}],
+    "signals": {},
+    "flags": ["high_cost_lender_detected"],
+}
 ELIGIBLE = {"application_id": "app-1", "decision": "eligible", "max_amount_krw": 20_000_000, "rate_band": "A"}
 INELIGIBLE = {"application_id": "app-1", "decision": "ineligible", "max_amount_krw": 0, "rate_band": None}
 APPROVE = {"decision": "approve", "officer_id": "officer-1", "amount_krw": 20_000_000}
@@ -38,6 +44,7 @@ def acts(**overrides):
         "underwrite": lambda _: UNDERWRITING,
         "evaluate_policy": lambda _: ELIGIBLE,
         "assess_credit": lambda _: ASSESSED,
+        "register_monitoring": lambda p: {"loan_id": p["application_id"]},
     }
     return base | overrides
 
@@ -71,7 +78,8 @@ def test_happy_path_reaches_approved(run_journey):
 
 def test_each_stage_is_saved_as_snapshot(run_journey):
     _, ctx = run_journey(START, acts(), [("event", APPROVE)])
-    assert [s["status"] for s in ctx.saved] == statuses(ctx)
+    # 마지막 저장은 같은 상태에서 모니터링 등록 결과를 남긴다.
+    assert [s["status"] for s in ctx.saved] == [*statuses(ctx), "approved"]
     assert ctx.saved[0]["consent"] is None  # 이후 변경이 이전 저장본에 섞이지 않는다
     assert all(c.input["container"] == "applications" for c in ctx.called("save_document"))
 
@@ -201,3 +209,31 @@ def test_second_timeout_closes_without_decision(run_journey):
 def test_input_as_json_string_is_accepted(run_journey):
     result, _ = run_journey(json.dumps(START), acts(), [("event", DECLINE)])
     assert result["status"] == "declined"
+
+
+def test_approval_registers_monitoring(run_journey):
+    _, ctx = run_journey(START, acts(), [("event", {**APPROVE, "amount_krw": 15_000_000})])
+    call = ctx.called("register_monitoring")[0]
+    assert call.retry == "RETRY"
+    assert call.input == {
+        "application_id": "app-1",
+        "applicant_id": "demo-cafe-001",
+        "consent_id": "c-1",
+        "decision": "approve",
+        "amount_krw": 15_000_000,
+        "tenor_months": 12,
+        "decided_at": ctx.saved[-1]["officer_decision"]["at"],
+        "underwriting": {"features": UNDERWRITING["features"], "monthly": UNDERWRITING["monthly"]},
+    }
+    assert ctx.saved[-1]["monitoring"]["loan_id"] == "app-1"
+
+
+def test_monitoring_failure_keeps_approval(run_journey):
+    result, ctx = run_journey(START, acts(register_monitoring=boom), [("event", APPROVE)])
+    assert result["status"] == "approved"
+    assert FLAG_MONITORING_UNAVAILABLE in ctx.saved[-1]["flags"] and ctx.saved[-1]["monitoring"] is None
+
+
+def test_decline_does_not_register_monitoring(run_journey):
+    result, ctx = run_journey(START, acts(), [("event", DECLINE)])
+    assert result["status"] == "declined" and ctx.called("register_monitoring") == []

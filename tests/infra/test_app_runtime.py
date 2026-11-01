@@ -27,7 +27,12 @@ def _smoke_config(exp) -> dict:
 
 def test_function_queues_on_host_storage(closed):
     queues = closed.of_type("Microsoft.Storage/storageAccounts/queueServices/queues")
-    assert {q["name"].split("/")[-1] for q in queues} == {"applications-start", "officer-decisions"}
+    assert {q["name"].split("/")[-1] for q in queues} == {
+        "applications-start",
+        "officer-decisions",
+        "monitoring-replay",
+        "restructure-decisions",
+    }
     assert all(q["name"].startswith("stfn") for q in queues)
 
 
@@ -44,6 +49,8 @@ def test_cosmos_app_containers(closed):
         "applications": ["/application_id"],
         "consents": ["/consent_id"],
         "classifications": ["/id"],
+        "loans": ["/loan_id"],
+        "alerts": ["/loan_id"],
     }
 
 
@@ -101,11 +108,21 @@ def test_function_app_settings_point_to_runtime(closed, variant):
     assert settings["DECISION_DEPLOYMENT"] == "decision-1"
     assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
     assert settings["CLASSIFIER_MODEL"] == "gpt-5.4-mini"
+    assert (settings["EW_MODEL"], settings["COLLECTIONS_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
     assert settings["SERVICEBUS_FQDN"].endswith(".servicebus.windows.net")
     # 런타임 속성(엔드포인트)은 PSRule 펼침에서 빈 값이므로 키 존재만 확인합니다.
     assert {"COSMOS_ENDPOINT", "DATA_BLOB_ENDPOINT", "KEYVAULT_URI"} <= settings.keys()
     assert "PSEUDONYM_KEY" not in settings
     assert _settings(variant)["SERVICEBUS_FQDN"] == ""
+
+
+def test_function_servicebus_trigger_connection_uses_identity(closed, variant):
+    settings = _settings(closed)
+    assert settings["ServiceBusConnection__fullyQualifiedNamespace"] == settings["SERVICEBUS_FQDN"]
+    assert settings["ServiceBusConnection__credential"] == "managedidentity"
+    assert "ServiceBusConnection__clientId" in settings
+    # pause 상태에서는 트리거를 등록하지 않으므로 연결 설정도 두지 않는다.
+    assert not any(k.startswith("ServiceBusConnection__") for k in _settings(variant))
 
 
 def test_smoke_job_has_e2e_config(closed):

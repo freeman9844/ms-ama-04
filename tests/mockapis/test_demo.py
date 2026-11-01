@@ -45,3 +45,19 @@ def test_main_builds_app(monkeypatch):
     sys.modules.pop("mockapis.main", None)
     module = importlib.import_module("mockapis.main")
     assert TestClient(module.app).get("/healthz").status_code == 200
+
+
+def test_postloan_flows_cast_the_cafe_as_the_stacking_hero():
+    from mockapis.demo import build_postloan_flows
+    from mockapis.postloan import FlowScenario
+
+    as_of = date(2026, 11, 2)
+    flows = build_postloan_flows(build_demo_cases(as_of), as_of)
+    assert {k: f.scenario for k, f in flows.items()} == {
+        "demo-cafe-001": FlowScenario.STACKING,
+        "demo-mismatch-002": FlowScenario.STABLE,
+        "demo-stress-003": FlowScenario.STABLE,
+        "demo-thin-004": FlowScenario.STABLE,
+        "demo-injection-005": FlowScenario.STABLE,
+    }
+    assert all(f.start == as_of for f in flows.values())

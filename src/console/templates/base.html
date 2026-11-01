@@ -12,6 +12,7 @@
 <body>
 <header>
   <a class="brand" href="/">AMA Lending 심사 콘솔</a>
+  <nav><a href="/">신청</a> · <a href="/loans">사후 모니터링</a></nav>
   <span class="who">{{ user.name }} · {{ user.roles|sort|join(", ") }}</span>
   {% if not demo %}<a href="/.auth/logout">로그아웃</a>{% endif %}
 </header>

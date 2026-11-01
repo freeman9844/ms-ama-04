@@ -13,6 +13,7 @@ from pydantic import TypeAdapter
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
 from agents.features import compute_underwriting
+from agents.monitoring import Baseline
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS
@@ -23,6 +24,9 @@ CLASSIFICATION_CONTAINER = "classifications"
 ANALYST_MODEL = "gpt-5.4"
 REVIEWER_MODEL = "gpt-5.4-mini"
 CLASSIFIER_MODEL = "gpt-5.4-mini"
+EW_MODEL = "gpt-5.4"
+COLLECTIONS_MODEL = "gpt-5.4-mini"
+LOANS_CONTAINER = "loans"
 TOPIC_CONSENT = "consent"
 EVENT_CONSENT_GRANTED = "consent.granted"
 _TRANSACTIONS = TypeAdapter(list[Transaction])
@@ -49,7 +53,9 @@ class PolicyApi(Protocol):
 
 
 class Publisher(Protocol):
-    def publish(self, topic: str, message: dict[str, Any], message_id: str) -> None: ...
+    def publish(
+        self, topic: str, message: dict[str, Any], message_id: str, session_id: str | None = None
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,8 @@ class Deps:
     analyst_model: str = ANALYST_MODEL
     reviewer_model: str = REVIEWER_MODEL
     classifier_model: str = CLASSIFIER_MODEL
+    ew_model: str = EW_MODEL
+    collections_model: str = COLLECTIONS_MODEL
 
 
 class StoreCache:
@@ -255,7 +263,43 @@ def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
+    """승인된 대출을 사후 모니터링 대상으로 등록한다. 기준선은 심사 시점 특성·월별 흐름에서 만든다."""
+    loan_id = payload["application_id"]
+    profile = deps.raw.get_json(raw_container(payload["consent_id"]), "profile.json")
+    if profile is None:
+        raise RuntimeError(f"원천 프로필 없음: {payload['consent_id']}")
+    existing = deps.store.read(LOANS_CONTAINER, loan_id, loan_id) or {}
+    deps.store.upsert(
+        LOANS_CONTAINER,
+        {
+            "id": loan_id,
+            "loan_id": loan_id,
+            "application_id": loan_id,
+            "applicant_id": payload["applicant_id"],
+            "industry": ApplicantProfile.model_validate(profile).industry,
+            "underwriting_consent_id": payload["consent_id"],
+            "decision": payload["decision"],
+            "amount_krw": payload["amount_krw"],
+            "tenor_months": payload["tenor_months"],
+            "approved_at": payload["decided_at"],
+            "baseline": Baseline.from_underwriting(payload["underwriting"]).to_dict(),
+            "monitoring": existing.get("monitoring"),
+            "updated_at": deps.clock().isoformat(),
+        },
+    )
+    return {"loan_id": loan_id}
+
+
 ACTIVITIES: dict[str, Callable[[Deps, Any], Any]] = {
     f.__name__: f
-    for f in (save_document, request_consent, assemble_data, underwrite, evaluate_policy, assess_credit)
+    for f in (
+        save_document,
+        request_consent,
+        assemble_data,
+        underwrite,
+        evaluate_policy,
+        assess_credit,
+        register_monitoring,
+    )
 }

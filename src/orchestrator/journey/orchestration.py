@@ -19,6 +19,7 @@ ORCHESTRATOR = "application_journey"
 EVENT_OFFICER_DECISION = "officer_decision"
 FLAG_DATA_INCOMPLETE = "data_incomplete"
 FLAG_POLICY_UNAVAILABLE = "policy_unavailable"
+FLAG_MONITORING_UNAVAILABLE = "monitoring_unavailable"
 _FINAL = {
     "approve": Status.APPROVED,
     "conditional": Status.CONDITIONALLY_APPROVED,
@@ -89,6 +90,7 @@ def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
         "sla": None,
         "decision_attempts": [],
         "officer_decision": None,
+        "monitoring": None,
         "error": None,
     }
 
@@ -206,6 +208,8 @@ def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) 
                 continue
             doc["officer_decision"] = {**decision.model_dump(mode="json"), "at": at}
             yield from _advance(ctx, retry, doc, _FINAL[decision.decision])
+            if decision.decision != "decline":
+                yield from _register_monitoring(ctx, retry, doc)
             return _result(doc)
         if doc["sla"]["escalated"]:
             yield from _advance(ctx, retry, doc, Status.CLOSED_NO_DECISION)
@@ -213,3 +217,30 @@ def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) 
         deadline = _now(ctx) + sla
         doc["sla"].update(escalated=True, deadline=deadline.isoformat())
         yield from _advance(ctx, retry, doc, Status.ESCALATED)
+
+
+def _register_monitoring(ctx: Any, retry: Any, doc: dict[str, Any]) -> Steps:
+    """승인된 대출을 사후 모니터링에 등록한다. 실패해도 승인은 유지하고 플래그만 남긴다."""
+    decision = doc["officer_decision"]
+    try:
+        if doc["underwriting"] is None or doc["consent"] is None:
+            raise ValueError("심사 결과 없음")
+        result = yield ctx.call_activity_with_retry(
+            "register_monitoring",
+            retry,
+            {
+                "application_id": doc["application_id"],
+                "applicant_id": doc["applicant_id"],
+                "consent_id": doc["consent"]["consent_id"],
+                "decision": decision["decision"],
+                "amount_krw": decision.get("amount_krw") or doc["requested_amount_krw"],
+                "tenor_months": doc["requested_tenor_months"],
+                "decided_at": decision["at"],
+                "underwriting": {k: doc["underwriting"][k] for k in ("features", "monthly")},
+            },
+        )
+        doc["monitoring"] = {"loan_id": result["loan_id"], "registered_at": _now(ctx).isoformat()}
+    except Exception:  # noqa: BLE001
+        doc["flags"].append(FLAG_MONITORING_UNAVAILABLE)
+    yield _save(ctx, retry, doc)
+    return None

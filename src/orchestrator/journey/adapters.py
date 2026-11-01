@@ -11,7 +11,15 @@ import httpx
 from agents.data_assembly import DEFAULT_MODEL, SourceError
 from agents.runtime import FoundryAgents
 from agents.txn_classify import DecisionClient
-from journey.activities import ANALYST_MODEL, CLASSIFIER_MODEL, REVIEWER_MODEL, Deps, StoreCache
+from journey.activities import (
+    ANALYST_MODEL,
+    CLASSIFIER_MODEL,
+    COLLECTIONS_MODEL,
+    EW_MODEL,
+    REVIEWER_MODEL,
+    Deps,
+    StoreCache,
+)
 from journey.models import KST
 from shared.contracts import PolicyDecision
 
@@ -23,6 +31,7 @@ SOURCE_PATHS = {
     "transactions": "/mydata/transactions",
     "tax": "/tax/filings",
     "pg": "/pg/settlements",
+    "flow": "/mydata/flow",
 }
 
 
@@ -120,7 +129,9 @@ class ServiceBusPublisher:
 
         self._client = ServiceBusClient(fqdn, credential)
 
-    def publish(self, topic: str, message: dict[str, Any], message_id: str) -> None:
+    def publish(
+        self, topic: str, message: dict[str, Any], message_id: str, session_id: str | None = None
+    ) -> None:
         from azure.servicebus import ServiceBusMessage
 
         with self._client.get_topic_sender(topic) as sender:
@@ -130,6 +141,7 @@ class ServiceBusPublisher:
                     message_id=message_id,
                     content_type="application/json",
                     subject=message.get("type"),
+                    session_id=session_id,
                 )
             )
 
@@ -151,6 +163,8 @@ def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[
         settings["analyst_model"] = env.get("ANALYST_MODEL", ANALYST_MODEL)
         settings["reviewer_model"] = env.get("REVIEWER_MODEL", REVIEWER_MODEL)
         settings["classifier_model"] = env.get("CLASSIFIER_MODEL", CLASSIFIER_MODEL)
+        settings["ew_model"] = env.get("EW_MODEL", EW_MODEL)
+        settings["collections_model"] = env.get("COLLECTIONS_MODEL", COLLECTIONS_MODEL)
     if (account := env.get("AI_ACCOUNT_ENDPOINT")) and (deployment := env.get("DECISION_DEPLOYMENT")):
         settings["decider"] = DecisionClient(account, deployment, lambda: token(COGNITIVE_SCOPE))
     return settings

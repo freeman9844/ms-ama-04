@@ -2,7 +2,15 @@ import json
 
 import pytest
 
-from console.adapters import LIST_QUERY, CosmosApplications, StorageQueueSender, build_deps
+from console.adapters import (
+    ALERTS_QUERY,
+    LIST_QUERY,
+    LOANS_QUERY,
+    CosmosApplications,
+    CosmosMonitoring,
+    StorageQueueSender,
+    build_deps,
+)
 
 
 class FakeContainer:
@@ -11,8 +19,8 @@ class FakeContainer:
         self.missing = missing
         self.calls = []
 
-    def query_items(self, query, parameters, enable_cross_partition_query):
-        self.calls.append(("query", query, parameters, enable_cross_partition_query))
+    def query_items(self, query, parameters, enable_cross_partition_query=None, partition_key=None):
+        self.calls.append(("query", query, parameters, enable_cross_partition_query or partition_key))
         return iter(self.items)
 
     def read_item(self, item, partition_key):
@@ -24,6 +32,11 @@ class FakeContainer:
 
 class NotFound(Exception):
     status_code = 404
+
+
+class FakeDbAny:
+    def get_container_client(self, name):
+        return FakeContainer()
 
 
 def test_list_recent_queries_projection_across_partitions():
@@ -41,6 +54,19 @@ def test_get_reads_by_application_partition_and_maps_missing_to_none():
     assert CosmosApplications(container).get("app-1") == {"id": "app-1"}
     assert container.calls == [("read", "app-1", "app-1")]
     assert CosmosApplications(FakeContainer(missing=True)).get("app-x") is None
+
+
+def test_monitoring_store_reads_loans_and_partitioned_alerts():
+    loans, alerts = FakeContainer([{"id": "app-1"}]), FakeContainer([{"id": "ew-rp-1-w02"}])
+    store = CosmosMonitoring(loans, alerts)
+    assert store.list_loans(50) == [{"id": "app-1"}]
+    assert loans.calls[0] == ("query", LOANS_QUERY, [{"name": "@limit", "value": 50}], True)
+    assert store.get_loan("app-1") == {"id": "app-1"}
+    assert CosmosMonitoring(FakeContainer(missing=True), alerts).get_loan("app-x") is None
+    assert store.list_alerts("app-1", "rp-1") == [{"id": "ew-rp-1-w02"}]
+    # 대출 파티션 안에서만 찾고, 연락 기록 문서(contacts-*)는 제외한다.
+    assert alerts.calls[0] == ("query", ALERTS_QUERY, [{"name": "@replay", "value": "rp-1"}], "app-1")
+    assert "STARTSWITH(c.id, 'ew-')" in ALERTS_QUERY
 
 
 def test_queue_sender_sends_plain_utf8_json():
@@ -65,9 +91,17 @@ def test_build_deps_wires_env(monkeypatch):
         def __init__(self, *args, **kwargs):
             made[type(self).__name__] = (args, kwargs)
 
-    for name in ("ManagedIdentityCredential", "CosmosApplications", "BlobRawStore", "StorageQueueSender"):
+    class FakeDb:
+        def __init__(self, endpoint, db):
+            self.where = (endpoint, db)
+
+        def get_container_client(self, name):
+            return (name, *self.where)
+
+    for name in ("ManagedIdentityCredential", "CosmosApplications", "CosmosMonitoring", "BlobRawStore",
+                 "StorageQueueSender"):
         monkeypatch.setattr(f"console.adapters.{name}", type(name, (Recorder,), {}), raising=True)
-    monkeypatch.setattr("console.adapters._cosmos_container", lambda endpoint, db, cred: ("container", endpoint, db))
+    monkeypatch.setattr("console.adapters._cosmos_database", lambda endpoint, db, cred: FakeDb(endpoint, db))
     monkeypatch.setattr("console.adapters._queue_factory", lambda endpoint, cred: ("queues", endpoint))
     env = {
         "AZURE_CLIENT_ID": "cid", "COSMOS_ENDPOINT": "https://cos", "COSMOS_DATABASE": "lending",
@@ -76,7 +110,8 @@ def test_build_deps_wires_env(monkeypatch):
     }
     deps = build_deps(env)
     assert made["ManagedIdentityCredential"][1] == {"client_id": "cid"}
-    assert made["CosmosApplications"][0] == (("container", "https://cos", "lending"),)
+    assert made["CosmosApplications"][0] == (("applications", "https://cos", "lending"),)
+    assert made["CosmosMonitoring"][0] == (("loans", "https://cos", "lending"), ("alerts", "https://cos", "lending"))
     assert made["BlobRawStore"][0][0] == "https://blob"
     assert made["StorageQueueSender"][0] == (("queues", "https://queue"),)
     assert deps.pseudonym_key == b"k" * 32
@@ -95,7 +130,7 @@ def test_build_deps_requires_endpoints():
 ])
 def test_build_deps_demo_mode_principal(monkeypatch, mode, role, expected):
     monkeypatch.setattr("console.adapters.ManagedIdentityCredential", lambda **kw: None)
-    monkeypatch.setattr("console.adapters._cosmos_container", lambda *a: None)
+    monkeypatch.setattr("console.adapters._cosmos_database", lambda *a: FakeDbAny())
     monkeypatch.setattr("console.adapters._queue_factory", lambda *a: None)
     monkeypatch.setattr("console.adapters.BlobRawStore", lambda *a: None)
     env = {"AZURE_CLIENT_ID": "cid", "COSMOS_ENDPOINT": "https://cos", "COSMOS_DATABASE": "lending",

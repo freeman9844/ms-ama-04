@@ -27,3 +27,18 @@ def test_service_bus_roles(closed):
 def test_paused_environment_has_no_service_bus(variant):
     assert variant.of_type(SB) == []
     assert variant.private_endpoints("sb-") == {}
+
+
+def test_monitoring_subscriptions_are_session_ordered_and_filtered(closed):
+    subs = {"/".join(s["name"].split("/")[-2:]): s for s in closed.of_type(f"{SB}/topics/subscriptions")}
+    assert set(subs) == {"flow.updated/early-warning", "alert.raised/collections"}
+    for sub in subs.values():
+        props = sub["properties"]
+        assert props["requiresSession"] is True and props["lockDuration"] == "PT5M"
+        assert props["maxDeliveryCount"] == 5 and props["deadLetteringOnMessageExpiration"] is True
+    rules = {r["name"].split("/")[-2]: r["properties"] for r in closed.of_type(f"{SB}/topics/subscriptions/rules")}
+    assert set(rules) == {"early-warning", "collections"}
+    # 스모크 메시지(subject 없음)는 구독에 들어가지 않는다.
+    assert rules["early-warning"] == {"filterType": "CorrelationFilter", "correlationFilter": {"label": "flow.updated"}}
+    assert rules["collections"] == {"filterType": "CorrelationFilter", "correlationFilter": {"label": "alert.raised"}}
+    assert all(r["name"].endswith("/$Default") for r in closed.of_type(f"{SB}/topics/subscriptions/rules"))

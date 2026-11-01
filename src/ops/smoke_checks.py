@@ -29,6 +29,7 @@ E2E_REQUESTED_KRW = 20_000_000
 E2E_TENOR_MONTHS = 12
 E2E_INTERVAL_SECONDS = 10.0
 E2E_ENDED = ("failed", "closed_no_decision", "approved", "conditionally_approved", "declined")
+FLAG_MONITORING_UNAVAILABLE = "monitoring_unavailable"
 
 
 class CheckFailed(Exception):
@@ -208,12 +209,16 @@ def enqueue(cfg: dict, http: Http, token: TokenProvider, queue: str, message: di
            what=f"queue {queue}")
 
 
-def read_application(cfg: dict, http: Http, token: TokenProvider, application_id: str) -> dict | None:
-    url = (f"https://{cfg['cosmos_host']}/dbs/{cfg['cosmos_database']}"
-           f"/colls/applications/docs/{application_id}")
-    resp = expect(http("GET", url, _cosmos_headers(cfg, token, partition_key=application_id)), 200, 404,
-                  what="cosmos read application")
+def read_doc(cfg: dict, http: Http, token: TokenProvider, container: str, doc_id: str) -> dict | None:
+    """id = 파티션 키인 문서(applications·loans)를 읽습니다."""
+    url = f"https://{cfg['cosmos_host']}/dbs/{cfg['cosmos_database']}/colls/{container}/docs/{doc_id}"
+    resp = expect(http("GET", url, _cosmos_headers(cfg, token, partition_key=doc_id)), 200, 404,
+                  what=f"cosmos read {container}")
     return None if resp.status == 404 else resp.json()
+
+
+def read_application(cfg: dict, http: Http, token: TokenProvider, application_id: str) -> dict | None:
+    return read_doc(cfg, http, token, "applications", application_id)
 
 
 def wait_for_status(read: Callable[[], dict | None], target: str, sleep: Callable[[float], None],
@@ -231,9 +236,25 @@ def wait_for_status(read: Callable[[], dict | None], target: str, sleep: Callabl
                       f"(마지막 상태: {status})")
 
 
+def wait_for_monitoring(doc: dict, read: Callable[[], dict | None], sleep: Callable[[float], None],
+                        attempts: int) -> dict:
+    """승인 저장 뒤 오케스트레이터가 사후 모니터링(loans)을 등록하고 신청 문서를 한 번 더 저장합니다."""
+    for _ in range(attempts):
+        if doc.get("monitoring"):
+            return doc
+        if FLAG_MONITORING_UNAVAILABLE in doc.get("flags", ()):
+            raise CheckFailed(f"사후 모니터링 등록 실패: flags={doc.get('flags')}")
+        sleep(E2E_INTERVAL_SECONDS)
+        doc = read() or {}
+    raise CheckFailed(f"{attempts * E2E_INTERVAL_SECONDS:.0f}초 안에 모니터링 등록이 기록되지 않았습니다")
+
+
 def check_journey(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[float], None],
                   application_id: str, start_attempts: int = 120, decision_attempts: int = 30) -> str:
-    """신청 접수 → 동의 → 데이터 조립(에이전트) → 심사 → 정책 → 심사 에이전트 → 심사역 승인까지 한 바퀴."""
+    """신청 접수 → 동의 → 데이터 조립(에이전트) → 심사 → 정책 → 심사 에이전트 → 심사역 승인 → 모니터링 등록.
+
+    사후 13주 재생(LLM 비용·수 분)은 smoke에서 돌리지 않습니다. 콘솔의 재생 버튼으로 시연합니다.
+    """
     enqueue(cfg, http, token, cfg["start_queue"], {
         "application_id": application_id, "applicant_id": cfg["e2e_applicant"],
         "requested_amount_krw": E2E_REQUESTED_KRW, "requested_tenor_months": E2E_TENOR_MONTHS})
@@ -253,9 +274,15 @@ def check_journey(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[
     enqueue(cfg, http, token, cfg["decision_queue"], {"application_id": application_id, "decision": {
         "decision": "approve", "officer_id": "smoke", "amount_krw": amount, "reason": "smoke e2e"}})
     doc = wait_for_status(read, "approved", sleep, decision_attempts)
-    return (f"{application_id} approved {amount:,} KRW ({len(doc.get('timeline', []))} steps); "
+    steps = len(doc.get("timeline", []))
+    wait_for_monitoring(doc, read, sleep, decision_attempts)
+    loan = read_doc(cfg, http, token, "loans", application_id)
+    if not loan or not loan.get("baseline"):
+        raise CheckFailed(f"loans 문서가 없거나 기준선이 비었습니다: {application_id}")
+    return (f"{application_id} approved {amount:,} KRW ({steps} steps); "
             f"assessment {assessment['recommendation']}, "
-            f"review {'passed' if review['passed'] else 'not passed'} in {review['rounds']} rounds")
+            f"review {'passed' if review['passed'] else 'not passed'} in {review['rounds']} rounds; "
+            f"monitoring registered ({loan.get('industry')})")
 
 
 def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable[[str], str],

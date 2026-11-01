@@ -162,8 +162,9 @@ class Recommendation(StrEnum):
     REFER = "refer"
 
 
-# M: 계산 지표, S: 월별 계열, P: 정책 판정 값. 예) M:dscr, S:2026-07:revenue, P:R101:threshold
-EVIDENCE_ID_PATTERN = r"^[MSP]:[A-Za-z0-9_.:-]+$"
+# M: 계산 지표, S: 월별 계열, P: 정책 판정 값, W: 사후 주간 계열, B: 사후 모니터링 기준선·업종 집단.
+# 예) M:dscr, S:2026-07:revenue, P:R101:threshold, W:3:revenue, B:index:01
+EVIDENCE_ID_PATTERN = r"^[MSPWB]:[A-Za-z0-9_.:-]+$"
 EvidenceId = Annotated[str, Field(pattern=EVIDENCE_ID_PATTERN)]
 
 
@@ -232,3 +233,62 @@ class CreditAssessment(Contract):
         if self.recommendation in (Recommendation.APPROVE, Recommendation.CONDITIONAL) and not self.proposed_structure:
             raise ValueError("승인·조건부 추천에는 제안 구조가 필요하다")
         return self
+
+
+class AlertSeverity(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class SignalKind(StrEnum):
+    LOAN_STACKING = "loan_stacking"
+    INFLOW_DROP = "inflow_drop"
+    BUFFER_DROP = "buffer_drop"
+    VOLATILITY_SPIKE = "volatility_spike"
+    PAYROLL_DELAY = "payroll_delay"
+    SUPPLIER_LOSS = "supplier_loss"
+    TAX_ARREARS = "tax_arrears"
+    OTHER = "other"
+
+
+class RecommendedAction(StrEnum):
+    MONITOR = "monitor"
+    CONTACT_BORROWER = "contact_borrower"
+    HARDSHIP_REVIEW = "hardship_review"
+    OFFICER_REVIEW = "officer_review"
+
+
+class AlertSignal(Claim):
+    """조기경보 신호 1개. Claim처럼 근거(W:·B: 지표 ID 또는 거래 ID)가 하나 이상 있어야 한다."""
+
+    kind: SignalKind
+
+
+class EarlyWarningAlert(Contract):
+    """Early-Warning 에이전트 산출물(스펙 §3.3-4). alert.raised로 발행되어 콘솔과 Collections에 전달된다."""
+
+    schema_version: SchemaV1 = "1"
+    alert_id: str = Field(min_length=1)
+    loan_id: str = Field(min_length=1)
+    week: int = Field(ge=1, le=53)
+    as_of: date
+    severity: AlertSeverity
+    summary: str = Field(min_length=1, max_length=600)
+    signals: tuple[AlertSignal, ...] = Field(min_length=1)
+    recommended_action: RecommendedAction
+    triggers: tuple[str, ...]
+    models: dict[str, str]
+
+    @model_validator(mode="after")
+    def _action(self) -> "EarlyWarningAlert":
+        if self.severity is AlertSeverity.HIGH and self.recommended_action is RecommendedAction.MONITOR:
+            raise ValueError("high 경보는 관찰(monitor)만 권고할 수 없다")
+        return self
+
+
+class HardshipCategory(StrEnum):
+    REVENUE_SHOCK = "revenue_shock"
+    ILLNESS_OR_DISASTER = "illness_or_disaster"
+    DEBT_OVERLOAD = "debt_overload"
+    NONE = "none"

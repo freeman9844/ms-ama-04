@@ -111,3 +111,18 @@ def make_doc_fixture():
 @pytest.fixture(name="fake_raw")
 def fake_raw_fixture():
     return FakeRaw
+
+
+@pytest.fixture(name="mask")
+def mask_fixture():
+    return mask
+
+
+@pytest.fixture(name="raw_txns")
+def raw_txns_fixture():
+    return [t.model_dump(mode="json") for t in TXNS]
+
+
+@pytest.fixture(name="raw_profile")
+def raw_profile_fixture():
+    return PROFILE.model_dump(mode="json")

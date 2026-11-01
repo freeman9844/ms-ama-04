@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
+{% block main %}
+<h1>사후 모니터링</h1>
+<p>승인된 대출의 사후 13주 거래 흐름을 재생해 조기경보(Early-Warning)와 추심(Collections) 에이전트를 시연합니다.</p>
+<table>
+  <thead><tr><th>대출 ID</th><th>신청인</th><th>업종</th><th>승인 금액</th><th>모니터링</th><th>경보</th><th>갱신 시각</th></tr></thead>
+  <tbody>
+{% for r in rows %}
+<tr>
+  <td><a href="/loans/{{ r.id|path }}">{{ r.id }}</a></td>
+  <td>{{ r.applicant_id }}</td>
+  <td>{{ r.industry }}</td>
+  <td>{{ r.amount_krw|krw }} / {{ r.tenor_months }}개월</td>
+  <td>{{ r.monitoring_status|monitoring_label }}</td>
+  <td>{{ r.alerts if r.alerts is not none else "-" }}</td>
+  <td>{{ r.updated_at or "" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7">승인된 대출이 없습니다. 신청을 승인하면 모니터링 대상이 됩니다.</td></tr>
+{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

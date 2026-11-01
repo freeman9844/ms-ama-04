@@ -299,3 +299,84 @@ python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 2
   데모 후 `azd env set CONSOLE_AUTH_ENABLED true`로 되돌리고 다시 프로비저닝합니다.
 - 목록은 Cosmos 교차 파티션 `ORDER BY updated_at` 최근 50건입니다(페이지 없음).
 - 콘솔이 보낸 결정의 결과는 상세 화면 새로 고침(진행 중 10초 자동)으로 확인합니다. 큐 처리 실패는 오케스트레이터 로그에 남습니다.
+
+## 사후 모니터링: 조기경보·추심(P5a)
+
+승인된 대출을 사후 13주 동안 지켜보는 두 에이전트입니다(스펙 §3.3). 데모에서는 Mock MyData의 사후 거래 흐름
+(`GET /mydata/flow`, 승인 다음 날부터 13주)을 콘솔의 **재생** 버튼으로 한 주씩 흘려보냅니다.
+
+1. **등록**: 최종 결정이 승인·조건부 승인이면 오케스트레이터가 `register_monitoring` 활동으로 Cosmos `loans`에 대출 문서와
+   기준선(주 평균 매출·변동성·현금 버퍼·월별 계절 지수)을 만듭니다. 실패해도 결정은 그대로이고 `monitoring_unavailable` 플래그만 남습니다.
+2. **재생**(`monitoring-replay` 큐): 계좌 범위의 모니터링 동의를 새로 받아 흐름을 `consent-<동의 ID>/flow.json`에 저장하고,
+   주차별로 거래 의미 분류(P4a와 같은 경로) → 주간 지표 → 탐지기(매출 급감·현금 버퍼 감소·변동성 급증·신규 차입)를 돌립니다.
+3. **조기경보 에이전트**(`early-warning-investigator`, gpt-5.4): 이번 재생에서 **처음** 걸린 트리거가 있을 때만 조사합니다.
+   주간 지표·기준선·업종 집단 계절 지수·거래 조회 도구로 계절성(예: 1월 카페 비수기)을 걸러 내고, 경보를 내면
+   모든 문장의 수치가 근거 ID(`W:<주차>:<지표>`, `B:<기준선>`)와 맞아야 합니다(코드 검사). 실패하면 탐지기만으로 만든
+   `officer_review` 경보가 남습니다(자동 연락 없음).
+4. **추심 에이전트**(`collections-agent`, gpt-5.4-mini): 권고가 `contact_borrower`·`hardship_review`인 경보만 처리합니다.
+   승인된 스크립트만 보낼 수 있고(자유 문장 발송 없음), 공정 추심 규칙(KST 08~21시, 7일 7회)을 코드가 막으며,
+   상환 곤란이면 재조정 상담 요청(`pending_officer`)을 만듭니다. 재조정 승인·거절은 심사역이 콘솔에서 합니다(`restructure-decisions` 큐).
+
+| 저장 위치 | 내용 |
+|---|---|
+| `loans`(파티션 `/loan_id`) | 대출·기준선·`monitoring`(재생 ID, 진행 주차, 주차별 지표·트리거·조사 결과) |
+| `alerts`(파티션 `/loan_id`) | 경보(`ew-<재생 ID>-wNN`: 근거 신호, 추심 결과, 재조정 요청), 재생별 연락 기록(`contacts-<재생 ID>`) |
+| 모니터링 동의 문서 | 조기경보·추심 에이전트의 Foundry 대화 ID(`foundry_conversations`) |
+
+- Service Bus가 켜져 있으면 주차 메시지를 `flow.updated` 토픽(세션 = 대출 ID, 구독 `early-warning`)으로, 경보를 `alert.raised`
+  (구독 `collections`)로 보냅니다. 꺼져 있으면(`ops pause` 상태) 같은 처리를 큐 트리거 안에서 순서대로 직접 합니다(`mode: inline`).
+- 같은 대출의 재생은 30분 안에 한 번만 시작됩니다(진행 중이면 콘솔 버튼이 꺼지고 큐 메시지도 무시). 멈춘 재생은 30분 뒤 다시 시작할 수 있습니다.
+- smoke `journey`는 승인 뒤 `loans` 문서 등록까지 확인합니다(재생은 LLM 비용 때문에 돌리지 않음).
+
+### 배포 순서(P5a)
+
+```powershell
+python -m ops window open --acr            # 새 큐(monitoring-replay, restructure-decisions)·컨테이너(loans, alerts)·앱 설정
+python -m ops deploy mockapi               # GET /mydata/flow
+python -m ops deploy orchestrator          # 모니터링 트리거·활동
+python -m ops deploy console               # 사후 모니터링 화면
+python -m ops window close
+python -m ops smoke                        # journey가 모니터링 등록까지 확인
+```
+
+콘솔 상단의 `사후 모니터링` → 승인된 대출 → `사후 13주 재생`을 누르면 인라인 모드에서 수 분 뒤(주차마다 분류, 새 트리거마다 에이전트)
+주간 표·경보·추심 결과가 채워집니다(재생 중 10초 자동 새로 고침). 재조정 결정 폼은 재생이 끝난 뒤에 나타납니다(새로 고침이 입력을 지우지 않도록). `demo-cafe-001`은 사후 흐름에서 고금리 대출을 겹쳐 받는
+시나리오(1주차 설비 지출로 버퍼 감소, 2주차부터 신규 차입, 4주차부터 매출 급감)입니다.
+
+### 실제 배포 기록(P5a, 2026-11-01, koreacentral)
+
+| 단계 | 명령 | 시간 | 결과 |
+|---|---|---|---|
+| 배포 창 | `ops window open --acr` | 3.4분 | 큐·loans/alerts 컨테이너·앱 설정 프로비저닝 |
+| Mock API | `ops deploy mockapi` | 4.7분 | 성공 |
+| 오케스트레이터 | `ops deploy orchestrator` | 4.8분 | 트리거 목록에 `monitoring_replay`·`restructure_decision`·`register_monitoring`, Service Bus 트리거 없음 |
+| 콘솔 | `ops deploy console` | 4.4분 | 성공 |
+| 창 닫기 | `ops window close` | 3.6분 | 성공 |
+| smoke | `ops smoke` | 2.7분 | 23개 점검 통과, journey `… approved 20,000,000 KRW (7 steps); … monitoring registered (카페)` |
+| 정리 | `ops pause` | 즉시 | Service Bus 없음(인라인 모드 유지) |
+
+체크리스트 결과(데모 모드, 운영자 IP에서 HTTP로 같은 순서 실행):
+
+1. `demo-cafe-001` 50,000,000원·12개월 신청 → 50초 뒤 `awaiting_officer` → 제안 금액 30,000,000원 `승인` → 20초 안에 `사후 모니터링` 링크.
+2. `사후 모니터링` 목록에 `재생 전`으로 표시.
+3. `사후 13주 재생` → "사후 13주 재생 요청을 큐에 보냈습니다…" → `재생 중`, 버튼 비활성 문구·자동 새로 고침 확인.
+4. 132초 뒤 `재생 완료`. 주간 표 13줄, 경보 2건(2주차 중간 `차주 연락`, 9주차 높음 `상환 곤란 검토`). 1주차 버퍼 감소는 `no_alert`.
+   사전 검증(2·4·9주차)과 달리 4주차 경보는 이번 실행에서 나오지 않았습니다(LLM 조사 결과 변동). 첫 경보(2주차 말 2026-11-14)는 연체일 2027-01-20보다 67일 앞섭니다(KPI 60~90일).
+5. 경보마다 신호별 근거 칩(2주차 W 5·B 2개, 9주차 W 7·B 6개)과 참조 거래 적요가 보입니다. 추심: 2주차 `hardship_offer` 발송 + 재조정 요청,
+   9주차 발송 없이 재조정 요청(`revenue_shock`). 두 요청 모두 `pending_officer`.
+6. 2주차 재조정 `승인`(사유 입력) → "재조정 결정(approve)을 큐에 보냈습니다." → 상태 `approved`, 결정자 `demo-operator`·시각·사유 표시, 해당 폼 사라짐.
+7. `demo-injection-005`(STABLE 흐름) 신청 → 승인 → 재생 40초 → 경보 0건.
+
+### 문제 대응(P5a)
+
+- 대출 목록이 비어 있음: P5a 배포 전에 승인한 신청은 `loans` 문서가 없습니다. 새로 신청해 승인합니다.
+- 재생 상태가 `재생 실패`: 화면의 오류와 App Insights `traces`(`journey.monitoring`)를 봅니다. 버튼으로 바로 다시 시작할 수 있습니다.
+- 경보 모델이 `detector_only`: 에이전트 호출이 실패해 탐지기만으로 만든 경보입니다(조사 기록의 `record.error`).
+- Service Bus 모드에서 주차가 멈춤: `flow.updated/early-warning` 구독의 dead-letter를 확인합니다. 앞 주차가 안 끝나면 뒤 주차는 재시도됩니다.
+
+### 알려진 제약(P5a)
+
+- 사후 흐름은 합성 데이터이고, 재생은 실제 시간이 아니라 주차 단위로 압축됩니다. 연락은 실제로 발송하지 않고 기록만 합니다.
+- 업종 집단 통계는 코드에 고정된 합성 표입니다.
+- 인라인 모드는 13주를 한 번의 큐 트리거 안에서 처리합니다(Flex Consumption 기본 제한 30분).
+- 재조정 결정은 기록만 하고 상환 일정을 실제로 바꾸지 않습니다. 동의 만료·삭제와 이의 제기는 P5b입니다.

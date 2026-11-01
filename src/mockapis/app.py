@@ -1,13 +1,14 @@
 """Mock MyData·국세청·PG API. 데이터 접근마다 동의 토큰을 검증한다."""
 
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from mockapis.consent import ConsentError, ConsentRegistry, issue_token, verify_token
+from mockapis.postloan import PostLoanFlow
 from mockapis.synth import SyntheticCase
 from shared.contracts import ApplicantProfile, ConsentScope, PgSettlement, TaxFiling, Transaction
 
@@ -43,6 +44,7 @@ def create_app(
     cases: Mapping[str, SyntheticCase],
     secret: bytes,
     clock: Callable[[], datetime],
+    flows: Mapping[str, PostLoanFlow] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Mock MyData/Tax/PG API")
     registry = ConsentRegistry()
@@ -88,6 +90,21 @@ def create_app(
     @app.get("/mydata/transactions")
     def get_transactions(authorization: AuthHeader = None) -> list[Transaction]:
         return list(authorize(authorization, ConsentScope.ACCOUNT).transactions)
+
+    @app.get("/mydata/flow")
+    def get_flow(
+        authorization: AuthHeader = None, start: date | None = None, end: date | None = None
+    ) -> list[Transaction]:
+        """대출 실행 이후 거래(조기경보 재생용). start·end는 포함 구간이다."""
+        case = authorize(authorization, ConsentScope.ACCOUNT)
+        flow = (flows or {}).get(case.profile.applicant_id)
+        if flow is None:
+            raise _error(404, "no_flow")
+        return [
+            t
+            for t in flow.transactions
+            if (start is None or t.booked_on >= start) and (end is None or t.booked_on <= end)
+        ]
 
     @app.get("/tax/filings")
     def get_tax_filings(authorization: AuthHeader = None) -> list[TaxFiling]:
