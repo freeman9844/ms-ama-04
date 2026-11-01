@@ -1,5 +1,6 @@
 """Azure·HTTP 어댑터와 앱 설정에서 Deps 조립. Azure SDK는 지연 import한다."""
 
+import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
@@ -16,6 +17,8 @@ from journey.activities import (
     CLASSIFIER_MODEL,
     COLLECTIONS_MODEL,
     EW_MODEL,
+    GRIEVANCE_MODEL,
+    NOTICE_MODEL,
     REVIEWER_MODEL,
     Deps,
     StoreCache,
@@ -50,6 +53,14 @@ class HttpMockApi:
         )
         r.raise_for_status()
         return r.json()
+
+    def revoke(self, consent_id: str) -> str:
+        """Mock 레지스트리는 인메모리라 재시작 뒤에는 404(absent)일 수 있다."""
+        r = self._client.post(f"/consents/{consent_id}/revoke")
+        if r.status_code == 404:
+            return "absent"
+        r.raise_for_status()
+        return "revoked"
 
     def fetch(self, source: str, token: str) -> Any:
         try:
@@ -96,6 +107,20 @@ class CosmosStore:
         except CosmosResourceNotFoundError:
             return None
 
+    def replace(self, container: str, document: dict[str, Any], etag: str | None) -> bool:
+        from azure.core import MatchConditions
+        from azure.cosmos.exceptions import CosmosAccessConditionFailedError, CosmosResourceNotFoundError
+
+        client = self._db.get_container_client(container)
+        if etag is None:
+            client.upsert_item(document)
+            return True
+        try:
+            client.replace_item(document["id"], document, etag=etag, match_condition=MatchConditions.IfNotModified)
+        except (CosmosAccessConditionFailedError, CosmosResourceNotFoundError):
+            return False
+        return True
+
 
 class BlobRawStore:
     def __init__(self, account_url: str, credential: Any) -> None:
@@ -121,6 +146,41 @@ class BlobRawStore:
         except ResourceNotFoundError:
             return None
         return json.loads(data)
+
+    def manifest(self, container: str) -> list[dict[str, Any]] | None:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        client = self._svc.get_container_client(container)
+        try:
+            names = sorted(b.name for b in client.list_blobs())
+        except ResourceNotFoundError:
+            return None
+        out = []
+        for name in names:
+            data = client.download_blob(name).readall()
+            out.append({"name": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+        return out
+
+    def delete_container(self, container: str) -> bool:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            self._svc.delete_container(container)
+        except ResourceNotFoundError:
+            return False
+        return True
+
+
+class StorageQueueSender:
+    """함수 앱 호스트 저장소 큐. host.json이 messageEncoding=none이라 JSON 원문을 보낸다."""
+
+    def __init__(self, account_url: str, credential: Any) -> None:
+        from azure.storage.queue import QueueServiceClient
+
+        self._svc = QueueServiceClient(account_url, credential=credential)
+
+    def send(self, queue: str, message: dict[str, Any]) -> None:
+        self._svc.get_queue_client(queue).send_message(json.dumps(message, ensure_ascii=False))
 
 
 class ServiceBusPublisher:
@@ -165,6 +225,8 @@ def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[
         settings["classifier_model"] = env.get("CLASSIFIER_MODEL", CLASSIFIER_MODEL)
         settings["ew_model"] = env.get("EW_MODEL", EW_MODEL)
         settings["collections_model"] = env.get("COLLECTIONS_MODEL", COLLECTIONS_MODEL)
+        settings["notice_model"] = env.get("NOTICE_MODEL", NOTICE_MODEL)
+        settings["grievance_model"] = env.get("GRIEVANCE_MODEL", GRIEVANCE_MODEL)
     if (account := env.get("AI_ACCOUNT_ENDPOINT")) and (deployment := env.get("DECISION_DEPLOYMENT")):
         settings["decider"] = DecisionClient(account, deployment, lambda: token(COGNITIVE_SCOPE))
     return settings
@@ -185,5 +247,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> Deps:
         pseudonym_key=load_pseudonym_key(env, credential),
         clock=lambda: datetime.now(KST),
         cache=StoreCache(store),
+        # 동의 수명주기 예약에 꼭 필요하다(없으면 시작하지 않는다).
+        queue=StorageQueueSender(env["QUEUE_ENDPOINT"], credential),
         **agent_settings(env, lambda scope: credential.get_token(scope).token),
     )

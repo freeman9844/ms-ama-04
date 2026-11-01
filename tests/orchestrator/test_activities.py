@@ -17,9 +17,12 @@ from journey.activities import (
     assemble_data,
     assess_credit,
     evaluate_policy,
+    Conflict,
+    _remember_foundry,
     request_consent,
     save_document,
     underwrite,
+    update_doc,
 )
 from agents.txn_classify import DecisionClient
 from journey.adapters import HttpMockApi, HttpPolicyApi, PolicyUnavailable, agent_settings
@@ -37,14 +40,25 @@ NOW = datetime(2026, 11, 2, 9, 0, tzinfo=KST)
 
 class MemoryStore:
     def __init__(self):
-        self.docs = {}
+        self.docs, self.etags, self.conflicts = {}, {}, 0
 
     def upsert(self, container, document):
         self.docs[(container, document["id"])] = deepcopy(document)
+        self.etags[(container, document["id"])] = self.etags.get((container, document["id"]), 0) + 1
 
     def read(self, container, item_id, partition_key):
         doc = self.docs.get((container, item_id))
-        return deepcopy(doc) if doc else None
+        return {**deepcopy(doc), "_etag": str(self.etags[(container, item_id)])} if doc else None
+
+    def replace(self, container, document, etag):
+        key = (container, document["id"])
+        if self.conflicts:
+            self.conflicts -= 1
+            self.etags[key] += 1
+        if key not in self.docs or str(self.etags[key]) != etag:
+            return False
+        self.upsert(container, {k: v for k, v in document.items() if k != "_etag"})
+        return True
 
 
 class MemoryRaw:
@@ -56,6 +70,28 @@ class MemoryRaw:
 
     def get_json(self, container, name):
         return self.blobs.get((container, name))
+
+    def manifest(self, container):
+        names = sorted(n for c, n in self.blobs if c == container)
+        if not names:
+            return None
+        return [{"name": n, "size": len(json.dumps(self.blobs[(container, n)])), "sha256": "h"} for n in names]
+
+    def delete_container(self, container):
+        keys = [k for k in self.blobs if k[0] == container]
+        for k in keys:
+            del self.blobs[k]
+        return bool(keys)
+
+
+class MemoryQueue:
+    def __init__(self, fail=False):
+        self.sent, self.fail = [], fail
+
+    def send(self, queue, message):
+        if self.fail:
+            raise RuntimeError("queue down")
+        self.sent.append((queue, message))
 
 
 class Outbox:
@@ -89,6 +125,7 @@ def deps(mock_client):
         events=Outbox(),
         pseudonym_key=KEY,
         clock=lambda: NOW,
+        queue=MemoryQueue(),
     )
 
 
@@ -392,3 +429,88 @@ def test_agent_settings_builds_agents_decider_and_models():
     assert settings["agents"] is not None
     assert (settings["analyst_model"], settings["reviewer_model"]) == ("gpt-x", "gpt-5.4-mini")
     assert settings["classifier_model"] == "gpt-5.4-mini"
+    assert (settings["notice_model"], settings["grievance_model"]) == ("gpt-5.4-mini", "gpt-5.4-mini")
+
+
+def test_request_consent_schedules_lifecycle(deps):
+    consent = consent_for(deps)
+    ((queue, message),) = deps.queue.sent
+    assert queue == "consent-lifecycle"
+    assert message == {"consent_id": consent["consent_id"], "expires_at": consent["expires_at"]}
+    doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])
+    assert doc["lifecycle_error"] is None and doc["status"] == "granted"
+
+
+def test_request_consent_without_queue_records_error(deps):
+    d = with_deps(deps, queue=None)
+    consent = consent_for(d)
+    assert d.store.read("consents", consent["consent_id"], consent["consent_id"])["lifecycle_error"] == "queue_disabled"
+
+
+def test_request_consent_fails_closed_when_lifecycle_cannot_be_scheduled(deps):
+    d = with_deps(deps, queue=MemoryQueue(fail=True))
+    with pytest.raises(RuntimeError, match="queue down"):
+        consent_for(d)
+    ((_, doc),) = [(k, v) for k, v in d.store.docs.items() if k[0] == "consents"]
+    assert doc["status"] == "void" and "queue down" in doc["lifecycle_error"]
+
+
+def test_update_doc_retries_on_etag_conflict(deps):
+    deps.store.upsert("consents", {"id": "c1", "n": 0})
+    deps.store.conflicts = 2
+    doc = update_doc(deps.store, "consents", "c1", "c1", lambda d: d.update(n=d["n"] + 1))
+    assert doc["n"] == 1 and deps.store.read("consents", "c1", "c1")["n"] == 1
+    assert update_doc(deps.store, "consents", "zz", "zz", lambda d: None) is None
+    deps.store.conflicts = 10
+    with pytest.raises(Conflict):
+        update_doc(deps.store, "consents", "c1", "c1", lambda d: d.update(n=5), attempts=3)
+
+
+def test_update_doc_skips_write_when_mutate_returns_false(deps):
+    deps.store.upsert("consents", {"id": "c1", "n": 0})
+    before = deps.store.etags[("consents", "c1")]
+    update_doc(deps.store, "consents", "c1", "c1", lambda d: False)
+    assert deps.store.etags[("consents", "c1")] == before
+
+
+class CleanupRunner:
+    def __init__(self):
+        self.deleted_conversations, self.deleted_containers = [], []
+
+    def delete_conversation(self, conversation_id):
+        self.deleted_conversations.append(conversation_id)
+        return "deleted"
+
+    def delete_container(self, container_id):
+        self.deleted_containers.append(container_id)
+        return True
+
+
+def test_remember_foundry_on_ended_consent_deletes_immediately(deps):
+    runner = CleanupRunner()
+    d = with_deps(deps, agents=runner)
+    d.store.upsert("consents", {"id": "c1", "consent_id": "c1", "status": "revoked", "foundry_conversations": []})
+    _remember_foundry(d, "c1", ["conv_late"], [{"id": "cntr_late", "deleted": False}])
+    doc = d.store.read("consents", "c1", "c1")
+    assert runner.deleted_conversations == ["conv_late"] and runner.deleted_containers == ["cntr_late"]
+    assert doc["foundry_conversations"] == []
+    assert doc["late_cleanup"] == [
+        {"kind": "conversation", "target": "conv_late", "outcome": "deleted", "at": NOW.isoformat()},
+        {"kind": "container", "target": "cntr_late", "outcome": "deleted", "at": NOW.isoformat()},
+    ]
+
+
+def test_remember_foundry_on_live_consent_appends(deps):
+    deps.store.upsert("consents", {"id": "c1", "consent_id": "c1", "status": "granted", "foundry_conversations": ["a"]})
+    _remember_foundry(deps, "c1", ["a", "b"], [{"id": "k", "deleted": True}])
+    doc = deps.store.read("consents", "c1", "c1")
+    assert doc["foundry_conversations"] == ["a", "b"] and doc["foundry_containers"] == [{"id": "k", "deleted": True}]
+
+
+def test_mock_revoke(mock_client, deps):
+    consent = consent_for(deps)
+    api = HttpMockApi(client=mock_client)
+    assert api.revoke(consent["consent_id"]) == "revoked"
+    with pytest.raises(SourceError):
+        api.fetch("profile", consent["token"])
+    assert api.revoke("unknown") == "absent"

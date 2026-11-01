@@ -37,14 +37,31 @@ LOAN = "app-1"
 
 class MemoryStore:
     def __init__(self):
-        self.docs = {}
+        self.docs, self.etags = {}, {}
 
     def upsert(self, container, document):
-        self.docs[(container, document["id"])] = deepcopy(document)
+        key = (container, document["id"])
+        self.docs[key] = {k: v for k, v in deepcopy(document).items() if k != "_etag"}
+        self.etags[key] = self.etags.get(key, 0) + 1
 
     def read(self, container, item_id, partition_key):
         doc = self.docs.get((container, item_id))
-        return deepcopy(doc) if doc else None
+        return {**deepcopy(doc), "_etag": str(self.etags[(container, item_id)])} if doc else None
+
+    def replace(self, container, document, etag):
+        key = (container, document["id"])
+        if key not in self.docs or str(self.etags[key]) != etag:
+            return False
+        self.upsert(container, document)
+        return True
+
+
+class MemoryQueue:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, queue, message):
+        self.sent.append((queue, message))
 
 
 class MemoryRaw:
@@ -128,6 +145,7 @@ def make_deps(mock_app, events=None, agents=None):
         pseudonym_key=KEY,
         clock=lambda: NOW,
         agents=agents,
+        queue=MemoryQueue(),
     )
 
 
@@ -342,3 +360,22 @@ def test_unknown_loan_and_bad_messages(mock_app):
     assert handle_replay(deps, "not json") is None
     assert handle_alert_raised(deps, json.dumps({"type": "alert.raised", "loan_id": LOAN, "alert_id": "x"})) is None
     assert process_week(deps, LOAN, "rp-x", 1) is None
+
+
+def test_replay_schedules_monitoring_consent_lifecycle(mock_app):
+    deps = make_deps(mock_app)
+    underwriting = approved_loan(deps)
+    replay(deps)
+    mon_consent = loan(deps)["monitoring"]["consent_id"]
+    scheduled = [m["consent_id"] for q, m in deps.queue.sent if q == "consent-lifecycle"]
+    assert scheduled == [underwriting["consent_id"], mon_consent]
+
+
+def test_replay_refused_after_underwriting_consent_ended(mock_app):
+    deps = make_deps(mock_app)
+    underwriting = approved_loan(deps)
+    doc = deps.store.read("consents", underwriting["consent_id"], underwriting["consent_id"])
+    deps.store.upsert("consents", {**doc, "status": "expired"})
+    assert replay(deps) is None
+    assert loan(deps)["monitoring"] is None
+    assert len(deps.queue.sent) == 1

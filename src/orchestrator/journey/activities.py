@@ -16,7 +16,7 @@ from agents.features import compute_underwriting
 from agents.monitoring import Baseline
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
-from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS
+from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
 from shared.contracts import ApplicantProfile, TaxFiling, Transaction
 
 CONTAINERS = ("applications", "consents")
@@ -26,6 +26,10 @@ REVIEWER_MODEL = "gpt-5.4-mini"
 CLASSIFIER_MODEL = "gpt-5.4-mini"
 EW_MODEL = "gpt-5.4"
 COLLECTIONS_MODEL = "gpt-5.4-mini"
+NOTICE_MODEL = "gpt-5.4-mini"
+GRIEVANCE_MODEL = "gpt-5.4-mini"
+LIFECYCLE_QUEUE = "consent-lifecycle"
+ENDED_CONSENT = ("expired", "revoked")
 LOANS_CONTAINER = "loans"
 TOPIC_CONSENT = "consent"
 EVENT_CONSENT_GRANTED = "consent.granted"
@@ -36,16 +40,32 @@ _FILINGS = TypeAdapter(list[TaxFiling])
 class DocumentStore(Protocol):
     def upsert(self, container: str, document: dict[str, Any]) -> None: ...
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None: ...
+    def replace(self, container: str, document: dict[str, Any], etag: str | None) -> bool:
+        """etag가 같을 때만 교체한다. 다른 쓰기가 끼어들었으면 False."""
+        ...
 
 
 class RawStore(Protocol):
     def put_json(self, container: str, name: str, value: Any) -> None: ...
     def get_json(self, container: str, name: str) -> Any | None: ...
+    def manifest(self, container: str) -> list[dict[str, Any]] | None:
+        """[{name, size, sha256}]. 컨테이너가 없으면 None."""
+        ...
+    def delete_container(self, container: str) -> bool:
+        """삭제했으면 True, 원래 없었으면 False."""
+        ...
 
 
 class MockApi(Protocol):
     def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int) -> dict[str, Any]: ...
     def fetch(self, source: str, token: str) -> Any: ...
+    def revoke(self, consent_id: str) -> str:
+        """revoked | absent(레지스트리에 없음)."""
+        ...
+
+
+class QueueSender(Protocol):
+    def send(self, queue: str, message: dict[str, Any]) -> None: ...
 
 
 class PolicyApi(Protocol):
@@ -76,6 +96,33 @@ class Deps:
     classifier_model: str = CLASSIFIER_MODEL
     ew_model: str = EW_MODEL
     collections_model: str = COLLECTIONS_MODEL
+    queue: QueueSender | None = None
+    notice_model: str = NOTICE_MODEL
+    grievance_model: str = GRIEVANCE_MODEL
+
+
+class Conflict(RuntimeError):
+    """etag 경합이 계속돼 문서를 고치지 못했다."""
+
+
+def update_doc(
+    store: DocumentStore,
+    container: str,
+    item_id: str,
+    partition_key: str,
+    mutate: Callable[[dict[str, Any]], Any],
+    attempts: int = 5,
+) -> dict[str, Any] | None:
+    """읽기-수정-조건부 교체. mutate가 False를 돌려주면 쓰지 않는다. 문서가 없으면 None."""
+    for _ in range(attempts):
+        doc = store.read(container, item_id, partition_key)
+        if doc is None:
+            return None
+        if mutate(doc) is False:
+            return doc
+        if store.replace(container, doc, doc.get("_etag")):
+            return doc
+    raise Conflict(f"{container}/{item_id}: 동시 수정 충돌")
 
 
 class StoreCache:
@@ -101,6 +148,28 @@ def save_document(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"허용되지 않은 컨테이너: {container}")
     deps.store.upsert(container, payload["document"])
     return {"id": payload["document"]["id"]}
+
+
+def schedule_lifecycle(deps: Deps, doc: dict[str, Any]) -> None:
+    """동의 수명주기(만료 타이머·갱신 안내·삭제)를 예약한다.
+
+    큐가 없으면(로컬·테스트) 기록만 남긴다. 전송이 실패하면 동의를 무효(void)로 남기고 예외를 올린다.
+    만료 처리가 예약되지 않은 동의로는 데이터를 가져오지 않는다(fail-closed).
+    """
+    doc["lifecycle_error"] = None
+    if deps.queue is None:
+        doc["lifecycle_error"] = "queue_disabled"
+        deps.store.upsert("consents", doc)
+        return
+    deps.store.upsert("consents", doc)
+    message = LifecycleStart(consent_id=doc["consent_id"], expires_at=doc["expires_at"])
+    try:
+        deps.queue.send(LIFECYCLE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
+    except Exception as e:
+        doc["status"] = "void"
+        doc["lifecycle_error"] = f"{type(e).__name__}: {e}"[:300]
+        deps.store.upsert("consents", doc)
+        raise
 
 
 def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
@@ -137,7 +206,7 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
             doc["event_published"] = True
         except Exception as e:  # noqa: BLE001 - 알림 실패가 동의 자체를 무효로 하지 않는다
             doc["event_error"] = f"{type(e).__name__}: {e}"[:300]
-    deps.store.upsert("consents", doc)
+    schedule_lifecycle(deps, doc)
     return {"consent_id": consent_id, "token": grant["token"], "scopes": scopes, "expires_at": grant["expires_at"]}
 
 
@@ -161,16 +230,45 @@ def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
 def _remember_foundry(
     deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]]
 ) -> None:
-    """동의 철회 시 삭제할 Foundry 대화·컨테이너를 동의 문서에 남긴다(P5 철회 처리)."""
+    """동의 만료·철회 때 삭제할 Foundry 대화·컨테이너를 동의 문서에 남긴다.
+
+    삭제가 이미 끝난 동의(늦게 끝난 에이전트 실행)면 바로 지우고 late_cleanup에 기록한다.
+    """
     if not conversations and not containers:
         return
-    consent = deps.store.read("consents", consent_id, consent_id)
-    if consent is None:
-        return
-    known = consent.setdefault("foundry_conversations", [])
-    known.extend(c for c in conversations if c not in known)
-    consent.setdefault("foundry_containers", []).extend(containers)
-    deps.store.upsert("consents", consent)
+
+    def mutate(consent: dict[str, Any]) -> None:
+        if consent.get("status") in ENDED_CONSENT:
+            consent.setdefault("late_cleanup", []).extend(_cleanup_now(deps, conversations, containers))
+            return
+        known = consent.setdefault("foundry_conversations", [])
+        known.extend(c for c in conversations if c not in known)
+        consent.setdefault("foundry_containers", []).extend(containers)
+
+    update_doc(deps.store, "consents", consent_id, consent_id, mutate)
+
+
+def _cleanup_now(
+    deps: Deps, conversations: list[str], containers: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    at, out = deps.clock().isoformat(), []
+    for cid in conversations:
+        outcome = "failed"
+        if deps.agents is not None:
+            try:
+                outcome = str(deps.agents.delete_conversation(cid))  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                outcome = "failed"
+        out.append({"kind": "conversation", "target": cid, "outcome": outcome, "at": at})
+    for c in containers:
+        deleted = bool(c.get("deleted"))
+        if not deleted and deps.agents is not None:
+            try:
+                deleted = bool(deps.agents.delete_container(c["id"]))
+            except Exception:  # noqa: BLE001
+                deleted = False
+        out.append({"kind": "container", "target": c["id"], "outcome": "deleted" if deleted else "failed", "at": at})
+    return out
 
 
 def _load(deps: Deps, consent_id: str) -> tuple[ApplicantProfile, list[Transaction], list[TaxFiling]]:

@@ -18,7 +18,15 @@ from agents.collections import CollectionsContext, act
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
 from agents.monitoring import WEEKS, Baseline, categorize, detect, week_window, weekly_series
-from journey.activities import _TRANSACTIONS, Deps, _remember_foundry, _semantic, raw_container
+from journey.activities import (
+    _TRANSACTIONS,
+    ENDED_CONSENT,
+    Deps,
+    _remember_foundry,
+    _semantic,
+    raw_container,
+    schedule_lifecycle,
+)
 from journey.models import (
     CONSENT_TTL_DAYS,
     MONITORING_PURPOSE,
@@ -61,11 +69,17 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
     if replay_in_progress(loan.get("monitoring"), deps.clock()):
         log.warning("재생 진행 중이라 새 재생 요청 무시: %s", loan_id)
         return None
+    underwriting_consent = loan["underwriting_consent_id"]
+    consent = deps.store.read("consents", underwriting_consent, underwriting_consent)
+    if consent is not None and consent.get("status") in ENDED_CONSENT:
+        # 사후 탐지는 심사 동의로 받은 프로필(가명화 키)이 필요하다. 동의가 끝나면 원천 데이터가 없다.
+        log.warning("심사 동의가 끝나 재생할 수 없음: %s (%s)", loan_id, consent.get("status"))
+        return None
     scopes = list(MONITORING_SCOPES)
     grant = deps.mock.create_consent(loan["applicant_id"], scopes, MONITORING_PURPOSE, CONSENT_TTL_DAYS)
     consent_id, now = grant["consent_id"], deps.clock().isoformat()
-    deps.store.upsert(
-        "consents",
+    schedule_lifecycle(
+        deps,
         {
             "id": consent_id,
             "consent_id": consent_id,
