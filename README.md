@@ -255,6 +255,29 @@ python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 2
 
 증분 배포는 리소스를 지우지 않으므로 Easy Auth 설정(`authConfigs`)은 남기고 `platform.enabled`만 끕니다. Entra 앱 등록도 그대로입니다.
 
+### 실제 배포 기록(P4b, 2026-11-01, koreacentral)
+
+| 단계 | 명령 | 시간 | 결과 |
+|---|---|---|---|
+| Service Bus 재개 | `ops resume` | 4.5분 | 성공 |
+| 배포 창 | `ops window open --acr` | 4.1분 | Graph 확장으로 Entra 앱·역할·운영자 CreditOfficer 할당 생성 |
+| 콘솔 | `ops deploy console` | 4.1분 | 리비전 Healthy, Key Vault 가명 키 로드 |
+| 오케스트레이터 | `ops deploy orchestrator` | 5.0분 | 성공 |
+| 창 닫기 | `ops window close` | 3.8분 | 성공 |
+| smoke | `ops smoke` | 2.7분 | 25개 점검 + 로그인 없는 접근 → Entra 로그인 리디렉션(client_id 일치) |
+| 데모 모드 전환 | `CONSOLE_AUTH_ENABLED=false` 후 window open → deploy console → window close | 4.0 + 4.2 + 4.3분 | 성공 |
+| smoke(데모 모드) | `ops smoke` | 2.4분 | 25개 점검 + 운영자 IP에서 200 |
+| 정리 | `ops pause` | 6.0분 | Service Bus 삭제(콘솔은 데모 모드로 유지) |
+
+브라우저 확인 결과:
+
+- Easy Auth 모드: 로그인 시 "관리자 승인 필요"(테넌트가 사용자 동의를 막음, 운영자는 Global Reader). 운영자 본인에 대한
+  위임 권한 부여(openid·profile·email)를 만든 뒤 로그인·목록·`새 신청` 화면(CreditOfficer 역할 필요)까지 확인했습니다.
+  역할 클레임 파싱은 정상입니다. `/.auth/me`는 토큰 저장소를 쓰지 않아 앱의 404가 보입니다. 다만 브라우저의 `새 신청` 제출(POST)이
+  앱에 도달하지 않고 빈 403으로 끝나 CLI로 재현하지 못했고, 데모는 데모 모드로 진행했습니다.
+- 데모 모드: `새 신청`(demo-cafe-001, 50,000,000원, 12개월) → 접수 대기(404 자동 새로고침) → 상세 → `승인` 결정(202) →
+  최종 상태 `approved`와 타임라인의 심사역 결정을 확인했습니다.
+
 ### 문제 대응(P4b)
 
 - 콘솔이 403(빈 화면): 현재 공인 IP가 `CONSOLE_IP`와 다릅니다. `python -m ops window open` → `window close`.
@@ -271,5 +294,7 @@ python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 2
 - Easy Auth는 클라이언트 비밀 없이 ID 토큰(암시적 흐름)만 씁니다. 운영 설계는 Key Vault 비밀 또는 페더레이션 자격 증명으로
   권한 부여 코드 흐름을 쓰고, 콘솔은 internal 환경 + Application Gateway WAF 뒤에 둡니다.
 - 콘솔 인증 흐름(실제 Entra 로그인 → 결정)은 자동 테스트가 없습니다. smoke는 로그인 없는 접근이 Entra로 리디렉션되는지만 봅니다.
+- 데모 모드(`CONSOLE_AUTH_ENABLED=false`)에서는 IP 허용 목록만 진입을 막고, 결정 기록의 심사역 ID는 고정 값(`demo-operator`)입니다.
+  데모 후 `azd env set CONSOLE_AUTH_ENABLED true`로 되돌리고 다시 프로비저닝합니다.
 - 목록은 Cosmos 교차 파티션 `ORDER BY updated_at` 최근 50건입니다(페이지 없음).
 - 콘솔이 보낸 결정의 결과는 상세 화면 새로 고침(진행 중 10초 자동)으로 확인합니다. 큐 처리 실패는 오케스트레이터 로그에 남습니다.
