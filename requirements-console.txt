@@ -1,0 +1,12 @@
+# 심사역 콘솔 컨테이너 의존성(고정). 로컬 개발은 pyproject.toml을 씁니다.
+fastapi==0.162.0
+starlette==1.9.0
+uvicorn==0.54.0
+pydantic==2.14.1
+jinja2==3.1.6
+httpx==0.28.1
+azure-identity==1.27.0
+azure-cosmos==4.17.1
+azure-storage-blob==12.31.1
+azure-storage-queue==12.18.1
+azure-keyvault-secrets==4.12.0
