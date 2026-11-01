@@ -16,6 +16,9 @@ param mockConsentSecret string
 param pseudonymKey string
 param policyImage string
 param mockapiImage string
+param consoleImage string
+@description('콘솔에 접속할 운영자 공인 IPv4. 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
+param consoleIp string
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -41,9 +44,12 @@ var names = {
   idOrchestrator: 'id-orch-${environmentName}'
   idApps: 'id-apps-${environmentName}'
   idSmoke: 'id-smoke-${environmentName}'
+  idConsole: 'id-console-${environmentName}'
   smokeJob: 'job-smoke'
   caPolicy: 'ca-policy'
   caMockapi: 'ca-mockapi'
+  caConsole: 'ca-console'
+  consoleApp: 'amalend-console-${environmentName}-${sfx}'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -118,6 +124,7 @@ module identities 'modules/identities.bicep' = {
       orchestrator: names.idOrchestrator
       apps: names.idApps
       smoke: names.idSmoke
+      console: names.idConsole
     }
     location: location
     tags: tags
@@ -151,6 +158,7 @@ module keyVault 'modules/keyvault.bicep' = {
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.appsPrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.kvValueReader, principalType: sp }
+      { principalId: identities.outputs.consolePrincipalId, roleId: role.kvValueReader, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.kvValueAdmin, principalType: 'User' }
     ] : [])
@@ -192,6 +200,7 @@ module stData 'modules/storage.bicep' = {
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobContributor, principalType: sp }
       { principalId: identities.outputs.appsPrincipalId, roleId: role.blobContributor, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.blobReader, principalType: sp }
+      { principalId: identities.outputs.consolePrincipalId, roleId: role.blobReader, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.blobContributor, principalType: 'User' }
     ] : [])
@@ -217,6 +226,7 @@ module stFunc 'modules/storage.bicep' = {
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.queueContributor, principalType: sp }
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.tableContributor, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.queueSender, principalType: sp }
+      { principalId: identities.outputs.consolePrincipalId, roleId: role.queueSender, principalType: sp }
     ]
   }
 }
@@ -238,6 +248,7 @@ module cosmos 'modules/cosmos.bicep' = {
       { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
       { principalId: identities.outputs.appsPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
       { principalId: identities.outputs.smokePrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000001', scope: 'account' }
+      { principalId: identities.outputs.consolePrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000001', scope: 'database' }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'account' }
     ] : [])
@@ -378,6 +389,7 @@ module acr 'modules/acr.bicep' = {
     zoneId: zoneId['privatelink.azurecr.io']
     roleAssignments: concat([
       { principalId: identities.outputs.appsPrincipalId, roleId: role.acrPull, principalType: sp }
+      { principalId: identities.outputs.consolePrincipalId, roleId: role.acrPull, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.acrPush, principalType: 'User' }
     ] : [])
@@ -504,6 +516,49 @@ module functions 'modules/functions.bicep' = {
 }
 
 output FUNCTION_APP_NAME string = functions.outputs.name
+
+// ── 심사역 콘솔 (P4b) ──────────────────────────────────────────────────
+// 외부 Container Apps 환경(snet-apps-web, 같은 VNet이라 Private Endpoint DNS가 풀립니다).
+// 진입은 운영자 IP 허용 목록 + Entra 로그인(앱 역할)으로 막습니다.
+var consoleFqdn = '${names.caConsole}.${acaWeb.outputs.defaultDomain}'
+
+module consoleAuth 'modules/console-auth.bicep' = {
+  name: 'console-auth'
+  params: {
+    uniqueName: names.consoleApp
+    displayName: 'AMA Lending 심사 콘솔 (${environmentName})'
+    redirectUri: 'https://${consoleFqdn}/.auth/login/aad/callback'
+    operatorPrincipalId: operatorPrincipalId
+  }
+}
+
+module caConsole 'modules/container-app.bicep' = {
+  name: 'ca-console'
+  params: {
+    name: names.caConsole
+    location: location
+    tags: tags
+    serviceName: 'console'
+    environmentId: acaWeb.outputs.id
+    identityId: identities.outputs.consoleId
+    identityClientId: identities.outputs.consoleClientId
+    registryServer: acr.outputs.loginServer
+    image: consoleImage
+    ipAllowList: [ empty(consoleIp) ? '192.0.2.0/32' : '${consoleIp}/32' ]
+    authClientId: consoleAuth.outputs.clientId
+    envVars: [
+      { name: 'COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
+      { name: 'COSMOS_DATABASE', value: cosmos.outputs.databaseName }
+      { name: 'DATA_BLOB_ENDPOINT', value: stData.outputs.blobEndpoint }
+      { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${storageSuffix}/' }
+      { name: 'KEYVAULT_URI', value: keyVault.outputs.uri }
+    ]
+  }
+}
+
+output CONSOLE_APP_NAME string = caConsole.outputs.name
+output CONSOLE_URL string = 'https://${consoleFqdn}'
+output CONSOLE_CLIENT_ID string = consoleAuth.outputs.clientId
 
 // ── VNet 안 smoke Job (T8) ─────────────────────────────────────────────
 // Private Endpoint가 있는 모든 호스트. VNet 안에서 사설 IP로 해석되어야 합니다.
