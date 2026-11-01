@@ -69,8 +69,8 @@ Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provisio
 | `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창). 실측 11.0분(Cosmos 갱신이 약 8분) |
 | `python -m ops window status` | 창 상태 확인. 공인 IP가 바뀌었으면 경고(종료 코드 2) |
 | `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행). 실측 10.8분 |
-| `python -m ops deploy [policy\|mockapi\|orchestrator\|all]` | 앱 배포(P3): 정책·Mock 이미지 ACR Build → 프로비저닝, Function zip. `window open --acr` 필요 |
-| `python -m ops smoke` | VNet 안 smoke Job 실행 |
+| `python -m ops deploy [policy\|mockapi\|console\|orchestrator\|all]` | 앱 배포(P3·P4b): 정책·Mock·콘솔 이미지 ACR Build → 프로비저닝, Function zip. `window open --acr` 필요 |
+| `python -m ops smoke` | VNet 안 smoke Job 실행 + 운영자 PC에서 콘솔 로그인 관문 확인(P4b) |
 | `python -m ops pause` / `resume` | Service Bus Premium 삭제/복구(비용 절감). 실측 pause 5.8분, resume 4.7분 |
 | `python -m ops teardown --confirm rg-amalend` | capability host → Foundry 계정 purge → 리소스 그룹 삭제 → Key Vault purge |
 
@@ -196,3 +196,62 @@ python -m ops smoke                # P2 점검 + health:policy, health:mockapi, 
 - 데모 데이터에서 규칙 미분류 적요는 공급업체 송금뿐이라 의미 분류가 특성을 바꾸지 않습니다. 보수적 반영은 단위 테스트로 검증합니다.
 - 수치 근거 검사는 숫자 일치만 봅니다. 해석의 타당성은 검토 에이전트 판정에 의존합니다.
 - `demo-stress-003`은 고금리 대출이 감지되어도 정책상 eligible입니다(P3 규칙). 분석가는 이를 claim·counterfactual로 드러냅니다.
+
+## 심사역 콘솔(P4b)
+
+심사역이 신청 목록·상세(심사 에이전트 근거)를 보고 승인·조건부 승인·거절을 내리는 웹 콘솔입니다(`src/console`, FastAPI +
+서버 렌더링 HTML, 목록만 htmx 폴링). 결정은 P3와 같은 `officer-decisions` 큐로 보내고, 최종 판단은 오케스트레이터가
+정책 한도와 함께 다시 검증합니다.
+
+| 구성 | 위치 | 비고 |
+|------|------|------|
+| 콘솔 | `ca-console`(external 환경 `cae-web`, `snet-apps-web`) | 관리 ID `id-console`: Cosmos `lending` 읽기, 데이터 Blob 읽기, 큐 보내기, Key Vault 비밀 읽기, ACR pull |
+| 진입 통제 | ingress IP 허용(`CONSOLE_IP`/32) + Easy Auth(Entra 로그인 강제) | `CONSOLE_IP`가 비면 TEST-NET 주소만 허용(fail-closed) |
+| 앱 등록 | Bicep Graph 확장(`infra/modules/console-auth.bicep`) | 앱 역할 `CreditOfficer`·`CreditManager`·`Auditor`, 역할 할당 필수, 운영자에게 `CreditOfficer` 부여 |
+
+| 역할 | 목록·상세 | 실명 복원 | 결정·새 신청 |
+|------|-----------|-----------|--------------|
+| `CreditOfficer`, `CreditManager` | 가능 | 가능(동의된 원천 데이터로 가명 토큰 복원) | 가능 |
+| `Auditor` | 가능 | 불가(가명 토큰 그대로) | 불가(403) |
+| 역할 없음 | 불가(Entra가 로그인 거부: 역할 할당 필수) | | |
+
+- 심사역 ID(`officer_id`)는 폼 값이 아니라 Easy Auth 헤더(`X-MS-CLIENT-PRINCIPAL`)의 로그인 사용자에서 가져옵니다.
+- 결정·새 신청은 CSRF 토큰(가명 키 HMAC, 복제본 간 동일)과 `application/x-www-form-urlencoded`만 받습니다.
+  응답에는 CSP(`script-src 'self'` + htmx SRI), `no-store`, `nosniff`, `no-referrer`를 붙입니다.
+- 결정 가능한 상태는 `awaiting_officer`, `escalated`뿐이고, 금액은 정책 한도(`max_amount_krw`) 이하만 보냅니다.
+
+### 배포 순서(P4b)
+
+```powershell
+python -m ops resume                       # 선택: Service Bus 이벤트까지 보려면
+python -m ops window open --acr            # CONSOLE_IP도 운영자 IP로 설정(창을 닫아도 유지)
+python -m ops deploy console               # 콘솔 이미지 + 프로비저닝(Graph 앱 등록·Easy Auth 포함)
+python -m ops deploy orchestrator          # P4a 리뷰 수정분 포함 Function 재배포
+python -m ops window close
+python -m ops smoke                        # 25개 점검 + 콘솔 관문(로그인 없이 접근 → Entra 로그인 리디렉션)
+python -m ops pause
+```
+
+브라우저로 `azd env get-value CONSOLE_URL`을 열어 로그인합니다(허용 IP에서만). `새 신청`으로 데모 사업자를 넣고
+`awaiting_officer`가 되면 상세 화면에서 결정합니다. 공인 IP가 바뀌면 `python -m ops window open` 후 `window close`로
+`CONSOLE_IP`를 갱신합니다.
+
+다른 사용자에게 역할을 줄 때는 Entra 관리 센터 → 엔터프라이즈 애플리케이션 → `AMA Lending 심사 콘솔 (<환경>)` →
+사용자 및 그룹에서 할당합니다. 운영자 자신을 `Auditor`로 바꿔 보려면 같은 화면에서 역할을 바꾸고 다시 로그인합니다.
+
+### 문제 대응(P4b)
+
+- 콘솔이 403(빈 화면): 현재 공인 IP가 `CONSOLE_IP`와 다릅니다. `python -m ops window open` → `window close`.
+- 로그인 후 `AADSTS50105`(역할 미할당): 엔터프라이즈 애플리케이션에서 사용자에게 앱 역할을 할당합니다.
+- 로그인 후 `AADSTS50011`(redirect URI 불일치): `azd provision`이 Container Apps 기본 도메인으로 redirect URI를 다시 씁니다.
+  `ops window open`/`close` 중 하나를 다시 실행하세요.
+- 로그인은 되지만 403 "역할 없음": 토큰에 `roles` 클레임이 없습니다. 역할을 할당한 뒤 로그아웃(`/.auth/logout`)하고 다시 로그인합니다.
+- 상세 화면의 실명이 "원천 데이터 없음": 동의 컨테이너(`consent-<동의 ID>`)가 없거나 만료 처리되었습니다(가명 그대로 표시).
+
+### 알려진 제약(P4b)
+
+- Easy Auth는 클라이언트 비밀 없이 ID 토큰(암시적 흐름)만 씁니다. 운영 설계는 Key Vault 비밀 또는 페더레이션 자격 증명으로
+  권한 부여 코드 흐름을 쓰고, 콘솔은 internal 환경 + Application Gateway WAF 뒤에 둡니다.
+- 콘솔 인증 흐름(실제 Entra 로그인 → 결정)은 자동 테스트가 없습니다. smoke는 로그인 없는 접근이 Entra로 리디렉션되는지만 봅니다.
+- 목록은 Cosmos 교차 파티션 `ORDER BY updated_at` 최근 50건입니다(페이지 없음).
+- 콘솔이 보낸 결정의 결과는 상세 화면 새로 고침(진행 중 10초 자동)으로 확인합니다. 큐 처리 실패는 오케스트레이터 로그에 남습니다.
