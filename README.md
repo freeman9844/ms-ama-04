@@ -247,6 +247,7 @@ Easy Auth를 끄고, 콘솔은 모든 요청을 고정 데모 사용자(`CONSOLE
 
 ```powershell
 azd env set CONSOLE_AUTH_ENABLED false     # 다시 켜려면 true
+azd env set CONSOLE_DEMO_ROLE Auditor      # 선택: 감사자(가명 읽기 전용) 데모. 기본 CreditOfficer
 python -m ops window open --acr            # 프로비저닝: authConfigs platform.enabled=false, CONSOLE_AUTH_MODE=demo
 python -m ops deploy console               # 데모 모드를 아는 콘솔 이미지
 python -m ops window close

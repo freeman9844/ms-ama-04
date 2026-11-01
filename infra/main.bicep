@@ -56,6 +56,10 @@ param consoleIp string = ''
 @description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). IP 허용 목록은 그대로입니다.')
 param consoleAuthEnabled bool = true
 
+@description('데모 모드의 고정 사용자 역할(azd env CONSOLE_DEMO_ROLE). Auditor면 가명 읽기 전용 데모입니다.')
+@allowed([ 'CreditOfficer', 'CreditManager', 'Auditor' ])
+param consoleDemoRole string = 'CreditOfficer'
+
 var tags = {
   'azd-env-name': environmentName
   project: 'ama-cashflow-lending'
@@ -96,6 +100,7 @@ module resources 'resources.bicep' = {
     consoleImage: consoleImage
     consoleIp: consoleIp
     consoleAuthEnabled: consoleAuthEnabled
+    consoleDemoRole: consoleDemoRole
   }
 }
 

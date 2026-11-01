@@ -21,6 +21,8 @@ param consoleImage string
 param consoleIp string
 @description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(IP 허용 목록만 남음, 데모 전용).')
 param consoleAuthEnabled bool
+@description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
+param consoleDemoRole string
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -555,7 +557,10 @@ module caConsole 'modules/container-app.bicep' = {
       { name: 'DATA_BLOB_ENDPOINT', value: stData.outputs.blobEndpoint }
       { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${storageSuffix}/' }
       { name: 'KEYVAULT_URI', value: keyVault.outputs.uri }
-    ], consoleAuthEnabled ? [] : [ { name: 'CONSOLE_AUTH_MODE', value: 'demo' } ])
+    ], consoleAuthEnabled ? [] : [
+      { name: 'CONSOLE_AUTH_MODE', value: 'demo' }
+      { name: 'CONSOLE_DEMO_ROLE', value: consoleDemoRole }
+    ])
   }
 }
 

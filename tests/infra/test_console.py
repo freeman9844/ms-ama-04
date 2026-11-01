@@ -144,3 +144,10 @@ def test_console_easy_auth_can_be_switched_off_for_demo(console_app_noauth, expa
     assert env["CONSOLE_AUTH_MODE"] == "demo"
     default = expand_azd({"OPERATOR_IP": "closed"})
     assert _deployment(default, "ca-console")["authEnabled"] is True
+
+
+def test_console_demo_role_reaches_the_container(expand_azd):
+    # README의 CONSOLE_DEMO_ROLE(예: Auditor 데모)이 실제 컨테이너까지 가야 합니다. 안 가면 앱은 CreditOfficer로 동작합니다.
+    demo = expand_azd({"CONSOLE_AUTH_ENABLED": "false", "CONSOLE_DEMO_ROLE": "Auditor", "OPERATOR_IP": "closed"})
+    env = {e["name"]: e.get("value") for e in demo.one(CA, "ca-console")["properties"]["template"]["containers"][0]["env"]}
+    assert env["CONSOLE_AUTH_MODE"] == "demo" and env["CONSOLE_DEMO_ROLE"] == "Auditor"
