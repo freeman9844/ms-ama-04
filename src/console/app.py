@@ -1,7 +1,7 @@
 """심사역 콘솔(FastAPI + Jinja2 + htmx).
 
 인증은 Container Apps 기본 인증(Easy Auth)이 맡고, 앱은 X-MS-CLIENT-PRINCIPAL의 앱 역할로 권한을 정한다.
-결정과 신규 신청은 큐 메시지로만 오케스트레이터에 전달한다(콘솔은 Cosmos 읽기 전용).
+결정·신규 신청·사후 재생·재조정 결정은 큐 메시지로만 오케스트레이터에 전달한다(콘솔은 Cosmos 읽기 전용).
 """
 
 import hashlib
@@ -21,13 +21,24 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
+from console.monitoring import (
+    ACTION_LABELS,
+    MONITORING_LABELS,
+    SEVERITY_LABELS,
+    TRIGGER_LABELS,
+    MonitoringStore,
+    load_monitoring_raw,
+    loan_view,
+)
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
-from journey.models import KST, OfficerMessage, StartRequest
+from journey.models import KST, OfficerMessage, ReplayRequest, RestructureDecision, StartRequest, replay_in_progress
 from journey.validation import validate_officer_decision
 
 HERE = Path(__file__).parent
 START_QUEUE = "applications-start"
 DECISION_QUEUE = "officer-decisions"
+REPLAY_QUEUE = "monitoring-replay"
+RESTRUCTURE_QUEUE = "restructure-decisions"
 MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
 DEMO_APPLICANTS = ("demo-cafe-001", "demo-mismatch-002", "demo-stress-003", "demo-thin-004", "demo-injection-005")
@@ -87,6 +98,8 @@ class ConsoleDeps:
     new_application_id: Callable[[], str] = field(default=_new_application_id)
     # 데모 모드(Easy Auth 끔): 운영자 IP 허용 목록만 남고 모든 요청을 이 주체로 처리한다.
     demo_principal: Principal | None = None
+    monitoring: MonitoringStore | None = None
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(KST))
 
 
 def _krw(value: Any) -> str:
@@ -98,6 +111,10 @@ def _templates() -> Environment:
     env.filters["krw"] = _krw
     env.filters["status_label"] = lambda s: STATUS_LABELS.get(s or "", s or "-")
     env.filters["path"] = lambda s: quote(str(s), safe="")
+    env.filters["monitoring_label"] = lambda s: MONITORING_LABELS.get(s or "", "재생 전")
+    env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
+    env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
+    env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
     env.globals.update(htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS)
     return env
 
@@ -242,5 +259,76 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         message = OfficerMessage(application_id=application_id, decision=decision.model_dump(mode="json"))
         deps.queue.send(DECISION_QUEUE, message.model_dump(mode="json"))
         return render("sent.html", user, 202, application_id=application_id, decision=decision)
+
+    def monitoring_store() -> MonitoringStore:
+        if deps.monitoring is None:
+            raise HTTPException(404, "monitoring not configured")
+        return deps.monitoring
+
+    def loan_or_404(loan_id: str) -> dict[str, Any]:
+        loan = monitoring_store().get_loan(loan_id)
+        if loan is None:
+            raise HTTPException(404, "loan not found")
+        return loan
+
+    def loan_page(user: Principal, loan: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
+        mon = loan.get("monitoring") or {}
+        alerts = monitoring_store().list_alerts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else []
+        raw = load_monitoring_raw(deps.raw, loan)
+        view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore)
+        blocked = replay_in_progress(mon, deps.clock())
+        return render("loan.html", user, status_code, v=view, replay_blocked=blocked, **ctx)
+
+    @app.get("/loans", response_class=HTMLResponse)
+    def loans(request: Request) -> HTMLResponse:
+        user = viewer(request)
+        return render("loans.html", user, rows=monitoring_store().list_loans(LIST_LIMIT))
+
+    @app.get("/loans/{loan_id}", response_class=HTMLResponse)
+    def loan_detail(loan_id: str, request: Request) -> HTMLResponse:
+        user = viewer(request)
+        return loan_page(user, loan_or_404(loan_id))
+
+    @app.post("/loans/{loan_id}/replay", response_class=HTMLResponse)
+    async def replay(loan_id: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        await checked_form(request, user)
+        loan = loan_or_404(loan_id)
+        if replay_in_progress(loan.get("monitoring"), deps.clock()):
+            return loan_page(user, loan, 409, error="이미 재생이 진행 중입니다.")
+        deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json"))
+        return render(
+            "loan_sent.html", user, 202, loan_id=loan["id"],
+            message="사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.",
+        )
+
+    @app.post("/loans/{loan_id}/alerts/{alert_id}/restructure", response_class=HTMLResponse)
+    async def restructure(loan_id: str, alert_id: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        form = await checked_form(request, user)
+        loan = loan_or_404(loan_id)
+        replay_id = (loan.get("monitoring") or {}).get("replay_id")
+        alerts = monitoring_store().list_alerts(loan["id"], replay_id) if replay_id else []
+        alert = next((a for a in alerts if a.get("alert_id") == alert_id), None)
+        if alert is None:
+            raise HTTPException(404, "alert not found")
+        if (alert.get("restructure") or {}).get("status") != "pending_officer":
+            raise HTTPException(409, "restructure request is not pending")
+        reason = form.get("reason", "").strip()
+        try:
+            # 심사역 ID는 폼이 아니라 로그인 주체에서만 가져온다.
+            message = RestructureDecision(
+                loan_id=loan["id"], alert_id=alert_id, decision=form.get("decision", ""),
+                officer_id=user.user_id, reason=reason,
+            )
+        except ValidationError:
+            return loan_page(user, loan, 422, error="재조정 결정 형식이 올바르지 않습니다.")
+        if not reason:
+            return loan_page(user, loan, 422, error="사유를 입력해야 합니다.")
+        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        return render(
+            "loan_sent.html", user, 202, loan_id=loan["id"],
+            message=f"재조정 결정({message.decision})을 큐에 보냈습니다.",
+        )
 
     return app

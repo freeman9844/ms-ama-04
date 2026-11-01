@@ -1,8 +1,9 @@
 """콘솔의 Azure 어댑터(관리 ID). Azure SDK는 지연 import한다.
 
-- Cosmos `applications`: 읽기 전용(Built-in Data Reader)
+- Cosmos `applications`·`loans`·`alerts`: 읽기 전용(Built-in Data Reader, 데이터베이스 범위)
 - Blob 원천 데이터: 읽기 전용(실명 복원용)
-- Storage Queue: applications-start·officer-decisions에 보내기만 한다(Functions host.json messageEncoding=none)
+- Storage Queue: applications-start·officer-decisions·monitoring-replay·restructure-decisions에 보내기만 한다
+  (Functions host.json messageEncoding=none)
 """
 
 import json
@@ -14,6 +15,8 @@ from console.app import ConsoleDeps
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
 
 APPLICATIONS = "applications"
+LOANS = "loans"
+ALERTS = "alerts"
 PSEUDONYM_SECRET = "pseudonym-key"
 LIST_QUERY = (
     "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, "
@@ -38,6 +41,41 @@ class CosmosApplications:
             if getattr(e, "status_code", None) == 404:
                 return None
             raise
+
+
+LOANS_QUERY = (
+    "SELECT TOP @limit c.id, c.applicant_id, c.industry, c.amount_krw, c.tenor_months, c.updated_at, "
+    "c.monitoring.status AS monitoring_status, ARRAY_LENGTH(c.monitoring.alert_ids) AS alerts "
+    "FROM c ORDER BY c.updated_at DESC"
+)
+# 같은 파티션(loan_id)에 연락 기록 문서(contacts-*)도 있어 id 접두사로 경보만 고른다.
+ALERTS_QUERY = "SELECT * FROM c WHERE c.replay_id = @replay AND STARTSWITH(c.id, 'ew-')"
+
+
+class CosmosMonitoring:
+    def __init__(self, loans: Any, alerts: Any) -> None:
+        self._loans = loans
+        self._alerts = alerts
+
+    def list_loans(self, limit: int) -> list[dict[str, Any]]:
+        items = self._loans.query_items(
+            query=LOANS_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
+        )
+        return list(items)
+
+    def get_loan(self, loan_id: str) -> dict[str, Any] | None:
+        try:
+            return self._loans.read_item(item=loan_id, partition_key=loan_id)
+        except Exception as e:  # noqa: BLE001 - SDK를 import하지 않고 404만 None으로 바꾼다
+            if getattr(e, "status_code", None) == 404:
+                return None
+            raise
+
+    def list_alerts(self, loan_id: str, replay_id: str) -> list[dict[str, Any]]:
+        items = self._alerts.query_items(
+            query=ALERTS_QUERY, parameters=[{"name": "@replay", "value": replay_id}], partition_key=loan_id
+        )
+        return list(items)
 
 
 class BlobRawStore:
@@ -65,12 +103,10 @@ class StorageQueueSender:
         self._queue_client(queue).send_message(json.dumps(message, ensure_ascii=False))
 
 
-def _cosmos_container(endpoint: str, database: str, credential: Any) -> Any:
+def _cosmos_database(endpoint: str, database: str, credential: Any) -> Any:
     from azure.cosmos import CosmosClient
 
-    return CosmosClient(endpoint, credential=credential).get_database_client(database).get_container_client(
-        APPLICATIONS
-    )
+    return CosmosClient(endpoint, credential=credential).get_database_client(database)
 
 
 def _queue_factory(endpoint: str, credential: Any) -> Callable[[str], Any]:
@@ -115,8 +151,10 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
     cfg = {name: env[name] for name in REQUIRED_ENV}
     demo = demo_principal(env)
     credential = ManagedIdentityCredential(client_id=cfg["AZURE_CLIENT_ID"])
+    db = _cosmos_database(cfg["COSMOS_ENDPOINT"], cfg["COSMOS_DATABASE"], credential)
     return ConsoleDeps(
-        store=CosmosApplications(_cosmos_container(cfg["COSMOS_ENDPOINT"], cfg["COSMOS_DATABASE"], credential)),
+        store=CosmosApplications(db.get_container_client(APPLICATIONS)),
+        monitoring=CosmosMonitoring(db.get_container_client(LOANS), db.get_container_client(ALERTS)),
         raw=BlobRawStore(cfg["DATA_BLOB_ENDPOINT"], credential),
         queue=StorageQueueSender(_queue_factory(cfg["QUEUE_ENDPOINT"], credential)),
         pseudonym_key=load_pseudonym_key(env, credential),

@@ -3,7 +3,7 @@
 {% block head %}{% if in_progress %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block title %}{{ d.application_id }} · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
-<p><a href="/">← 목록</a></p>
+<p><a href="/">← 목록</a>{% if d.monitoring %} · <a href="/loans/{{ d.application_id|path }}">사후 모니터링</a>{% endif %}</p>
 <h1>{{ d.application_id }} <span class="status s-{{ d.status }}">{{ d.status|status_label }}</span></h1>
 <dl class="facts">
   <dt>신청인</dt><dd>{{ d.applicant_id }}</dd>
