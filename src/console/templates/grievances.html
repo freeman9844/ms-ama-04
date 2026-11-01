@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}이의제기 · AMA Lending 심사 콘솔{% endblock %}
+{% block main %}
+<h1>이의제기</h1>
+<table>
+  <thead><tr><th>이의제기 ID</th><th>신청</th><th>신청인</th><th>상태</th><th>접수</th><th>처리</th></tr></thead>
+  <tbody>
+{% for r in rows %}
+<tr>
+  <td><a href="/grievances/{{ r.application_id|path }}/{{ r.grievance_id|path }}">{{ r.grievance_id }}</a></td>
+  <td>{{ r.application_id }}</td>
+  <td>{{ r.applicant_id }}</td>
+  <td><span class="status g-{{ r.status }}">{{ r.status|grievance_status }}</span></td>
+  <td>{{ r.submitted_at }}</td>
+  <td>{{ r.resolved_at or "" }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6">이의제기가 없습니다. 차주 시뮬레이터에서 제출할 수 있습니다.</td></tr>
+{% endfor %}
+  </tbody>
+</table>
+{% endblock %}

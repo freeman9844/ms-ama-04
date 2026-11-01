@@ -1,8 +1,10 @@
 """콘솔의 Azure 어댑터(관리 ID). Azure SDK는 지연 import한다.
 
-- Cosmos `applications`·`loans`·`alerts`: 읽기 전용(Built-in Data Reader, 데이터베이스 범위)
+- Cosmos `applications`·`loans`·`alerts`·`consents`·`deletion_proofs`·`grievances`:
+  읽기 전용(Built-in Data Reader, 데이터베이스 범위)
 - Blob 원천 데이터: 읽기 전용(실명 복원용)
-- Storage Queue: applications-start·officer-decisions·monitoring-replay·restructure-decisions에 보내기만 한다
+- Storage Queue: applications-start·officer-decisions·monitoring-replay·restructure-decisions·
+  consent-commands·grievances·grievance-decisions에 보내기만 한다
   (Functions host.json messageEncoding=none)
 """
 
@@ -17,6 +19,9 @@ from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
 APPLICATIONS = "applications"
 LOANS = "loans"
 ALERTS = "alerts"
+CONSENTS = "consents"
+PROOFS = "deletion_proofs"
+GRIEVANCES = "grievances"
 PSEUDONYM_SECRET = "pseudonym-key"
 LIST_QUERY = (
     "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, "
@@ -76,6 +81,62 @@ class CosmosMonitoring:
             query=ALERTS_QUERY, parameters=[{"name": "@replay", "value": replay_id}], partition_key=loan_id
         )
         return list(items)
+
+
+CONSENTS_BY_APPLICANT = "SELECT * FROM c WHERE c.applicant_id = @applicant ORDER BY c.granted_at DESC"
+CONSENTS_BY_APPLICATION = "SELECT * FROM c WHERE c.application_id = @application ORDER BY c.granted_at DESC"
+# 목록에는 차주가 쓴 이의 내용(text)을 싣지 않는다.
+GRIEVANCES_QUERY = (
+    "SELECT TOP @limit c.id, c.grievance_id, c.application_id, c.applicant_id, c.status, c.submitted_at, "
+    "c.resolved_at FROM c ORDER BY c.submitted_at DESC"
+)
+GRIEVANCES_BY_APPLICANT = "SELECT * FROM c WHERE c.applicant_id = @applicant ORDER BY c.submitted_at DESC"
+
+
+def _read_or_none(container: Any, item: str, partition_key: str) -> dict[str, Any] | None:
+    try:
+        return container.read_item(item=item, partition_key=partition_key)
+    except Exception as e:  # noqa: BLE001 - SDK를 import하지 않고 404만 None으로 바꾼다
+        if getattr(e, "status_code", None) == 404:
+            return None
+        raise
+
+
+class CosmosPrivacy:
+    """동의(consents), 삭제 증명(deletion_proofs), 이의제기(grievances) 읽기."""
+
+    def __init__(self, consents: Any, proofs: Any, grievances: Any) -> None:
+        self._consents = consents
+        self._proofs = proofs
+        self._grievances = grievances
+
+    @staticmethod
+    def _query(container: Any, query: str, name: str, value: Any) -> list[dict[str, Any]]:
+        items = container.query_items(
+            query=query, parameters=[{"name": name, "value": value}], enable_cross_partition_query=True
+        )
+        return list(items)
+
+    def consents_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
+        return self._query(self._consents, CONSENTS_BY_APPLICANT, "@applicant", applicant_id)
+
+    def consents_for_application(self, application_id: str) -> list[dict[str, Any]]:
+        return self._query(self._consents, CONSENTS_BY_APPLICATION, "@application", application_id)
+
+    def get_consent(self, consent_id: str) -> dict[str, Any] | None:
+        return _read_or_none(self._consents, consent_id, consent_id)
+
+    def get_proof(self, consent_id: str) -> dict[str, Any] | None:
+        return _read_or_none(self._proofs, consent_id, consent_id)
+
+    def list_grievances(self, limit: int) -> list[dict[str, Any]]:
+        return self._query(self._grievances, GRIEVANCES_QUERY, "@limit", limit)
+
+    def grievances_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
+        return self._query(self._grievances, GRIEVANCES_BY_APPLICANT, "@applicant", applicant_id)
+
+    def get_grievance(self, application_id: str, grievance_id: str) -> dict[str, Any] | None:
+        return _read_or_none(self._grievances, grievance_id, application_id)
 
 
 class BlobRawStore:
@@ -155,6 +216,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
     return ConsoleDeps(
         store=CosmosApplications(db.get_container_client(APPLICATIONS)),
         monitoring=CosmosMonitoring(db.get_container_client(LOANS), db.get_container_client(ALERTS)),
+        privacy=CosmosPrivacy(*(db.get_container_client(name) for name in (CONSENTS, PROOFS, GRIEVANCES))),
         raw=BlobRawStore(cfg["DATA_BLOB_ENDPOINT"], credential),
         queue=StorageQueueSender(_queue_factory(cfg["QUEUE_ENDPOINT"], credential)),
         pseudonym_key=load_pseudonym_key(env, credential),

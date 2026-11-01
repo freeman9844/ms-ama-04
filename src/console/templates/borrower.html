@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ applicant_id }} · 차주 시뮬레이터{% endblock %}
+{% block main %}
+<p><a href="/borrower">← 차주 선택</a></p>
+<h1>{{ applicant_id }} <small>차주 화면(데모)</small></h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+<section>
+<h2>동의 관리</h2>
+{% for c in consents %}
+<article class="consent">
+  <h3>{{ c.purpose }} <span class="status c-{{ c.status }}">{{ c.status|consent_status }}</span> <small>{{ c.consent_id }}</small></h3>
+  <p>{% for s in c.scopes %}<span class="chip">{{ s|scope_label }}</span>{% endfor %} · 만료 {{ c.expires_at }}{% if c.ended_at %} · 종료 {{ c.ended_at }}{% endif %}</p>
+  {% if c.deletion_proof_id %}<p><a href="/consents/{{ c.deletion_proof_id|path }}/proof">삭제 증명 보기</a></p>{% endif %}
+  {% for n in c.notices or [] %}
+  <details><summary>{{ n.kind|notice_label }}: {{ n.title }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body }}</p></details>
+  {% endfor %}
+  {% if c.status == "granted" and user.can_decide %}
+  <form method="post" action="/borrower/{{ applicant_id|path }}/consents/{{ c.consent_id|path }}/revoke" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">동의 철회</button>
+  </form>
+  {% endif %}
+</article>
+{% else %}
+<p>동의 기록이 없습니다.</p>
+{% endfor %}
+</section>
+
+<section>
+<h2>이의제기</h2>
+{% set decided = applications|selectattr("officer_decision")|list %}
+{% if decided and user.can_decide %}
+<form method="post" action="/borrower/{{ applicant_id|path }}/grievances" class="decision">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>신청 <select name="application_id">{% for a in decided %}<option value="{{ a.application_id }}"{% if form and form.application_id == a.application_id %} selected{% endif %}>{{ a.application_id }} · {{ a.status|status_label }}</option>{% endfor %}</select></label>
+  <label>이의 내용(1000자 이내) <textarea name="text" rows="4" maxlength="1000">{{ form.text if form else "" }}</textarea></label>
+  <button type="submit">이의제기 제출</button>
+</form>
+{% elif not decided %}
+<p>결정이 난 신청이 없어 이의제기를 할 수 없습니다.</p>
+{% endif %}
+{% for g in grievances %}
+<article class="grievance">
+  <h3>{{ g.application_id }} <span class="status g-{{ g.status }}">{{ g.status|grievance_status }}</span> <small>{{ g.grievance_id }} · {{ g.submitted_at }}</small></h3>
+  <p class="quote">{{ g.text }}</p>
+  {% if g.reply %}<details open><summary>회신: {{ g.reply.title }}</summary><p class="notice">{{ g.reply.body }}</p></details>{% endif %}
+</article>
+{% endfor %}
+</section>
+{% endblock %}

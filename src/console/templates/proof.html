@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}삭제 증명 {{ p.consent_id }} · AMA Lending 심사 콘솔{% endblock %}
+{% block main %}
+<p>{% if p.application_id %}<a href="/applications/{{ p.application_id|path }}">← 신청 {{ p.application_id }}</a>{% endif %}</p>
+<h1>삭제 증명 {{ p.consent_id }} <span class="status {{ 'ok' if p.complete else 'warn' }}">{{ "완료" if p.complete else "미완료" }}</span></h1>
+<dl class="facts">
+  <dt>사유</dt><dd>{{ p.reason|reason_label }} ({{ p.trigger }})</dd>
+  <dt>요청자</dt><dd>{{ p.requested_by }}</dd>
+  <dt>삭제 시각</dt><dd>{{ p.deleted_at }}</dd>
+  <dt>시도</dt><dd>{{ p.attempts }}회</dd>
+  <dt>이벤트</dt><dd>{{ "발행" if p.event_published else (p.event_error or "미발행") }}</dd>
+</dl>
+<section>
+<h2>삭제 항목</h2>
+<table>
+  <thead><tr><th>항목</th><th>대상</th><th>결과</th><th>검증</th><th>비고</th></tr></thead>
+  <tbody>{% for i in p["items"] %}<tr><td>{{ i.kind|item_label }}</td><td>{{ i.target }}</td><td>{{ i.outcome }}</td><td>{{ "확인" if i.verified else "실패" }}</td><td>{{ i.detail or "" }}</td></tr>{% endfor %}</tbody>
+</table>
+</section>
+<section>
+<h2>삭제 전 원천 데이터 목록 <small>sha256 {{ p.manifest_sha256 }}</small></h2>
+<table>
+  <thead><tr><th>파일</th><th>크기(바이트)</th><th>sha256</th></tr></thead>
+  <tbody>{% for m in p.manifest %}<tr><td>{{ m.name }}</td><td>{{ m.size }}</td><td><code>{{ m.sha256 }}</code></td></tr>{% else %}<tr><td colspan="3">삭제 시점에 남은 원천 파일이 없었습니다.</td></tr>{% endfor %}</tbody>
+</table>
+</section>
+<section>
+<h2>보존 항목</h2>
+<ul>{% for r in p.retained %}<li>{{ r.target }} — {{ r.note }}</li>{% else %}<li>없음</li>{% endfor %}</ul>
+</section>
+{% endblock %}

@@ -11,11 +11,14 @@
   <dt>접수</dt><dd>{{ d.received_at }}</dd>
   {% if d.sla %}<dt>SLA 마감</dt><dd>{{ d.sla.deadline }}{% if d.sla.escalated %} (초과){% endif %}</dd>{% endif %}
   {% if d.flags %}<dt>플래그</dt><dd>{% for f in d.flags %}<span class="chip warn">{{ f }}</span>{% endfor %}</dd>{% endif %}
+  {% if d.withdrawal %}<dt>동의 철회</dt><dd>{{ d.withdrawal.consent_id }} · {{ d.withdrawal.requested_by }} · {{ d.withdrawal.at }}</dd>{% endif %}
   {% if d.error %}<dt>오류</dt><dd class="error">{{ d.error.stage }}: {{ d.error.message }}</dd>{% endif %}
 </dl>
 {% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
 {% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
 {% else %}<p class="pii">가명 표시 중(감사자 권한은 실명을 볼 수 없습니다).</p>{% endif %}
+
+{% if consents is not none %}{% include "_consents.html" %}{% endif %}
 
 <section>
 <h2>타임라인</h2>

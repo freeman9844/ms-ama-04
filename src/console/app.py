@@ -1,7 +1,8 @@
 """심사역 콘솔(FastAPI + Jinja2 + htmx).
 
 인증은 Container Apps 기본 인증(Easy Auth)이 맡고, 앱은 X-MS-CLIENT-PRINCIPAL의 앱 역할로 권한을 정한다.
-결정·신규 신청·사후 재생·재조정 결정은 큐 메시지로만 오케스트레이터에 전달한다(콘솔은 Cosmos 읽기 전용).
+결정·신규 신청·사후 재생·재조정 결정·동의 명령·이의제기는 큐 메시지로만 오케스트레이터에 전달한다
+(콘솔은 Cosmos 읽기 전용). /borrower는 차주 화면을 흉내 낸 데모 시뮬레이터다.
 """
 
 import hashlib
@@ -30,8 +31,19 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
+from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
-from journey.models import KST, OfficerMessage, ReplayRequest, RestructureDecision, StartRequest, replay_in_progress
+from journey.models import (
+    KST,
+    ConsentCommand,
+    GrievanceDecision,
+    GrievanceSubmission,
+    OfficerMessage,
+    ReplayRequest,
+    RestructureDecision,
+    StartRequest,
+    replay_in_progress,
+)
 from journey.validation import validate_officer_decision
 
 HERE = Path(__file__).parent
@@ -39,6 +51,9 @@ START_QUEUE = "applications-start"
 DECISION_QUEUE = "officer-decisions"
 REPLAY_QUEUE = "monitoring-replay"
 RESTRUCTURE_QUEUE = "restructure-decisions"
+CONSENT_COMMAND_QUEUE = "consent-commands"
+GRIEVANCE_QUEUE = "grievances"
+GRIEVANCE_DECISION_QUEUE = "grievance-decisions"
 MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
 DEMO_APPLICANTS = ("demo-cafe-001", "demo-mismatch-002", "demo-stress-003", "demo-thin-004", "demo-injection-005")
@@ -49,7 +64,7 @@ CSP = (
     "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self'; "
     "img-src 'self' data:; frame-ancestors 'none'"
 )
-TERMINAL = frozenset({"approved", "conditionally_approved", "declined", "closed_no_decision", "failed"})
+TERMINAL = frozenset({"approved", "conditionally_approved", "declined", "closed_no_decision", "withdrawn", "failed"})
 STATUS_LABELS = {
     "received": "접수",
     "consent_granted": "동의 완료",
@@ -63,6 +78,7 @@ STATUS_LABELS = {
     "conditionally_approved": "조건부 승인",
     "declined": "거절",
     "closed_no_decision": "미결 종료",
+    "withdrawn": "철회 종료",
     "failed": "실패",
 }
 DECISION_ERRORS = {
@@ -89,6 +105,10 @@ def _new_application_id() -> str:
     return f"app-{datetime.now(KST):%Y%m%d}-{secrets.token_hex(3)}"
 
 
+def _new_grievance_id() -> str:
+    return f"grv-{secrets.token_hex(6)}"
+
+
 @dataclass
 class ConsoleDeps:
     store: ApplicationStore
@@ -100,6 +120,8 @@ class ConsoleDeps:
     demo_principal: Principal | None = None
     monitoring: MonitoringStore | None = None
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(KST))
+    privacy: PrivacyStore | None = None
+    new_grievance_id: Callable[[], str] = field(default=_new_grievance_id)
 
 
 def _krw(value: Any) -> str:
@@ -115,7 +137,11 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
     env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
-    env.globals.update(htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS)
+    for name, labels in LABEL_FILTERS.items():
+        env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
+    env.globals.update(
+        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS
+    )
     return env
 
 
@@ -186,7 +212,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw = load_raw(deps.raw, doc) if doc.get("consent") else None
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
-        return render("detail.html", user, status_code, v=view, in_progress=in_progress, **ctx)
+        consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
+        return render("detail.html", user, status_code, v=view, in_progress=in_progress, consents=consents, **ctx)
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
@@ -330,5 +357,161 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             "loan_sent.html", user, 202, loan_id=loan["id"],
             message=f"재조정 결정({message.decision})을 큐에 보냈습니다.",
         )
+
+    # ── 동의 수명주기·이의제기(P5b) ──
+
+    def privacy() -> PrivacyStore:
+        if deps.privacy is None:
+            raise HTTPException(404, "privacy views not configured")
+        return deps.privacy
+
+    def sent(user: Principal, message: str, back_url: str, back_label: str) -> HTMLResponse:
+        return render("privacy_sent.html", user, 202, message=message, back_url=back_url, back_label=back_label)
+
+    def borrower_page(user: Principal, applicant_id: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
+        store = privacy()
+        consents = store.consents_for_applicant(applicant_id)
+        applications = []
+        for application_id in dict.fromkeys(c["application_id"] for c in consents if c.get("application_id")):
+            doc = deps.store.get(application_id)
+            if doc is not None and doc.get("applicant_id") == applicant_id:
+                applications.append(doc)
+        return render(
+            "borrower.html", user, status_code, applicant_id=applicant_id, consents=consents,
+            applications=applications, grievances=store.grievances_for_applicant(applicant_id), **ctx,
+        )
+
+    @app.get("/borrower", response_class=HTMLResponse)
+    def borrower_index(request: Request) -> HTMLResponse:
+        user = viewer(request)
+        privacy()
+        return render("borrower_index.html", user)
+
+    @app.get("/borrower/{applicant_id}", response_class=HTMLResponse)
+    def borrower(applicant_id: str, request: Request) -> HTMLResponse:
+        return borrower_page(viewer(request), applicant_id)
+
+    @app.post("/borrower/{applicant_id}/consents/{consent_id}/revoke", response_class=HTMLResponse)
+    async def borrower_revoke(applicant_id: str, consent_id: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        await checked_form(request, user)
+        doc = privacy().get_consent(consent_id)
+        if doc is None or doc.get("applicant_id") != applicant_id:
+            raise HTTPException(404, "consent not found")
+        if doc.get("status") != "granted":
+            raise HTTPException(409, "consent is not active")
+        command = ConsentCommand(
+            consent_id=consent_id, action="revoke", requested_by=f"borrower:{applicant_id}"[:64],
+            application_id=doc.get("application_id"),
+        )
+        deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
+        back = f"/borrower/{quote(applicant_id, safe='')}"
+        return sent(user, f"동의 {consent_id} 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.",
+                    back, "차주 화면으로")
+
+    @app.post("/borrower/{applicant_id}/grievances", response_class=HTMLResponse)
+    async def borrower_grievance(applicant_id: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        form = await checked_form(request, user)
+        privacy()
+        application_id = form.get("application_id", "")
+        doc = deps.store.get(application_id)
+        if doc is None or doc.get("applicant_id") != applicant_id:
+            raise HTTPException(404, "application not found")
+        if not doc.get("officer_decision"):
+            raise HTTPException(409, "application has no decision yet")
+        try:
+            message = GrievanceSubmission(
+                grievance_id=deps.new_grievance_id(), application_id=application_id, applicant_id=applicant_id,
+                text=form.get("text", ""),
+            )
+        except ValidationError:
+            return borrower_page(user, applicant_id, 422, error="이의 내용은 1~1000자로 입력해야 합니다.", form=form)
+        deps.queue.send(GRIEVANCE_QUEUE, message.model_dump(mode="json"))
+        back = f"/borrower/{quote(applicant_id, safe='')}"
+        return sent(user, f"이의제기 {message.grievance_id}를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.",
+                    back, "차주 화면으로")
+
+    @app.post("/applications/{application_id}/consents/{consent_id}/{action}", response_class=HTMLResponse)
+    async def consent_demo(application_id: str, consent_id: str, action: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        await checked_form(request, user)
+        if action not in DEMO_ACTIONS:
+            raise HTTPException(404, "unknown action")
+        doc = privacy().get_consent(consent_id)
+        if doc is None or doc.get("application_id") != application_id:
+            raise HTTPException(404, "consent not found")
+        if doc.get("status") != "granted":
+            raise HTTPException(409, "consent is not active")
+        # 요청자는 폼이 아니라 로그인 주체에서만 가져온다.
+        command = ConsentCommand(
+            consent_id=consent_id, action=action, requested_by=user.user_id, application_id=application_id
+        )
+        deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
+        return sent(user, f"동의 {consent_id}에 '{DEMO_ACTIONS[action]}' 명령을 보냈습니다.",
+                    f"/applications/{quote(application_id, safe='')}", "신청 상세로")
+
+    @app.get("/consents/{consent_id}/proof", response_class=HTMLResponse)
+    def proof(consent_id: str, request: Request) -> HTMLResponse:
+        user = viewer(request)
+        doc = privacy().get_proof(consent_id)
+        if doc is None:
+            raise HTTPException(404, "deletion proof not found")
+        return render("proof.html", user, p=doc)
+
+    @app.get("/grievances", response_class=HTMLResponse)
+    def grievances(request: Request) -> HTMLResponse:
+        user = viewer(request)
+        return render("grievances.html", user, rows=privacy().list_grievances(LIST_LIMIT))
+
+    def grievance_or_404(application_id: str, grievance_id: str) -> dict[str, Any]:
+        doc = privacy().get_grievance(application_id, grievance_id)
+        if doc is None:
+            raise HTTPException(404, "grievance not found")
+        return doc
+
+    @app.get("/grievances/{application_id}/{grievance_id}", response_class=HTMLResponse)
+    def grievance(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
+        user = viewer(request)
+        return render("grievance.html", user, g=grievance_or_404(application_id, grievance_id))
+
+    @app.post("/grievances/{application_id}/{grievance_id}/decision", response_class=HTMLResponse)
+    async def grievance_decision(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        form = await checked_form(request, user)
+        doc = grievance_or_404(application_id, grievance_id)
+        if doc.get("status") != "pending_officer":
+            raise HTTPException(409, "grievance is not pending")
+        outcome = form.get("outcome", "")
+        rereview = outcome == "rereview"
+        new_decision = form.get("new_decision", "") if rereview else ""
+        amount_text = form.get("amount_krw", "").strip() if rereview and new_decision != "decline" else ""
+        amount = _int(amount_text) if amount_text else None
+
+        def invalid(message: str, code: str | None = None) -> HTMLResponse:
+            return render("grievance.html", user, 422, g=doc, error=message, error_code=code, form=form)
+
+        if amount_text and amount is None:
+            return invalid(DECISION_ERRORS["invalid_payload"])
+        try:
+            # 심사역 ID는 폼이 아니라 로그인 주체에서만 가져온다.
+            message = GrievanceDecision(
+                grievance_id=grievance_id, application_id=application_id, outcome=outcome,
+                officer_id=user.user_id, reason=form.get("reason", ""), new_decision=new_decision or None,
+                amount_krw=amount,
+                conditions=[c.strip() for c in form.get("conditions", "").splitlines() if c.strip()] if rereview else [],
+            )
+        except ValidationError:
+            return invalid("처리 결과와 사유를 확인하세요(재심사에는 새 결정이 필요합니다).")
+        if rereview:
+            proposed = message.model_dump(include={"officer_id", "amount_krw", "conditions", "reason"})
+            _, error = validate_officer_decision(
+                {**proposed, "decision": message.new_decision}, (doc.get("record") or {}).get("policy")
+            )
+            if error:
+                return invalid(DECISION_ERRORS.get(error, error), error)
+        deps.queue.send(GRIEVANCE_DECISION_QUEUE, message.model_dump(mode="json"))
+        return sent(user, f"이의제기 {grievance_id} 처리({outcome})를 보냈습니다. 회신 초안이 곧 기록됩니다.",
+                    f"/grievances/{quote(application_id, safe='')}/{quote(grievance_id, safe='')}", "이의제기로")
 
     return app

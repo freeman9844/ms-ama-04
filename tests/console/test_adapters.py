@@ -5,9 +5,14 @@ import pytest
 from console.adapters import (
     ALERTS_QUERY,
     LIST_QUERY,
+    CONSENTS_BY_APPLICANT,
+    CONSENTS_BY_APPLICATION,
+    GRIEVANCES_BY_APPLICANT,
+    GRIEVANCES_QUERY,
     LOANS_QUERY,
     CosmosApplications,
     CosmosMonitoring,
+    CosmosPrivacy,
     StorageQueueSender,
     build_deps,
 )
@@ -69,6 +74,30 @@ def test_monitoring_store_reads_loans_and_partitioned_alerts():
     assert "STARTSWITH(c.id, 'ew-')" in ALERTS_QUERY
 
 
+def test_privacy_store_reads_consents_proofs_and_grievances():
+    consents, proofs, grievances = FakeContainer([{"id": "c-1"}]), FakeContainer(), FakeContainer([{"id": "grv-1"}])
+    store = CosmosPrivacy(consents, proofs, grievances)
+    assert store.consents_for_applicant("demo-cafe-001") == [{"id": "c-1"}]
+    assert store.consents_for_application("app-1") == [{"id": "c-1"}]
+    assert consents.calls == [
+        ("query", CONSENTS_BY_APPLICANT, [{"name": "@applicant", "value": "demo-cafe-001"}], True),
+        ("query", CONSENTS_BY_APPLICATION, [{"name": "@application", "value": "app-1"}], True),
+    ]
+    assert store.get_consent("c-1") == {"id": "c-1"} and consents.calls[-1] == ("read", "c-1", "c-1")
+    assert store.get_proof("c-1") == {"id": "c-1"} and proofs.calls[-1] == ("read", "c-1", "c-1")
+    assert CosmosPrivacy(FakeContainer(missing=True), FakeContainer(missing=True), grievances).get_proof("c-x") is None
+    assert store.list_grievances(50) == [{"id": "grv-1"}]
+    assert store.grievances_for_applicant("demo-cafe-001") == [{"id": "grv-1"}]
+    assert grievances.calls == [
+        ("query", GRIEVANCES_QUERY, [{"name": "@limit", "value": 50}], True),
+        ("query", GRIEVANCES_BY_APPLICANT, [{"name": "@applicant", "value": "demo-cafe-001"}], True),
+    ]
+    # 이의제기는 신청 파티션(/application_id)에 있다.
+    assert store.get_grievance("app-1", "grv-1") == {"id": "grv-1"}
+    assert grievances.calls[-1] == ("read", "grv-1", "app-1")
+    assert "c.text" not in GRIEVANCES_QUERY
+
+
 def test_queue_sender_sends_plain_utf8_json():
     sent = {}
 
@@ -98,8 +127,8 @@ def test_build_deps_wires_env(monkeypatch):
         def get_container_client(self, name):
             return (name, *self.where)
 
-    for name in ("ManagedIdentityCredential", "CosmosApplications", "CosmosMonitoring", "BlobRawStore",
-                 "StorageQueueSender"):
+    for name in ("ManagedIdentityCredential", "CosmosApplications", "CosmosMonitoring", "CosmosPrivacy",
+                 "BlobRawStore", "StorageQueueSender"):
         monkeypatch.setattr(f"console.adapters.{name}", type(name, (Recorder,), {}), raising=True)
     monkeypatch.setattr("console.adapters._cosmos_database", lambda endpoint, db, cred: FakeDb(endpoint, db))
     monkeypatch.setattr("console.adapters._queue_factory", lambda endpoint, cred: ("queues", endpoint))
@@ -112,6 +141,8 @@ def test_build_deps_wires_env(monkeypatch):
     assert made["ManagedIdentityCredential"][1] == {"client_id": "cid"}
     assert made["CosmosApplications"][0] == (("applications", "https://cos", "lending"),)
     assert made["CosmosMonitoring"][0] == (("loans", "https://cos", "lending"), ("alerts", "https://cos", "lending"))
+    assert made["CosmosPrivacy"][0] == tuple(
+        (name, "https://cos", "lending") for name in ("consents", "deletion_proofs", "grievances"))
     assert made["BlobRawStore"][0][0] == "https://blob"
     assert made["StorageQueueSender"][0] == (("queues", "https://queue"),)
     assert deps.pseudonym_key == b"k" * 32
