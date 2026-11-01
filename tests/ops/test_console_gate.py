@@ -100,3 +100,23 @@ def test_cli_smoke_checks_console_gate_after_job(fake_runner, monkeypatch):
     assert main(["smoke"], runner=fake_runner(ENV), out=out) == 0
     assert order == ["job", ("gate", ENV["CONSOLE_URL"])]
     assert "콘솔" in out.getvalue()
+
+
+DEMO_ENV = ENV | {"CONSOLE_AUTH_ENABLED": "false"}
+
+
+def test_gate_in_demo_mode_expects_console_open_to_operator_ip():
+    fetch, calls = fake_fetch({f"{ENV['CONSOLE_URL']}/": (200, None)})
+    assert "데모 모드" in check_console_gate(DEMO_ENV, fetch)
+    assert calls == [f"{ENV['CONSOLE_URL']}/"]
+
+
+@pytest.mark.parametrize("status, location, message", [
+    (403, None, "window open"),
+    (302, LOGIN, "Easy Auth"),
+    (500, None, "HTTP 500"),
+])
+def test_gate_in_demo_mode_failures(status, location, message):
+    fetch, _ = fake_fetch({f"{ENV['CONSOLE_URL']}/": (status, location)})
+    with pytest.raises(OpsError, match=message):
+        check_console_gate(DEMO_ENV, fetch)

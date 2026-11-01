@@ -132,3 +132,15 @@ def test_console_identity_grants_are_least_privilege(closed):
 @pytest.mark.parametrize("output", ["CONSOLE_URL", "CONSOLE_CLIENT_ID", "CONSOLE_APP_NAME"])
 def test_console_outputs_exposed_to_azd(output):
     assert output in _compile(INFRA / "main.bicep")["outputs"]
+
+
+def test_console_easy_auth_can_be_switched_off_for_demo(console_app_noauth, expand_azd):
+    # 증분 배포는 리소스를 지우지 않으므로 authConfigs를 남기고 platform만 끕니다.
+    [auth] = console_app_noauth.of_type(f"{CA}/authConfigs")
+    assert auth["properties"]["platform"]["enabled"] is False
+    demo = expand_azd({"CONSOLE_AUTH_ENABLED": "false", "OPERATOR_IP": "closed"})
+    assert _deployment(demo, "ca-console")["authEnabled"] is False
+    env = {e["name"]: e.get("value") for e in demo.one(CA, "ca-console")["properties"]["template"]["containers"][0]["env"]}
+    assert env["CONSOLE_AUTH_MODE"] == "demo"
+    default = expand_azd({"OPERATOR_IP": "closed"})
+    assert _deployment(default, "ca-console")["authEnabled"] is True

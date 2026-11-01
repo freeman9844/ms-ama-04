@@ -15,6 +15,21 @@ from ops.azcli import OpsError
 LOGIN_HOST = "login.microsoftonline.com"
 MAX_HOPS = 4
 Fetch = Callable[[str], "tuple[int, str | None]"]
+_IP_BLOCKED = ("콘솔이 현재 IP를 막았습니다(403). 콘솔 허용 IP는 CONSOLE_IP입니다: "
+               "`python -m ops window open`으로 갱신한 뒤 `window close` 하세요.")
+
+
+def _check_demo_console(url: str, fetch: Fetch) -> str:
+    """데모 모드(CONSOLE_AUTH_ENABLED=false): Easy Auth가 꺼져 운영자 IP에서 바로 열려야 합니다."""
+    status, _ = fetch(url)
+    if status == 403:
+        raise OpsError(_IP_BLOCKED)
+    if status in (301, 302, 303, 307, 308):
+        raise OpsError(f"{url}: 데모 모드인데 리디렉션합니다(HTTP {status}). Easy Auth가 아직 켜져 있습니다: "
+                       "`python -m ops window open` 으로 다시 프로비저닝하세요.")
+    if status != 200:
+        raise OpsError(f"{url}: 예상하지 못한 응답 HTTP {status}")
+    return "데모 모드: Entra 로그인 꺼짐, 운영자 IP에서 콘솔이 열립니다(IP 허용 목록만 적용)"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -42,13 +57,14 @@ def check_console_gate(env: dict[str, str], fetch: Fetch = urllib_fetch) -> str:
     base, client_id = env.get("CONSOLE_URL"), env.get("CONSOLE_CLIENT_ID")
     if not base or not client_id:
         raise OpsError("CONSOLE_URL/CONSOLE_CLIENT_ID가 azd 환경에 없습니다. `azd provision` 후 다시 실행하세요.")
+    if env.get("CONSOLE_AUTH_ENABLED") == "false":
+        return _check_demo_console(base.rstrip("/") + "/", fetch)
     console_host = urllib.parse.urlsplit(base).hostname
     url = base.rstrip("/") + "/"
     for _ in range(MAX_HOPS):
         status, location = fetch(url)
         if status == 403:
-            raise OpsError("콘솔이 현재 IP를 막았습니다(403). 콘솔 허용 IP는 CONSOLE_IP입니다: "
-                           "`python -m ops window open`으로 갱신한 뒤 `window close` 하세요.")
+            raise OpsError(_IP_BLOCKED)
         if status == 200:
             raise OpsError(f"{url}: 로그인 없이 200을 돌려줍니다. Easy Auth(authConfigs)를 확인하세요.")
         if status not in (301, 302, 303, 307, 308) or not location:

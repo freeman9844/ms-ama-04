@@ -13,8 +13,9 @@
 <header>
   <a class="brand" href="/">AMA Lending 심사 콘솔</a>
   <span class="who">{{ user.name }} · {{ user.roles|sort|join(", ") }}</span>
-  <a href="/.auth/logout">로그아웃</a>
+  {% if not demo %}<a href="/.auth/logout">로그아웃</a>{% endif %}
 </header>
+{% if demo %}<p class="demo-banner">데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.</p>{% endif %}
 <main>
 {% block main %}{% endblock %}
 </main>

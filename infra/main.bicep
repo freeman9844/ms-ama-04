@@ -53,6 +53,9 @@ param consoleImage string = ''
 @description('심사역 콘솔 접속 허용 IPv4(ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
 param consoleIp string = ''
 
+@description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). IP 허용 목록은 그대로입니다.')
+param consoleAuthEnabled bool = true
+
 var tags = {
   'azd-env-name': environmentName
   project: 'ama-cashflow-lending'
@@ -92,6 +95,7 @@ module resources 'resources.bicep' = {
     mockapiImage: mockapiImage
     consoleImage: consoleImage
     consoleIp: consoleIp
+    consoleAuthEnabled: consoleAuthEnabled
   }
 }
 

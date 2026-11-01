@@ -85,6 +85,8 @@ class ConsoleDeps:
     queue: QueueSender
     pseudonym_key: bytes
     new_application_id: Callable[[], str] = field(default=_new_application_id)
+    # 데모 모드(Easy Auth 끔): 운영자 IP 허용 목록만 남고 모든 요청을 이 주체로 처리한다.
+    demo_principal: Principal | None = None
 
 
 def _krw(value: Any) -> str:
@@ -140,11 +142,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
     def render(name: str, user: Principal | None, status_code: int = 200, **ctx: Any) -> HTMLResponse:
         csrf = csrf_token(csrf_key, user.user_id) if user else ""
-        html = templates.get_template(name).render(user=user, csrf=csrf, **ctx)
+        html = templates.get_template(name).render(user=user, csrf=csrf, demo=deps.demo_principal is not None, **ctx)
         return HTMLResponse(html, status_code=status_code)
 
     def viewer(request: Request) -> Principal:
-        user = parse_principal(request.headers.get(PRINCIPAL_HEADER))
+        user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
         if user is None:
             raise HTTPException(401, "login required")
         if not user.can_view:

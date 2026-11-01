@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from console.app import ConsoleDeps
+from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
 
 APPLICATIONS = "applications"
 PSEUDONYM_SECRET = "pseudonym-key"
@@ -94,14 +95,30 @@ def ManagedIdentityCredential(**kwargs: Any) -> Any:  # noqa: N802 - 테스트�
 
 
 REQUIRED_ENV = ("AZURE_CLIENT_ID", "COSMOS_ENDPOINT", "COSMOS_DATABASE", "DATA_BLOB_ENDPOINT", "QUEUE_ENDPOINT")
+CONSOLE_ROLES = (CREDIT_OFFICER, CREDIT_MANAGER, AUDITOR)
+
+
+def demo_principal(env: Mapping[str, str]) -> Principal | None:
+    """CONSOLE_AUTH_MODE=demo(Easy Auth 끔)이면 CONSOLE_DEMO_ROLE(기본 CreditOfficer)의 고정 주체."""
+    mode = env.get("CONSOLE_AUTH_MODE", "easyauth")
+    if mode == "easyauth":
+        return None
+    if mode != "demo":
+        raise ValueError(f"CONSOLE_AUTH_MODE는 easyauth 또는 demo입니다: {mode}")
+    role = env.get("CONSOLE_DEMO_ROLE", CREDIT_OFFICER)
+    if role not in CONSOLE_ROLES:
+        raise ValueError(f"CONSOLE_DEMO_ROLE은 {', '.join(CONSOLE_ROLES)} 중 하나입니다: {role}")
+    return Principal(user_id="demo-operator", name="데모 사용자", roles=frozenset({role}))
 
 
 def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
     cfg = {name: env[name] for name in REQUIRED_ENV}
+    demo = demo_principal(env)
     credential = ManagedIdentityCredential(client_id=cfg["AZURE_CLIENT_ID"])
     return ConsoleDeps(
         store=CosmosApplications(_cosmos_container(cfg["COSMOS_ENDPOINT"], cfg["COSMOS_DATABASE"], credential)),
         raw=BlobRawStore(cfg["DATA_BLOB_ENDPOINT"], credential),
         queue=StorageQueueSender(_queue_factory(cfg["QUEUE_ENDPOINT"], credential)),
         pseudonym_key=load_pseudonym_key(env, credential),
+        demo_principal=demo,
     )

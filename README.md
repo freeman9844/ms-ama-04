@@ -239,9 +239,27 @@ python -m ops pause
 다른 사용자에게 역할을 줄 때는 Entra 관리 센터 → 엔터프라이즈 애플리케이션 → `AMA Lending 심사 콘솔 (<환경>)` →
 사용자 및 그룹에서 할당합니다. 운영자 자신을 `Auditor`로 바꿔 보려면 같은 화면에서 역할을 바꾸고 다시 로그인합니다.
 
+### 데모 모드(Entra 로그인 끔)
+
+테넌트 정책 때문에 Entra 로그인을 쓸 수 없을 때(예: 사용자 동의가 막혀 "관리자 승인 필요")의 데모 전용 스위치입니다.
+Easy Auth를 끄고, 콘솔은 모든 요청을 고정 데모 사용자(`CONSOLE_DEMO_ROLE`, 기본 `CreditOfficer`)로 처리합니다.
+진입 통제는 운영자 IP 허용 목록(`CONSOLE_IP`/32)만 남습니다. 화면 상단에 "데모 모드" 배너가 보입니다.
+
+```powershell
+azd env set CONSOLE_AUTH_ENABLED false     # 다시 켜려면 true
+python -m ops window open --acr            # 프로비저닝: authConfigs platform.enabled=false, CONSOLE_AUTH_MODE=demo
+python -m ops deploy console               # 데모 모드를 아는 콘솔 이미지
+python -m ops window close
+python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 200(데모 모드)
+```
+
+증분 배포는 리소스를 지우지 않으므로 Easy Auth 설정(`authConfigs`)은 남기고 `platform.enabled`만 끕니다. Entra 앱 등록도 그대로입니다.
+
 ### 문제 대응(P4b)
 
 - 콘솔이 403(빈 화면): 현재 공인 IP가 `CONSOLE_IP`와 다릅니다. `python -m ops window open` → `window close`.
+- 로그인 시 "관리자 승인 필요": 테넌트가 사용자 동의를 막았습니다. 관리자가 앱에 관리자 동의(openid·profile·email)를 하거나,
+  운영자 본인에 대한 위임 권한 부여(`oauth2PermissionGrants`, consentType `Principal`)를 만들거나, 데모 모드를 씁니다.
 - 로그인 후 `AADSTS50105`(역할 미할당): 엔터프라이즈 애플리케이션에서 사용자에게 앱 역할을 할당합니다.
 - 로그인 후 `AADSTS50011`(redirect URI 불일치): `azd provision`이 Container Apps 기본 도메인으로 redirect URI를 다시 씁니다.
   `ops window open`/`close` 중 하나를 다시 실행하세요.

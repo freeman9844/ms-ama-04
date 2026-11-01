@@ -240,3 +240,40 @@ def test_htmx_is_pinned_with_sri(env):
     assert 'integrity="sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"' in page
     assert 'href="/.auth/logout"' in page
     assert client.get("/static/console.css").status_code == 200
+
+
+# ── 데모 모드(Easy Auth 끔): 운영자 IP만 허용하고 고정 데모 주체로 동작 ──
+
+@pytest.fixture
+def demo_env(make_doc, raw, key):
+    from console.auth import Principal
+    queue = FakeQueue()
+    demo = Principal(user_id="demo-officer", name="데모 심사역", roles=frozenset({CREDIT_OFFICER}))
+    deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=queue, pseudonym_key=key,
+                       new_application_id=lambda: "app-20261101-demo01", demo_principal=demo)
+    return TestClient(create_app(deps), follow_redirects=False), queue
+
+
+def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
+    client, queue = demo_env
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "데모 모드" in page.text and "/.auth/logout" not in page.text
+    assert "빈스카페(대표 김대표)는 계절성이 있다" in client.get("/applications/app-1").text
+    token = csrf(client, {}, "/applications/new")
+    resp = client.post("/applications", data={"csrf": token, "applicant_id": "demo-cafe-001",
+                                              "requested_amount_krw": "50,000,000", "requested_tenor_months": "12"})
+    assert resp.status_code == 303
+    assert queue.sent[0][1]["application_id"] == "app-20261101-demo01"
+
+
+def test_demo_mode_ignores_forged_principal_header(demo_env):
+    client, _ = demo_env
+    page = client.get("/", headers=principal(CREDIT_MANAGER, oid="oid-forged", name="위조")).text
+    assert "데모 심사역" in page and "위조" not in page
+
+
+def test_easy_auth_mode_has_no_demo_banner(env):
+    client, _ = env
+    page = client.get("/", headers=OFFICER).text
+    assert "데모 모드" not in page and "/.auth/logout" in page

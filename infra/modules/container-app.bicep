@@ -19,6 +19,8 @@ param secretEnv object = {}
 param ipAllowList array = []
 @description('Entra 앱(클라이언트) ID. 있으면 Easy Auth로 로그인을 강제합니다(ID 토큰, 비밀 없음).')
 param authClientId string = ''
+@description('false면 authConfigs를 남긴 채 Easy Auth를 끕니다(데모 모드). 증분 배포는 리소스를 지우지 않으므로 끄기로 표현합니다.')
+param authEnabled bool = true
 
 var placeholder = empty(image)
 var secretItems = filter(items(secretEnv), s => !empty(s.value))
@@ -79,7 +81,7 @@ resource auth 'Microsoft.App/containerApps/authConfigs@2024-03-01' = if (!empty(
   parent: app
   name: 'current'
   properties: {
-    platform: { enabled: true }
+    platform: { enabled: authEnabled }
     globalValidation: {
       unauthenticatedClientAction: 'RedirectToLoginPage'
       redirectToProvider: 'azureactivedirectory'

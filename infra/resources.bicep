@@ -19,6 +19,8 @@ param mockapiImage string
 param consoleImage string
 @description('콘솔에 접속할 운영자 공인 IPv4. 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
 param consoleIp string
+@description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(IP 허용 목록만 남음, 데모 전용).')
+param consoleAuthEnabled bool
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -546,13 +548,14 @@ module caConsole 'modules/container-app.bicep' = {
     image: consoleImage
     ipAllowList: [ empty(consoleIp) ? '192.0.2.0/32' : '${consoleIp}/32' ]
     authClientId: consoleAuth.outputs.clientId
-    envVars: [
+    authEnabled: consoleAuthEnabled
+    envVars: concat([
       { name: 'COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'COSMOS_DATABASE', value: cosmos.outputs.databaseName }
       { name: 'DATA_BLOB_ENDPOINT', value: stData.outputs.blobEndpoint }
       { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${storageSuffix}/' }
       { name: 'KEYVAULT_URI', value: keyVault.outputs.uri }
-    ]
+    ], consoleAuthEnabled ? [] : [ { name: 'CONSOLE_AUTH_MODE', value: 'demo' } ])
   }
 }
 

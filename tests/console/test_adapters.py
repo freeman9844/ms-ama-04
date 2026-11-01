@@ -85,3 +85,31 @@ def test_build_deps_wires_env(monkeypatch):
 def test_build_deps_requires_endpoints():
     with pytest.raises(KeyError):
         build_deps({"AZURE_CLIENT_ID": "cid", "PSEUDONYM_KEY": "k" * 32})
+
+
+@pytest.mark.parametrize("mode, role, expected", [
+    (None, None, None),
+    ("easyauth", None, None),
+    ("demo", None, "CreditOfficer"),
+    ("demo", "Auditor", "Auditor"),
+])
+def test_build_deps_demo_mode_principal(monkeypatch, mode, role, expected):
+    monkeypatch.setattr("console.adapters.ManagedIdentityCredential", lambda **kw: None)
+    monkeypatch.setattr("console.adapters._cosmos_container", lambda *a: None)
+    monkeypatch.setattr("console.adapters._queue_factory", lambda *a: None)
+    monkeypatch.setattr("console.adapters.BlobRawStore", lambda *a: None)
+    env = {"AZURE_CLIENT_ID": "cid", "COSMOS_ENDPOINT": "https://cos", "COSMOS_DATABASE": "lending",
+           "DATA_BLOB_ENDPOINT": "https://blob", "QUEUE_ENDPOINT": "https://queue", "PSEUDONYM_KEY": "k" * 32}
+    env |= {k: v for k, v in {"CONSOLE_AUTH_MODE": mode, "CONSOLE_DEMO_ROLE": role}.items() if v}
+    demo = build_deps(env).demo_principal
+    assert (demo and sorted(demo.roles)) == ([expected] if expected else None)
+
+
+@pytest.mark.parametrize("env", [{"CONSOLE_AUTH_MODE": "demo", "CONSOLE_DEMO_ROLE": "Admin"},
+                                 {"CONSOLE_AUTH_MODE": "none"}])
+def test_build_deps_rejects_unknown_auth_settings(monkeypatch, env):
+    monkeypatch.setattr("console.adapters.ManagedIdentityCredential", lambda **kw: None)
+    base = {"AZURE_CLIENT_ID": "cid", "COSMOS_ENDPOINT": "https://cos", "COSMOS_DATABASE": "lending",
+            "DATA_BLOB_ENDPOINT": "https://blob", "QUEUE_ENDPOINT": "https://queue", "PSEUDONYM_KEY": "k" * 32}
+    with pytest.raises(ValueError):
+        build_deps(base | env)

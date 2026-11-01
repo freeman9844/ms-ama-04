@@ -140,3 +140,10 @@ def expand_azd():
     def run(env: dict[str, str]) -> Expanded:
         return Expanded(_expand(INFRA / "main.bicepparam", env))
     return run
+
+
+@pytest.fixture(scope="session")
+def console_app_noauth() -> Expanded:
+    """Easy Auth를 끈 콘솔 container-app 모듈(데모 모드)."""
+    return Expanded(_expand(INFRA / "tests" / "console-app-noauth.bicepparam",
+                            template=INFRA / "modules" / "container-app.bicep"))

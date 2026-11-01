@@ -32,3 +32,5 @@ form input[name], form select, form textarea { display: block; width: 100%; max-
 form input[type=radio] { display: inline; width: auto; }
 fieldset { border: 1px solid var(--line); max-width: 32rem; }
 button, .button { display: inline-block; padding: .4rem 1rem; border: 0; border-radius: .3rem; background: var(--accent); color: #fff; font: inherit; text-decoration: none; cursor: pointer; }
+
+.demo-banner { margin: 0; padding: .5rem 1rem; background: #fff4ce; color: #5c4400; border-bottom: 1px solid #e6c84f; }
