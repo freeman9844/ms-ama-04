@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block head %}<meta http-equiv="refresh" content="5">{% endblock %}
+{% block main %}
+<h1>{{ application_id }}</h1>
+<p>신청 문서가 아직 없습니다. 오케스트레이터가 큐 메시지를 처리하면 자동으로 표시됩니다(5초마다 새로 고침).</p>
+<p><a href="/">목록으로</a></p>
+{% endblock %}

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
+{% block head %}{% endblock %}
+<title>{% block title %}AMA Lending 심사 콘솔{% endblock %}</title>
+<link rel="stylesheet" href="/static/console.css">
+<script src="{{ htmx_src }}" integrity="{{ htmx_sri }}" crossorigin="anonymous"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">AMA Lending 심사 콘솔</a>
+  <span class="who">{{ user.name }} · {{ user.roles|sort|join(", ") }}</span>
+  {% if not demo %}<a href="/.auth/logout">로그아웃</a>{% endif %}
+</header>
+{% if demo %}<p class="demo-banner">데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.</p>{% endif %}
+<main>
+{% block main %}{% endblock %}
+</main>
+</body>
+</html>

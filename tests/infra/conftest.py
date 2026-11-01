@@ -25,7 +25,8 @@ def _require_opt_in():
         pytest.skip("RUN_INFRA_TESTS=1 일 때만 실행합니다")
 
 
-def _expand(param_file: Path, extra_env: dict[str, str] | None = None) -> list[dict]:
+def _expand(param_file: Path, extra_env: dict[str, str] | None = None,
+            template: Path = INFRA / "main.bicep") -> list[dict]:
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.fail("PowerShell 7(pwsh)이 필요합니다")
@@ -33,7 +34,7 @@ def _expand(param_file: Path, extra_env: dict[str, str] | None = None) -> list[d
         out = Path(tmp) / "expanded.json"
         proc = subprocess.run(
             [pwsh, "-NoProfile", "-NonInteractive", "-File", str(EXPAND),
-             "-TemplateFile", str(INFRA / "main.bicep"),
+             "-TemplateFile", str(template),
              "-ParamFile", str(param_file), "-OutFile", str(out)],
             capture_output=True, text=True, encoding="utf-8",
             env={**os.environ, **(extra_env or {})},
@@ -127,8 +128,22 @@ def variant() -> Expanded:
 
 
 @pytest.fixture(scope="session")
+def console_app() -> Expanded:
+    """콘솔용 container-app 모듈만 펼친 결과(Graph appId를 아는 상태의 authConfigs 확인용)."""
+    return Expanded(_expand(INFRA / "tests" / "console-app.bicepparam",
+                            template=INFRA / "modules" / "container-app.bicep"))
+
+
+@pytest.fixture(scope="session")
 def expand_azd():
     """azd용 infra/main.bicepparam을 주어진 환경 변수로 펼칩니다."""
     def run(env: dict[str, str]) -> Expanded:
         return Expanded(_expand(INFRA / "main.bicepparam", env))
     return run
+
+
+@pytest.fixture(scope="session")
+def console_app_noauth() -> Expanded:
+    """Easy Auth를 끈 콘솔 container-app 모듈(데모 모드)."""
+    return Expanded(_expand(INFRA / "tests" / "console-app-noauth.bicepparam",
+                            template=INFRA / "modules" / "container-app.bicep"))

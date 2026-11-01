@@ -7,6 +7,8 @@ from typing import Callable
 
 from ops import deploy as deploy_module
 from ops.azcli import OpsError, Runner, subprocess_runner
+from ops.azdenv import get_env
+from ops.console_gate import check_console_gate
 from ops.lifecycle import pause, resume, teardown
 from ops.smoke_runner import run_smoke
 from ops.window import close_window, fetch_public_ip, open_window, window_status
@@ -26,8 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("pause", help="Service Bus Premium 삭제(비용 절감)")
     commands.add_parser("resume", help="Service Bus 다시 배포")
-    commands.add_parser("smoke", help="VNet 안 smoke Job 실행")
-    deployer = commands.add_parser("deploy", help="정책·Mock 이미지(ACR Build)와 Function 코드 배포")
+    commands.add_parser("smoke", help="VNet 안 smoke Job 실행 + 콘솔 로그인 관문 확인")
+    deployer = commands.add_parser("deploy", help="정책·Mock·콘솔 이미지(ACR Build)와 Function 코드 배포")
     deployer.add_argument("target", nargs="?", default="all", choices=deploy_module.TARGETS)
     destroy = commands.add_parser("teardown", help="환경 전체 삭제")
     destroy.add_argument("--confirm", required=True, help="삭제할 리소스 그룹 이름")
@@ -68,6 +70,7 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             print("배포했습니다: " + ", ".join(deployed), file=out)
         elif args.command == "smoke":
             print(f"smoke 성공: {run_smoke(runner)}", file=out)
+            print(f"콘솔 관문 확인: {check_console_gate(get_env(runner))}", file=out)
         elif args.command == "teardown":
             teardown(runner, args.confirm)
             print(f"{args.confirm} 삭제를 마쳤습니다.", file=out)

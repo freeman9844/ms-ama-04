@@ -8,5 +8,8 @@ docs
 infra
 tests
 src/orchestrator
-src/agents
+# 심사역 콘솔 이미지는 journey 모델·검증만 씁니다(src/console/Dockerfile).
+!src/orchestrator/journey/__init__.py
+!src/orchestrator/journey/models.py
+!src/orchestrator/journey/validation.py
 src/ops

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block main %}
+<h1>새 신청</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/applications">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>신청인(데모)
+    <select name="applicant_id">
+    {% for a in demo_applicants %}<option value="{{ a }}"{% if form and form.applicant_id == a %} selected{% endif %}>{{ a }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>신청 금액(원) <input name="requested_amount_krw" inputmode="numeric" required value="{{ form.requested_amount_krw if form else '30000000' }}"></label>
+  <label>기간(개월, 1~60) <input name="requested_tenor_months" inputmode="numeric" required value="{{ form.requested_tenor_months if form else '12' }}"></label>
+  <button type="submit">제출</button>
+</form>
+<p><a href="/">목록으로</a></p>
+{% endblock %}

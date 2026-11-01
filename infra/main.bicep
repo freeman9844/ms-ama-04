@@ -47,6 +47,19 @@ param policyImage string = ''
 @description('Mock API 이미지. 비면 자리표시 이미지(ops deploy 전).')
 param mockapiImage string = ''
 
+@description('심사역 콘솔 이미지. 비면 자리표시 이미지(ops deploy 전).')
+param consoleImage string = ''
+
+@description('심사역 콘솔 접속 허용 IPv4(ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
+param consoleIp string = ''
+
+@description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). IP 허용 목록은 그대로입니다.')
+param consoleAuthEnabled bool = true
+
+@description('데모 모드의 고정 사용자 역할(azd env CONSOLE_DEMO_ROLE). Auditor면 가명 읽기 전용 데모입니다.')
+@allowed([ 'CreditOfficer', 'CreditManager', 'Auditor' ])
+param consoleDemoRole string = 'CreditOfficer'
+
 var tags = {
   'azd-env-name': environmentName
   project: 'ama-cashflow-lending'
@@ -84,6 +97,10 @@ module resources 'resources.bicep' = {
     pseudonymKey: pseudonymKey
     policyImage: policyImage
     mockapiImage: mockapiImage
+    consoleImage: consoleImage
+    consoleIp: consoleIp
+    consoleAuthEnabled: consoleAuthEnabled
+    consoleDemoRole: consoleDemoRole
   }
 }
 
@@ -128,3 +145,7 @@ output MOCKAPI_URL string = resources.outputs.MOCKAPI_URL
 output FUNCTION_APP_NAME string = resources.outputs.FUNCTION_APP_NAME
 
 output SMOKE_JOB_NAME string = resources.outputs.SMOKE_JOB_NAME
+
+output CONSOLE_APP_NAME string = resources.outputs.CONSOLE_APP_NAME
+output CONSOLE_URL string = resources.outputs.CONSOLE_URL
+output CONSOLE_CLIENT_ID string = resources.outputs.CONSOLE_CLIENT_ID

@@ -40,6 +40,8 @@ def open_window(runner: Runner, ip: str, *, acr: bool = False) -> str:
     ip = validate_operator_ip(ip)
     ensure_caphost_skip(runner, get_env(runner))
     set_env(runner, "OPERATOR_IP", ip)
+    # 콘솔 허용 IP는 창을 닫아도 유지합니다(시연 중 콘솔 접속). close_window는 건드리지 않습니다.
+    set_env(runner, "CONSOLE_IP", ip)
     set_env(runner, "ACR_PUBLIC", "true" if acr else "false")
     provision(runner)
     return ip

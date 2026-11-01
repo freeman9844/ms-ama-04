@@ -7,3 +7,4 @@ param acrPublic = false
 param operatorPrincipalId = '11111111-1111-1111-1111-111111111111'
 param serviceBusEnabled = true
 param deployCapabilityHost = true
+param consoleIp = '20.30.40.50'

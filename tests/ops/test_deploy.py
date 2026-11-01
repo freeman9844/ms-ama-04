@@ -105,12 +105,13 @@ def test_function_package_layout_and_linux_wheels(fake_runner, repo):
     assert runner.commands("azd", "provision") == []
 
 
-def test_all_builds_both_images_provisions_once_then_deploys_function(fake_runner, repo):
+def test_all_builds_every_image_provisions_once_then_deploys_function(fake_runner, repo):
     runner = fake_runner(ENV)
     deploy(runner, "all", root=repo, tag="t2")
     tags = [c[c.index("-t") + 1] for c in runner.commands("az", "acr", "build")]
-    assert tags == ["policy:t2", "mockapi:t2"]
+    assert tags == ["policy:t2", "mockapi:t2", "console:t2"]
     assert runner.env["SERVICE_MOCKAPI_IMAGE_NAME"] == "acrx.azurecr.io/mockapi:t2"
+    assert runner.env["SERVICE_CONSOLE_IMAGE_NAME"] == "acrx.azurecr.io/console:t2"
     assert len(runner.commands("azd", "provision")) == 1
     assert runner.index("azd", "provision") < runner.index(*ZIP_DEPLOY)
 
@@ -122,3 +123,14 @@ def test_cli_deploy(fake_runner, repo, monkeypatch):
     assert main(["deploy", "mockapi"], runner=runner, out=out) == 0
     assert runner.env["SERVICE_MOCKAPI_IMAGE_NAME"].startswith("acrx.azurecr.io/mockapi:")
     assert "mockapi" in out.getvalue()
+
+
+def test_console_image_built_from_repo_root(fake_runner, repo):
+    # 콘솔 이미지는 src/agents·src/shared·journey 모델을 함께 복사하므로 저장소 루트가 빌드 컨텍스트입니다.
+    runner = fake_runner(ENV)
+    assert deploy(runner, "console", root=repo, tag="t3") == ["acrx.azurecr.io/console:t3"]
+    [build] = runner.commands("az", "acr", "build")
+    assert build[build.index("-f") + 1] == "src/console/Dockerfile"
+    assert str(repo) in build
+    assert runner.env["SERVICE_CONSOLE_IMAGE_NAME"] == "acrx.azurecr.io/console:t3"
+    assert runner.commands(*ZIP_DEPLOY) == []

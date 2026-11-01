@@ -1,5 +1,6 @@
-// internal Container Apps 환경의 앱(VNet 전용 진입점). image가 비면 MCR Python 자리표시 이미지로 만들고,
-// ops deploy가 ACR 이미지로 갱신합니다(azd 환경 SERVICE_<NAME>_IMAGE_NAME으로 재프로비저닝에도 유지).
+// Container Apps 앱. internal 환경에서는 VNet 전용, 외부 환경(콘솔)에서는 ipAllowList와 Entra 기본 인증으로 막습니다.
+// image가 비면 MCR Python 자리표시 이미지로 만들고, ops deploy가 ACR 이미지로 갱신합니다
+// (azd 환경 SERVICE_<NAME>_IMAGE_NAME으로 재프로비저닝에도 유지).
 param name string
 param location string
 param tags object
@@ -14,6 +15,12 @@ param envVars array = []
 @secure()
 @description('{ 환경 변수 이름: 비밀 값 }. 값이 빈 항목은 만들지 않습니다.')
 param secretEnv object = {}
+@description('허용할 IPv4 CIDR 목록. 비면 IP 제한이 없습니다(internal 환경 전용).')
+param ipAllowList array = []
+@description('Entra 앱(클라이언트) ID. 있으면 Easy Auth로 로그인을 강제합니다(ID 토큰, 비밀 없음).')
+param authClientId string = ''
+@description('false면 authConfigs를 남긴 채 Easy Auth를 끕니다(데모 모드). 증분 배포는 리소스를 지우지 않으므로 끄기로 표현합니다.')
+param authEnabled bool = true
 
 var placeholder = empty(image)
 var secretItems = filter(items(secretEnv), s => !empty(s.value))
@@ -36,6 +43,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: 8000
         transport: 'auto'
         allowInsecure: false
+        ipSecurityRestrictions: [for (cidr, i) in ipAllowList: {
+          name: 'allow-${i}'
+          ipAddressRange: cidr
+          action: 'Allow'
+        }]
       }
       registries: placeholder ? [] : [ { server: registryServer, identity: identityId } ]
       // 값은 @secure() secretEnv에서 오지만 filter() 때문에 린터가 추적하지 못합니다.
@@ -61,6 +73,30 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       scale: { minReplicas: 1, maxReplicas: 1 }
     }
+  }
+}
+
+// 로그인하지 않은 요청은 Entra 로그인으로 보냅니다. 앱은 X-MS-CLIENT-PRINCIPAL 헤더의 역할만 믿습니다.
+resource auth 'Microsoft.App/containerApps/authConfigs@2024-03-01' = if (!empty(authClientId)) {
+  parent: app
+  name: 'current'
+  properties: {
+    platform: { enabled: authEnabled }
+    globalValidation: {
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+      redirectToProvider: 'azureactivedirectory'
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: authClientId
+          openIdIssuer: '${environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
+        }
+        validation: { allowedAudiences: [ authClientId ] }
+      }
+    }
+    login: { preserveUrlFragmentsForLogins: false }
   }
 }
 

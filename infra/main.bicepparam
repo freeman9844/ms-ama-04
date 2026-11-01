@@ -17,3 +17,7 @@ param mockConsentSecret = readEnvironmentVariable('MOCK_CONSENT_SECRET', '')
 param pseudonymKey = readEnvironmentVariable('PSEUDONYM_KEY', '')
 param policyImage = readEnvironmentVariable('SERVICE_POLICY_IMAGE_NAME', '')
 param mockapiImage = readEnvironmentVariable('SERVICE_MOCKAPI_IMAGE_NAME', '')
+param consoleImage = readEnvironmentVariable('SERVICE_CONSOLE_IMAGE_NAME', '')
+param consoleIp = readEnvironmentVariable('CONSOLE_IP', '')
+param consoleAuthEnabled = readEnvironmentVariable('CONSOLE_AUTH_ENABLED', 'true') != 'false'
+param consoleDemoRole = readEnvironmentVariable('CONSOLE_DEMO_ROLE', 'CreditOfficer')

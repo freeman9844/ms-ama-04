@@ -26,6 +26,7 @@ def test_open_window_sets_ip_and_provisions(fake_runner):
     runner = fake_runner(PROVISIONED)
     assert open_window(runner, "20.30.40.50") == "20.30.40.50"
     assert runner.env["OPERATOR_IP"] == "20.30.40.50"
+    assert runner.env["CONSOLE_IP"] == "20.30.40.50"
     assert runner.env["ACR_PUBLIC"] == "false"
     assert runner.commands("azd", "provision") == [["azd", "provision", "--no-prompt"]]
 
@@ -51,9 +52,11 @@ def test_open_window_before_first_provision_keeps_caphost(fake_runner):
 
 
 def test_close_window_sets_closed_sentinel(fake_runner):
-    runner = fake_runner({**PROVISIONED, "OPERATOR_IP": "20.30.40.50", "ACR_PUBLIC": "true"})
+    runner = fake_runner({**PROVISIONED, "OPERATOR_IP": "20.30.40.50", "ACR_PUBLIC": "true",
+                          "CONSOLE_IP": "20.30.40.50"})
     close_window(runner)
     assert runner.env["OPERATOR_IP"] == "closed"
+    assert runner.env["CONSOLE_IP"] == "20.30.40.50"  # 창을 닫아도 콘솔 시연은 계속됩니다.
     assert runner.env["ACR_PUBLIC"] == "false"
     assert len(runner.commands("azd", "provision")) == 1
 

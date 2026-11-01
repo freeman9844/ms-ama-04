@@ -13,6 +13,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pyyaml>=6.0",
   "httpx>=0.27",
+  "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -23,7 +24,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shared", "src/policy", "src/mockapis", "src/ops", "src/agents"]
+packages = ["src/shared", "src/policy", "src/mockapis", "src/ops", "src/agents", "src/console"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "src/orchestrator"]

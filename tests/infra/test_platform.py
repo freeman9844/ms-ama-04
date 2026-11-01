@@ -30,6 +30,6 @@ def test_app_insights_is_workspace_based_and_entra_only(closed):
     assert closed.roles_on("appi-") == {ROLE_METRICS_PUBLISHER}
 
 
-def test_three_user_assigned_identities(closed):
+def test_workload_user_assigned_identities(closed):
     names = {r["name"] for r in closed.of_type("Microsoft.ManagedIdentity/userAssignedIdentities")}
-    assert names == {"id-orch-amatest", "id-apps-amatest", "id-smoke-amatest"}
+    assert names == {"id-orch-amatest", "id-apps-amatest", "id-smoke-amatest", "id-console-amatest"}
