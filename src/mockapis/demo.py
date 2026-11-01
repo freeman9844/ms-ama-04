@@ -4,6 +4,7 @@ import os
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 
+from mockapis.postloan import FlowScenario, PostLoanFlow, generate_postloan
 from mockapis.synth import Archetype, SyntheticCase, generate_case
 
 KST = timezone(timedelta(hours=9), "KST")
@@ -22,6 +23,23 @@ def build_demo_cases(as_of: date) -> dict[str, SyntheticCase]:
     return {
         applicant_id: generate_case(applicant_id, archetype, as_of, seed, inject_prompt=inject)
         for applicant_id, archetype, seed, inject in DEMO_APPLICANTS
+    }
+
+# 대출 실행 이후 흐름: 심사 때 건강했던 카페가 확장 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
+STACKING_APPLICANTS = frozenset({"demo-cafe-001"})
+POSTLOAN_SEED_OFFSET = 1000
+
+
+def build_postloan_flows(cases: Mapping[str, SyntheticCase], as_of: date) -> dict[str, PostLoanFlow]:
+    seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
+    return {
+        applicant_id: generate_postloan(
+            case,
+            FlowScenario.STACKING if applicant_id in STACKING_APPLICANTS else FlowScenario.STABLE,
+            as_of,
+            seeds.get(applicant_id, 0) + POSTLOAN_SEED_OFFSET,
+        )
+        for applicant_id, case in cases.items()
     }
 
 

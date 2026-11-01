@@ -130,3 +130,23 @@ def test_fault_injection_503(client):
     assert r.json()["detail"]["code"] == "unavailable"
     assert client.post("/admin/faults", json={"mode": "none"}).status_code == 204
     assert client.get("/mydata/transactions", headers=h).status_code == 200
+
+
+def test_postloan_flow_needs_account_scope_and_filters_by_window(clock):
+    from mockapis.postloan import FlowScenario, generate_postloan
+
+    case = generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)
+    flow = generate_postloan(case, FlowScenario.STACKING, AS_OF, 1)
+    c = TestClient(create_app({"a1": case}, SECRET, clock, flows={"a1": flow}))
+    assert c.get("/mydata/flow", headers=_auth(_consent(c, scopes=("tax",))["token"])).status_code == 403
+    h = _auth(_consent(c, scopes=("account",))["token"])
+    everything = c.get("/mydata/flow", headers=h).json()
+    assert len(everything) == len(flow.transactions)
+    week = c.get("/mydata/flow", headers=h, params={"start": "2026-10-01", "end": "2026-10-07"}).json()
+    assert week and {t["booked_on"] for t in week} <= {f"2026-10-0{d}" for d in range(1, 8)}
+    assert "labels" not in everything[0] and "default_on" not in str(everything[0])
+
+
+def test_postloan_flow_missing_is_404(client):
+    h = _auth(_consent(client)["token"])
+    assert client.get("/mydata/flow", headers=h).json()["detail"] == {"code": "no_flow"}
