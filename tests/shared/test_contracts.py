@@ -4,6 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from shared.contracts import (
+    AlertSignal,
+    EarlyWarningAlert,
     ApplicantProfile,
     CashFlowFeatures,
     Claim,
@@ -242,3 +244,48 @@ def test_approval_needs_structure_and_failed_review_needs_issues():
         _assessment(review=ReviewOutcome(passed=False, rounds=3))
     with pytest.raises(ValidationError):
         ReviewOutcome(passed=True, rounds=4)
+
+
+def _signal(**kw):
+    base = dict(kind="loan_stacking", text="3주차 고금리 상환 2건", metric_ids=("W:3:high_cost_lender",), txn_ids=())
+    return AlertSignal(**(base | kw))
+
+
+def _alert(**kw):
+    base = dict(
+        alert_id="loan-1:w3",
+        loan_id="loan-1",
+        week=3,
+        as_of=date(2026, 11, 21),
+        severity="high",
+        summary="대부업 상환이 새로 생겼다",
+        signals=(_signal(),),
+        recommended_action="hardship_review",
+        triggers=("new_debt",),
+        models={"investigator": "gpt-5.4"},
+    )
+    return EarlyWarningAlert(**(base | kw))
+
+
+def test_weekly_and_baseline_ids_are_evidence_ids():
+    assert _signal(metric_ids=("W:3:revenue", "B:index:01")).metric_ids == ("W:3:revenue", "B:index:01")
+    with pytest.raises(ValidationError):
+        _signal(metric_ids=("X:3:revenue",))
+
+
+def test_alert_signal_needs_evidence_and_known_kind():
+    with pytest.raises(ValidationError):
+        _signal(metric_ids=(), txn_ids=())
+    with pytest.raises(ValidationError):
+        _signal(kind="gut_feeling")
+
+
+def test_early_warning_alert_round_trip_and_invariants():
+    alert = _alert()
+    assert EarlyWarningAlert.model_validate_json(alert.model_dump_json()) == alert
+    with pytest.raises(ValidationError):
+        _alert(signals=())
+    with pytest.raises(ValidationError):
+        _alert(severity="high", recommended_action="monitor")
+    with pytest.raises(ValidationError):
+        _alert(week=0)
