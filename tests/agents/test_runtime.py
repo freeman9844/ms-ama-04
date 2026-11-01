@@ -239,3 +239,39 @@ def test_delete_container_failure_returns_false():
     fake = FakeFoundry()
     fake.delete_response = httpx.Response(404, json={"error": {"code": "not_found"}})
     assert agents(fake).delete_container("cntr_a") is False
+
+
+def conversations_api(status: int, *, get_status: int = 404):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        if request.method == "DELETE":
+            return httpx.Response(status, json={"id": "conv_a", "deleted": True} if status == 200 else {"error": {}})
+        return httpx.Response(get_status, json={"id": "conv_a"} if get_status == 200 else {"error": {}})
+
+    client = FoundryAgents(BASE, lambda: "tok", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    return client, seen
+
+
+@pytest.mark.parametrize(("status", "outcome"), [(200, "deleted"), (404, "absent"), (500, "failed")])
+def test_delete_conversation_outcomes(status, outcome):
+    client, seen = conversations_api(status)
+    assert client.delete_conversation("conv_a") == outcome
+    assert seen == [("DELETE", "/api/projects/proj-lending/openai/v1/conversations/conv_a")]
+
+
+def test_delete_conversation_network_error_is_failed():
+    def down(request):
+        raise httpx.ConnectError("down")
+
+    client = FoundryAgents(BASE, lambda: "tok", client=httpx.Client(transport=httpx.MockTransport(down)))
+    assert client.delete_conversation("conv_a") == "failed"
+    assert client.conversation_exists("conv_a") is None
+
+
+@pytest.mark.parametrize(("get_status", "exists"), [(200, True), (404, False), (500, None)])
+def test_conversation_exists(get_status, exists):
+    client, seen = conversations_api(200, get_status=get_status)
+    assert client.conversation_exists("conv_a") is exists
+    assert seen == [("GET", "/api/projects/proj-lending/openai/v1/conversations/conv_a")]

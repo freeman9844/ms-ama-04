@@ -179,6 +179,27 @@ class FoundryAgents:
         except AgentError:
             return False
 
+    def _status(self, method: str, path: str) -> int | None:
+        try:
+            r = self._client.request(method, self._base + path, headers={"Authorization": f"Bearer {self._token()}"})
+        except Exception:  # noqa: BLE001 - 토큰 발급·네트워크 실패도 결과(None)로 돌려준다
+            return None
+        return r.status_code
+
+    def delete_conversation(self, conversation_id: str) -> str:
+        """대화(입력·출력 항목 포함)를 삭제한다. deleted | absent(이미 없음) | failed. 예외 없음."""
+        status = self._status("DELETE", f"/openai/v1/conversations/{conversation_id}")
+        if status == 404:
+            return "absent"
+        return "deleted" if status is not None and status < 400 else "failed"
+
+    def conversation_exists(self, conversation_id: str) -> bool | None:
+        """삭제 검증용. 알 수 없으면 None."""
+        status = self._status("GET", f"/openai/v1/conversations/{conversation_id}")
+        if status == 404:
+            return False
+        return True if status is not None and status < 400 else None
+
     def _loop(
         self,
         spec: AgentSpec,
