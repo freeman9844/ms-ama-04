@@ -28,7 +28,7 @@ AUDIENCE_SERVICEBUS = "https://servicebus.azure.net"
 E2E_REQUESTED_KRW = 20_000_000
 E2E_TENOR_MONTHS = 12
 E2E_INTERVAL_SECONDS = 10.0
-E2E_ENDED = ("failed", "closed_no_decision", "approved", "conditionally_approved", "declined")
+E2E_ENDED = ("failed", "closed_no_decision", "approved", "conditionally_approved", "declined", "withdrawn")
 FLAG_MONITORING_UNAVAILABLE = "monitoring_unavailable"
 
 
@@ -210,7 +210,7 @@ def enqueue(cfg: dict, http: Http, token: TokenProvider, queue: str, message: di
 
 
 def read_doc(cfg: dict, http: Http, token: TokenProvider, container: str, doc_id: str) -> dict | None:
-    """id = 파티션 키인 문서(applications·loans)를 읽습니다."""
+    """id = 파티션 키인 문서(applications·loans·consents·deletion_proofs)를 읽습니다."""
     url = f"https://{cfg['cosmos_host']}/dbs/{cfg['cosmos_database']}/colls/{container}/docs/{doc_id}"
     resp = expect(http("GET", url, _cosmos_headers(cfg, token, partition_key=doc_id)), 200, 404,
                   what=f"cosmos read {container}")
@@ -285,6 +285,39 @@ def check_journey(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[
             f"monitoring registered ({loan.get('industry')})")
 
 
+def check_consent_deletion(cfg: dict, http: Http, token: TokenProvider, sleep: Callable[[float], None],
+                           application_id: str, attempts: int = 30) -> str:
+    """승인된 smoke 신청의 심사 동의를 '지금 만료'시키고 삭제 증명이 완료되는지 확인합니다(P5b).
+
+    원천 데이터·Foundry 대화·컨테이너가 지워지고, 신청 문서(판단 기록)는 남아야 합니다.
+    """
+    doc = read_application(cfg, http, token, application_id)
+    if not doc or doc.get("status") != "approved":
+        raise CheckFailed(f"approved 신청이 없어 건너뜁니다(상태: {doc.get('status') if doc else None})")
+    consent_id = (doc.get("consent") or {}).get("consent_id")
+    if not consent_id:
+        raise CheckFailed(f"신청에 consent가 없습니다: {application_id}")
+    enqueue(cfg, http, token, cfg["consent_command_queue"], {
+        "consent_id": consent_id, "action": "expire_now", "requested_by": "smoke", "application_id": application_id})
+    proof = None
+    for _ in range(attempts):
+        proof = read_doc(cfg, http, token, "deletion_proofs", consent_id)
+        if proof and proof.get("complete"):
+            break
+        sleep(E2E_INTERVAL_SECONDS)
+    else:
+        pending = [f"{i.get('kind')}:{i.get('target')}" for i in (proof or {}).get("items", []) if not i.get("verified")]
+        raise CheckFailed(f"{attempts * E2E_INTERVAL_SECONDS:.0f}초 안에 삭제 증명이 완료되지 않았습니다"
+                          f"(증명 {'있음' if proof else '없음'}, 미확인 {pending})")
+    consent = read_doc(cfg, http, token, "consents", consent_id) or {}
+    if consent.get("status") != "expired":
+        raise CheckFailed(f"동의 상태가 expired가 아닙니다: {consent.get('status')}")
+    if read_application(cfg, http, token, application_id) is None:
+        raise CheckFailed(f"삭제 뒤 신청 문서(판단 기록)가 사라졌습니다: {application_id}")
+    return (f"{consent_id} expired; proof complete ({len(proof['items'])} items verified, "
+            f"{len(proof.get('manifest', []))} files in manifest); application retained")
+
+
 def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable[[str], str],
                  sleep: Callable[[float], None]) -> list[tuple[str, Callable[[], str]]]:
     checks: list[tuple[str, Callable[[], str]]] = [
@@ -307,6 +340,7 @@ def build_checks(cfg: dict, http: Http, token: TokenProvider, resolver: Callable
     checks.append(("decision", lambda: check_decision(cfg, http, token)))
     application_id = time.strftime("smoke-%Y%m%d-%H%M%S", time.gmtime())
     checks.append(("journey", lambda: check_journey(cfg, http, token, sleep, application_id)))
+    checks.append(("consent", lambda: check_consent_deletion(cfg, http, token, sleep, application_id)))
     return checks
 
 

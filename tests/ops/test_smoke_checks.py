@@ -24,6 +24,7 @@ CFG = {
     "queue_host": "stfnx.queue.core.windows.net",
     "start_queue": "applications-start",
     "decision_queue": "officer-decisions",
+    "consent_command_queue": "consent-commands",
     "cosmos_database": "lending",
     "policy_url": "https://ca-policy.int.example",
     "mockapi_url": "https://ca-mockapi.int.example",
@@ -73,6 +74,11 @@ ASSESSMENT = {"recommendation": "conditional", "review": {"passed": True, "round
 
 MONITORING = {"loan_id": "smoke-e2e-test", "registered_at": "2026-11-02T09:00:00+09:00"}
 LOAN = {"id": "smoke-e2e-test", "industry": "카페", "baseline": {"avg_weekly_revenue": 9_000_000}, "monitoring": None}
+CONSENT = {"consent_id": "c-smoke", "scopes": ["account", "tax", "pg"]}
+PROOF = {"id": "c-smoke", "complete": True, "reason": "expired",
+         "items": [{"kind": "raw_container", "verified": True}, {"kind": "consent_registry", "verified": True},
+                   {"kind": "conversation", "verified": True}],
+         "manifest": [{"name": "profile.json"}, {"name": "transactions.json"}]}
 
 
 def app_doc(status, **extra):
@@ -83,8 +89,11 @@ def healthy_routes():
     return {
         ("GET", "/colls/applications/docs/"): [sc.Response(404, b"{}"),
                                                app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT),
-                                               app_doc("approved", monitoring=MONITORING)],
+                                               app_doc("approved", monitoring=MONITORING, consent=CONSENT)],
         ("GET", "/colls/loans/docs/"): ok(LOAN),
+        ("GET", "/colls/deletion_proofs/docs/"): ok(PROOF),
+        ("GET", "/colls/consents/docs/"): ok({"id": "c-smoke", "status": "expired", "deletion_complete": True}),
+        ("POST", "/consent-commands/messages"): ok(status=201),
         ("GET", "/msi/token"): ok({"access_token": "tok"}),
         ("POST", "/openai/v1/chat/completions"): ok({"model": "gpt"}),
         ("GET", "?comp=list"): ok(),
@@ -160,8 +169,9 @@ def test_main_succeeds_when_all_checks_pass():
     code = sc.main(ENV, http=FakeHttp(healthy_routes()), resolver=private, sleep=lambda s: None, out=out)
     lines = [json.loads(line) for line in out.getvalue().splitlines()]
     assert code == 0
-    # dns 2 + chat 2 + blob + cosmos + keyvault + health 2 + servicebus + agent + decision + journey
-    assert lines[-1] == {"summary": {"total": 13, "failed": 0}}
+    # dns 2 + chat 2 + blob + cosmos + keyvault + health 2 + servicebus + agent + decision + journey + consent
+    assert lines[-1] == {"summary": {"total": 14, "failed": 0}}
+    assert [r["check"] for r in lines[-3:-1]] == ["journey", "consent"]
 
 
 def test_main_reports_failure_and_skips_paused_service_bus():
@@ -303,3 +313,62 @@ def test_decision_check_rejects_unexpected_answer():
     http = FakeHttp({**healthy_routes(), ("POST", "/providers/microsoft/v1/systemone"): ok({"answers": {}})})
     with pytest.raises(sc.CheckFailed, match="decision"):
         sc.check_decision(CFG, http, token_for(http))
+
+
+# ── 동의 만료 → 삭제 증명(P5b) ──
+
+def consent_http(app, proofs, consent=None):
+    routes = {**healthy_routes(), ("GET", "/colls/applications/docs/"): app, ("GET", "/colls/deletion_proofs/docs/"): proofs}
+    if consent is not None:
+        routes[("GET", "/colls/consents/docs/")] = consent
+    return FakeHttp(routes)
+
+
+def test_consent_check_expires_underwriting_consent_and_waits_for_complete_proof():
+    sleeps = []
+    incomplete = ok({**PROOF, "complete": False, "items": [{"kind": "conversation", "verified": False}]})
+    http = consent_http(app_doc("approved", consent=CONSENT), [sc.Response(404, b"{}"), incomplete, ok(PROOF)])
+    detail = sc.check_consent_deletion(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test")
+    assert detail == "c-smoke expired; proof complete (3 items verified, 2 files in manifest); application retained"
+    [command] = http.find("POST", "/consent-commands/messages")
+    assert command["url"] == "https://stfnx.queue.core.windows.net/consent-commands/messages"
+    assert queue_text(command) == {"consent_id": "c-smoke", "action": "expire_now", "requested_by": "smoke",
+                                   "application_id": "smoke-e2e-test"}
+    proof = http.find("GET", "/colls/deletion_proofs/docs/")[0]
+    assert proof["url"].endswith("/dbs/lending/colls/deletion_proofs/docs/c-smoke")
+    assert proof["headers"]["x-ms-documentdb-partitionkey"] == '["c-smoke"]'
+    assert http.find("GET", "/colls/consents/docs/")[0]["url"].endswith("/colls/consents/docs/c-smoke")
+    assert sleeps == [10.0, 10.0]
+    # 증명 뒤에 신청 문서(판단 기록)가 남아 있는지 다시 읽는다.
+    assert len(http.find("GET", "/colls/applications/docs/")) == 2
+
+
+@pytest.mark.parametrize("app, match", [
+    (app_doc("awaiting_officer", consent=CONSENT), "approved"),
+    (sc.Response(404, b"{}"), "approved"),
+    (app_doc("approved"), "consent"),
+])
+def test_consent_check_runs_only_on_approved_application_with_consent(app, match):
+    http = consent_http(app, ok(PROOF))
+    with pytest.raises(sc.CheckFailed, match=match):
+        sc.check_consent_deletion(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
+    assert http.find("POST", "/consent-commands/messages") == []
+
+
+def test_consent_check_fails_on_incomplete_proof_timeout_or_lost_record():
+    stuck = ok({**PROOF, "complete": False, "items": [{"kind": "conversation", "target": "conv_1", "verified": False}]})
+    http = consent_http(app_doc("approved", consent=CONSENT), stuck)
+    with pytest.raises(sc.CheckFailed, match="conversation"):
+        sc.check_consent_deletion(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test", attempts=3)
+    http = consent_http(app_doc("approved", consent=CONSENT), ok(PROOF), consent=ok({"id": "c-smoke", "status": "granted"}))
+    with pytest.raises(sc.CheckFailed, match="granted"):
+        sc.check_consent_deletion(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
+    http = consent_http([app_doc("approved", consent=CONSENT), sc.Response(404, b"{}")], ok(PROOF))
+    with pytest.raises(sc.CheckFailed, match="신청 문서"):
+        sc.check_consent_deletion(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
+
+
+def test_withdrawn_application_ends_the_wait():
+    http = journey_http(app_doc("withdrawn"))
+    with pytest.raises(sc.CheckFailed, match="withdrawn"):
+        sc.check_journey(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test")
