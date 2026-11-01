@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 KST = timezone(timedelta(hours=9), "KST")
 APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
@@ -17,6 +17,26 @@ MONITORING_PURPOSE = "대출 사후 모니터링"
 LOAN_ID_PATTERN = APPLICATION_ID_PATTERN
 # 진행 중인 재생을 새 재생이 덮어쓰지 못하게 막는 시간. 멈춘 재생은 이 시간이 지나면 다시 시작할 수 있다.
 REPLAY_GUARD = timedelta(minutes=30)
+CONSENT_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$"
+GRIEVANCE_ID_PATTERN = r"^grv-[a-z0-9]{6,32}$"
+RENEWAL_NOTICE_DAYS = 7
+# Durable timer는 한 번에 최대 6일까지만 건다(긴 대기는 나눠서 반복).
+MAX_TIMER = timedelta(days=6)
+WITHDRAWN_EVENT = "consent_withdrawn"
+GRIEVANCE_TEXT_MAX = 1000
+
+
+def lifecycle_instance(consent_id: str) -> str:
+    return f"consent-{consent_id}"
+
+
+def renewal_at(expires_at: datetime) -> datetime:
+    return expires_at - timedelta(days=RENEWAL_NOTICE_DAYS)
+
+
+def next_wake(now: datetime, target: datetime) -> datetime:
+    """target까지 남은 대기를 MAX_TIMER 단위로 자른 다음 깨어날 시각."""
+    return max(now, min(target, now + MAX_TIMER))
 
 
 def replay_in_progress(monitoring: Mapping[str, Any] | None, now: datetime) -> bool:
@@ -43,6 +63,7 @@ class Status(StrEnum):
     CONDITIONALLY_APPROVED = "conditionally_approved"
     DECLINED = "declined"
     CLOSED_NO_DECISION = "closed_no_decision"
+    WITHDRAWN = "withdrawn"
     FAILED = "failed"
 
 
@@ -114,3 +135,62 @@ class RestructureDecision(BaseModel):
     decision: Literal["approve", "decline"]
     officer_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(default="", max_length=500)
+
+
+class LifecycleStart(BaseModel):
+    """consent-lifecycle 큐 메시지이자 consent_lifecycle 오케스트레이션 입력.
+
+    initial은 수명주기 인스턴스가 없는 동의(P5b 이전 동의)에 명령이 왔을 때 바로 처리할 동작이다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    consent_id: str = Field(pattern=CONSENT_ID_PATTERN)
+    expires_at: AwareDatetime
+    initial: Literal["revoke", "expire_now", "remind_now"] | None = None
+    requested_by: str = Field(default="system", min_length=1, max_length=64)
+
+
+class ConsentCommand(BaseModel):
+    """consent-commands 큐 메시지. 차주 철회와 데모 버튼(지금 만료, 갱신 안내)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    consent_id: str = Field(pattern=CONSENT_ID_PATTERN)
+    action: Literal["revoke", "expire_now", "remind_now"]
+    requested_by: str = Field(min_length=1, max_length=64)
+    application_id: str | None = Field(default=None, pattern=APPLICATION_ID_PATTERN)
+
+
+class GrievanceSubmission(BaseModel):
+    """grievances 큐 메시지(차주 이의제기)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    grievance_id: str = Field(pattern=GRIEVANCE_ID_PATTERN)
+    application_id: str = Field(pattern=APPLICATION_ID_PATTERN)
+    applicant_id: str = Field(min_length=1, max_length=64)
+    text: str = Field(min_length=1, max_length=GRIEVANCE_TEXT_MAX)
+
+
+class GrievanceDecision(BaseModel):
+    """grievance-decisions 큐 메시지. uphold는 원결정 유지, rereview는 재심사 결과를 기록한다."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    grievance_id: str = Field(pattern=GRIEVANCE_ID_PATTERN)
+    application_id: str = Field(pattern=APPLICATION_ID_PATTERN)
+    outcome: Literal["uphold", "rereview"]
+    officer_id: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=500)
+    new_decision: Literal["approve", "conditional", "decline"] | None = None
+    amount_krw: int | None = Field(default=None, gt=0)
+    conditions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _outcome(self) -> "GrievanceDecision":
+        if self.outcome == "rereview" and self.new_decision is None:
+            raise ValueError("재심사에는 새 결정이 필요하다")
+        if self.outcome == "uphold" and (self.new_decision or self.amount_krw or self.conditions):
+            raise ValueError("원결정 유지에는 새 결정을 둘 수 없다")
+        return self
