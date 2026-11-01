@@ -92,21 +92,53 @@ def test_malformed_decision_is_dropped():
     assert client.raised == []
 
 
-def test_function_app_registers_triggers():
-    from function_app import app
+QUEUES = (
+    ("start_application", "applications-start"),
+    ("officer_decision", "officer-decisions"),
+    ("monitoring_replay", "monitoring-replay"),
+    ("restructure_decision", "restructure-decisions"),
+)
+
+
+def load_app(monkeypatch, fqdn):
+    import importlib
+
+    import function_app
+
+    if fqdn:
+        monkeypatch.setenv("SERVICEBUS_FQDN", fqdn)
+    else:
+        monkeypatch.delenv("SERVICEBUS_FQDN", raising=False)
+    return importlib.reload(function_app).app
+
+
+def test_function_app_registers_triggers(monkeypatch):
+    app = load_app(monkeypatch, "")
 
     functions = {f.get_function_name(): f for f in app.get_functions()}
-    assert set(functions) == {"start_application", "officer_decision", ORCHESTRATOR, *ACTIVITIES}
+    assert set(functions) == {*(name for name, _ in QUEUES), ORCHESTRATOR, *ACTIVITIES}
     bindings = {name: {b.type: b for b in f.get_bindings()} for name, f in functions.items()}
     assert "orchestrationTrigger" in bindings[ORCHESTRATOR]
     for name in ACTIVITIES:
         assert "activityTrigger" in bindings[name]
-    for name, queue in (("start_application", "applications-start"), ("officer_decision", "officer-decisions")):
+    for name, queue in QUEUES:
         trigger = json.loads(functions[name].get_function_json())["bindings"]
         queue_binding = next(b for b in trigger if b["type"] == "queueTrigger")
         assert queue_binding["queueName"] == queue
         assert queue_binding["connection"] == "AzureWebJobsStorage"
-        assert "durableClient" in bindings[name]
+    assert all("durableClient" in bindings[name] for name in ("start_application", "officer_decision"))
+
+
+def test_servicebus_triggers_only_when_enabled(monkeypatch):
+    app = load_app(monkeypatch, "sb-x.servicebus.windows.net")
+    functions = {f.get_function_name(): f for f in app.get_functions()}
+    expected = {"flow_updated": ("flow.updated", "early-warning"), "alert_raised": ("alert.raised", "collections")}
+    for name, (topic, subscription) in expected.items():
+        binding = json.loads(functions[name].get_function_json())["bindings"][0]
+        assert binding["type"] == "serviceBusTrigger"
+        assert (binding["topicName"], binding["subscriptionName"]) == (topic, subscription)
+        assert binding["connection"] == "ServiceBusConnection" and binding["isSessionsEnabled"] is True
+    load_app(monkeypatch, "")
 
 
 def test_host_json():
