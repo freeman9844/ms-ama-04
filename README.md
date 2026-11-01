@@ -343,6 +343,30 @@ python -m ops smoke                        # journey가 모니터링 등록까�
 주간 표·경보·추심 결과가 채워집니다(재생 중 10초 자동 새로 고침). `demo-cafe-001`은 사후 흐름에서 고금리 대출을 겹쳐 받는
 시나리오(1주차 설비 지출로 버퍼 감소, 2주차부터 신규 차입, 4주차부터 매출 급감)입니다.
 
+### 실제 배포 기록(P5a, 2026-11-01, koreacentral)
+
+| 단계 | 명령 | 시간 | 결과 |
+|---|---|---|---|
+| 배포 창 | `ops window open --acr` | 3.4분 | 큐·loans/alerts 컨테이너·앱 설정 프로비저닝 |
+| Mock API | `ops deploy mockapi` | 4.7분 | 성공 |
+| 오케스트레이터 | `ops deploy orchestrator` | 4.8분 | 트리거 목록에 `monitoring_replay`·`restructure_decision`·`register_monitoring`, Service Bus 트리거 없음 |
+| 콘솔 | `ops deploy console` | 4.4분 | 성공 |
+| 창 닫기 | `ops window close` | 3.6분 | 성공 |
+| smoke | `ops smoke` | 2.7분 | 23개 점검 통과, journey `… approved 20,000,000 KRW (7 steps); … monitoring registered (카페)` |
+| 정리 | `ops pause` | 즉시 | Service Bus 없음(인라인 모드 유지) |
+
+체크리스트 결과(데모 모드, 운영자 IP에서 HTTP로 같은 순서 실행):
+
+1. `demo-cafe-001` 50,000,000원·12개월 신청 → 50초 뒤 `awaiting_officer` → 제안 금액 30,000,000원 `승인` → 20초 안에 `사후 모니터링` 링크.
+2. `사후 모니터링` 목록에 `재생 전`으로 표시.
+3. `사후 13주 재생` → "사후 13주 재생 요청을 큐에 보냈습니다…" → `재생 중`, 버튼 비활성 문구·자동 새로 고침 확인.
+4. 132초 뒤 `재생 완료`. 주간 표 13줄, 경보 2건(2주차 중간 `차주 연락`, 9주차 높음 `상환 곤란 검토`). 1주차 버퍼 감소는 `no_alert`.
+   사전 검증(2·4·9주차)과 달리 4주차 경보는 이번 실행에서 나오지 않았습니다(LLM 조사 결과 변동). 첫 경보(2주차 말 2026-11-14)는 연체일 2027-01-20보다 67일 앞섭니다(KPI 60~90일).
+5. 경보마다 신호별 근거 칩(2주차 W 5·B 2개, 9주차 W 7·B 6개)과 참조 거래 적요가 보입니다. 추심: 2주차 `hardship_offer` 발송 + 재조정 요청,
+   9주차 발송 없이 재조정 요청(`revenue_shock`). 두 요청 모두 `pending_officer`.
+6. 2주차 재조정 `승인`(사유 입력) → "재조정 결정(approve)을 큐에 보냈습니다." → 상태 `approved`, 결정자 `demo-operator`·시각·사유 표시, 해당 폼 사라짐.
+7. `demo-injection-005`(STABLE 흐름) 신청 → 승인 → 재생 40초 → 경보 0건.
+
 ### 문제 대응(P5a)
 
 - 대출 목록이 비어 있음: P5a 배포 전에 승인한 신청은 `loans` 문서가 없습니다. 새로 신청해 승인합니다.
