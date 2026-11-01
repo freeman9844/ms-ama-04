@@ -5,6 +5,8 @@ param tags object
 param peSubnetId string
 param zoneId string
 param topics array
+@description('[{ topic, name }] 세션 구독. subject(label)가 토픽 이름과 같은 메시지만 받습니다.')
+param subscriptions array = []
 @description('[{ principalId, roleId, principalType }]')
 param roleAssignments array = []
 
@@ -40,6 +42,27 @@ resource topicResources 'Microsoft.ServiceBus/namespaces/topics@2024-01-01' = [f
     defaultMessageTimeToLive: 'P14D'
     requiresDuplicateDetection: true
     duplicateDetectionHistoryTimeWindow: 'PT10M'
+  }
+}]
+
+resource subscriptionResources 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2024-01-01' = [for s in subscriptions: {
+  name: '${name}/${s.topic}/${s.name}'
+  properties: {
+    requiresSession: true
+    lockDuration: 'PT5M'
+    maxDeliveryCount: 5
+    deadLetteringOnMessageExpiration: true
+  }
+  dependsOn: [ topicResources ]
+}]
+
+// 기본 규칙($Default, 전체 수신)을 상관 필터로 바꿉니다.
+resource subscriptionRules 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = [for (s, i) in subscriptions: {
+  parent: subscriptionResources[i]
+  name: '$Default'
+  properties: {
+    filterType: 'CorrelationFilter'
+    correlationFilter: { label: s.topic }
   }
 }]
 

@@ -224,7 +224,7 @@ module stFunc 'modules/storage.bicep' = {
       { groupId: 'table', zoneId: zoneId[tableZone] }
     ]
     containers: [ 'deploymentpackage' ]
-    queues: [ 'applications-start', 'officer-decisions' ]
+    queues: [ 'applications-start', 'officer-decisions', 'monitoring-replay', 'restructure-decisions' ]
     roleAssignments: [
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobOwner, principalType: sp }
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.queueContributor, principalType: sp }
@@ -247,6 +247,8 @@ module cosmos 'modules/cosmos.bicep' = {
       { name: 'applications', partitionKey: '/application_id' }
       { name: 'consents', partitionKey: '/consent_id' }
       { name: 'classifications', partitionKey: '/id' }
+      { name: 'loans', partitionKey: '/loan_id' }
+      { name: 'alerts', partitionKey: '/loan_id' }
     ]
     sqlRoleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
@@ -368,6 +370,11 @@ module serviceBus 'modules/servicebus.bicep' = if (serviceBusEnabled) {
     peSubnetId: subnetId['snet-pe']
     zoneId: zoneId['privatelink.servicebus.windows.net']
     topics: [ 'consent', 'flow.updated', 'alert.raised', 'grievance' ]
+    // 대출별 세션으로 주차 순서를 지키고, subject(label) 필터로 스모크 메시지를 거릅니다.
+    subscriptions: [
+      { topic: 'flow.updated', name: 'early-warning' }
+      { topic: 'alert.raised', name: 'collections' }
+    ]
     roleAssignments: [
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.sbSender, principalType: sp }
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.sbReceiver, principalType: sp }
@@ -500,7 +507,7 @@ module functions 'modules/functions.bicep' = {
     storageName: stFunc.outputs.name
     storageBlobEndpoint: stFunc.outputs.blobEndpoint
     appInsightsConnectionString: monitoring.outputs.appiConnectionString
-    extraSettings: {
+    extraSettings: union({
       COSMOS_ENDPOINT: cosmos.outputs.endpoint
       COSMOS_DATABASE: cosmos.outputs.databaseName
       DATA_BLOB_ENDPOINT: stData.outputs.blobEndpoint
@@ -511,11 +518,18 @@ module functions 'modules/functions.bicep' = {
       ANALYST_MODEL: 'gpt-5.4'
       REVIEWER_MODEL: 'gpt-5.4-mini'
       CLASSIFIER_MODEL: 'gpt-5.4-mini'
+      EW_MODEL: 'gpt-5.4'
+      COLLECTIONS_MODEL: 'gpt-5.4-mini'
       POLICY_URL: policyUrl
       MOCKAPI_URL: mockapiUrl
       SERVICEBUS_FQDN: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
       KEYVAULT_URI: keyVault.outputs.uri
-    }
+    }, serviceBusEnabled ? {
+      // Service Bus 트리거(관리 ID). pause 상태에서는 트리거를 등록하지 않으므로 두지 않습니다.
+      ServiceBusConnection__fullyQualifiedNamespace: '${names.sb}.servicebus.windows.net'
+      ServiceBusConnection__credential: 'managedidentity'
+      ServiceBusConnection__clientId: identities.outputs.orchestratorClientId
+    } : {})
   }
 }
 
