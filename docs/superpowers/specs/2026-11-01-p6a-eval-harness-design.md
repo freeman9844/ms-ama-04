@@ -18,8 +18,8 @@
 |---|---|
 | 실행 위치 | VNet 안 Container Apps Job(`job-eval`). 로컬 CLI 실행은 하지 않음 |
 | 평가 방식 | 컴포넌트 평가: 에이전트 코드를 직접 호출하고 모델 호출만 실제 Azure. 배포된 여정 E2E 평가는 제외 |
-| 평가기 | 자체 지표 + Foundry 내장 평가기(`azure-ai-evaluation` LLM-judge). 포털 업로드는 하지 않음 |
-| 규모 | 소규모: 거래 약 300건, 심사 8건 × 2모델, 조기경보 6경로 × 2모델. 약 20분, 약 $3 |
+| 평가기 | 자체 지표 + 자체 LLM-judge(gpt-5.4, groundedness·relevance·coherence 1~5점). `azure-ai-evaluation`은 설치 실패로 쓰지 않음(§9). 포털 업로드는 하지 않음 |
+| 규모 | 소규모: 분류 신청 8건(규칙 미분류 그룹 + 어려운 적요 뱅크), 심사 8건 × 2모델, 조기경보 6경로 × 13주 × 2모델. 약 20분, 약 $3 |
 | 모델 비교 | 분류: Decision-1 / gpt-5.4-mini / gpt-5.4. 심사 analyst·조기경보 investigator: gpt-5.4 / mini |
 | 리포트 회수 | Log Analytics 재조립 + Blob 원본 보관. 데이터 스토리지(stdat) 네트워크는 열지 않음 |
 | 공정성 분담 | P6a는 반사실 쌍 테스트. 운영 데이터 기준 세그먼트별 승인율 격차 대시보드는 P6b |
@@ -52,7 +52,8 @@
 상위 Spec §6.2는 `eval/`에 하네스·데이터셋·리포트를 둔다고 했습니다. 패키징(`pyproject.toml`의 `packages`)과 `pythonpath = src` 관례를 따르기 위해 다음처럼 나눕니다.
 
 - 코드: `src/evals/` (패키지명 `evals`. 내장 함수 `eval`과 이름이 겹치지 않게 합니다.)
-- 단가표와 결과: `eval/prices.json`, `eval/reports/<run-id>/`
+- 단가표: `src/evals/prices.json`(이미지에 함께 들어가야 하므로 패키지 안에 둡니다).
+- 결과: `eval/reports/<run-id>/`.
 - 데이터셋은 시드로 결정적으로 생성하므로 파일로 커밋하지 않고, 리포트에 시드와 분포 요약을 남깁니다.
 
 ### 2.3 구성 요소
@@ -60,17 +61,19 @@
 | 모듈 | 역할 |
 |---|---|
 | `evals/datasets.py` | `mockapis.synth`로 라벨 평가셋 생성(분류 거래, 심사 케이스, 조기경보 경로, 반사실 쌍). 시드 고정 |
-| `evals/metering.py` | 호출 단위 기록(suite, case, 모델, 토큰, 지연, 재시도, 상태). 단가표로 비용 계산, 예산 가드 |
+| `evals/metering.py` | httpx 전송 계층에서 호출 단위 기록(suite, case, 모델, 토큰, 지연, 재시도, 상태, PII 적중). 429·5xx 재시도, 단가표로 비용 계산, 예산 가드 |
+| `evals/runner.py` | 평가용 에이전트 이름(`eval-<이름>-<모델>`)으로 바꿔 운영 에이전트 버전을 건드리지 않음. 실행 후 대화·컨테이너 정리 |
+| `evals/backend.py` | 실제 Azure(관리 ID) 또는 가짜 HTTP 에뮬레이터(`evals/fake.py`). 둘 다 같은 계측 transport를 거침 |
 | `evals/metrics.py` | 순수 함수: macro F1, 정확도, precision/recall, 리드 일수 분포, p50/p95 |
-| `evals/suites/classify.py` | `agents.txn_classify.classify_unresolved`를 모델별 실행 |
+| `evals/suites/classify.py` | `agents.txn_classify.classify_unresolved`를 3구성(Decision-1+mini 폴백 / mini만 / gpt-5.4만)으로 실행 |
 | `evals/suites/underwriting.py` | `agents.underwriting.assess`(analyst+reviewer)를 모델별 실행. Policy는 `policy.engine.evaluate` 직접 호출 |
-| `evals/suites/early_warning.py` | 주간 스냅샷마다 `agents.monitoring.detect` 규칙 트리거, 트리거 시 `agents.early_warning.investigate` 실행 |
+| `evals/suites/early_warning.py` | 운영 `process_week`와 같은 주차 처리(규칙 분류 → `agents.monitoring.detect` → 새 트리거만 `investigate`)를 경로별 13주 재생. 탐지기 단독 기준선도 함께 계산 |
 | `evals/suites/safety.py` | 위 suite 입출력 재사용: 주입 방어율, PII 누출률, 반사실 공정성 |
-| `evals/judge.py` | `azure-ai-evaluation`의 Groundedness·Relevance·Coherence 평가기로 심사 설명 채점(judge 모델 gpt-5.4) |
+| `evals/judge.py` | 자체 LLM-judge(`quality-judge` 에이전트, gpt-5.4). 심사 의견서를 근거 컨텍스트에 비춰 groundedness·relevance·coherence를 1~5점으로 채점 |
 | `evals/report.py` | `summary.json`, `report.md`(실패 유형 카탈로그, 사람 표본 검토 섹션, "합성 데이터 기준" 표기), `calls.jsonl` 생성 |
-| `evals/transport.py` | 리포트 파일을 gzip+base64 청크로 stdout 출력, Blob 업로드. 회수 측 재조립·sha256 검증 |
-| `evals/__main__.py` | `python -m evals [--suite classify\|underwriting\|ew\|all] [--fake] [--out DIR]` |
-| `ops` 추가 | `ops deploy eval`(이미지 빌드·Job 갱신), `ops eval`(Job 시작·대기·리포트 회수) |
+| `evals/transport.py` | 리포트 파일을 gzip+base64 청크로 stdout 출력, Blob REST(Put Blob) 업로드. 회수 측 재조립·sha256 검증 |
+| `evals/__main__.py` | `python -m evals [--suite all\|classify\|underwriting\|early_warning\|safety] [--fake] [--out DIR] [--budget USD] [--emit]` |
+| `ops` 추가 | `ops deploy eval`(이미지 빌드·Job 갱신), `ops eval [--suite ...]`(Job 시작·대기·리포트 회수, `ops/eval_runner.py`) |
 
 - 에이전트 코드는 고치지 않습니다. 기존 주입 지점(runner, decider, fallback, model 인자)만 씁니다.
 - `src/orchestrator`는 이미지에 넣지 않습니다. 필요한 순수 함수가 orchestrator에만 있으면 scratch 단계에서 `shared`나 `agents`로 옮길지 판단하고, 옮길 때는 기존 테스트로 동작 보존을 확인합니다.
@@ -83,27 +86,27 @@
 
 | 데이터셋 | 구성 | 라벨 |
 |---|---|---|
-| 분류 거래 | 4개 아키타입 × 시드 여러 개, 약 300건. 규칙으로 처리되지 않는 거래가 모델 비교 대상 | `TxnCategory` 정답 |
-| 심사 케이스 | 8건(아키타입별 2건) | 아키타입, Policy 판정, TAX_MISMATCH 여부, 주입 거래 포함 여부 |
-| 조기경보 경로 | 6개: STRESSED 3개(시작 시점·강도 다름), 정상 2개, 계절성 하락 1개 | `stress_onset`. 라벨 연체일 = onset + 90일 |
-| 반사실 쌍 | 심사 케이스 중 일부의 재무 데이터는 같고 지역·업종만 바꾼 쌍 | 결론과 등급이 같아야 함 |
+| 분류 거래 | 4개 아키타입 × 시드 2개(신청 8건). 규칙(classify-v1)이 못 푸는 거래처 이체에 더해, 규칙 키워드에 걸리지 않는 어려운 적요 뱅크(라벨마다 4개, 일부러 모호한 것 포함)를 아키타입별로 나눠 넣음. 같은 적요를 두 번 넣어 신청 안 중복 제거와 캐시 적중을 확인 | 분류기 라벨(`TxnCategory` 정답을 분류기 선택지로 사상. 매출·대출금 입금은 선택지 밖이라 제외) |
+| 심사 케이스 | 8건: 아키타입 4개 × (일반, 프롬프트 주입) | 아키타입, Policy 판정, TAX_MISMATCH 여부, 주입 여부 |
+| 조기경보 경로 | 6개: 아키타입 3개(HEALTHY_SEASONAL, TAX_MISMATCH, STRESSED) × 사후 흐름 시나리오 2개(STACKING=양성, STABLE=음성). 경로당 13주 재생 | 양성 여부와 라벨 연체일(`default_on`) |
+| 반사실 쌍 | 주입 없는 심사 케이스 2건(HEALTHY_SEASONAL, TAX_MISMATCH)의 재무 데이터는 그대로 두고 지역·업종만 다른 페르소나 값으로 바꾼 쌍. gpt-5.4 analyst로만 실행 | 결론과 등급이 같아야 함 |
 
 ### 3.2 지표
 
 | Suite | 지표 |
 |---|---|
-| 분류 | macro F1, 정확도, 신뢰도 임계값별 정확도와 fallback 비율, 규칙 처리 비율, 캐시 적중률, 신청당 모델 호출 수, 분류 1건당 비용 |
+| 분류 | macro F1, 정확도(고유 적요 그룹 단위 + 거래 가중), 신뢰도 임계값별(0.5~0.9) 정확도와 fallback 비율, 규칙 처리 비율, 캐시 적중률, 신청당 모델 호출 수, 분류 1건당 비용 |
 | 심사 | 근거 인용률(`check_grounding` 통과 비율), 세무 대사 불일치 탐지율, Policy 판정과의 결론 일치율, reviewer 라운드 수, LLM-judge 점수(groundedness·relevance·coherence) |
-| 조기경보 | precision, recall(경로 단위), 리드 일수 분포(라벨 연체일 − 첫 경보일), 오탐 경로 |
+| 조기경보 | precision, recall(경로 단위), 리드 일수 분포(라벨 연체일 − 첫 경보일), 오탐 경로. 비교 기준선으로 "탐지기 단독"(트리거가 하나라도 걸리면 경보) 값을 함께 표기 |
 | 안전 | 주입 방어율(주입 거래가 있는 케이스에서 승인 유도에 따르지 않은 비율), PII 누출률(모델 입력·출력에 원본 PII가 남은 건수/전체), 반사실 공정성(쌍 간 결론·등급 불일치 수) |
 | 공통(모델 비교) | 모델별 p50/p95 지연, 입력·출력 토큰, 건당 비용 |
 
-- 단가는 `eval/prices.json`에 모델별로 두고 출처 URL과 확인 날짜를 적습니다. 공개 단가가 없는 모델은 "단가 미확인"으로 표시하고 토큰 수만 보고합니다.
+- 단가는 `src/evals/prices.json`에 모델별로 두고 출처와 확인 날짜를 적습니다. 공개 단가가 없는 모델(Decision-1)은 "단가 미확인"으로 표시하고 토큰 수와 호출 수만 보고합니다. 비용 합계와 예산 가드에는 단가를 아는 호출만 들어갑니다.
 - 사람 표본 검토: `report.md`에 심사 설명 3건과 빈 평가 칸을 넣고, 사용자가 채운 결과를 README에 옮깁니다.
 
 ### 3.3 예산
 
-거래 약 300건 × 3모델, 심사 8건 × 2모델, 조기경보 조사 약 6~12회 × 2모델, judge 16회. 목표는 약 20분, 약 $3이고, 가드는 $5입니다.
+거래 그룹 × 3구성, 심사 8건 × 2모델(+ reviewer), 반사실 2건, 조기경보 조사(새 트리거 주차만) × 2모델, judge 16회. 목표는 약 20분, 약 $3이고, 가드는 $5입니다(Decision-1 호출은 단가 미확인이라 가드에 들어가지 않음).
 
 ---
 
@@ -111,36 +114,37 @@
 
 ### 4.1 이미지와 Job
 
-- `src/evals/Dockerfile`: `shared`, `policy`, `mockapis`, `agents`, `evals`를 복사하고 `azure-ai-evaluation`, `azure-identity`, `azure-storage-blob` 등을 설치합니다.
-- `ops deploy eval`: 기존 `deploy_images`와 같은 방식으로 `az acr build` 후 `EVAL_IMAGE` azd env를 설정하고 provision합니다. ACR 창(`window open --acr`)이 필요합니다.
+- `src/evals/Dockerfile`: `shared`, `policy`, `mockapis`, `agents`, `evals`를 복사하고 `requirements-eval.txt`(pydantic, PyYAML, httpx, azure-identity, 버전 고정)를 설치합니다. Blob은 REST로 올리므로 Storage SDK는 넣지 않습니다.
+- `ops deploy eval`: 기존 `deploy_images`와 같은 방식으로 `az acr build` 후 `SERVICE_EVAL_IMAGE_NAME` azd env를 설정하고 provision합니다. ACR 창(`window open --acr`)이 필요합니다. `ops deploy all`에도 포함됩니다.
 - `infra/modules/eval-job.bicep`:
   - `job-eval`, 내부 ACA 환경(VNet), 수동 트리거, 1 CPU / 2Gi, `replicaTimeout` 3600초, 재시도 0.
-  - `EVAL_IMAGE`가 없으면 자리표시 이미지로 배포합니다(다른 서비스와 같은 패턴).
-  - 환경 변수: OpenAI·Foundry 엔드포인트, 모델 배포 이름, judge 모델, `EVAL_BUDGET_USD`, 리포트 컨테이너, managed identity client id.
+  - `SERVICE_EVAL_IMAGE_NAME`이 없으면 자리표시 이미지로 배포합니다(다른 서비스와 같은 패턴).
+  - 환경 변수: OpenAI·Foundry 엔드포인트, 모델 배포 이름(운영과 같은 analyst gpt-5.4·mini·reviewer mini·decision-1), judge 모델, `EVAL_BUDGET_USD`=5, `EVAL_EMIT_LOGS`=1, 리포트 Blob 엔드포인트·컨테이너, managed identity client id.
 - 신규 managed identity `id-eval`(최소 권한):
-  - Cognitive Services OpenAI User, Azure AI User(모델, judge).
-  - Storage Blob Data Contributor는 stdat의 `eval-reports` 컨테이너 범위만.
+  - Cognitive Services OpenAI User, Azure AI User(모델, judge, 평가용 에이전트 버전 생성), AcrPull.
+  - Storage Blob Data Contributor는 stdat의 `eval-reports` 컨테이너 범위만(`modules/blob-container-role.bicep`).
   - Cosmos, Key Vault, 큐 권한은 없습니다.
 
 ### 4.2 실행 흐름
 
 1. `ops window open --acr` → `ops deploy eval` → `ops window close`. 창은 이미지 빌드에만 필요합니다.
-2. `ops eval [--suite ...]`: Job 시작(제어 평면) → `smoke_runner`와 같은 폴링으로 종료 대기 → 리포트 회수 → `eval/reports/<run-id>/` 저장.
+2. `ops eval [--suite ...]`: Job 시작(제어 평면. `all`이 아니면 `--env-vars EVAL_SUITE=<suite>`로 덮어씀) → `smoke_runner`와 같은 폴링으로 종료 대기 → 리포트 회수 → `eval/reports/<실행 이름>/` 저장.
 3. 리포트를 커밋하고 README에 실측값을 기록합니다.
 
 ### 4.3 리포트 회수
 
-- Job은 리포트 원본을 Blob `eval-reports/<run-id>/`에 올립니다.
-- 같은 파일을 stdout에 `EVALCHUNK <run-id> <file> <seq>/<total> <sha256> <base64>` 형식(gzip 후 base64, 한 줄 8KB 이하)으로 출력합니다.
-- `ops eval`은 Log Analytics(`ContainerAppConsoleLogs_CL`)에서 실행 이름으로 청크를 모아 재조립하고 sha256을 확인합니다. 수집 지연이 있으므로 최대 10분 다시 조회합니다.
+- Job은 리포트 원본을 Blob `eval-reports/<run-id>/`에 올립니다(실패해도 로그만 남기고 계속).
+- 같은 파일을 stdout에 `EVALCHUNK <run-id> <file> <seq>/<total> <sha256> <base64>` 형식(gzip 후 base64, 조각 6000자, 한 줄 8KB 이하)으로 출력합니다. run-id는 `CONTAINER_APP_JOB_EXECUTION_NAME`, 없으면 `local-<UTC 시각>`입니다.
+- `ops eval`은 Log Analytics(`ContainerAppConsoleLogs_CL`)에서 실행 이름으로 청크를 모아 재조립하고 sha256을 확인합니다. 수집 지연이 있으므로 30초 간격으로 최대 10분 다시 조회합니다.
 - 이렇게 해서 stdat 네트워크를 열지 않고 리포트를 받습니다.
 
-### 4.4 Live probe 항목 (scratch 전에 확인)
+### 4.4 Live probe 항목 (plan 작성 전에 확인)
 
-1. `azure-ai-evaluation` 평가기가 private endpoint와 managed identity로 동작하는지, 그리고 gpt-5.4를 judge로 쓸 수 있는지.
-2. 패키지 크기와 `az acr build` 시간.
-3. 분류 suite가 gpt-5.4 배포 이름으로 `LlmFallback`을 직접 부를 수 있는지.
-4. 긴 stdout 줄이 Log Analytics에서 잘리지 않는 최대 길이(청크 크기 확정).
+1. ~~`azure-ai-evaluation` 평가기~~: 설치 실패로 자체 judge로 대체(§9). 대신 gpt-5.4 judge 에이전트가 관리 ID로 동작하는지.
+2. 이미지 크기와 `az acr build` 시간.
+3. 분류 suite가 gpt-5.4 배포 이름으로 `LlmFallback`을 직접 부를 수 있는지, Decision-1 응답에 usage 필드가 있는지.
+4. 긴 stdout 줄이 Log Analytics에서 잘리지 않는지(6000자 조각 기준), Job에 `CONTAINER_APP_JOB_EXECUTION_NAME`이 주입되는지, `job start --env-vars`로 suite를 덮어쓸 수 있는지.
+5. `eval-` 접두어 에이전트 이름을 Foundry가 받는지.
 
 ---
 
@@ -187,7 +191,28 @@
 
 | 위험 | 대응 |
 |---|---|
-| `azure-ai-evaluation` 의존성이 무겁거나 private endpoint에서 동작하지 않음 | live probe에서 먼저 확인. 안 되면 judge를 같은 프롬프트 기반 자체 LLM-judge로 대체하고 Spec을 수정 |
+| `azure-ai-evaluation` 의존성이 무겁거나 private endpoint에서 동작하지 않음 | 실제로 설치 실패. 같은 기준의 자체 LLM-judge로 대체함(§9) |
 | Decision-1 공개 단가 없음 | 토큰 수만 보고하고 "단가 미확인" 표시 |
 | 소규모 표본 | 지표마다 표본 수(n)를 함께 표기 |
 | Log Analytics 수집 지연·줄 길이 제한 | probe로 청크 크기 확정, 재조회, Blob 원본 보관 |
+
+---
+
+## 9. Scratch 결과 반영 (2026-11-02 보정)
+
+Scratch TDD에서 확인해 위 본문에 반영한 변경입니다.
+
+| 항목 | 원래 | 변경과 이유 |
+|---|---|---|
+| judge | `azure-ai-evaluation` 평가기 | 패키지 설치가 실패해 §8 대응대로 자체 LLM-judge(`evals/judge.py`)로 대체. 기준(groundedness·relevance·coherence, 1~5점)과 judge 모델(gpt-5.4)은 같음 |
+| 에이전트 이름 | 운영 이름 그대로 | 운영 코드는 같은 이름의 최신 버전을 부르므로, 평가가 다른 모델로 같은 이름의 버전을 만들면 운영 동작이 바뀜. `eval-<이름>-<모델>`로 분리하고 실행 후 대화·컨테이너를 정리 |
+| 계량 위치 | suite가 직접 기록 | httpx 전송 계층(`MeteredTransport`)에서 기록. 재시도(429·502·503·504, 지수 백오프 최대 3회)도 같은 곳에서 처리해 에이전트 코드를 고치지 않음 |
+| PII 검사 | 모델 입출력 문자열 | 도구 인자·출력 안에 다시 들어 있는 JSON 문자열까지 풀어서 검사. 식별자·메타데이터 키(id, created_at 등)는 숫자열이 계좌번호 패턴에 걸리므로 제외 |
+| 분류 데이터 | 거래 약 300건 | 합성 케이스의 규칙 미분류 거래만으로는 모델 비교 대상이 적어, 규칙 키워드에 걸리지 않는 어려운 적요 뱅크를 추가 |
+| 조기경보 데이터 | STRESSED onset 기반 6경로 | P5a의 사후 흐름 시나리오(STACKING/STABLE)를 그대로 써 운영 모니터링 경로와 같은 입력을 재생. "탐지기 단독" 기준선을 함께 보고해 에이전트 조사의 기여를 보임 |
+| 반사실 쌍 | "일부" | 주입 없는 2건, gpt-5.4 analyst만. 소규모라 불일치 0건이어도 공정성 보장이 아니라 "이 표본에서 관찰되지 않음"으로 표기 |
+| Decision-1 비용 | 단가 미확인 표시 | 비용 합계·예산 가드에서도 제외하고 호출 수를 따로 보고 |
+| Blob 업로드 | SDK | REST(Put Blob) + 관리 ID 토큰. 이미지 의존성을 줄임 |
+| 컨테이너 범위 역할 | 미정 | `modules/blob-container-role.bicep`으로 `eval-reports` 컨테이너에만 부여 |
+| 단가표 위치 | `eval/prices.json` | `src/evals/prices.json`(이미지·wheel에 포함) |
+| suite 이름 | `ew` | `early_warning`, `safety` 추가. `safety`만 고르면 입력이 되는 `underwriting`도 함께 실행 |
