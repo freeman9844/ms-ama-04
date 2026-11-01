@@ -52,7 +52,8 @@ def _error(e: Exception) -> str:
 def _delete_raw(deps: Deps, container: str) -> dict[str, Any]:
     try:
         outcome = "deleted" if deps.raw.delete_container(container) else "absent"
-        return _item("raw_container", container, outcome, deps.raw.manifest(container) is None)
+        # 삭제 중인 컨테이너는 잠시 빈 채로 보이므로 없음(None)과 빈 목록 모두 삭제 확인이다.
+        return _item("raw_container", container, outcome, not deps.raw.manifest(container))
     except Exception as e:  # noqa: BLE001 - 항목 실패는 증명에 남기고 재시도한다
         return _item("raw_container", container, "failed", False, _error(e))
 

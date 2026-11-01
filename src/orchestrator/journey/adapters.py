@@ -164,8 +164,12 @@ class BlobRawStore:
     def delete_container(self, container: str) -> bool:
         from azure.core.exceptions import ResourceNotFoundError
 
+        client = self._svc.get_container_client(container)
         try:
-            self._svc.delete_container(container)
+            # 컨테이너 삭제는 202로 끝나고 실제 제거는 나중이라, blob을 먼저 지워야 바로 빈 것으로 검증된다.
+            for blob in list(client.list_blobs()):
+                client.delete_blob(blob.name)
+            client.delete_container()
         except ResourceNotFoundError:
             return False
         return True

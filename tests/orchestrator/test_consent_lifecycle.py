@@ -1,9 +1,10 @@
 import asyncio
 import json
+import sys
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from fastapi.testclient import TestClient
 from agents.notices import Draft
 from agents.runtime import AgentRun
 from journey.activities import Deps, _remember_foundry, assemble_data, request_consent
-from journey.adapters import HttpMockApi, HttpPolicyApi
+from journey.adapters import BlobRawStore, HttpMockApi, HttpPolicyApi
 from journey.models import KST
 from journey.consent import (
     CONSENT_ACTIVITIES,
@@ -481,3 +482,72 @@ def test_command_for_unknown_completed_or_invalid_is_dropped():
     assert asyncio.run(handle_consent_command(done, command(application_id="app-1"), MemoryStore())) == "ignored"
     assert not done.raised and not done.started
     assert asyncio.run(handle_consent_command(FakeClient(), command(action="extend"), MemoryStore())) == "invalid"
+
+
+class PendingDeleteRaw(MemoryRaw):
+    """Azure는 컨테이너 삭제를 202로 받고 나중에 지워서, 직후에는 빈 컨테이너가 남아 보인다."""
+
+    def __init__(self):
+        super().__init__()
+        self.pending = set()
+
+    def manifest(self, container):
+        found = super().manifest(container)
+        return [] if found is None and container in self.pending else found
+
+    def delete_container(self, container):
+        self.pending.add(container)
+        return super().delete_container(container)
+
+
+def test_raw_container_is_verified_while_empty_container_deletion_is_pending(mock_client):
+    deps = replace(make_deps(mock_client, FoundryRunner()), raw=PendingDeleteRaw())
+    cid = granted(deps)["consent_id"]
+
+    assert delete_consent_data(deps, end(cid))["complete"] is True
+    item = deps.store.read(PROOFS_CONTAINER, cid, cid)["items"][0]
+    assert (item["kind"], item["outcome"], item["verified"]) == ("raw_container", "deleted", True)
+
+
+class AsyncDeleteContainer:
+    """컨테이너 삭제 요청은 받아 두기만 하고 blob 목록은 그대로 보이는 Azure 동작을 흉내 낸다."""
+
+    def __init__(self, names):
+        self.blobs = {n: b"{}" for n in names}
+        self.delete_requested = False
+
+    def list_blobs(self):
+        return [SimpleNamespace(name=n) for n in self.blobs]
+
+    def download_blob(self, name):
+        return SimpleNamespace(readall=lambda: self.blobs[name])
+
+    def delete_blob(self, name):
+        del self.blobs[name]
+
+    def delete_container(self):
+        self.delete_requested = True
+
+
+@pytest.fixture
+def azure_errors(monkeypatch):
+    """개발 venv에는 azure-core가 없어 함수 앱 의존성의 예외 모듈만 대신 넣는다."""
+    try:
+        import azure.core.exceptions  # noqa: F401
+    except ModuleNotFoundError:
+        errors = ModuleType("azure.core.exceptions")
+        errors.ResourceNotFoundError = type("ResourceNotFoundError", (Exception,), {})
+        monkeypatch.setitem(sys.modules, "azure.core", ModuleType("azure.core"))
+        monkeypatch.setitem(sys.modules, "azure.core.exceptions", errors)
+
+
+def test_blob_store_deletes_blobs_so_pending_container_is_empty_at_once(azure_errors):
+    container = AsyncDeleteContainer(["pg.json", "tax.json"])
+    store = BlobRawStore.__new__(BlobRawStore)
+    store._svc = SimpleNamespace(
+        get_container_client=lambda name: container,
+        delete_container=lambda name: container.delete_container(),
+    )
+
+    assert store.delete_container("consent-x") is True
+    assert container.delete_requested and store.manifest("consent-x") == []
