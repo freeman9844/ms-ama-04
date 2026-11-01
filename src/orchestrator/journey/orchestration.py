@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE
-from journey.models import KST, StartRequest, Status
+from journey.models import KST, WITHDRAWN_EVENT, StartRequest, Status
 from journey.validation import validate_officer_decision
 
 ORCHESTRATOR = "application_journey"
@@ -91,6 +91,7 @@ def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
         "decision_attempts": [],
         "officer_decision": None,
         "monitoring": None,
+        "withdrawal": None,
         "error": None,
     }
 
@@ -192,9 +193,24 @@ def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) 
     # 이벤트 태스크는 완료될 때까지 재사용한다. 타이머가 이겼다고 새로 만들면
     # 버려진 태스크가 다음 이벤트를 소비해 결정이 유실될 수 있다.
     event = ctx.wait_for_external_event(EVENT_OFFICER_DECISION)
+    withdrawn = ctx.wait_for_external_event(WITHDRAWN_EVENT)
     while True:
         timer = ctx.create_timer(deadline)
-        winner = yield ctx.task_any([event, timer])
+        winner = yield ctx.task_any([event, withdrawn, timer])
+        if winner is withdrawn:
+            timer.cancel()
+            payload = _json(withdrawn.result)
+            if isinstance(payload, dict) and payload.get("consent_id") == doc["consent"]["consent_id"]:
+                doc["withdrawal"] = {
+                    "consent_id": payload["consent_id"],
+                    "requested_by": str(payload.get("requested_by", ""))[:64],
+                    "at": _now(ctx).isoformat(),
+                }
+                yield from _advance(ctx, retry, doc, Status.WITHDRAWN)
+                return _result(doc)
+            # 다른 동의(사후 모니터링 동의 등)의 철회는 신청 여정을 끝내지 않는다.
+            withdrawn = ctx.wait_for_external_event(WITHDRAWN_EVENT)
+            continue
         if winner is event:
             timer.cancel()
             payload = _json(event.result)

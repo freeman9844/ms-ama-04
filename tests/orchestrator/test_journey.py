@@ -192,7 +192,8 @@ def test_escalation_reuses_pending_event_task(run_journey):
     result, ctx = run_journey(START, acts(), [("timer",), ("event", APPROVE)])
     assert result["status"] == "approved"
     assert statuses(ctx)[-3:] == ["awaiting_officer", "escalated", "approved"]
-    assert len(ctx.events) == 1  # 타이머가 이겨도 대기 중인 이벤트 태스크를 버리지 않는다
+    # 타이머가 이겨도 대기 중인 이벤트 태스크를 버리지 않는다
+    assert [e.name for e in ctx.events] == ["officer_decision", "consent_withdrawn"]
     assert ctx.timers[0].input == datetime(2026, 11, 2, 15, 0, tzinfo=UTC)
     assert ctx.timers[1].input == datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
     sla = ctx.saved[-1]["sla"]
@@ -237,3 +238,31 @@ def test_monitoring_failure_keeps_approval(run_journey):
 def test_decline_does_not_register_monitoring(run_journey):
     result, ctx = run_journey(START, acts(), [("event", DECLINE)])
     assert result["status"] == "declined" and ctx.called("register_monitoring") == []
+
+
+WITHDRAW = {"consent_id": "c-1", "requested_by": "borrower:demo-cafe-001"}
+
+
+def test_withdrawal_while_awaiting_officer_ends_journey(run_journey):
+    result, ctx = run_journey(START, acts(), [("withdraw", WITHDRAW)])
+    assert result == {"application_id": "app-1", "status": "withdrawn"}
+    assert statuses(ctx)[-2:] == ["awaiting_officer", "withdrawn"]
+    doc = ctx.saved[-1]
+    assert doc["withdrawal"] == {**WITHDRAW, "at": doc["updated_at"]}
+    assert doc["officer_decision"] is None and not ctx.called("register_monitoring")
+    assert ctx.timers[-1].cancelled and ctx.custom_status == "withdrawn"
+
+
+def test_withdrawal_after_escalation_ends_journey(run_journey):
+    result, ctx = run_journey(START, acts(), [("timer",), ("withdraw", json.dumps(WITHDRAW))])
+    assert result["status"] == "withdrawn"
+    assert statuses(ctx)[-3:] == ["awaiting_officer", "escalated", "withdrawn"]
+
+
+def test_withdrawal_of_another_consent_is_ignored(run_journey):
+    other = {"consent_id": "c-9", "requested_by": "borrower:x"}
+    result, ctx = run_journey(START, acts(), [("withdraw", other), ("withdraw", "garbage"), ("event", APPROVE)])
+    assert result["status"] == "approved"
+    assert [e.name for e in ctx.events].count("consent_withdrawn") == 3
+    assert [e.name for e in ctx.events].count("officer_decision") == 1
+    assert ctx.saved[-1]["withdrawal"] is None and "withdrawn" not in statuses(ctx)

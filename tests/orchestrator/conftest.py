@@ -64,11 +64,16 @@ class FakeContext:
         return [c for c in self.calls if c.name == name]
 
 
-def drive(ctx):
-    """생성기를 끝까지 돌린다. outcomes: ("event", payload) 또는 ("timer",)."""
-    from journey.orchestration import journey
+# 각본의 "event"/"withdraw"는 신청 여정 이벤트 이름의 별칭이다. 그 밖의 첫 원소는 이벤트 이름 그대로다.
+_ALIASES = {"event": "officer_decision", "withdraw": "consent_withdrawn"}
 
-    gen = journey(ctx, RETRY)
+
+def drive(ctx, orchestrator=None):
+    """생성기를 끝까지 돌린다. outcomes: ("timer",) 또는 (이벤트 이름|별칭, payload)."""
+    if orchestrator is None:
+        from journey.orchestration import journey as orchestrator
+
+    gen = orchestrator(ctx, RETRY)
     value, error = None, None
     while True:
         try:
@@ -86,15 +91,18 @@ def drive(ctx):
             except Exception as e:  # noqa: BLE001
                 error = e
         elif isinstance(yielded, FakeAny):
-            event, timer = yielded.tasks
-            assert event.kind == "event" and timer.kind == "timer"
+            assert all(not t.cancelled for t in yielded.tasks), "취소된 태스크를 다시 기다림"
             outcome = ctx.outcomes.pop(0)
-            if outcome[0] == "event":
-                event.result = outcome[1]
-                value = event
-            else:
+            if outcome[0] == "timer":
+                (timer,) = [t for t in yielded.tasks if t.kind == "timer"]
                 ctx.current_utc_datetime = timer.input
                 value = timer
+            else:
+                name = _ALIASES.get(outcome[0], outcome[0])
+                (event,) = [t for t in yielded.tasks if t.kind == "event" and t.name == name]
+                assert event.result is None, "이미 완료된 이벤트 태스크를 다시 기다림"
+                event.result = outcome[1]
+                value = event
         else:
             raise AssertionError(f"unexpected yield {yielded!r}")
 
@@ -104,5 +112,16 @@ def run_journey():
     def run(payload, activities, outcomes=()):
         ctx = FakeContext(payload, activities, outcomes)
         return drive(ctx), ctx
+
+    return run
+
+
+@pytest.fixture
+def run_orchestrator():
+    """신청 여정 밖의 오케스트레이터(동의 수명주기 등)를 같은 방식으로 구동한다."""
+
+    def run(orchestrator, payload, activities, outcomes=()):
+        ctx = FakeContext(payload, activities, outcomes)
+        return drive(ctx, orchestrator), ctx
 
     return run
