@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set l = v.loan %}{% set m = v.monitoring %}
-{% block head %}{% if m.status == "replaying" %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
+{% block head %}{% if replay_blocked %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
 <p><a href="/loans">← 사후 모니터링</a> · <a href="/applications/{{ l.application_id|path }}">신청 상세</a></p>
@@ -69,7 +69,9 @@
 <h3>재조정 상담 요청 <small>{{ rs.status }}</small></h3>
 <p>{{ rs.category }} · {{ rs.note }}</p>
 {% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason }}</p>{% endif %}
-{% if a.decidable and user.can_decide %}
+{% if a.decidable and user.can_decide and replay_blocked %}
+<p><small>재생이 끝나면 재조정 결정을 내릴 수 있습니다.</small></p>
+{% elif a.decidable and user.can_decide %}
 <form method="post" action="/loans/{{ l.id|path }}/alerts/{{ a.alert_id|path }}/restructure" class="decision">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <fieldset><legend>재조정 결정</legend>

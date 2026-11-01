@@ -172,6 +172,17 @@ def test_replay_is_blocked_while_one_is_running(setup):
     assert queue2.sent == [(REPLAY_QUEUE, {"loan_id": "app-1"})]
 
 
+def test_restructure_form_waits_for_replay_to_finish(setup):
+    # 재생 중에는 10초 자동 새로 고침이 입력 중인 사유를 지우므로 결정 폼을 숨긴다.
+    client, *_ = setup(loan=make_loan(status="replaying", started_at=NOW - timedelta(minutes=5)))
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert 'http-equiv="refresh"' in page and "/restructure" not in page
+    assert "재생이 끝나면 재조정 결정을 내릴 수 있습니다." in page
+    stuck, *_ = setup(loan=make_loan(status="replaying", started_at=NOW - timedelta(minutes=31)))
+    page = stuck.get("/loans/app-1", headers=OFFICER).text
+    assert 'http-equiv="refresh"' not in page and "/restructure" in page
+
+
 def test_replay_requires_decider_and_csrf(setup):
     client, queue, *_ = setup()
     assert client.post("/loans/app-1/replay", data={"csrf": "0" * 64}, headers=OFFICER).status_code == 403
