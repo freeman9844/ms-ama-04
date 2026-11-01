@@ -13,7 +13,7 @@ from ops.azdenv import get_env, provision, set_env
 from ops.window import CLOSED
 
 ROOT = Path(__file__).resolve().parents[2]
-TARGETS = ("policy", "mockapi", "orchestrator", "all")
+TARGETS = ("policy", "mockapi", "console", "orchestrator", "all")
 # pip는 manylinux_2_28만 주면 manylinux_2_17/2014 wheel(pydantic-core 등)을 고르지 않습니다.
 PIP_PLATFORMS = ("manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64")
 SITE_PACKAGES = Path(".python_packages") / "lib" / "site-packages"
@@ -30,6 +30,7 @@ class ContainerService:
 CONTAINERS = (
     ContainerService("policy", "src/policy/Dockerfile", "SERVICE_POLICY_IMAGE_NAME"),
     ContainerService("mockapi", "src/mockapis/Dockerfile", "SERVICE_MOCKAPI_IMAGE_NAME"),
+    ContainerService("console", "src/console/Dockerfile", "SERVICE_CONSOLE_IMAGE_NAME"),
 )
 
 
@@ -80,7 +81,7 @@ def deploy_function(runner: Runner, root: Path) -> str:
 
 
 def deploy(runner: Runner, target: str, *, root: Path | None = None, tag: str | None = None) -> list[str]:
-    """target: policy | mockapi | orchestrator | all. 배포한 이미지·앱 이름 목록을 돌려줍니다."""
+    """target: policy | mockapi | console | orchestrator | all. 배포한 이미지·앱 이름 목록을 돌려줍니다."""
     if target not in TARGETS:
         raise OpsError(f"알 수 없는 배포 대상: {target}")
     root = root or ROOT
