@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from agents.classify import Category
 from agents.evidence import build_catalog
+from agents.grounding import close, ungrounded
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from shared.contracts import (
     EVIDENCE_ID_PATTERN,
@@ -33,7 +34,6 @@ ANALYST_AGENT = "underwriting-analyst"
 REVIEWER_AGENT = "underwriting-reviewer"
 MAX_ROUNDS = 3
 MAX_TXNS = 20
-TOLERANCE = 0.02
 MAX_ISSUES = 20
 FLAG_ASSESSMENT_UNAVAILABLE = "assessment_unavailable"
 FLAG_REVIEW_NOT_PASSED = "review_not_passed"
@@ -325,40 +325,6 @@ class UnderwritingContext:
 
 # --- 결정적 grounding 검사 ---
 
-_STRIP = (
-    re.compile(r"\[\[[A-Z]+_[0-9a-f]+\]\]"),
-    re.compile(r"[MSP]:[A-Za-z0-9_.:-]+"),
-    re.compile(r"\d{4}-\d{2}(?:-\d{2})?"),
-    re.compile(r"\bR\d{3}\b"),
-    re.compile(r"(?<![\d.])(?:19|20)\d{2}\s*년"),
-)
-_NUMBER = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(억|천만|백만|만|천)?\s*(%|퍼센트)?")
-_UNITS = {"억": 1e8, "천만": 1e7, "백만": 1e6, "만": 1e4, "천": 1e3}
-
-
-def _numbers(text: str) -> list[tuple[str, float]]:
-    for pattern in _STRIP:
-        text = pattern.sub(" ", text)
-    out = []
-    for m in _NUMBER.finditer(text):
-        raw, unit, pct = m.group(1), m.group(2), m.group(3)
-        try:
-            value = float(raw.replace(",", "")) * _UNITS.get(unit or "", 1)
-        except ValueError:
-            continue
-        if not unit and not pct and "." not in raw and value < 100:
-            continue
-        out.append((m.group(0).strip(), value))
-    return out
-
-
-def _close(a: float, b: float) -> bool:
-    return abs(a - b) <= max(abs(b) * TOLERANCE, 0.005)
-
-
-def _matches(value: float, cited: Sequence[float]) -> bool:
-    return any(_close(value, v) or _close(value, v * 100) or _close(value, abs(v)) for v in cited)
-
 
 def check_grounding(draft: AnalystDraft, ctx: UnderwritingContext) -> list[str]:
     issues: list[str] = []
@@ -372,13 +338,13 @@ def check_grounding(draft: AnalystDraft, ctx: UnderwritingContext) -> list[str]:
             issues.append(f"claims[{i}]: 알 수 없는 근거 ID {unknown}")
         cited = [float(ctx.catalog[m]) for m in c.metric_ids if m in ctx.catalog]
         cited += [float(ctx.by_id[t].amount_krw) for t in c.txn_ids if t in ctx.by_id]
-        bad = [raw for raw, value in _numbers(c.text) if not _matches(value, cited)]
+        bad = ungrounded(c.text, cited)
         if bad:
             issues.append(f"claims[{i}]: 인용 근거와 맞지 않는 수치 {bad}")
     for i, cf in enumerate(draft.counterfactuals):
         if cf.metric_id not in ctx.catalog:
             issues.append(f"counterfactuals[{i}]: 알 수 없는 지표 {cf.metric_id}")
-        elif not _close(cf.current, float(ctx.catalog[cf.metric_id])):
+        elif not close(cf.current, float(ctx.catalog[cf.metric_id])):
             issues.append(f"counterfactuals[{i}]: current {cf.current}가 {cf.metric_id} 값 {ctx.catalog[cf.metric_id]}와 다르다")
     rec, s = draft.recommendation, draft.proposed_structure
     lending = rec in (Recommendation.APPROVE, Recommendation.CONDITIONAL)
