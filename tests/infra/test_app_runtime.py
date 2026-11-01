@@ -32,6 +32,10 @@ def test_function_queues_on_host_storage(closed):
         "officer-decisions",
         "monitoring-replay",
         "restructure-decisions",
+        "consent-lifecycle",
+        "consent-commands",
+        "grievances",
+        "grievance-decisions",
     }
     assert all(q["name"].startswith("stfn") for q in queues)
 
@@ -51,6 +55,8 @@ def test_cosmos_app_containers(closed):
         "classifications": ["/id"],
         "loans": ["/loan_id"],
         "alerts": ["/loan_id"],
+        "deletion_proofs": ["/consent_id"],
+        "grievances": ["/application_id"],
     }
 
 
@@ -109,6 +115,9 @@ def test_function_app_settings_point_to_runtime(closed, variant):
     assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
     assert settings["CLASSIFIER_MODEL"] == "gpt-5.4-mini"
     assert (settings["EW_MODEL"], settings["COLLECTIONS_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
+    assert (settings["NOTICE_MODEL"], settings["GRIEVANCE_MODEL"]) == ("gpt-5.4-mini", "gpt-5.4-mini")
+    # 동의 수명주기 예약은 함수 호스트 스토리지의 큐로 보낸다(오케스트레이터 ID는 큐 기여자).
+    assert settings["QUEUE_ENDPOINT"].startswith("https://stfn") and ".queue." in settings["QUEUE_ENDPOINT"]
     assert settings["SERVICEBUS_FQDN"].endswith(".servicebus.windows.net")
     # 런타임 속성(엔드포인트)은 PSRule 펼침에서 빈 값이므로 키 존재만 확인합니다.
     assert {"COSMOS_ENDPOINT", "DATA_BLOB_ENDPOINT", "KEYVAULT_URI"} <= settings.keys()
@@ -132,6 +141,7 @@ def test_smoke_job_has_e2e_config(closed):
     assert config["queue_host"].startswith("stfn") and ".queue." in config["queue_host"]
     assert config["start_queue"] == "applications-start"
     assert config["decision_queue"] == "officer-decisions"
+    assert config["consent_command_queue"] == "consent-commands"
     assert config["cosmos_database"] == "lending"
     assert config["policy_url"].startswith("https://ca-policy.")
     assert config["mockapi_url"].startswith("https://ca-mockapi.")

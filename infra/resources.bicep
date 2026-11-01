@@ -224,7 +224,10 @@ module stFunc 'modules/storage.bicep' = {
       { groupId: 'table', zoneId: zoneId[tableZone] }
     ]
     containers: [ 'deploymentpackage' ]
-    queues: [ 'applications-start', 'officer-decisions', 'monitoring-replay', 'restructure-decisions' ]
+    queues: [
+      'applications-start', 'officer-decisions', 'monitoring-replay', 'restructure-decisions'
+      'consent-lifecycle', 'consent-commands', 'grievances', 'grievance-decisions'
+    ]
     roleAssignments: [
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobOwner, principalType: sp }
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.queueContributor, principalType: sp }
@@ -249,6 +252,8 @@ module cosmos 'modules/cosmos.bicep' = {
       { name: 'classifications', partitionKey: '/id' }
       { name: 'loans', partitionKey: '/loan_id' }
       { name: 'alerts', partitionKey: '/loan_id' }
+      { name: 'deletion_proofs', partitionKey: '/consent_id' }
+      { name: 'grievances', partitionKey: '/application_id' }
     ]
     sqlRoleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
@@ -520,6 +525,10 @@ module functions 'modules/functions.bicep' = {
       CLASSIFIER_MODEL: 'gpt-5.4-mini'
       EW_MODEL: 'gpt-5.4'
       COLLECTIONS_MODEL: 'gpt-5.4-mini'
+      NOTICE_MODEL: 'gpt-5.4-mini'
+      GRIEVANCE_MODEL: 'gpt-5.4-mini'
+      // 동의 수명주기 예약(consent-lifecycle 큐). 오케스트레이터 ID가 함수 스토리지 큐 기여자입니다.
+      QUEUE_ENDPOINT: 'https://${names.stFunc}.queue.${storageSuffix}/'
       POLICY_URL: policyUrl
       MOCKAPI_URL: mockapiUrl
       SERVICEBUS_FQDN: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
@@ -623,6 +632,7 @@ module smokeJob 'modules/smoke-job.bicep' = {
       queue_host: '${names.stFunc}.queue.${storageSuffix}'
       start_queue: 'applications-start'
       decision_queue: 'officer-decisions'
+      consent_command_queue: 'consent-commands'
       cosmos_database: cosmos.outputs.databaseName
       policy_url: policyUrl
       mockapi_url: mockapiUrl
