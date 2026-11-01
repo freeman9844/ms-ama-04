@@ -4,7 +4,7 @@ import pytest
 
 from ops.azcli import OpsError
 from ops.cli import main
-from ops.console_gate import check_console_gate
+from ops.console_gate import check_console_gate, urllib_fetch
 
 ENV = {"CONSOLE_URL": "https://ca-console.example.koreacentral.azurecontainerapps.io",
        "CONSOLE_CLIENT_ID": "22222222-2222-2222-2222-222222222222"}
@@ -58,6 +58,32 @@ def test_gate_stops_redirect_loops():
     with pytest.raises(OpsError, match="리디렉션"):
         check_console_gate(ENV, fetch)
     assert len(calls) <= 5
+
+
+def test_urllib_fetch_asks_like_a_browser_and_does_not_follow_redirects():
+    # Easy Auth는 브라우저 User-Agent(Mozilla/…)만 로그인 페이지로 보내고, 나머지는 401을 돌려줍니다(실측).
+    import http.server
+    import threading
+
+    class EasyAuthLike(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.headers.get("User-Agent", "").startswith("Mozilla/"):
+                self.send_response(302)
+                self.send_header("Location", LOGIN)
+            else:
+                self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), EasyAuthLike)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert urllib_fetch(f"http://127.0.0.1:{server.server_port}/") == (302, LOGIN)
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_gate_requires_console_outputs():

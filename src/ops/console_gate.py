@@ -23,10 +23,16 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def urllib_fetch(url: str) -> tuple[int, str | None]:
-    """리디렉션을 따라가지 않고 (상태 코드, Location)을 돌려줍니다."""
+    """리디렉션을 따라가지 않고 (상태 코드, Location)을 돌려줍니다.
+
+    Easy Auth는 브라우저 User-Agent(Mozilla/…) 요청만 로그인 페이지로 보내고 그 밖의 요청에는 401을 돌려주므로
+    (실측) 브라우저처럼 묻습니다.
+    """
     opener = urllib.request.build_opener(_NoRedirect)
+    request = urllib.request.Request(url, method="GET", headers={
+        "User-Agent": "Mozilla/5.0 (compatible; ama-ops-console-gate)", "Accept": "text/html"})
     try:
-        with opener.open(urllib.request.Request(url, method="GET"), timeout=30) as resp:
+        with opener.open(request, timeout=30) as resp:
             return resp.status, resp.headers.get("Location")
     except urllib.error.HTTPError as err:
         return err.code, err.headers.get("Location")
