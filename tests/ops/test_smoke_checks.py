@@ -71,15 +71,20 @@ ELIGIBLE = {"decision": "eligible", "max_amount_krw": 15_000_000}
 ASSESSMENT = {"recommendation": "conditional", "review": {"passed": True, "rounds": 2, "issues": []}}
 
 
+MONITORING = {"loan_id": "smoke-e2e-test", "registered_at": "2026-11-02T09:00:00+09:00"}
+LOAN = {"id": "smoke-e2e-test", "industry": "카페", "baseline": {"avg_weekly_revenue": 9_000_000}, "monitoring": None}
+
+
 def app_doc(status, **extra):
     return ok({"id": "smoke-e2e-test", "status": status, "timeline": [{}, {}, {}], **extra})
 
 
 def healthy_routes():
     return {
-        ("GET", "/docs/"): [sc.Response(404, b"{}"),
-                            app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT),
-                            app_doc("approved")],
+        ("GET", "/colls/applications/docs/"): [sc.Response(404, b"{}"),
+                                               app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT),
+                                               app_doc("approved", monitoring=MONITORING)],
+        ("GET", "/colls/loans/docs/"): ok(LOAN),
         ("GET", "/msi/token"): ok({"access_token": "tok"}),
         ("POST", "/openai/v1/chat/completions"): ok({"model": "gpt"}),
         ("GET", "?comp=list"): ok(),
@@ -176,8 +181,11 @@ def queue_text(call):
     return json.loads(ET.fromstring(call["body"]).findtext("MessageText"))
 
 
-def journey_http(docs):
-    return FakeHttp({**healthy_routes(), ("GET", "/docs/"): docs})
+def journey_http(docs, loan=None):
+    routes = {**healthy_routes(), ("GET", "/colls/applications/docs/"): docs}
+    if loan is not None:
+        routes[("GET", "/colls/loans/docs/")] = loan
+    return FakeHttp(routes)
 
 
 def test_health_check_requires_status_ok_and_flags_placeholder_image():
@@ -193,10 +201,11 @@ def test_health_check_requires_status_ok_and_flags_placeholder_image():
 def test_journey_starts_application_and_approves_within_policy_limit():
     sleeps = []
     http = journey_http([sc.Response(404, b"{}"), app_doc("consent_granted"),
-                         app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT), app_doc("approved")])
+                         app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT),
+                         app_doc("approved", monitoring=MONITORING)])
     detail = sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test")
     assert detail == ("smoke-e2e-test approved 15,000,000 KRW (3 steps); "
-                      "assessment conditional, review passed in 2 rounds")
+                      "assessment conditional, review passed in 2 rounds; monitoring registered (카페)")
     [start] = http.find("POST", "/applications-start/messages")
     assert start["url"] == "https://stfnx.queue.core.windows.net/applications-start/messages"
     assert start["headers"]["x-ms-version"] == "2023-11-03"
@@ -205,11 +214,36 @@ def test_journey_starts_application_and_approves_within_policy_limit():
     [decision] = http.find("POST", "/officer-decisions/messages")
     assert queue_text(decision) == {"application_id": "smoke-e2e-test", "decision": {
         "decision": "approve", "officer_id": "smoke", "amount_krw": 15_000_000, "reason": "smoke e2e"}}
-    read = http.find("GET", "/docs/")[0]
+    read = http.find("GET", "/colls/applications/docs/")[0]
     assert read["url"] == "https://cosmos-x.documents.azure.com/dbs/lending/colls/applications/docs/smoke-e2e-test"
     assert read["headers"]["x-ms-documentdb-partitionkey"] == '["smoke-e2e-test"]'
     assert read["headers"]["Authorization"].startswith("type%3Daad")
     assert sleeps == [10.0, 10.0]
+    [loan] = http.find("GET", "/colls/loans/docs/")
+    assert loan["url"] == "https://cosmos-x.documents.azure.com/dbs/lending/colls/loans/docs/smoke-e2e-test"
+    assert loan["headers"]["x-ms-documentdb-partitionkey"] == '["smoke-e2e-test"]'
+
+
+def approved_then(*later):
+    return [app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT), app_doc("approved"), *later]
+
+
+def test_journey_waits_for_monitoring_registration_after_approval():
+    sleeps = []
+    http = journey_http(approved_then(app_doc("approved"), app_doc("approved", monitoring=MONITORING)))
+    assert sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test").endswith("registered (카페)")
+    assert sleeps == [10.0, 10.0]
+
+
+@pytest.mark.parametrize("later, loan, match", [
+    ([app_doc("approved", flags=["monitoring_unavailable"])], ok(LOAN), "monitoring_unavailable"),
+    ([app_doc("approved")], ok(LOAN), "모니터링 등록"),
+    ([app_doc("approved", monitoring=MONITORING)], sc.Response(404, b"{}"), "loans"),
+])
+def test_journey_fails_when_monitoring_is_not_registered(later, loan, match):
+    http = journey_http(approved_then(*later), loan=loan)
+    with pytest.raises(sc.CheckFailed, match=match):
+        sc.check_journey(CFG, http, token_for(http), lambda s: None, "smoke-e2e-test", decision_attempts=3)
 
 
 def test_journey_fails_fast_when_application_fails():
