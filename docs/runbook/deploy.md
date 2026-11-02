@@ -5,7 +5,7 @@
 
 ## 배포 창
 
-Azure 서비스는 기본적으로 사설 엔드포인트 전용입니다. 이미지 빌드나 Function 코드 배포처럼 운영자 PC에서 직접 접근해야 하는 작업은 **배포 창** 동안에만 운영자 공인 IP 하나(`<운영자 공인 IP>/32`)에 접근을 허용하고, 끝나면 닫습니다. ADR-004에 설계 근거가 있고, 상위 설계는 `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2입니다.
+Azure 서비스는 기본적으로 사설 엔드포인트 전용입니다. 이미지 빌드나 Function 코드 배포처럼 운영자 PC에서 직접 접근해야 하는 작업은 **배포 창** 동안에만 운영자 공인 IP 하나(`<운영자 공인 IP>/32`)에 접근을 허용하고, 끝나면 닫습니다. [ADR-004](../adr/ADR-004-private-network-deploy-window.md)에 설계 근거가 있고, 상위 설계는 `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2입니다.
 
 | 명령 | 하는 일 |
 |------|---------|

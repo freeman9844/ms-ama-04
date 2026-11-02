@@ -14,7 +14,18 @@ REQUIRED_DOCS = [
     "docs/runbook/deploy-history.md",
     "docs/architecture.md",
     "docs/agents.md",
+    "docs/adr/README.md",
+    "docs/adr/ADR-001-orchestration.md",
+    "docs/adr/ADR-002-model-deployment.md",
+    "docs/adr/ADR-003-deterministic-policy.md",
+    "docs/adr/ADR-004-private-network-deploy-window.md",
+    "docs/adr/ADR-005-classification-model.md",
+    "docs/adr/ADR-006-two-container-apps-environments.md",
+    "docs/adr/ADR-007-demo-auth-mode.md",
+    "docs/adr/ADR-008-vnet-jobs-for-eval-ops.md",
+    "docs/adr/ADR-009-deletion-vs-explainability.md",
 ]
+ADR_SECTIONS = ("## 상태", "## 맥락", "## 결정", "## 검토한 대안", "## 결과", "## 재검토 조건", "## 근거")
 FENCE = re.compile(r"```.*?```", re.S)
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
 REPO_PATH = re.compile(r"`((?:src|infra|ops/reports|eval/reports|tests|docs)/[^`\s]+)`")
@@ -68,3 +79,15 @@ def test_repo_paths_exist(doc):
 @pytest.mark.parametrize("doc", hub_docs(), ids=_id)
 def test_repo_paths_use_forward_slashes(doc):
     assert BACKSLASH_PATH.findall(_text(doc)) == []
+
+
+@pytest.mark.parametrize("adr", sorted((ROOT / "docs" / "adr").glob("ADR-*.md")), ids=_id)
+def test_adr_has_required_sections(adr):
+    text = adr.read_text(encoding="utf-8")
+    assert [s for s in ADR_SECTIONS if s not in text] == []
+
+
+def test_adr_index_links_every_adr():
+    index = ROOT / "docs" / "adr" / "README.md"
+    linked = {(index.parent / t).resolve() for t in links(index)}
+    assert {p.resolve() for p in (ROOT / "docs" / "adr").glob("ADR-*.md")} <= linked

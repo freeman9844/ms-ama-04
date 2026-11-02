@@ -85,7 +85,7 @@ flowchart TB
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
 | Container Registry | Azure Container Registry + PE | 콘솔·Policy·Mock·Job 컨테이너 이미지 | 이미지 | MI `AcrPull`, 배포 창에 운영자 push | `infra/modules/acr.bicep` |
-| smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | Cosmos·Blob(읽기) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
+| smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | id-eval: Blob `eval-reports`(쓰기); id-ops: Cosmos(읽기)·큐; id-smoke: 큐·Service Bus(송신) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
 | Service Bus | Service Bus Premium + PE | `consent`·`flow.updated`·`alert.raised`·`grievance` 토픽. 평상시 pause(삭제) | 없음 | Managed Identity | `infra/modules/servicebus.bicep`, `src/ops/lifecycle.py` |
 | 데이터 저장소 | Cosmos DB(NoSQL), Blob Storage | 신청·동의·분류·대출·경보·삭제 증명·이의, 원천 데이터·리포트 | — | Cosmos SQL RBAC, Storage Entra RBAC | `infra/modules/cosmos.bicep`, `infra/modules/storage.bicep` |
 | 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics | 비밀·무키 인증·관측성 | — | RBAC | `infra/modules/keyvault.bicep`, `infra/modules/identities.bicep`, `infra/modules/monitoring.bicep` |
@@ -200,7 +200,7 @@ flowchart LR
 | Policy Engine | 판정 불가 | fail-closed: 판정 없이 진행 안 함. `policy_unavailable`+`assessment_unavailable` 플래그, 심사역 판단으로 넘김. 호출에 프로세스 단위 서킷(`src/orchestrator/journey/circuit.py`) | policy-down: 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`(`ops/reports/fault-20261102111750/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Service Bus | L4 이벤트 지연 | 세션 구독(`requiresSession`)·중복 감지(멱등 지원)·만료 dead-letter. 평상시 pause 시 `monitoring-replay` 큐 인라인 처리 | 세션·중복 감지·`deadLetteringOnMessageExpiration` 설정 `infra/modules/servicebus.bicep` |
 
-**한계:** 서킷 브레이커는 프로세스(Flex 인스턴스) 단위다(`src/orchestrator/journey/circuit.py`). Flex가 여러 인스턴스로 확장되면 서킷 상태가 인스턴스별로 따로 쌓여 전역 open이 보장되지 않는다. 분산 서킷은 운영 전환 과제다(ADR-007 범위).
+**한계:** 서킷 브레이커는 프로세스(Flex 인스턴스) 단위다(`src/orchestrator/journey/circuit.py`). Flex가 여러 인스턴스로 확장되면 서킷 상태가 인스턴스별로 따로 쌓여 전역 open이 보장되지 않는다. 분산 서킷은 운영 전환 과제다([ADR-001](adr/ADR-001-orchestration.md) 재검토 조건).
 
 ## 확장 경로
 
@@ -209,8 +209,8 @@ flowchart LR
 | 처리량 | Functions Flex `maximumInstanceCount: 40`, Container Apps 수평 확장 | 인스턴스 상한 상향, 동시성 조정 |
 | 데이터 | Cosmos DB 기본 RU | 컨테이너별 RU 상향·자동 확장 |
 | 모델 | Global Standard, 배포 `gpt-5.4`/`gpt-5.4-mini`/`decision-1` | TPM 쿼터 상향 |
-| 분류 비용 | 규칙(classify-v1) 선분류 + 정규화·중복 제거 + 캐시 + Decision-1, 폴백만 mini LLM | 규칙 커버리지 80.0%·캐시 적중 25.0%. `decision-1+mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. Decision-1 호출은 신청당 8.375회지만 단가 미확인이라 총비용 효과는 미검증(`eval/reports/job-eval-9imbutm/report.md` 2장) |
-| 지연·단가 | Global Standard | PTU 전환(예측 가능 지연·단가, ADR-002) |
+| 분류 비용 | 규칙(classify-v1) 선분류 + 정규화·중복 제거 + 캐시 + Decision-1, 폴백만 mini LLM | 규칙 커버리지 80.0%·캐시 적중 25.0%. `decision-1+mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. `decision-1+mini` 구성의 분류 호출은 신청당 8.375회(Decision-1 7.5회 + mini 폴백)지만 Decision-1 단가 미확인이라 총비용 효과는 미검증(`eval/reports/job-eval-9imbutm/report.md` 2장) |
+| 지연·단가 | Global Standard | PTU 전환(예측 가능 지연·단가, [ADR-002](adr/ADR-002-model-deployment.md)) |
 | 가용성 | 단일 리전(Korea Central) | 다중 리전 DR(문서만) |
 
 ## 운영 아키텍처
@@ -220,10 +220,10 @@ flowchart LR
 | 항목 | 데모 | 운영 전환 시 |
 |---|---|---|
 | 외부 진입 | 콘솔만 external, 운영자 IP + Entra | internal 환경 앞 Application Gateway(WAF v2) + Entra 단일 진입(월 약 $365, 상위 Spec §2.2) |
-| 심사역 인증 | Easy Auth implicit id_token, `consoleAuthEnabled=false` 시 데모 역할 | Entra 로그인 복원(비밀 또는 FIC 기반 인증 코드 흐름, ADR-007) |
+| 심사역 인증 | Easy Auth implicit id_token, `consoleAuthEnabled=false` 시 데모 역할 | Entra 로그인 복원(비밀 또는 FIC 기반 인증 코드 흐름, [ADR-007](adr/ADR-007-demo-auth-mode.md)) |
 | 서킷 브레이커 | 프로세스(Flex 인스턴스) 단위 | 분산 서킷(공유 상태) |
 | 가용성 | 단일 리전 | 다중 리전 DR |
-| 모델 배포 | Global Standard | Data Zone / PTU(ADR-002) |
+| 모델 배포 | Global Standard | Data Zone / PTU([ADR-002](adr/ADR-002-model-deployment.md)) |
 | 입력 방어 | 없음(미구축) | AI Content Safety Prompt Shields 등 프롬프트 입력 방어(상위 Spec §2.3). 현재 `infra/`·`src/`에 Content Safety/Prompt Shields 구현 없음 |
 
-ADR-001·ADR-002·ADR-007 등은 별도 ADR 문서로 정리 예정이다.
+모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)과 연결된다.

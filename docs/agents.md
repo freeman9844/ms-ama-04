@@ -38,7 +38,7 @@
   4. 고유 적요마다 Microsoft-Decision-1(`DECISION_DEPLOYMENT=decision-1`, REST `/providers/microsoft/v1/systemone`)에 고정 선택지(+`cannot_tell`)로 병렬 질의.
   5. 기권·저신뢰(`DEFAULT_THRESHOLD=0.7`)·오류만 mini LLM 폴백 에이전트 `txn-classifier`에 한 번에 묻고, 그래도 모르면 미분류.
 - **가드레일:** 모델로 가는 적요는 가명처리. 적요는 데이터일 뿐 지시가 아니라고 지시문에 명시. 특성 반영은 보수적(출금의 부채상환·고금리 상환만 override).
-- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 2장 — 규칙만으로 80.0% 분류, 캐시 적중 25.0%. `decision-1+gpt-5.4-mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. Decision-1 자체 호출은 신청당 8.375회지만 단가 미확인이라 건당 총비용 효과는 미검증이다(보고서의 mini 단독 $0.0123·1.000회 vs `decision-1+mini` $0.0047은 Decision-1 단가를 제외한 값). 세 구성 모두 macro F1 1.000(천장 효과)이라 품질이 아니라 폴백 비율·지연으로 가린다.
+- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 2장 — 규칙만으로 80.0% 분류, 캐시 적중 25.0%. `decision-1+gpt-5.4-mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. `decision-1+gpt-5.4-mini` 구성의 분류 호출은 신청당 8.375회(Decision-1 7.5회 + mini 폴백)지만 Decision-1 단가 미확인이라 건당 총비용 효과는 미검증이다(보고서의 mini 단독 $0.0123·1.000회 vs `decision-1+mini` $0.0047은 Decision-1 단가를 제외한 값). 세 구성 모두 macro F1 1.000(천장 효과)이라 품질이 아니라 폴백 비율·지연으로 가린다.
 
 ## 심사(분석가·검토자)
 
