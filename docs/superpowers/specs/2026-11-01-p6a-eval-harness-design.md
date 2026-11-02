@@ -128,7 +128,7 @@
 ### 4.2 실행 흐름
 
 1. `ops window open --acr` → `ops deploy eval` → `ops window close`. 창은 이미지 빌드에만 필요합니다.
-2. `ops eval [--suite ...]`: Job 시작(제어 평면. `all`이 아니면 `--env-vars EVAL_SUITE=<suite>`로 덮어씀) → `smoke_runner`와 같은 폴링으로 종료 대기 → 리포트 회수 → `eval/reports/<실행 이름>/` 저장.
+2. `ops eval [--suite ...]`: Job 시작(제어 평면. `all`이 아니면 `job show`의 컨테이너 정의를 복사해 `EVAL_SUITE`만 바꾼 템플릿으로 ARM `start`) → `smoke_runner`와 같은 폴링으로 종료 대기 → 리포트 회수 → `eval/reports/<실행 이름>/` 저장.
 3. 리포트를 커밋하고 README에 실측값을 기록합니다.
 
 ### 4.3 리포트 회수
@@ -143,8 +143,16 @@
 1. ~~`azure-ai-evaluation` 평가기~~: 설치 실패로 자체 judge로 대체(§9). 대신 gpt-5.4 judge 에이전트가 관리 ID로 동작하는지.
 2. 이미지 크기와 `az acr build` 시간.
 3. 분류 suite가 gpt-5.4 배포 이름으로 `LlmFallback`을 직접 부를 수 있는지, Decision-1 응답에 usage 필드가 있는지.
-4. 긴 stdout 줄이 Log Analytics에서 잘리지 않는지(6000자 조각 기준), Job에 `CONTAINER_APP_JOB_EXECUTION_NAME`이 주입되는지, `job start --env-vars`로 suite를 덮어쓸 수 있는지.
+4. 긴 stdout 줄이 Log Analytics에서 잘리지 않는지(6000자 조각 기준), Job에 `CONTAINER_APP_JOB_EXECUTION_NAME`이 주입되는지, 시작 시 suite를 덮어쓸 수 있는지.
 5. `eval-` 접두어 에이전트 이름을 Foundry가 받는지.
+
+결과(2026-11-02, 운영자 PC와 `job-smoke`로 확인):
+
+- judge 에이전트(gpt-5.4)와 `eval-` 접두어 에이전트 버전 생성·대화·컨테이너 삭제가 정상입니다.
+- Decision-1 응답에 usage(입력 토큰, 출력 1)가 있고, gpt-5.4 배포 이름으로 `LlmFallback`을 직접 부를 수 있습니다.
+- `CONTAINER_APP_JOB_EXECUTION_NAME`은 주입됩니다. start 템플릿 덮어쓰기는 컨테이너 정의를 통째로 바꾸므로, 기존 컨테이너를 복사해 env만 바꾸면 이미지·env·관리 ID가 유지됩니다(§4.2).
+- Log Analytics는 16,384바이트를 넘는 줄을 나눠 저장합니다(40K 줄 → 3조각). 6K·12K 줄은 그대로라 6000자 조각은 안전합니다. 수집 지연은 약 5초입니다.
+- 사전 실행 비용: 분류 $0.06, 심사 $0.55, 조기경보 $0.99(합계 약 $1.6, 가드 $5 안). 이미지 크기와 빌드 시간은 실제 배포에서 기록합니다.
 
 ---
 
@@ -216,3 +224,8 @@ Scratch TDD에서 확인해 위 본문에 반영한 변경입니다.
 | 컨테이너 범위 역할 | 미정 | `modules/blob-container-role.bicep`으로 `eval-reports` 컨테이너에만 부여 |
 | 단가표 위치 | `eval/prices.json` | `src/evals/prices.json`(이미지·wheel에 포함) |
 | suite 이름 | `ew` | `early_warning`, `safety` 추가. `safety`만 고르면 입력이 되는 `underwriting`도 함께 실행 |
+| suite 덮어쓰기 | `job start --env-vars` | start 템플릿이 컨테이너를 통째로 바꾸고, Windows `az.cmd`가 따옴표 든 인자를 깨뜨림. `job show` 컨테이너를 복사해 `EVAL_SUITE`만 바꾼 본문을 `az rest`(ARM `jobs/<이름>/start`, 본문은 임시 파일)로 보냄 |
+| 토큰 | 자격 증명 객체 그대로 | 로컬 `AzureCliCredential`은 호출마다 az 프로세스를 띄워 분류 suite가 18분, 75% 토큰 실패. `CachedToken`(만료 5분 전까지 재사용)으로 91초, 실패 0 |
+| judge 컨텍스트 | 지표·정책 | 분석가가 인용한 월별 지수·신호가 없어 groundedness가 2.1~2.5로 깎임. 분석가와 같은 근거(지표·신호·플래그·월별·정책, 가명)를 주자 4.25 |
+| 분류 천장 효과 | — | 사전 실행에서 세 구성 모두 macro F1 1.0. 모든 구성이 0.95 이상이면 리포트 한계 절에 "천장 효과"를 적음 |
+| 로컬 실행 의존성 | — | dev extra에 `azure-identity==1.27.0`. win-arm64에서는 `--only-binary=cryptography,cffi`로 설치 |
