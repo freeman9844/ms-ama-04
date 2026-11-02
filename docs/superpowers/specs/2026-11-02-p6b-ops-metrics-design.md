@@ -61,19 +61,20 @@
 | 계산 모듈 | `src/opsmetrics/` (신규, 순수 함수) | SLO1·SLO2·비용·공정성 계산. I/O 없음 |
 | console `/ops` | `src/console/app.py`, `views.py`, `adapters.py` | run 선택, 공정성 표, 격차 배너, SLO/비용 요약 |
 | ops 명령 | `src/ops/` | `load`, `metrics`, `fault` 하위 명령 |
+| 운영 Job | `infra/modules/ops-job.bicep`, `src/opsjob/`(신규, 평가 이미지에 포함) | VNet 내부에서 큐 제출·Cosmos 읽기, 투영을 로그로 반환(`load`·`submit`·`collect` 모드) |
 | 균형 격자 신청자 | `src/mockapis/demo.py`, `synth.py` | `load-*` 24명 생성(세그먼트 독립 배정) |
 | 장애 주입 | `src/mockapis/app.py`(flaky 모드), `src/policy/app.py`(FAULT_MODE 미들웨어) | 토글로 켜고 끔 |
 | 서킷브레이커 | `src/orchestrator/journey/adapters.py` `HttpPolicyApi` | 프로세스 내 브레이커 |
 | 텔레메트리 | `function_app.py`, `src/policy/main.py`, requirements | `configure_azure_monitor(credential=관리 ID)`, httpx·FastAPI 계측 |
-| 인프라 | `infra/modules/monitoring.bicep` 또는 신규 `ops-insights.bicep`, `container-app.bicep` | Workbook, 경보 2개, Policy 앱 App Insights 설정·역할 |
+| 인프라 | `infra/modules/monitoring.bicep` 또는 신규 `ops-insights.bicep`, `container-app.bicep`, `functions.bicep`, Foundry 모듈 | Workbook, 경보 2개, Policy 앱 App Insights 설정, `OTEL_SERVICE_NAME`, Foundry 프로젝트 App Insights 연결·역할, `id-ops`와 역할 |
 
 ### 2.3 데이터 흐름
 
 ```
-ops load ──(queue applications-start, submitted_at·source·run_id)──▶ Functions 여정
+ops load ──(job-ops 시작)──▶ job-ops ──(queue applications-start, submitted_at·source·run_id)──▶ Functions 여정
    활동(consent·assemble·underwrite·policy·assess) ──_meter──▶ 오케스트레이터 ──▶ Cosmos applications.steps[]
    활동 스팬(OTel) ──▶ App Insights ◀── Policy FastAPI 스팬(traceparent 전파)
-ops metrics ──(Cosmos 읽기 + Cost Management + prices.json)──▶ opsmetrics ──▶ ops/reports/<run_id>/
+ops metrics ──(job-ops collect: Cosmos 투영 ⇢ 로그) + Cost Management + KQL + prices.json──▶ opsmetrics ──▶ ops/reports/<run_id>/
 console /ops ──(Cosmos 읽기)──▶ opsmetrics ──▶ 공정성 표·배너
 Workbook·경보 ──(KQL)──▶ App Insights
 ```
@@ -146,7 +147,7 @@ console 신청 경로도 `submitted_at`·`source=console`을 채웁니다. 신�
 ### 4.3 건당 비용
 
 - AI 비용/건 = Σ(steps.usage × `src/evals/prices.json` 단가) ÷ 신청 수. 단가 미확인 호출(Decision-1)은 호출 수만 표시합니다. 캐시 할인을 반영하지 않아 상한 추정입니다.
-- 고정비/건 = 월 고정비 ÷ 가정 물량(월 100, 1,000, 10,000건). 월 고정비는 Cost Management에서 `rg-amalend`의 최근 완료월(없으면 월 누계를 일수로 환산)을 조회하고, AI 토큰 미터(Cognitive Services/Foundry 모델 사용)는 이중 계산을 막기 위해 뺍니다. 데모 운영 형태(Service Bus pause, IP 창 닫힘)가 반영된 값임을 표기합니다.
+- 고정비/건 = 월 고정비 ÷ 가정 물량(월 100, 1,000, 10,000건). 월 고정비는 Cost Management에서 `rg-amalend`의 최근 완료일 일별 비용(최대 7일) 평균 × 30으로 환산하고, MeterCategory `Foundry Models`(AI 토큰)는 이중 계산을 막기 위해 뺍니다(Probe 결과 반영 P6 참고). 데모 운영 형태(Service Bus pause, IP 창 닫힘)가 반영된 값임을 표기합니다.
 - 수작업 원가 = 소상공인 대출 1건 심사·실행 원가에 대한 공개 출처 가정치. 출처 URL·발행 연도·환산 근거를 보고서와 README에 적습니다(조사는 계획 단계).
 - 결과 표: 물량별 (AI + 고정비)/건, 수작업 원가 대비 비율, USD 6,000 티켓 대비 비율.
 
@@ -165,15 +166,16 @@ console 신청 경로도 `submitted_at`·`source=console`을 채웁니다. 신�
 
 ### 5.1 Functions
 
-- `azure-monitor-opentelemetry`를 의존성에 추가하고, 시작 시 `configure_azure_monitor(connection_string=..., credential=ManagedIdentityCredential(client_id))`를 호출합니다(App Insights 로컬 인증이 꺼져 있음). httpx 계측을 켜 Policy·mockapi·Foundry 호출을 의존성으로 남깁니다.
-- Flex Consumption Python에서 host.json `telemetryMode`와 워커 OTel 설정 조합은 probe로 확정합니다(§9).
+- `azure-monitor-opentelemetry==1.8.11`·`opentelemetry-instrumentation-httpx==0.66b1`을 의존성에 추가하고, 시작 시 `configure_azure_monitor(credential=ManagedIdentityCredential(client_id), logger_name="journey.otel", enable_live_metrics=False)`를 호출합니다(App Insights 로컬 인증이 꺼져 있음). httpx 계측을 켜 Policy·mockapi·Foundry 호출을 의존성으로 남깁니다.
+- host.json `telemetryMode`와 `PYTHON_APPLICATIONINSIGHTS_ENABLE_TELEMETRY`는 바꾸지 않습니다. 호스트는 기존 App Insights 연동(Entra 인증 문자열)을 그대로 쓰고, 워커는 배포판으로 직접 내보냅니다(Probe 결과 반영 P1).
+- `OTEL_SERVICE_NAME`을 앱 설정으로 지정합니다(Functions `orchestrator`, Policy `policy`). 지정하지 않으면 `unknown_service:python`으로 기록됩니다.
 - 활동마다 `journey.<step>` 스팬을 만들고 `application_id`, `step`, `outcome`, `source`, `run_id`를 속성으로 붙입니다. 에이전트 호출 스팬은 GenAI 의미 규약 속성(`gen_ai.agent.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`)을 붙입니다.
 - 오케스트레이터 함수에서는 스팬을 만들지 않습니다(재생 시 중복).
 - 로그·스팬 속성에 원문 PII(상호·대표자명·사업자번호·적요)를 넣지 않습니다. `application_id`·`applicant_id`(합성 ID)·세그먼트만 허용합니다.
 
 ### 5.2 Policy Engine
 
-- 같은 배포판 + FastAPI 계측. Policy 앱은 이미 `apps` 사용자 할당 ID를 쓰고, 이 ID에 Monitoring Metrics Publisher 역할이 있습니다(`infra/resources.bicep` monitoring 역할 목록). `container-app.bicep`에 선택 파라미터로 `APPLICATIONINSIGHTS_CONNECTION_STRING`을 넘기고, 코드는 `AZURE_CLIENT_ID`로 자격 증명을 만듭니다.
+- 같은 배포판(FastAPI 계측 포함, 별도 패키지 불필요). `/healthz` 요청과 ASGI 내부 send/receive 스팬은 `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=healthz`, `OTEL_PYTHON_FASTAPI_EXCLUDE_SPANS=receive,send`로 뺍니다. Policy 앱은 이미 `apps` 사용자 할당 ID를 쓰고, 이 ID에 Monitoring Metrics Publisher 역할이 있습니다(`infra/resources.bicep` monitoring 역할 목록). `container-app.bicep`에 선택 파라미터로 `APPLICATIONINSIGHTS_CONNECTION_STRING`을 넘기고, 코드는 `AZURE_CLIENT_ID`로 자격 증명을 만듭니다.
 - 활동 → Policy 호출은 httpx 계측이 `traceparent`를 전파해 같은 `operation_Id`로 이어집니다.
 
 ### 5.3 Workbook과 경보
@@ -186,8 +188,8 @@ console 신청 경로도 `submitted_at`·`source=console`을 채웁니다. 신�
 
 ### 5.4 알려진 한계
 
-- Python Durable은 오케스트레이터 → 활동 트레이스를 자동으로 잇지 않습니다. 신청 단위 연결은 `application_id` KQL 조인으로 대신합니다.
-- Foundry 에이전트 서비스 내부 트레이싱은 프로젝트에 App Insights를 연결하는 방식으로 probe한 뒤 채택 여부를 정합니다. 채택하지 않으면 우리 쪽 에이전트 호출 스팬까지만 보이는 것으로 README에 적습니다.
+- Python Durable은 오케스트레이터 → 활동 트레이스를 자동으로 잇지 않습니다. 활동 스팬은 각각 새 트레이스의 루트가 되고, 신청 단위 연결은 `application_id` KQL 조인으로 대신합니다.
+- Foundry 에이전트 서비스 트레이스(`invoke_agent`, `chat <model>`, `execute_tool`, `genAIContent`)는 프로젝트 App Insights 연결로 채택합니다. httpx가 `traceparent`를 전파해 우리 `journey.assess_credit` 스팬과 같은 `operation_Id`로 이어집니다(Probe 결과 반영 P4). `genAIContent`에는 프롬프트·응답이 남으므로 에이전트 입력이 가명화된 값뿐이라는 기존 원칙(P5)에 기대며, 이를 README에 적습니다.
 
 ---
 
@@ -228,11 +230,15 @@ console 신청 경로도 `submitted_at`·`source=console`을 채웁니다. 신�
 
 ### 7.2 실행 흐름
 
-1. `ops window open` (로컬에서 큐·Cosmos 접근).
-2. `ops load --count 24 --interval 15`: `run_id` 생성, 15초 간격으로 큐에 제출(`submitted_at`, `source=load`), 이후 Cosmos를 폴링해 전원이 `awaiting_officer` 또는 종료 상태가 될 때까지 대기(최대 30분). 진행 상황 출력.
-3. `ops fault run source-flaky`, `ops fault run policy-down`.
-4. `ops metrics --run <load run_id> --fault-runs <id...>`: Cosmos·Cost Management·KQL을 읽어 `ops/reports/<run_id>/report.md`·`metrics.json` 생성.
+Cosmos와 Storage Queue는 IP 창으로도 로컬에서 열리지 않습니다(Probe 결과 반영 P7). 그래서 큐 제출과 Cosmos 읽기는 내부 VNet의 Container Apps Job `job-ops`가 하고, 로컬 `ops`는 Job 시작·결과 수집·Cost Management·KQL 조회·보고서 작성을 맡습니다. `job-ops`는 P6a 평가 이미지를 재사용하고(`opsmetrics`·적재 모듈 추가), 전용 사용자 할당 ID(`id-ops`)에 `stfn` Queue Data Message Sender와 Cosmos 기본 제공 Data Reader만 줍니다. 결과는 P6a 로그 전송(EVALCHUNK 재조립)으로 돌려받습니다.
+
+1. `ops window open` (ACR 갱신이 필요하면 `--acr`).
+2. `ops load --count 24 --interval 15`: 로컬이 `run_id`를 만들고 `job-ops`를 `load` 모드로 시작합니다. Job은 15초 간격으로 큐에 제출(`submitted_at`, `source=load`)하고 Cosmos를 폴링해 전원이 `awaiting_officer` 또는 종료 상태가 될 때까지 기다린 뒤(최대 30분, Job 제한 시간 45분), 지표 입력용 투영(아래)을 로그로 내보냅니다. 로컬은 Job 상태를 폴링하며 진행 상황을 출력합니다.
+3. `ops fault run source-flaky`, `ops fault run policy-down`: 로컬이 토글(리비전 갱신)한 뒤 `job-ops`를 `submit` 모드(`source=fault`)로 시작하고, 끝나면 `finally`로 원복합니다.
+4. `ops metrics --run <load run_id> --fault-runs <id...>`: 로컬이 `job-ops`를 `collect` 모드로 시작해 run별 투영을 받고, Cost Management·KQL을 더해 `ops/reports/<run_id>/report.md`·`metrics.json`을 만듭니다. `load`가 받은 투영은 `ops/reports/<run_id>/docs.json`에 저장해 재계산에 씁니다.
 5. `ops window close`, `ops pause`.
+
+- 투영 필드: `application_id`, `applicant_id`, `status`, `submitted_at`, `received_at`, `source`, `run_id`, `segment`, `steps`, `timeline`, `flags`, `policy.eligible`·`policy.decision`·`policy.rule_hits`, `assessment.recommendation`, 심사역 결정. 원문 PII는 넣지 않습니다.
 
 - 배치 신청은 심사역 대기열에 남습니다. 승인율 기준이 추천이므로 결정은 넣지 않습니다. SLA 경과 후 escalated → closed_no_decision으로 자연 종료됩니다.
 
@@ -298,5 +304,20 @@ console 신청 경로도 `submitted_at`·`source=console`을 채웁니다. 신�
 | 24건 표본으로 p95·99%가 불안정 | 표본 수·nearest-rank 방식·신뢰 한계를 보고서에 명시, 과장 금지(B7) |
 | LLM 변동으로 원형 통제 격차가 우연히 임계값 초과 | 표본 수와 함께 보고하고, 초과 시 해당 사례를 보고서에 나열해 해석 |
 | 장애 토글 원복 실패로 데모 환경 오염 | `finally` 원복 + `ops fault status` + 보고서 원복 확인 항목 |
-| 고정비 조회 데이터 지연(당일 비용 미반영) | 최근 완료월 우선, 없으면 월 누계 환산·수동 입력 |
+| 고정비 조회 데이터 지연(당일 비용 미반영)·429 제한 | 최근 완료일 평균 환산, 429는 retry-after 존중 재시도, 실패 시 수동 입력 |
 | 배치 비용 초과 | 첫 3건 실측 후 중단 조건(§7.3) |
+
+---
+
+## Probe 결과 반영(2026-11-02)
+
+| # | 항목 | 결과 | 설계 반영 |
+|---|---|---|---|
+| P1 | Flex Python 워커 OTel + 관리 ID | **통과.** `configure_azure_monitor(credential=ManagedIdentityCredential)`만으로 워커 스팬이 `appi-amalend`(로컬 인증 꺼짐)에 들어옴. host.json·`PYTHON_APPLICATIONINSIGHTS_ENABLE_TELEMETRY` 변경 불필요. `logger_name`을 전용 이름으로 두어 호스트 로그와 중복 없음. 기본 `cloud_RoleName`은 `unknown_service:python` | §5.1: 호스트 설정 유지, `OTEL_SERVICE_NAME` 지정 |
+| P2 | 활동 → Policy 상관관계 | **통과.** `journey.evaluate_policy`(루트) → httpx `POST /v1/decisions`(부모) → Policy `request`가 같은 `operation_Id`. Policy 쪽에 `/healthz`와 ASGI send/receive 스팬이 함께 기록됨 | §5.2: healthz·send/receive 제외 |
+| P3 | Foundry 사용량 필드 | **통과.** P6a `calls.jsonl`과 `src/evals/metering.py`가 `usage.input_tokens`·`output_tokens`를 사용 | §3.3 그대로 |
+| P4 | Foundry 트레이스 | **통과.** 프로젝트 연결 `appi-amalend`(category `AppInsights`, authType `ProjectManagedIdentity`, `metadata.ApplicationInsightsConnectionString` 필수 — 없으면 400) + 프로젝트 시스템 ID에 appi Monitoring Metrics Publisher 역할. `invoke_agent`·`chat gpt-5.4`·`execute_tool`·`genAIContent`가 우리 스팬과 같은 `operation_Id`로 기록됨. 연결·역할은 probe 중 수동 생성했으므로 bicep에 넣음 | §5.4 채택, 인프라 작업 추가 |
+| P5 | 리비전 토글 | **통과.** `--set-env-vars` 약 22초 반환, 새 리비전 Healthy·트래픽 100%까지 약 39초. `--remove-env-vars` 약 19초. 이미지·ID·ingress·단일 리비전 모드 유지 | §6.2 그대로, 토글 후 리비전 Healthy 확인을 대기 조건으로 |
+| P6 | Cost Management | **조건부 통과.** RG 범위 `query`(api 2023-11-01) 가능. 429가 잦아 retry-after(2~20초) 재시도 필요. `TheLastMonth`는 지원 안 함 → `Custom` + `timePeriod`. 데이터 약 1일 지연. 배포가 월중 시작이라 완료월 없음 | §4.3: 최근 완료일 평균 × 30, MeterCategory `Foundry Models` 제외 |
+| P7 | 로컬 Cosmos·큐 접근 | **불가.** `operatorIp`는 Foundry 계정과 Functions에만 적용, Cosmos·Storage Queue는 사설 엔드포인트만 | §7.2: 사용자 선택에 따라 `job-ops`(VNet 내부 Job)로 변경 |
+
