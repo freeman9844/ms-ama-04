@@ -5,6 +5,7 @@
 """
 
 import json
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -25,6 +26,8 @@ SYSTEMONE_SUFFIX = "/providers/microsoft/v1/systemone"
 _SKIP_KEYS = frozenset({"id", "call_id", "conversation", "container_id", "previous_response_id", "created_at",
                         "agent_reference", "type", "status", "model", "role", "name", "usage",
                         "key", "txn_id", "txn_ids", "alert_id", "loan_id", "application_id"})
+# 키와 무관하게 서비스 식별자(resp_·msg_·conv_·call_… + 16진수)는 뺀다. 16진수 안의 숫자열이 계좌번호 패턴에 걸린다.
+_SERVICE_ID = re.compile(r"[a-z]{2,8}_[0-9a-f]{16,}")
 
 
 class BudgetExceeded(RuntimeError):
@@ -69,6 +72,8 @@ def kind_of(method: str, path: str) -> str:
 def _strings(value: Any) -> Iterator[str]:
     """JSON 문자열 잎. 에이전트 입력·도구 인자·출력 안에 다시 들어 있는 JSON도 풀어서 키 규칙을 적용한다."""
     if isinstance(value, str):
+        if _SERVICE_ID.fullmatch(value):
+            return
         start = min((i for i in (value.find("{"), value.find("[")) if i >= 0), default=-1)
         inner = _json(value[start:].encode()) if start >= 0 else None
         if isinstance(inner, dict | list):

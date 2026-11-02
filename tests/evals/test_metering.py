@@ -71,3 +71,18 @@ def test_pii_scan_finds_known_entities_in_output():
     with meter.scope(model="m", entities={"홍길동": "PERSON"}):
         client.post("https://x/openai/v1/responses", json={"input": "x"})
     assert meter.records[0].pii == ["PERSON"]
+
+
+def test_pii_scan_ignores_service_ids_under_any_key_but_keeps_real_accounts():
+    # 실제 실행에서 Foundry 응답 ID(resp_…16진수)에 섞인 10~14자리 숫자열이 계좌번호로 오탐됐다(75/322 호출).
+    meter = Meter(PRICES, 10)
+    body = {**USAGE, "object": "response", "response_id": "resp_04503b704cc8dbd4006ae80590811c8190880589361b3c5705",
+            "output": [{"type": "message", "item_ref": "msg_0a081ca1c077469d006ae805c86b588190897298c32ccb8d33",
+                        "content": [{"text": "입금 계좌 110-123-456789"}]}]}
+    client, _ = _client(meter, [200], body=body)
+    with meter.scope(model="m"):
+        client.post("https://x/openai/v1/responses", json={"input": "x"})
+    client2, _ = _client(meter, [200], body={**USAGE, "response_id": body["response_id"]})
+    with meter.scope(model="m"):
+        client2.post("https://x/openai/v1/responses", json={"input": "x"})
+    assert [r.pii for r in meter.records] == [["ACCOUNT"], []]
