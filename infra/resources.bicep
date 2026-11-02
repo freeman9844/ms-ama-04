@@ -17,6 +17,8 @@ param pseudonymKey string
 param policyImage string
 param mockapiImage string
 param consoleImage string
+@description('평가 Job 이미지. 비면 자리표시 이미지(ops deploy eval 전).')
+param evalImage string
 @description('콘솔에 접속할 운영자 공인 IPv4. 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
 param consoleIp string
 @description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(IP 허용 목록만 남음, 데모 전용).')
@@ -49,7 +51,9 @@ var names = {
   idApps: 'id-apps-${environmentName}'
   idSmoke: 'id-smoke-${environmentName}'
   idConsole: 'id-console-${environmentName}'
+  idEval: 'id-eval-${environmentName}'
   smokeJob: 'job-smoke'
+  evalJob: 'job-eval'
   caPolicy: 'ca-policy'
   caMockapi: 'ca-mockapi'
   caConsole: 'ca-console'
@@ -95,6 +99,7 @@ var role = {
 }
 var sp = 'ServicePrincipal'
 var hasOperator = !empty(operatorPrincipalId)
+var evalReportsContainer = 'eval-reports'
 
 // ── 네트워크와 Private DNS (T1) ─────────────────────────────────────────
 module network 'modules/network.bicep' = {
@@ -129,6 +134,7 @@ module identities 'modules/identities.bicep' = {
       apps: names.idApps
       smoke: names.idSmoke
       console: names.idConsole
+      eval: names.idEval
     }
     location: location
     tags: tags
@@ -200,6 +206,7 @@ module stData 'modules/storage.bicep' = {
     peSubnetId: subnetId['snet-pe']
     endpoints: [ { groupId: 'blob', zoneId: zoneId[blobZone] } ]
     softDeleteDays: 0
+    containers: [ evalReportsContainer ]
     roleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.blobContributor, principalType: sp }
       { principalId: identities.outputs.appsPrincipalId, roleId: role.blobContributor, principalType: sp }
@@ -304,6 +311,8 @@ module aiAccount 'modules/foundry/account.bicep' = {
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.openAiUser, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.foundryUser, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.openAiUser, principalType: sp }
+      { principalId: identities.outputs.evalPrincipalId, roleId: role.foundryUser, principalType: sp }
+      { principalId: identities.outputs.evalPrincipalId, roleId: role.openAiUser, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.foundryUser, principalType: 'User' }
       { principalId: operatorPrincipalId, roleId: role.openAiUser, principalType: 'User' }
@@ -406,6 +415,7 @@ module acr 'modules/acr.bicep' = {
     roleAssignments: concat([
       { principalId: identities.outputs.appsPrincipalId, roleId: role.acrPull, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.acrPull, principalType: sp }
+      { principalId: identities.outputs.evalPrincipalId, roleId: role.acrPull, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.acrPush, principalType: 'User' }
     ] : [])
@@ -644,3 +654,46 @@ module smokeJob 'modules/smoke-job.bicep' = {
 }
 
 output SMOKE_JOB_NAME string = smokeJob.outputs.name
+
+// ── 평가 하네스 Job (P6a) ──────────────────────────────────────────────
+// 모델 배포 이름은 오케스트레이터 설정과 같게 둡니다(평가가 운영 구성을 잰다).
+module evalReportsRole 'modules/blob-container-role.bicep' = {
+  name: 'eval-reports-role'
+  params: {
+    storageName: stData.outputs.name
+    containerName: evalReportsContainer
+    roleAssignments: [
+      { principalId: identities.outputs.evalPrincipalId, roleId: role.blobContributor, principalType: sp }
+    ]
+  }
+}
+
+module evalJob 'modules/eval-job.bicep' = {
+  name: 'eval-job'
+  params: {
+    name: names.evalJob
+    location: location
+    tags: tags
+    environmentId: acaInt.outputs.id
+    identityId: identities.outputs.evalId
+    identityClientId: identities.outputs.evalClientId
+    registryServer: acr.outputs.loginServer
+    image: evalImage
+    envVars: [
+      { name: 'AI_PROJECT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}' }
+      { name: 'AI_ACCOUNT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com' }
+      { name: 'DECISION_DEPLOYMENT', value: 'decision-1' }
+      { name: 'EVAL_FULL_MODEL', value: 'gpt-5.4' }
+      { name: 'EVAL_MINI_MODEL', value: 'gpt-5.4-mini' }
+      { name: 'REVIEWER_MODEL', value: 'gpt-5.4-mini' }
+      { name: 'EVAL_JUDGE_MODEL', value: 'gpt-5.4' }
+      { name: 'EVAL_BUDGET_USD', value: '5' }
+      { name: 'EVAL_EMIT_LOGS', value: '1' }
+      { name: 'EVAL_BLOB_ACCOUNT_URL', value: stData.outputs.blobEndpoint }
+      { name: 'EVAL_BLOB_CONTAINER', value: evalReportsContainer }
+    ]
+  }
+}
+
+output EVAL_JOB_NAME string = evalJob.outputs.name
+output EVAL_REPORTS_CONTAINER string = evalReportsContainer

@@ -50,6 +50,9 @@ param mockapiImage string = ''
 @description('심사역 콘솔 이미지. 비면 자리표시 이미지(ops deploy 전).')
 param consoleImage string = ''
 
+@description('평가 Job 이미지. 비면 자리표시 이미지(ops deploy eval 전).')
+param evalImage string = ''
+
 @description('심사역 콘솔 접속 허용 IPv4(ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
 param consoleIp string = ''
 
@@ -98,6 +101,7 @@ module resources 'resources.bicep' = {
     policyImage: policyImage
     mockapiImage: mockapiImage
     consoleImage: consoleImage
+    evalImage: evalImage
     consoleIp: consoleIp
     consoleAuthEnabled: consoleAuthEnabled
     consoleDemoRole: consoleDemoRole
