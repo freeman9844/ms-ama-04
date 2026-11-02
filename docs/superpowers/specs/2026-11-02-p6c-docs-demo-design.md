@@ -137,6 +137,7 @@ README 단계별 "알려진 제약" 원문을 주제별(인증·데이터·에�
 
 README의 P2~P6b 절을 작업 기준으로 재편합니다. 명령·문제 대응 문구는 원문 유지, 단계 표시는 `(P5b)`처럼 괄호로 남깁니다.
 운영자 IP 변동 대응(`operator-alt` 임시 규칙 추가·제거)을 troubleshooting에 추가합니다.
+`deploy-history.md`는 README P2~P6b 절 전체(설명·배포 순서·실제 배포 기록·문제 대응·알려진 제약)를 원문 그대로 보존하는 기록본이고, setup·deploy·operate·troubleshooting은 현재 작업 기준으로 재구성한 사본이다.
 
 ---
 
@@ -179,7 +180,7 @@ README의 P2~P6b 절을 작업 기준으로 재편합니다. 명령·문제 대�
 
 | ID | 문제 | 수정 |
 |---|---|---|
-| M5 | P6b 보고서 의존성 표에 리소스 호스트명이 그대로 노출(`report.md`, `metrics.json`) | 보고서 생성 시 호스트명을 역할 라벨(`storage-queue`, `cosmos`, `mockapi`, `foundry`, `storage-blob` 등)로 바꿈. 기존 보고서는 리허설 중 `ops metrics`로 재생성하고 숫자 불변을 확인 |
+| M5 | P6b 보고서 의존성 표에 리소스 호스트명이 그대로 노출(`report.md`, `metrics.json`) | 보고서 생성 시 호스트명을 역할 라벨(`storage-queue`, `cosmos`, `mockapi`, `foundry`, `storage-blob` 등)로 바꿈. 기존 `metrics.json`은 `ops.kql.relabel`로 오프라인 변환 후 `report.md`를 다시 렌더링(Cost Management 재조회 없이 숫자 불변 보장) |
 | M6 | 단계 기록 `detail`에 원시 예외 문자열 저장(`metering.py`의 `str(error)`) | 예외 종류·표준 코드만 남김(메시지 본문 제외). 기존 `DETAIL_MAX` 유지 |
 | M7 | 단계 라벨 불일치(`src/console/ops.py`의 `assemble` = "자료 조립" vs `src/ops/opsreport.py`·콘솔 타임라인 "데이터 수집") | 한 곳(공유 상수)에서 라벨을 정의하고 콘솔·보고서가 같이 씀 |
 
@@ -210,7 +211,7 @@ README의 P2~P6b 절을 작업 기준으로 재편합니다. 명령·문제 대�
 7. cost-model.md, limitations.md, evidence.md
 8. demo-script.md, fallback.md
 9. README 재작성(문서 지도) → 문서 테스트 통과
-10. 실제 Azure 리허설 → rehearsal.md, 보고서 재생성(M5)
+10. 실제 Azure 리허설 → rehearsal.md
 11. 최종 리뷰 → 병합
 
 브랜치: `p6c-docs-demo`.
@@ -225,4 +226,4 @@ README의 P2~P6b 절을 작업 기준으로 재편합니다. 명령·문제 대�
 | README 이동 중 내용 손실 | 이동 전후 "문제 대응"·"알려진 제약" 항목 수 비교를 계획 단계 검사로 둠 |
 | 리허설 중 IP 변동 | `operator-alt` 임시 규칙 절차를 fallback·troubleshooting에 명시 |
 | 리허설 비용·시간 | 배포 창 약 7분 + 배포 약 10분 + 리허설 30분 이내, 끝나면 pause |
-| 보고서 재생성 시 수치 변화 | 재생성은 같은 run ID 조회라 숫자가 같아야 함. 다르면 원인 기록 후 원본 유지 |
+| 보고서 재생성 시 수치 변화 | 오프라인 변환은 의존성 표 대상 열만 바꾼다. `summary`가 변환 전후 같음을 확인 |
