@@ -74,8 +74,10 @@ def test_account_data_plane_roles(closed):
 
 def test_project_connections_use_entra_auth(closed):
     connections = closed.of_type(f"{AIS}/projects/connections")
-    assert {c["properties"]["category"] for c in connections} == {"CosmosDB", "AzureStorageAccount", "CognitiveSearch"}
-    assert {c["properties"]["authType"] for c in connections} == {"AAD"}
+    # App Insights 트레이스 연결(P6b)은 프로젝트 관리 ID를 쓴다(test_ops_job.py).
+    byo = [c for c in connections if c["properties"]["category"] != "AppInsights"]
+    assert {c["properties"]["category"] for c in byo} == {"CosmosDB", "AzureStorageAccount", "CognitiveSearch"}
+    assert {c["properties"]["authType"] for c in byo} == {"AAD"}
 
 
 def test_capability_host_wires_byo_connections(closed):

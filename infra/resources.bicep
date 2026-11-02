@@ -25,6 +25,8 @@ param consoleIp string
 param consoleAuthEnabled bool
 @description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
 param consoleDemoRole string
+@description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
+param opsAlertEmail string = ''
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -52,8 +54,10 @@ var names = {
   idSmoke: 'id-smoke-${environmentName}'
   idConsole: 'id-console-${environmentName}'
   idEval: 'id-eval-${environmentName}'
+  idOps: 'id-ops-${environmentName}'
   smokeJob: 'job-smoke'
   evalJob: 'job-eval'
+  opsJob: 'job-ops'
   caPolicy: 'ca-policy'
   caMockapi: 'ca-mockapi'
   caConsole: 'ca-console'
@@ -135,6 +139,7 @@ module identities 'modules/identities.bicep' = {
       smoke: names.idSmoke
       console: names.idConsole
       eval: names.idEval
+      ops: names.idOps
     }
     location: location
     tags: tags
@@ -179,6 +184,7 @@ output KEYVAULT_NAME string = keyVault.outputs.name
 output KEYVAULT_URI string = keyVault.outputs.uri
 output LOG_ANALYTICS_CUSTOMER_ID string = monitoring.outputs.lawCustomerId
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.appiConnectionString
+output APPLICATIONINSIGHTS_RESOURCE_ID string = monitoring.outputs.appiId
 output ORCHESTRATOR_IDENTITY_ID string = identities.outputs.orchestratorId
 output ORCHESTRATOR_IDENTITY_CLIENT_ID string = identities.outputs.orchestratorClientId
 output APPS_IDENTITY_ID string = identities.outputs.appsId
@@ -241,6 +247,7 @@ module stFunc 'modules/storage.bicep' = {
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.tableContributor, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.queueSender, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.queueSender, principalType: sp }
+      { principalId: identities.outputs.opsPrincipalId, roleId: role.queueSender, principalType: sp }
     ]
   }
 }
@@ -267,6 +274,7 @@ module cosmos 'modules/cosmos.bicep' = {
       { principalId: identities.outputs.appsPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
       { principalId: identities.outputs.smokePrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000001', scope: 'account' }
       { principalId: identities.outputs.consolePrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000001', scope: 'database' }
+      { principalId: identities.outputs.opsPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000001', scope: 'database' }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'account' }
     ] : [])
@@ -416,6 +424,7 @@ module acr 'modules/acr.bicep' = {
       { principalId: identities.outputs.appsPrincipalId, roleId: role.acrPull, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.acrPull, principalType: sp }
       { principalId: identities.outputs.evalPrincipalId, roleId: role.acrPull, principalType: sp }
+      { principalId: identities.outputs.opsPrincipalId, roleId: role.acrPull, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.acrPush, principalType: 'User' }
     ] : [])
@@ -481,6 +490,12 @@ module caPolicy 'modules/container-app.bicep' = {
     identityClientId: identities.outputs.appsClientId
     registryServer: acr.outputs.loginServer
     image: policyImage
+    envVars: [
+      { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: monitoring.outputs.appiConnectionString }
+      { name: 'OTEL_SERVICE_NAME', value: 'policy' }
+      { name: 'OTEL_PYTHON_FASTAPI_EXCLUDED_URLS', value: 'healthz' }
+      { name: 'OTEL_PYTHON_FASTAPI_EXCLUDE_SPANS', value: 'receive,send' }
+    ]
   }
 }
 
@@ -523,6 +538,7 @@ module functions 'modules/functions.bicep' = {
     storageBlobEndpoint: stFunc.outputs.blobEndpoint
     appInsightsConnectionString: monitoring.outputs.appiConnectionString
     extraSettings: union({
+      OTEL_SERVICE_NAME: 'orchestrator'
       COSMOS_ENDPOINT: cosmos.outputs.endpoint
       COSMOS_DATABASE: cosmos.outputs.databaseName
       DATA_BLOB_ENDPOINT: stData.outputs.blobEndpoint
@@ -697,3 +713,44 @@ module evalJob 'modules/eval-job.bicep' = {
 
 output EVAL_JOB_NAME string = evalJob.outputs.name
 output EVAL_REPORTS_CONTAINER string = evalReportsContainer
+
+// ── 운영 지표 (P6b) ────────────────────────────────────────────────────
+// 같은 eval 이미지로 VNet 안에서 합성 신청을 제출하고 Cosmos 결과를 모읍니다.
+module opsJob 'modules/eval-job.bicep' = {
+  name: 'ops-job'
+  params: {
+    name: names.opsJob
+    location: location
+    tags: tags
+    environmentId: acaInt.outputs.id
+    identityId: identities.outputs.opsId
+    identityClientId: identities.outputs.opsClientId
+    registryServer: acr.outputs.loginServer
+    image: evalImage
+    containerName: 'ops'
+    command: [ '/opt/venv/bin/python', '-m', 'opsjob' ]
+    replicaTimeout: 2700
+    envVars: [
+      { name: 'COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
+      { name: 'COSMOS_DATABASE', value: cosmos.outputs.databaseName }
+      { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${environment().suffixes.storage}' }
+    ]
+  }
+}
+
+module opsInsights 'modules/ops-insights.bicep' = {
+  name: 'ops-insights'
+  params: {
+    location: location
+    tags: tags
+    lawId: monitoring.outputs.lawId
+    appiName: monitoring.outputs.appiName
+    appiConnectionString: monitoring.outputs.appiConnectionString
+    aiAccountName: aiAccount.outputs.name
+    projectName: aiProject.outputs.name
+    projectPrincipalId: aiProject.outputs.principalId
+    alertEmail: opsAlertEmail
+  }
+}
+
+output OPS_JOB_NAME string = opsJob.outputs.name

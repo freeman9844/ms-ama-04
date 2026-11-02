@@ -1,4 +1,4 @@
-// 워크로드별 사용자 할당 관리 ID. 오케스트레이터(Functions), 앱(Container Apps), smoke Job, 심사역 콘솔, 평가 Job.
+// 워크로드별 사용자 할당 관리 ID. 오케스트레이터(Functions), 앱(Container Apps), smoke Job, 심사역 콘솔, 평가 Job, 운영 지표 Job.
 param names object
 param location string
 param tags object
@@ -35,6 +35,13 @@ resource eval 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   tags: tags
 }
 
+// 운영 지표 Job은 신청 큐 보내기·Cosmos 읽기만 합니다(모델·Key Vault·쓰기 권한 없음).
+resource ops 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: names.ops
+  location: location
+  tags: tags
+}
+
 output orchestratorId string = orchestrator.id
 output orchestratorPrincipalId string = orchestrator.properties.principalId
 output orchestratorClientId string = orchestrator.properties.clientId
@@ -50,3 +57,6 @@ output consoleClientId string = console.properties.clientId
 output evalId string = eval.id
 output evalPrincipalId string = eval.properties.principalId
 output evalClientId string = eval.properties.clientId
+output opsId string = ops.id
+output opsPrincipalId string = ops.properties.principalId
+output opsClientId string = ops.properties.clientId
