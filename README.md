@@ -561,11 +561,11 @@ python -m ops eval --collect <실행 이름>            # 회수만 다시(로�
   Functions·Policy는 `azure-monitor-opentelemetry`로 App Insights에 요청·의존성·서킷 이벤트를 보냅니다(역할 이름 `orchestrator`·`policy`).
 - **지표**: SLO1 접수 → 심사역 대기 p95 ≤ 10분, SLO2 에이전트 단계 성공률 ≥ 99%, 건당 AI 비용(실측 토큰 × `src/evals/prices.json`)
   + 고정비(Cost Management 최근 완료 7일 일평균 × 30, Foundry Models 제외) ÷ 가정 물량, 세그먼트(업종·지역·업력)별 추천 approve율 격차
-  (임계값 20%p, 표본 5건 미만 제외, 업력은 규칙 R104로 설명되는 축).
+  (임계값 기본 20%p — `FAIRNESS_GAP_PP`로 변경, 잘못된 값이면 경고 후 20%p — 표본 5건 미만 제외, 업력은 규칙 R104로 설명되는 축).
 - **화면**: console `/ops`(공정성 표·경보 배너·SLO 요약), Azure Workbook "대출 여정 운영 지표(합성 데이터 기준)"(SLO·단계 성공률·비용 추이),
   경보 2개(`alert-agent-step-failure`, `alert-policy-circuit-open`). Foundry 프로젝트는 App Insights 연결로 에이전트 트레이스를 남깁니다.
-- **장애 주입**: `source-flaky`(mockapi 첫 요청 503 → Durable 재시도 회복), `policy-down`(Policy 503 → 서킷 open → fail-closed로
-  심사역 수동 심사). `ops fault`는 `FAULT_MODE` 환경 변수를 켜고 끄며, 실패해도 `finally`에서 원복합니다.
+- **장애 주입**: `source-flaky`(mockapi 첫 요청 503 → 데이터 조립 단계 원천별 재시도(에이전트 도구 재시도 + 안전망, 최대 3회)로 회복),
+  `policy-down`(Policy 503 → 서킷 open → fail-closed로 심사역 수동 심사). `ops fault`는 `FAULT_MODE` 환경 변수를 켜고 끄며, 실패해도 `finally`에서 원복합니다.
 
 ```powershell
 python -m ops load --count 24                                   # 측정 배치 → ops/reports/load-<시각>/
@@ -596,8 +596,8 @@ python -m ops metrics --run load-<시각> --fault-runs fault-<…> fault-<…>  
 | 건당 AI 비용 | $0.0423(gpt-5.4 70회 $0.885, gpt-5.4-mini 92회 $0.131, 합 $1.016 / 24건, 캐시 할인 미반영 상한). Decision-1 48회는 토큰 0·단가 미확인으로 제외 |
 | 고정비·건당 총비용 | 월 $304.73(Cost Management 2026-10-25~10-31 중 데이터가 있는 10-31 하루 × 30, USD). 월 100건 $3.09/건, 1,000건 $0.35/건, 10,000건 $0.07/건 — 수작업 $3,500/건 대비 0.1% 이하 |
 | 공정성(추천 approve율 격차) | 업종 12.5%p(임계값 이내), **지역 37.5%p(경보: 부산 50% vs 경기 12.5%)**, 업력 50%p(R104로 설명, 경보 대상 아님). 값당 8건이라 원형 통제 격차가 50~100%p로 잡음이 큽니다 |
-| 장애 ① source-flaky | mockapi 호출 5회 중 2회·9회 중 4회 실패 → Durable 재시도로 모든 단계 ok, 2건 모두 `awaiting_officer` |
-| 장애 ② policy-down | Policy 호출 실패 → 서킷 open, 3건 모두 `policy:failed`·`policy_unavailable`·`assessment_unavailable` 플래그로 `awaiting_officer`(fail-closed). `alert-policy-circuit-open` 발화(11:24Z). 에이전트 단계는 실패가 없어 `alert-agent-step-failure`는 발화하지 않음(정상) |
+| 장애 ① source-flaky | mockapi 호출 5회 중 2회·9회 중 4회 실패 → 데이터 조립 단계 원천별 재시도(에이전트 도구 재시도 + 안전망, 최대 3회)로 회복해 모든 단계 ok, 2건 모두 `awaiting_officer` |
+| 장애 ② policy-down | Policy 호출 실패 → 서킷 open, 3건 모두 `policy:failed`·`policy_unavailable`·`assessment_unavailable` 플래그로 `awaiting_officer`(fail-closed). `alert-policy-circuit-open` 발화(11:24Z). 에이전트 단계는 실패가 없어 `alert-agent-step-failure`는 발화하지 않음(정상). 03번 신청은 orchestrator → Policy 호출이 0회입니다(서킷 open이 호출을 막음). 서킷이 Flex 인스턴스마다 따로라 신청별 시험(half-open) 호출 수가 다릅니다 |
 
 console `/ops`의 SLO·비용·공정성 표와 경보 배너가 `report.md`와 같은 값을 보여 줍니다. 지역 경보는 합성 균형 격자 24건에서 나온 것이라
 모델·정책 편향의 증거가 아니라 "표본을 늘려 원인을 조사할 대상"을 보여 주는 예시입니다.
@@ -616,6 +616,7 @@ console `/ops`의 SLO·비용·공정성 표와 경보 배너가 `report.md`와 
 
 - 24건은 SLO 표본 수준이며 용량 시험이 아닙니다. p95·99%는 표본 수와 함께 봅니다.
 - 서킷브레이커는 Flex 인스턴스마다 따로입니다(분산 서킷은 운영 전환 과제).
+- `agent_assessment_mismatch` 플래그가 측정 신청 24/24건(장애 신청 4/5건)에 붙었습니다. 데이터 조립 에이전트가 보고한 상태가 결정론 판정과 다르다는 뜻입니다. SLO2는 파이프라인 단계 완료를 재며 에이전트 자기 평가 정확도는 재지 않습니다. 원인 분석은 후속 과제입니다.
 - Python Durable은 오케스트레이터 → 활동 트레이스를 잇지 않아 신청 단위 연결은 `application_id` KQL 조인입니다.
 - 건당 AI 비용은 캐시 할인 미반영(상한 추정)이고, 실패한 에이전트 호출은 토큰을 몰라 호출 수만 셉니다.
 - 원형 통제 격차는 원형·값당 2건이라 잡음이 큽니다. 경보 판정에는 전체 격차만 씁니다.
