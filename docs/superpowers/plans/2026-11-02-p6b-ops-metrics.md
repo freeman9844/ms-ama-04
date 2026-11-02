@@ -2173,7 +2173,7 @@ def summarize(
 | `OPS_APPLICANTS` | submit 신청자 CSV |
 | `OPS_SOURCE` | `load`·`fault` |
 | `OPS_RUN_IDS` | collect 대상 CSV |
-| `OPS_WAIT_S` | 최대 대기(기본 1800) |
+| `OPS_WAIT_S` | 최대 대기(기본 1500, job-ops replicaTimeout 3600 안에 맞춤) |
 | `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `QUEUE_ENDPOINT`, `AZURE_CLIENT_ID` | 접근 정보 |
 
 - [ ] **Step 1: 실패 테스트** — `tests/opsjob/test_opsjob.py`
@@ -4476,7 +4476,7 @@ python -m ops deploy all     # 이미지 4종(policy·mockapi·console·eval) AC
 python -m ops smoke
 ```
 
-확인: `azd env get-values`에 `OPS_JOB_NAME`·`APPLICATIONINSIGHTS_RESOURCE_ID`가 생겼는지, console `/ops`가 "측정 실행이 없습니다"를 보이는지, Policy·Functions App Insights에 `cloud_RoleName`(`policy-engine`·`journey-functions`)로 요청이 들어오는지.
+확인: `azd env get-values`에 `OPS_JOB_NAME`·`APPLICATIONINSIGHTS_RESOURCE_ID`가 생겼는지, console `/ops`가 "측정 실행이 없습니다"를 보이는지, Policy·Functions App Insights에 `cloud_RoleName`(`policy`·`orchestrator`, T11 `OTEL_SERVICE_NAME`)로 요청이 들어오는지.
 
 ```powershell
 $ws = azd env get-value LOG_ANALYTICS_CUSTOMER_ID
