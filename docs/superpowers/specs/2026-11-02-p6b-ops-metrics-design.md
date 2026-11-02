@@ -321,3 +321,20 @@ Cosmos와 Storage Queue는 IP 창으로도 로컬에서 열리지 않습니다(P
 | P6 | Cost Management | **조건부 통과.** RG 범위 `query`(api 2023-11-01) 가능. 429가 잦아 retry-after(2~20초) 재시도 필요. `TheLastMonth`는 지원 안 함 → `Custom` + `timePeriod`. 데이터 약 1일 지연. 배포가 월중 시작이라 완료월 없음 | §4.3: 최근 완료일 평균 × 30, MeterCategory `Foundry Models` 제외 |
 | P7 | 로컬 Cosmos·큐 접근 | **불가.** `operatorIp`는 Foundry 계정과 Functions에만 적용, Cosmos·Storage Queue는 사설 엔드포인트만 | §7.2: 사용자 선택에 따라 `job-ops`(VNet 내부 Job)로 변경 |
 
+## 계획 단계 확정 변경(2026-11-02)
+
+구현 계획(`docs/superpowers/plans/2026-11-02-p6b-ops-metrics.md`) 작성 중 확정한 변경입니다. 본문과 다르면 이 표가 우선합니다.
+
+| Spec | 변경 | 이유 |
+|---|---|---|
+| §3.2 | 세그먼트는 오케스트레이터가 `underwriting["features"]`(industry·region·business_age_months)에서 계산 | 활동이 profile을 따로 돌려줄 필요 없음. 원천 값과 같음 |
+| §3.3 | `attempts` 필드 삭제 | Durable 재시도 횟수는 활동 안에서 알 수 없음. 원천별 시도는 `assembly.sources[*].attempts`에 이미 있음 |
+| §3.3 | `assemble`은 `status != complete` **또는** `agent_fallback` 플래그면 `degraded` | 에이전트 실패 후 결정론 조립으로 완료한 경우도 안전망 경유 |
+| §3.3 | `classify` 하위 단계 시각 = `underwrite` 활동 시각 | 분류는 underwrite 활동 안에서 일어남 |
+| §7.2 | 투영의 정책 필드는 `policy.decision`·`policy.reason_codes` | `PolicyDecision`에 `eligible`·`rule_hits` 필드가 없음 |
+| §5.3 | Foundry 프로젝트 ID의 Metrics Publisher 역할은 `ops-insights.bicep`에 둠 | 연결과 역할을 한 모듈에 |
+| §8 | Cost Management 429는 고정 백오프(20초 × 5회) | `az rest`가 retry-after 헤더를 돌려주지 않음 |
+| §6.3 | KQL은 `az monitor log-analytics query`로 워크스페이스 테이블(`AppDependencies`·`AppRequests`·`AppTraces`) 조회 | P6a와 같은 경로 |
+| §6.2 | `policy-down` 시나리오 제출 간격 90초(`source-flaky`는 5초) | 서킷 cooldown(60초)보다 길게 둬 각 신청이 half-open 시험 → 재open을 거치게 함 |
+| §7.2 | 측정 결과 `ops/reports/<run_id>/`를 커밋 | `eval/reports`와 같은 관례. 투영 허용 필드만 있어 원문 PII 없음 |
+| §1.2 | console `/ops`는 고정비를 계산하지 않음(건당 총비용 "-", 보고서 안내) | console 관리 ID에 Cost Management 권한을 주지 않음 |
