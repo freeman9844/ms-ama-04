@@ -64,6 +64,13 @@ def test_latency_counts_unreached_and_received_only():
     assert r["p95_min"] == 19.0 and r["max_min"] == 20.0 and r["met"] is False
 
 
+def test_latency_skips_items_without_any_start_time():
+    p = project(doc(1, submitted=False))
+    p["received_at"] = None
+    r = latency([p, project(doc(2, minutes=4))])
+    assert r["n"] == 1 and r["p50_min"] == 4.0
+
+
 def test_latency_insufficient_samples():
     r = latency([project(doc(1))])
     assert r["n"] == 1 and r["insufficient"] is True
@@ -86,6 +93,13 @@ def test_ai_cost_sums_priced_and_counts_unpriced():
     assert r["by_model"]["decision-1"]["cost_usd"] is None
     assert r["total_usd"] == pytest.approx(2.0) and r["per_application_usd"] == pytest.approx(1.0)
     assert r["unpriced_calls"] == 3 and r["applications"] == 2
+
+
+def test_ai_cost_treats_usage_without_model_as_unpriced():
+    usage = [{"model": "m", "input_tokens": 1_000_000, "output_tokens": 0, "calls": 1},
+             {"input_tokens": 5, "output_tokens": 5, "calls": 4}]
+    r = ai_cost([project(doc(1, steps=[step("assemble", usage=usage)]))], PRICES)
+    assert r["total_usd"] == pytest.approx(1.0) and r["unpriced_calls"] == 4
 
 
 def test_unit_economics():
@@ -112,6 +126,14 @@ def test_fairness_gap_and_alert():
     assert ind["values"]["카페"]["approve_rate"] == 1.0 and ind["values"]["한식"]["approve_rate"] == pytest.approx(2 / 6)
     assert ind["gap_pp"] == pytest.approx(66.7, abs=0.1) and ind["alert"] is True
     assert r["alerts"] == ["industry"]
+
+
+def test_recommendation_breakdown_includes_refer():
+    recs = ["approve", "conditional", "refer", "refer", "decline"]
+    values = fairness([project(doc(i, rec=r)) for i, r in enumerate(recs, 1)])["axes"]["industry"]["values"]
+    cafe = values["카페"]
+    assert cafe["recommendations"] == {"approve": 1, "conditional": 1, "refer": 2, "decline": 1}
+    assert sum(cafe["recommendations"].values()) == cafe["assessed"]
 
 
 def test_small_groups_are_excluded_from_gap():

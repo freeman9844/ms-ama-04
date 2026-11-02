@@ -27,7 +27,10 @@ def latency(docs: list[dict[str, Any]], target_min: float = 10.0, min_samples: i
             continue
         start = p.get("submitted_at")
         if not start:
-            start, received_only = p.get("received_at"), received_only + 1
+            start = p.get("received_at")
+            if not start:
+                continue
+            received_only += 1
         minutes.append((datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds() / 60)
     p95 = nearest_rank(minutes, 95)
     return {

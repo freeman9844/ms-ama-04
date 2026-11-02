@@ -6,7 +6,7 @@ from opsmetrics.projection import archetype_of
 
 AXES = ("industry", "region", "business_age_band")
 POLICY_EXPLAINED = frozenset({"business_age_band"})
-RECOMMENDATIONS = ("approve", "conditional", "decline")
+RECOMMENDATIONS = ("approve", "conditional", "refer", "decline")
 
 
 def _rates(group: list[dict[str, Any]]) -> dict[str, Any]:

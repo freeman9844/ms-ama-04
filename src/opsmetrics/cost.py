@@ -5,6 +5,7 @@ from typing import Any
 MANUAL_USD = 3500.0  # Mills & McCarthy(HBS WP 15-004): 소상공인 대출 1건 처리 원가 $3,000~4,000의 중간값
 TICKET_USD = 6000.0
 VOLUMES = (100, 1000, 10000)
+UNKNOWN_MODEL = "(unknown)"  # 모델명 없는 usage는 단가 미상으로 집계
 
 
 def ai_cost(docs: list[dict[str, Any]], prices: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -12,7 +13,7 @@ def ai_cost(docs: list[dict[str, Any]], prices: dict[str, dict[str, Any]]) -> di
     for p in docs:
         for s in p.get("steps") or []:
             for u in s.get("usage") or []:
-                m = by_model.setdefault(u["model"], {"input_tokens": 0, "output_tokens": 0, "calls": 0})
+                m = by_model.setdefault(u.get("model") or UNKNOWN_MODEL, {"input_tokens": 0, "output_tokens": 0, "calls": 0})
                 for k in ("input_tokens", "output_tokens", "calls"):
                     m[k] += int(u.get(k) or 0)
     total, unpriced = 0.0, 0
