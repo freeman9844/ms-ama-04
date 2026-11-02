@@ -12,6 +12,8 @@ REQUIRED_DOCS = [
     "docs/runbook/operate.md",
     "docs/runbook/troubleshooting.md",
     "docs/runbook/deploy-history.md",
+    "docs/architecture.md",
+    "docs/agents.md",
 ]
 FENCE = re.compile(r"```.*?```", re.S)
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)")
