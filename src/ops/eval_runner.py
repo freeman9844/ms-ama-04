@@ -2,21 +2,19 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from evals.transport import TAG, TransportError, reassemble
+from evals.transport import TransportError
 from ops.azcli import OpsError, Runner, subscription_runner
 from ops.azdenv import get_env
-from ops.smoke_runner import TERMINAL, log_hint
+from ops.jobs import collect_with_retry, start_job, wait_job
+from ops.smoke_runner import log_hint
 
 REPORTS = Path(__file__).resolve().parents[2] / "eval" / "reports"
 REQUIRED = ("summary.json", "report.md", "calls.jsonl")
-START_API = "2024-03-01"
 
 
 @dataclass(frozen=True)
@@ -24,68 +22,6 @@ class EvalResult:
     execution: str
     out_dir: Path
     summary: dict
-
-
-def _query(execution: str) -> str:
-    return (f"ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith '{execution}' "
-            f"| where Log_s has '{TAG}' | project Log_s")
-
-
-def _run_id(lines: list[str], execution: str) -> str:
-    # Job에 실행 이름이 주입되지 않으면 local-<시각>을 쓴다. 로그는 이미 실행 이름으로 걸렀으므로 그 하나를 고른다.
-    ids = {line[line.find(TAG):].split(" ")[1] for line in lines if TAG + " " in line}
-    if execution in ids or len(ids) != 1:
-        return execution
-    return ids.pop()
-
-
-def collect_report(az: Runner, workspace: str, execution: str) -> dict[str, bytes]:
-    rows = json.loads(az(["az", "monitor", "log-analytics", "query", "-w", workspace,
-                          "--analytics-query", _query(execution), "-o", "json"]) or "[]")
-    lines = [row.get("Log_s", "") for row in rows]
-    files = reassemble(lines, _run_id(lines, execution))
-    missing = [name for name in REQUIRED if name not in files]
-    if missing:
-        raise TransportError(f"파일 누락: {', '.join(missing)}")
-    return files
-
-
-def _start(az: Runner, env: dict[str, str], group: str, job: str, suite: str) -> str:
-    if suite == "all":
-        return az(["az", "containerapp", "job", "start", "-g", group, "-n", job,
-                   "--query", "name", "-o", "tsv"]).strip()
-    # start 템플릿 덮어쓰기는 컨테이너 정의를 통째로 바꾼다. 기존 정의를 복사하고 EVAL_SUITE만 바꿔 ARM으로 시작한다
-    # (az.cmd는 따옴표가 든 인자를 깨뜨리므로 본문은 파일로 넘긴다).
-    template = json.loads(az(["az", "containerapp", "job", "show", "-g", group, "-n", job,
-                              "--query", "properties.template", "-o", "json"]))
-    containers = template["containers"]
-    containers[0]["env"] = ([e for e in containers[0].get("env", []) if e.get("name") != "EVAL_SUITE"]
-                            + [{"name": "EVAL_SUITE", "value": suite}])
-    body = {"containers": containers}
-    if template.get("initContainers"):
-        body["initContainers"] = template["initContainers"]
-    url = (f"https://management.azure.com/subscriptions/{env['AZURE_SUBSCRIPTION_ID']}/resourceGroups/{group}"
-           f"/providers/Microsoft.App/jobs/{job}/start?api-version={START_API}")
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-        json.dump(body, f)
-    try:
-        return json.loads(az(["az", "rest", "--method", "post", "--url", url, "--body", f"@{f.name}"]))["name"]
-    finally:
-        os.unlink(f.name)
-
-
-def _wait(az: Runner, env: dict[str, str], group: str, job: str, execution: str,
-          sleep: Callable[[float], None], poll_wait: float, poll_limit: int) -> None:
-    for _ in range(poll_limit):
-        status = az(["az", "containerapp", "job", "execution", "show", "-g", group, "-n", job,
-                     "--job-execution-name", execution, "--query", "properties.status", "-o", "tsv"]).strip()
-        if status in TERMINAL:
-            break
-        sleep(poll_wait)
-    else:
-        raise OpsError(f"평가 대기 시간 초과: {execution}\n{log_hint(env, execution)}")
-    if status != "Succeeded":
-        raise OpsError(f"평가 실패: {execution} 상태 {status}\n{log_hint(env, execution)}")
 
 
 def run_eval(runner: Runner, *, suite: str = "all", collect: str | None = None, out_root: Path | None = None,
@@ -99,23 +35,20 @@ def run_eval(runner: Runner, *, suite: str = "all", collect: str | None = None, 
     if collect:
         execution = collect
     else:
-        execution = _start(az, env, group, job, suite)
-        _wait(az, env, group, job, execution, sleep, poll_wait, poll_limit)
+        execution = start_job(az, env, group, job, None if suite == "all" else {"EVAL_SUITE": suite})
+        wait_job(az, env, group, job, execution, sleep=sleep, poll_wait=poll_wait, poll_limit=poll_limit,
+                 label="평가")
 
     # Log Analytics 수집은 수 분 늦을 수 있어 조각이 모두 모일 때까지 다시 조회한다(기본 최대 10분).
     workspace = env.get("LOG_ANALYTICS_CUSTOMER_ID", "")
-    for attempt in range(1, log_limit + 1):
-        try:
-            files = collect_report(az, workspace, execution)
-            break
-        except (TransportError, OpsError) as err:  # 조각 누락·수집 지연·일시적 조회 오류
-            if attempt == log_limit:
-                container = env.get("EVAL_REPORTS_CONTAINER", "eval-reports")
-                raise OpsError(
-                    f"리포트 복원 실패: {err}\n잠시 뒤 회수만 다시: python -m ops eval --collect {execution}\n"
-                    f"원본 사본: 데이터 스토리지 Blob {container}/{execution}/ (사설 엔드포인트 전용)\n"
-                    f"{log_hint(env, execution)}") from err
-            sleep(log_wait)
+    try:
+        files = collect_with_retry(az, workspace, execution, REQUIRED, sleep=sleep, wait=log_wait, limit=log_limit)
+    except (TransportError, OpsError) as err:  # 조각 누락·수집 지연·일시적 조회 오류
+        container = env.get("EVAL_REPORTS_CONTAINER", "eval-reports")
+        raise OpsError(
+            f"리포트 복원 실패: {err}\n잠시 뒤 회수만 다시: python -m ops eval --collect {execution}\n"
+            f"원본 사본: 데이터 스토리지 Blob {container}/{execution}/ (사설 엔드포인트 전용)\n"
+            f"{log_hint(env, execution)}") from err
     out_dir = (out_root or REPORTS) / execution
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, data in files.items():

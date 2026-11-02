@@ -1,0 +1,846 @@
+{
+  "run_id": "load-20261102110233",
+  "generated_at": "2026-11-02T12:00:58.365519+00:00",
+  "load": {
+    "run_id": "load-20261102110233",
+    "mode": "load",
+    "submitted": 24,
+    "reached": 24,
+    "unreached": [],
+    "aborted": false,
+    "guard": {
+      "sample": 3,
+      "per_application_usd": 0.06882983333333333,
+      "projected_usd": 1.651916,
+      "limit_usd": 4.0,
+      "unpriced_calls": 6
+    }
+  },
+  "summary": {
+    "basis": "합성 데이터 기준",
+    "applications": 24,
+    "latency": {
+      "n": 24,
+      "p50_min": 0.6028540333333333,
+      "p95_min": 1.2261636333333332,
+      "max_min": 5.663858950000001,
+      "target_min": 10.0,
+      "met": true,
+      "insufficient": false,
+      "unreached": 0,
+      "received_only": 0
+    },
+    "agent_success": {
+      "total": 72,
+      "ok": 72,
+      "degraded": 0,
+      "failed": 0,
+      "rate": 1.0,
+      "degraded_rate": 0.0,
+      "target": 0.99,
+      "met": true,
+      "by_step": {
+        "assemble": {
+          "ok": 24,
+          "degraded": 0,
+          "failed": 0
+        },
+        "classify": {
+          "ok": 24,
+          "degraded": 0,
+          "failed": 0
+        },
+        "assess": {
+          "ok": 24,
+          "degraded": 0,
+          "failed": 0
+        }
+      }
+    },
+    "ai_cost": {
+      "by_model": {
+        "gpt-5.4-mini": {
+          "input_tokens": 68940,
+          "output_tokens": 17562,
+          "calls": 92,
+          "cost_usd": 0.13073400000000002
+        },
+        "decision-1": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 48,
+          "cost_usd": null
+        },
+        "gpt-5.4": {
+          "input_tokens": 187149,
+          "output_tokens": 27803,
+          "calls": 70,
+          "cost_usd": 0.8849175
+        }
+      },
+      "total_usd": 1.0156515000000002,
+      "applications": 24,
+      "per_application_usd": 0.042318812500000004,
+      "unpriced_calls": 48
+    },
+    "fixed": {
+      "monthly_usd": 304.73,
+      "source": "Cost Management 실측 2026-10-25~2026-10-31 일평균(1일) × 30, Foundry Models 제외"
+    },
+    "unit_economics": [
+      {
+        "volume": 100,
+        "ai_usd": 0.042318812500000004,
+        "fixed_usd": 3.0473000000000003,
+        "total_usd": 3.089619,
+        "vs_manual": 0.0008827482857142857,
+        "vs_ticket": 0.0005149365
+      },
+      {
+        "volume": 1000,
+        "ai_usd": 0.042318812500000004,
+        "fixed_usd": 0.30473,
+        "total_usd": 0.347049,
+        "vs_manual": 9.915685714285714e-05,
+        "vs_ticket": 5.78415e-05
+      },
+      {
+        "volume": 10000,
+        "ai_usd": 0.042318812500000004,
+        "fixed_usd": 0.030473,
+        "total_usd": 0.072792,
+        "vs_manual": 2.0797714285714283e-05,
+        "vs_ticket": 1.2132e-05
+      }
+    ],
+    "fairness": {
+      "threshold_pp": 20.0,
+      "min_samples": 5,
+      "axes": {
+        "industry": {
+          "values": {
+            "제과점": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 3,
+                "conditional": 1,
+                "refer": 2,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "카페": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.25,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "한식": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.25,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 12.5,
+          "eligible_gap_pp": 25.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 50.0,
+              "mismatch": 0.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 50.0
+          },
+          "policy_explained": false,
+          "alert": false
+        },
+        "region": {
+          "values": {
+            "경기": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.125,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 1,
+                "conditional": 1,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "부산": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.5,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 4,
+                "conditional": 0,
+                "refer": 2,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "서울": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.25,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 37.5,
+          "eligible_gap_pp": 25.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 50.0,
+              "mismatch": 0.0,
+              "stress": 100.0,
+              "thin": 0.0
+            },
+            "max_pp": 100.0
+          },
+          "policy_explained": false,
+          "alert": true
+        },
+        "business_age_band": {
+          "values": {
+            "1~3년": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.5,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 4,
+                "conditional": 0,
+                "refer": 2,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "3년+": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 3,
+                "conditional": 1,
+                "refer": 2,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "<1년": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 6,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 50.0,
+          "eligible_gap_pp": 50.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 100.0,
+              "mismatch": 0.0,
+              "stress": 100.0,
+              "thin": 0.0
+            },
+            "max_pp": 100.0
+          },
+          "policy_explained": true,
+          "alert": false
+        }
+      },
+      "alerts": [
+        "region"
+      ]
+    }
+  },
+  "faults": [
+    {
+      "run_id": "fault-20261102111447",
+      "scenario": "source-flaky",
+      "reverted": true,
+      "applications": [
+        {
+          "application_id": "fault-20261102111447-01",
+          "applicant_id": "demo-cafe-001",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "ok"
+            },
+            {
+              "step": "assess",
+              "outcome": "ok"
+            }
+          ]
+        },
+        {
+          "application_id": "fault-20261102111447-02",
+          "applicant_id": "demo-mismatch-002",
+          "status": "awaiting_officer",
+          "flags": [],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "ok"
+            },
+            {
+              "step": "assess",
+              "outcome": "ok"
+            }
+          ]
+        }
+      ],
+      "dependencies": {
+        "fault-20261102111447-01": [
+          {
+            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 2
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          }
+        ],
+        "fault-20261102111447-02": [
+          {
+            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 9,
+            "failed": 4
+          },
+          {
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 2
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          }
+        ]
+      },
+      "dependencies_error": null
+    },
+    {
+      "run_id": "fault-20261102111750",
+      "scenario": "policy-down",
+      "reverted": true,
+      "applications": [
+        {
+          "application_id": "fault-20261102111750-01",
+          "applicant_id": "demo-cafe-001",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch",
+            "policy_unavailable",
+            "assessment_unavailable"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "failed"
+            }
+          ]
+        },
+        {
+          "application_id": "fault-20261102111750-02",
+          "applicant_id": "demo-stress-003",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch",
+            "high_cost_lender_detected",
+            "policy_unavailable",
+            "assessment_unavailable"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "failed"
+            }
+          ]
+        },
+        {
+          "application_id": "fault-20261102111750-03",
+          "applicant_id": "demo-thin-004",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch",
+            "policy_unavailable",
+            "assessment_unavailable"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "failed"
+            }
+          ]
+        }
+      ],
+      "dependencies": {
+        "fault-20261102111750-01": [
+          {
+            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 2
+          }
+        ],
+        "fault-20261102111750-02": [
+          {
+            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "169.254.255.2:8081",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "role": "orchestrator",
+            "total": 9,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.read_item",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.replace_item",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 0
+          },
+          {
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 8,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 3
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 7,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent txn-classifier",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 2
+          }
+        ],
+        "fault-20261102111750-03": [
+          {
+            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 1
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          }
+        ]
+      },
+      "dependencies_error": null
+    }
+  ]
+}

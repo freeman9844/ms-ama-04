@@ -48,3 +48,4 @@ article.consent, article.grievance { border: 1px solid var(--line); border-radiu
 .quote { white-space: pre-wrap; padding: .4rem .6rem; border-left: 3px solid var(--line); background: #f6f8fa; }
 .notice { white-space: pre-wrap; }
 .note { color: var(--muted); }
+.ops-alert { margin: .5rem 0; padding: .5rem 1rem; background: #fde7e9; color: #a4262c; border: 1px solid #f1707b; }

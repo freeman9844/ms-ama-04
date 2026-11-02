@@ -63,6 +63,9 @@ param consoleAuthEnabled bool = true
 @allowed([ 'CreditOfficer', 'CreditManager', 'Auditor' ])
 param consoleDemoRole string = 'CreditOfficer'
 
+@description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
+param opsAlertEmail string = ''
+
 var tags = {
   'azd-env-name': environmentName
   project: 'ama-cashflow-lending'
@@ -105,6 +108,7 @@ module resources 'resources.bicep' = {
     consoleIp: consoleIp
     consoleAuthEnabled: consoleAuthEnabled
     consoleDemoRole: consoleDemoRole
+    opsAlertEmail: opsAlertEmail
   }
 }
 
@@ -150,6 +154,8 @@ output FUNCTION_APP_NAME string = resources.outputs.FUNCTION_APP_NAME
 
 output SMOKE_JOB_NAME string = resources.outputs.SMOKE_JOB_NAME
 output EVAL_JOB_NAME string = resources.outputs.EVAL_JOB_NAME
+output OPS_JOB_NAME string = resources.outputs.OPS_JOB_NAME
+output APPLICATIONINSIGHTS_RESOURCE_ID string = resources.outputs.APPLICATIONINSIGHTS_RESOURCE_ID
 output EVAL_REPORTS_CONTAINER string = resources.outputs.EVAL_REPORTS_CONTAINER
 
 output CONSOLE_APP_NAME string = resources.outputs.CONSOLE_APP_NAME

@@ -5,11 +5,13 @@ import os
 import azure.durable_functions as df
 import azure.functions as func
 
+from journey import telemetry
 from journey.activities import ACTIVITIES, Deps
 from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start
 from journey.consent import consent_lifecycle as lifecycle_steps
 from journey.entry import handle_decision, handle_start
 from journey.grievance import handle_grievance, handle_grievance_decision
+from journey.metering import run_metered
 from journey.monitoring import (
     TOPIC_ALERT,
     TOPIC_FLOW,
@@ -19,6 +21,8 @@ from journey.monitoring import (
     handle_restructure_decision,
 )
 from journey.orchestration import journey
+
+telemetry.setup()
 
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 RETRY = df.RetryOptions(first_retry_interval_in_milliseconds=5000, max_number_of_attempts=3)
@@ -33,6 +37,10 @@ def deps() -> Deps:
 
         _deps = build_deps()
     return _deps
+
+
+def _metered_activity(name: str, payload: dict) -> dict:
+    return run_metered(name, ACTIVITIES[name], deps(), payload)
 
 
 @app.queue_trigger(arg_name="msg", queue_name="applications-start", connection="AzureWebJobsStorage")
@@ -59,27 +67,27 @@ def save_document(payload: dict) -> dict:
 
 @app.activity_trigger(input_name="payload")
 def request_consent(payload: dict) -> dict:
-    return ACTIVITIES["request_consent"](deps(), payload)
+    return _metered_activity("request_consent", payload)
 
 
 @app.activity_trigger(input_name="payload")
 def assemble_data(payload: dict) -> dict:
-    return ACTIVITIES["assemble_data"](deps(), payload)
+    return _metered_activity("assemble_data", payload)
 
 
 @app.activity_trigger(input_name="payload")
 def underwrite(payload: dict) -> dict:
-    return ACTIVITIES["underwrite"](deps(), payload)
+    return _metered_activity("underwrite", payload)
 
 
 @app.activity_trigger(input_name="payload")
 def evaluate_policy(payload: dict) -> dict:
-    return ACTIVITIES["evaluate_policy"](deps(), payload)
+    return _metered_activity("evaluate_policy", payload)
 
 
 @app.activity_trigger(input_name="payload")
 def assess_credit(payload: dict) -> dict:
-    return ACTIVITIES["assess_credit"](deps(), payload)
+    return _metered_activity("assess_credit", payload)
 
 
 @app.activity_trigger(input_name="payload")

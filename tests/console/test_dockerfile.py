@@ -57,7 +57,7 @@ def test_dockerfile_copies_everything_the_console_imports(tmp_path):
     code = (
         "import sys, pathlib; "
         f"sys.path[:] = [p for p in sys.path if p == {str(app)!r} or not (pathlib.Path(p) / 'shared').is_dir()]; "
-        "import console.app, console.adapters, console.views; "
+        "import console.app, console.adapters, console.views, console.ops; "
         "assert not [m for m in sys.modules if m.startswith('azure')], 'azure imported eagerly'"
     )
     env = {**os.environ, "PYTHONPATH": str(app)}
@@ -66,6 +66,9 @@ def test_dockerfile_copies_everything_the_console_imports(tmp_path):
     assert (app / "console" / "templates" / "detail.html").exists()
     assert (app / "console" / "static" / "console.css").exists()
     assert not (app / "journey" / "activities.py").exists()
+    assert (app / "evals" / "prices.json").exists()
+    assert (app / "opsmetrics" / "summary.py").exists()
+    assert not (app / "evals" / "runner.py").exists()
 
 
 def test_dockerignore_keeps_other_images_lean():

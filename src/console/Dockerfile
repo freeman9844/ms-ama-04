@@ -6,6 +6,8 @@ COPY requirements-console.txt /tmp/requirements.txt
 RUN /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 COPY src/shared /app/shared
 COPY src/agents /app/agents
+COPY src/opsmetrics /app/opsmetrics
+COPY src/evals/prices.json /app/evals/
 COPY src/orchestrator/journey/__init__.py src/orchestrator/journey/models.py src/orchestrator/journey/validation.py /app/journey/
 COPY src/console /app/console
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1

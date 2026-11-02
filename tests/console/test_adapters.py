@@ -128,7 +128,7 @@ def test_build_deps_wires_env(monkeypatch):
             return (name, *self.where)
 
     for name in ("ManagedIdentityCredential", "CosmosApplications", "CosmosMonitoring", "CosmosPrivacy",
-                 "BlobRawStore", "StorageQueueSender"):
+                 "BlobRawStore", "StorageQueueSender", "CosmosOps"):
         monkeypatch.setattr(f"console.adapters.{name}", type(name, (Recorder,), {}), raising=True)
     monkeypatch.setattr("console.adapters._cosmos_database", lambda endpoint, db, cred: FakeDb(endpoint, db))
     monkeypatch.setattr("console.adapters._queue_factory", lambda endpoint, cred: ("queues", endpoint))
@@ -146,6 +146,31 @@ def test_build_deps_wires_env(monkeypatch):
     assert made["BlobRawStore"][0][0] == "https://blob"
     assert made["StorageQueueSender"][0] == (("queues", "https://queue"),)
     assert deps.pseudonym_key == b"k" * 32
+    assert made["CosmosOps"][0] == (("applications", "https://cos", "lending"),)
+
+
+def test_cosmos_ops_lists_runs_and_projects_docs():
+    from console.adapters import CosmosOps
+
+    class Container:
+        def __init__(self):
+            self.queries = []
+
+        def query_items(self, query, parameters=None, enable_cross_partition_query=False):
+            self.queries.append((query, parameters, enable_cross_partition_query))
+            if "DISTINCT" in query:
+                return iter(["load-20261102010000", "fault-20261102030000"])
+            return iter([{"id": "a", "application_id": "a", "run_id": "load-20261102010000",
+                          "assembly": {"secret": "x"}, "policy": {"decision": "eligible", "max_amount_krw": 1}}])
+
+    c = Container()
+    ops = CosmosOps(c)
+    assert ops.runs() == ["load-20261102010000", "fault-20261102030000"]
+    docs = ops.by_run("load-20261102010000")
+    assert docs[0]["application_id"] == "a" and "assembly" not in docs[0]
+    assert docs[0]["policy"] == {"decision": "eligible", "reason_codes": []}
+    assert c.queries[1][1] == [{"name": "@run", "value": "load-20261102010000"}]
+    assert all(q[2] for q in c.queries)
 
 
 def test_build_deps_requires_endpoints():

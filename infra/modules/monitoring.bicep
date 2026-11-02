@@ -42,3 +42,5 @@ output lawId string = law.id
 output lawName string = law.name
 output lawCustomerId string = law.properties.customerId
 output appiConnectionString string = appi.properties.ConnectionString
+output appiId string = appi.id
+output appiName string = appi.name

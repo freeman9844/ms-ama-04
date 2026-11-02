@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}운영 지표 · AMA Lending 심사 콘솔{% endblock %}
+{% block main %}
+<h1>운영 지표 <small>합성 데이터 기준</small></h1>
+{% if not selected %}
+<p>측정 실행이 없습니다. 운영자 PC에서 <code>python -m ops load --count 24</code>로 합성 신청을 제출하면 여기에 표시됩니다.</p>
+{% else %}
+<form method="get" action="/ops">
+  <label>측정 실행
+    <select name="run">
+    {% for r in runs %}<option value="{{ r }}"{% if r == selected %} selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">보기</button>
+</form>
+<p>실행 <code>{{ selected }}</code> · 신청 {{ s.applications }}건 · {{ s.basis }}. 고정비·건당 총비용은 <code>ops/reports/{{ selected }}/report.md</code>를 봅니다.</p>
+
+{% for axis in s.fairness.alerts %}
+<p class="ops-alert">공정성 경보: {{ AXIS_LABELS.get(axis, axis) }} 추천 approve율 격차 {{ s.fairness.axes[axis].gap_pp|num }}%p &gt; 임계값 {{ s.fairness.threshold_pp|num }}%p. 원형 통제 최대 격차 {{ s.fairness.axes[axis].controlled.max_pp|num }}%p를 함께 확인하세요.</p>
+{% endfor %}
+
+<h2>SLO</h2>
+<table class="kv">
+  <tr><th>접수 → 심사역 대기 p50 / p95 / 최대(분)</th><td>{{ s.latency.p50_min|num }} / {{ s.latency.p95_min|num }} / {{ s.latency.max_min|num }} (목표 p95 ≤ {{ s.latency.target_min|num(0) }}분, {{ "충족" if s.latency.met else "미충족" }})</td></tr>
+  <tr><th>측정 표본</th><td>{{ s.latency.n }}건{% if s.latency.insufficient %} · 표본 부족(20건 미만){% endif %}{% if s.latency.unreached %} · 미도달 {{ s.latency.unreached }}건{% endif %}{% if s.latency.received_only %} · 접수 시각 기준 {{ s.latency.received_only }}건{% endif %}</td></tr>
+  <tr><th>에이전트 단계 성공률</th><td>{{ s.agent_success.rate|pct }} (목표 {{ s.agent_success.target|pct }}, ok {{ s.agent_success.ok }} · degraded {{ s.agent_success.degraded }} · failed {{ s.agent_success.failed }})</td></tr>
+  <tr><th>AI 비용(건당, 캐시 할인 미반영)</th><td>{{ s.ai_cost.per_application_usd|usd }}{% if s.ai_cost.unpriced_calls %} · 단가 미확인 호출 {{ s.ai_cost.unpriced_calls }}회 제외{% endif %}</td></tr>
+</table>
+{% if s.agent_success.by_step %}
+<table>
+  <thead><tr><th>단계</th><th>ok</th><th>degraded</th><th>failed</th></tr></thead>
+  <tbody>
+  {% for name, c in s.agent_success.by_step|dictsort %}
+  <tr><td>{{ STEP_LABELS.get(name, name) }}</td><td>{{ c.ok }}</td><td>{{ c.degraded }}</td><td>{{ c.failed }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>공정성(세그먼트별)</h2>
+<p>격차는 표본 {{ s.fairness.min_samples }}건 이상 세그먼트의 추천 approve율 최대 − 최소입니다. 임계값 {{ s.fairness.threshold_pp|num }}%p.</p>
+{% for axis, a in s.fairness.axes.items() %}
+<h3>{{ AXIS_LABELS.get(axis, axis) }} — 격차 {{ a.gap_pp|num }}%p · eligible 격차 {{ a.eligible_gap_pp|num }}%p · 원형 통제 최대 {{ a.controlled.max_pp|num }}%p
+{% if a.policy_explained %}<small>(규칙 R104로 설명되는 축, 경보 대상 아님)</small>{% endif %}</h3>
+<table>
+  <thead><tr><th>값</th><th>신청</th><th>추천 완료</th><th>추천 approve율</th><th>정책 eligible율</th><th>approve / conditional / refer / decline</th><th>심사역 승인율</th><th></th></tr></thead>
+  <tbody>
+  {% for value, r in a["values"].items() %}
+  <tr>
+    <td>{{ value }}</td><td>{{ r.n }}</td><td>{{ r.assessed }}</td><td>{{ r.approve_rate|pct }}</td><td>{{ r.eligible_rate|pct }}</td>
+    <td>{{ r.recommendations.approve }} / {{ r.recommendations.conditional }} / {{ r.recommendations.refer }} / {{ r.recommendations.decline }}</td>
+    <td>{{ r.officer_approve_rate|pct }}</td><td>{% if r.insufficient %}표본 부족{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% endif %}
+{% endblock %}

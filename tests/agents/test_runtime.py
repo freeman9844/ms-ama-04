@@ -275,3 +275,29 @@ def test_conversation_exists(get_status, exists):
     client, seen = conversations_api(200, get_status=get_status)
     assert client.conversation_exists("conv_a") is exists
     assert seen == [("GET", "/api/projects/proj-lending/openai/v1/conversations/conv_a")]
+
+def usage_round(*calls: dict, inp: int, out: int) -> httpx.Response:
+    usage = {"input_tokens": inp, "output_tokens": out, "total_tokens": inp + out}
+    return httpx.Response(200, json={"status": "completed", "output": list(calls), "usage": usage})
+
+
+def usage_done(obj, inp: int, out: int) -> httpx.Response:
+    message = {"type": "message", "content": [{"type": "output_text", "text": json.dumps(obj)}]}
+    usage = {"input_tokens": inp, "output_tokens": out, "total_tokens": inp + out}
+    return httpx.Response(200, json={"status": "completed", "output": [message], "usage": usage})
+
+
+def test_run_accumulates_input_output_tokens_and_model():
+    fake = FakeFoundry(
+        usage_round(fc("c1", "fetch_source", {"source": "profile"}), inp=40, out=10),
+        usage_done({"status": "complete"}, inp=70, out=30),
+    )
+    run = agents(fake).run(SPEC, "신청", {"fetch_source": lambda a: {"ok": 1}})
+    assert (run.input_tokens, run.output_tokens, run.total_tokens) == (110, 40, 150)
+    assert run.model == "gpt-5.4-mini"
+    assert "input_tokens" not in run.record()  # 감사 기록 형식은 그대로
+
+
+def test_missing_usage_split_counts_zero():
+    run = agents(FakeFoundry(done({"status": "complete"}, tokens=100))).run(SPEC, "신청", {})
+    assert (run.input_tokens, run.output_tokens, run.total_tokens) == (0, 0, 100)

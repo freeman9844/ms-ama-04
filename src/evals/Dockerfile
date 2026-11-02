@@ -9,6 +9,8 @@ COPY src/agents /app/agents
 COPY src/policy /app/policy
 COPY src/mockapis /app/mockapis
 COPY src/evals /app/evals
+COPY src/opsmetrics /app/opsmetrics
+COPY src/opsjob /app/opsjob
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
 WORKDIR /app
 # 리포트 기본 경로(eval/reports/<실행 이름>). /app은 root 소유라 비루트 사용자에게 미리 넘긴다

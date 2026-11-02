@@ -1,11 +1,11 @@
 """신청 여정의 상태·요청·심사역 결정 모델과 동의 상수."""
 
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 KST = timezone(timedelta(hours=9), "KST")
 APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
@@ -75,6 +75,14 @@ class StartRequest(BaseModel):
     requested_amount_krw: int = Field(gt=0)
     requested_tenor_months: int = Field(ge=1, le=60)
     sla_hours: float = Field(default=24, gt=0, le=720)
+    submitted_at: datetime | None = None
+    source: Literal["console", "load", "fault"] | None = None
+    run_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
+
+    @field_validator("submitted_at")
+    @classmethod
+    def _utc(cls, v: datetime | None) -> datetime | None:
+        return v.replace(tzinfo=UTC) if v and v.tzinfo is None else v
 
 
 class OfficerDecision(BaseModel):

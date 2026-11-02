@@ -4,7 +4,7 @@ labels(정답 분류)는 평가 하네스 전용이며 API로 노출하지 않�
 """
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
 
@@ -66,6 +66,16 @@ _PERSONAS: dict[Archetype, _Persona] = {
     ),
 }
 
+_LOAD_PERSONAS: dict[str, _Persona] = {
+    "카페": _Persona("다온커피", "한도윤", ("서하은", "문지호"), ("(주)원두나라", "푸른목장 유제품"), "카페", ""),
+    "한식": _Persona("소담한상", "배정민", ("유가은", "남도현"), ("(주)제철식자재", "새벽청과"), "한식", ""),
+    "제과점": _Persona("밀결베이커리", "신아름", ("홍다인", "권우진"), ("(주)곡물상회", "들녘유업"), "제과점", ""),
+}
+
+
+def load_persona(industry: str, region: str) -> _Persona:
+    return replace(_LOAD_PERSONAS[industry], region=region)
+
 
 @dataclass(frozen=True)
 class SyntheticCase:
@@ -90,9 +100,11 @@ def generate_case(
     as_of: date,
     seed: int,
     inject_prompt: bool = False,
+    persona: _Persona | None = None,
+    business_age_months: int | None = None,
 ) -> SyntheticCase:
     rng = random.Random(seed)
-    persona = _PERSONAS[archetype]
+    persona = persona or _PERSONAS[archetype]
     thin = archetype is Archetype.THIN_FILE
     start = _months_back(as_of, 4 if thin else 12)
     onset = as_of - timedelta(days=60) if archetype is Archetype.STRESSED else None
@@ -184,7 +196,7 @@ def generate_case(
         representative_name=persona.representative,
         industry=persona.industry,
         region=persona.region,
-        business_age_months=8 if thin else 38,
+        business_age_months=business_age_months if business_age_months is not None else (8 if thin else 38),
     )
     known_entities = {
         persona.business_name: "BIZNAME",

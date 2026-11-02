@@ -1,0 +1,22 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {"type": 1, "content": {"json": "## 대출 여정 운영 지표\n합성 데이터 기준. 신청 단위 연결은 `application_id`로 합니다(Durable 오케스트레이터 → 활동 트레이스 미연결)."}},
+    {"type": 9, "content": {"version": "KqlParameterItem/1.0", "parameters": [
+      {"name": "TimeRange", "type": 4, "value": {"durationMs": 86400000}, "typeSettings": {"allowCustom": true}},
+      {"name": "ApplicationId", "type": 1, "value": ""}
+    ]}},
+    {"type": 3, "content": {"version": "KqlItem/1.0", "title": "단계별 결과·p95 소요(ms)", "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "timeContext": {"durationMs": 0}, "timeContextFromParameter": "TimeRange",
+      "query": "AppTraces\n| where Message == \"journey.step\"\n| extend step = tostring(Properties.step), outcome = tostring(Properties.outcome), ms = todouble(Properties.duration_ms)\n| summarize total = count(), ok = countif(outcome == \"ok\"), degraded = countif(outcome == \"degraded\"), failed = countif(outcome == \"failed\"), p95_ms = percentile(ms, 95) by step\n| extend ok_rate = round(100.0 * ok / total, 1)\n| order by step asc", "visualization": "table"}},
+    {"type": 3, "content": {"version": "KqlItem/1.0", "title": "의존성 실패(대상별)", "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "timeContextFromParameter": "TimeRange",
+      "query": "AppDependencies\n| where AppRoleName in (\"orchestrator\", \"policy\")\n| summarize total = count(), failed = countif(Success == false) by Target, AppRoleName\n| order by failed desc", "visualization": "table"}},
+    {"type": 3, "content": {"version": "KqlItem/1.0", "title": "Policy 서킷 상태", "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "timeContextFromParameter": "TimeRange",
+      "query": "AppTraces\n| where Message == \"policy.circuit\"\n| project TimeGenerated, state = tostring(Properties.state), AppRoleInstance\n| order by TimeGenerated desc", "visualization": "table"}},
+    {"type": 3, "content": {"version": "KqlItem/1.0", "title": "토큰 추이(시간별)", "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "timeContextFromParameter": "TimeRange",
+      "query": "AppTraces\n| where Message == \"journey.step\"\n| summarize input_tokens = sum(tolong(Properties.input_tokens)), output_tokens = sum(tolong(Properties.output_tokens)) by bin(TimeGenerated, 1h)", "visualization": "timechart"}},
+    {"type": 3, "content": {"version": "KqlItem/1.0", "title": "신청 1건의 스팬", "queryType": 0, "resourceType": "microsoft.operationalinsights/workspaces", "timeContextFromParameter": "TimeRange",
+      "query": "let ops = union AppRequests, AppDependencies | where tostring(Properties.application_id) == \"{ApplicationId}\" | distinct OperationId;\nunion AppRequests, AppDependencies\n| where OperationId in (ops)\n| project TimeGenerated, OperationId, Name, Target, DurationMs, Success, AppRoleName\n| order by TimeGenerated asc", "visualization": "table"}}
+  ],
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

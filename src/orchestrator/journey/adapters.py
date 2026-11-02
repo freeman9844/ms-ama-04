@@ -12,6 +12,7 @@ import httpx
 from agents.data_assembly import DEFAULT_MODEL, SourceError
 from agents.runtime import FoundryAgents
 from agents.txn_classify import DecisionClient
+from journey import telemetry
 from journey.activities import (
     ANALYST_MODEL,
     CLASSIFIER_MODEL,
@@ -23,6 +24,7 @@ from journey.activities import (
     Deps,
     StoreCache,
 )
+from journey.circuit import CircuitBreaker
 from journey.models import KST
 from shared.contracts import PolicyDecision
 
@@ -77,14 +79,30 @@ class PolicyUnavailable(RuntimeError):
 
 
 class HttpPolicyApi:
-    def __init__(self, base_url: str = "", *, client: httpx.Client | None = None, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str = "",
+        *,
+        client: httpx.Client | None = None,
+        timeout: float = 30.0,
+        breaker: CircuitBreaker | None = None,
+    ) -> None:
         self._client = _http(base_url, client, timeout)
+        self._breaker = breaker
 
     def decide(self, features: dict[str, Any]) -> dict[str, Any]:
+        b = self._breaker
+        if b is not None and not b.allow():
+            raise PolicyUnavailable("circuit_open")
         try:
             r = self._client.post("/v1/decisions", json=features)
-        except httpx.HTTPError as e:
+        except Exception as e:
+            # httpx 밖의 예외도 실패로 기록한다. 아니면 half_open 시험이 끝나지 않아 서킷이 영영 막힌다.
+            if b is not None:
+                b.failure()
             raise PolicyUnavailable(type(e).__name__) from e
+        if b is not None:
+            b.failure() if r.status_code >= 500 else b.success()
         if r.status_code != 200:
             raise PolicyUnavailable(f"HTTP {r.status_code} {r.text[:200]}")
         return PolicyDecision.model_validate(r.json()).model_dump(mode="json")
@@ -246,7 +264,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> Deps:
         store=store,
         raw=BlobRawStore(env["DATA_BLOB_ENDPOINT"], credential),
         mock=HttpMockApi(env["MOCKAPI_URL"]),
-        policy=HttpPolicyApi(env["POLICY_URL"]),
+        policy=HttpPolicyApi(env["POLICY_URL"], breaker=CircuitBreaker(on_change=telemetry.circuit_changed)),
         events=ServiceBusPublisher(fqdn, credential) if fqdn else None,
         pseudonym_key=load_pseudonym_key(env, credential),
         clock=lambda: datetime.now(KST),

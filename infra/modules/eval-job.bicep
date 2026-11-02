@@ -1,4 +1,5 @@
 // 평가 하네스 수동 트리거 Job(내부 ACA 환경, VNet 안에서 Foundry Private Endpoint로 호출).
+// 운영 지표 Job(job-ops)도 같은 모듈을 씁니다.
 // image가 비면 MCR Python 자리표시 이미지로 만들고, ops deploy eval이 ACR 이미지로 갱신합니다.
 param name string
 param location string
@@ -10,6 +11,10 @@ param registryServer string
 param image string = ''
 @description('[{ name, value }] 일반 환경 변수')
 param envVars array = []
+param containerName string = 'eval'
+@description('비우면 이미지 기본 명령')
+param command array = []
+param replicaTimeout int = 3600
 
 var placeholder = empty(image)
 
@@ -26,7 +31,7 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       triggerType: 'Manual'
-      replicaTimeout: 3600
+      replicaTimeout: replicaTimeout
       replicaRetryLimit: 0
       manualTriggerConfig: {
         parallelism: 1
@@ -37,9 +42,9 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
     template: {
       containers: [
         {
-          name: 'eval'
+          name: containerName
           image: placeholder ? 'mcr.microsoft.com/azurelinux/base/python:3.12' : image
-          command: placeholder ? [ 'python3', '-c', 'print("eval image not deployed: python -m ops deploy eval")' ] : null
+          command: placeholder ? [ 'python3', '-c', 'print("eval image not deployed: python -m ops deploy eval")' ] : (empty(command) ? null : command)
           env: concat([
             { name: 'AZURE_CLIENT_ID', value: identityClientId }
             { name: 'PYTHONUNBUFFERED', value: '1' }

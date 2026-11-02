@@ -1,12 +1,33 @@
+import hashlib
 import importlib
+import json
 import sys
 from datetime import date, datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
-from mockapis.demo import build_demo_cases, load_secret, resolve_as_of
+from mockapis.demo import LOAD_ARCHETYPE, build_demo_cases, build_load_cases, load_secret, resolve_as_of
 from mockapis.synth import INJECTION_TEXT, Archetype
+from shared.segments import LOAD_GRID
+
+DIGESTS = {
+    "demo-cafe-001": "1179518b691d96f7",
+    "demo-mismatch-002": "3f86f1fcf3d5ccde",
+    "demo-stress-003": "da1eee928c6ccfc9",
+    "demo-thin-004": "1dbd0c52c90bcb84",
+    "demo-injection-005": "1db0ddf6309729d6",
+}
+
+
+def _digest(case) -> str:
+    body = {
+        "profile": case.profile.model_dump(mode="json"),
+        "txns": [t.model_dump(mode="json") for t in case.transactions],
+        "tax": [t.model_dump(mode="json") for t in case.tax_filings],
+        "pg": [p.model_dump(mode="json") for p in case.pg_settlements],
+    }
+    return hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def test_build_demo_cases():
@@ -61,3 +82,24 @@ def test_postloan_flows_cast_the_cafe_as_the_stacking_hero():
         "demo-injection-005": FlowScenario.STABLE,
     }
     assert all(f.start == as_of for f in flows.values())
+
+
+def test_demo_cases_unchanged():
+    cases = build_demo_cases(date(2026, 10, 1))
+    assert {k: _digest(v) for k, v in cases.items()} == DIGESTS
+
+
+def test_load_cases_follow_grid():
+    cases = build_load_cases(date(2026, 10, 1))
+    assert set(cases) == {a.applicant_id for a in LOAD_GRID}
+    for a in LOAD_GRID:
+        p = cases[a.applicant_id].profile
+        assert (p.industry, p.region, p.business_age_months) == (a.industry, a.region, a.business_age_months)
+        assert cases[a.applicant_id].archetype is LOAD_ARCHETYPE[a.archetype]
+    names = {cases[a.applicant_id].profile.business_name for a in LOAD_GRID}
+    assert not names & {c.profile.business_name for c in build_demo_cases(date(2026, 10, 1)).values()}
+
+
+def test_load_cases_are_deterministic():
+    a, b = build_load_cases(date(2026, 10, 1)), build_load_cases(date(2026, 10, 1))
+    assert all(_digest(a[k]) == _digest(b[k]) for k in a)
