@@ -149,6 +149,8 @@ output MOCKAPI_URL string = resources.outputs.MOCKAPI_URL
 output FUNCTION_APP_NAME string = resources.outputs.FUNCTION_APP_NAME
 
 output SMOKE_JOB_NAME string = resources.outputs.SMOKE_JOB_NAME
+output EVAL_JOB_NAME string = resources.outputs.EVAL_JOB_NAME
+output EVAL_REPORTS_CONTAINER string = resources.outputs.EVAL_REPORTS_CONTAINER
 
 output CONSOLE_APP_NAME string = resources.outputs.CONSOLE_APP_NAME
 output CONSOLE_URL string = resources.outputs.CONSOLE_URL

@@ -1,6 +1,8 @@
 import json
 import re
 
+import pytest
+
 from tests.infra.test_console import INFRA, _compile, _resources
 
 JOB = "Microsoft.App/jobs"
@@ -50,3 +52,9 @@ def test_eval_identity_is_least_privilege(closed):
     assert grants == {"foundry-account": {"foundryUser", "openAiUser"}, "acr": {"acrPull"},
                       "eval-reports-role": {"blobContributor"}}
     assert closed.roles_on("eval-reports") == {ROLE_BLOB_CONTRIBUTOR}
+
+
+@pytest.mark.parametrize("output", ["EVAL_JOB_NAME", "EVAL_REPORTS_CONTAINER"])
+def test_eval_outputs_exposed_to_azd(output):
+    # ops eval은 azd env에서 Job 이름을 읽는다. resources.bicep 출력만으로는 azd env에 올라가지 않는다
+    assert output in _compile(INFRA / "main.bicep")["outputs"]
