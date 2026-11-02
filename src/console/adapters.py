@@ -15,6 +15,7 @@ from typing import Any
 
 from console.app import ConsoleDeps
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
+from opsmetrics.projection import project
 
 APPLICATIONS = "applications"
 LOANS = "loans"
@@ -139,6 +140,26 @@ class CosmosPrivacy:
         return _read_or_none(self._grievances, grievance_id, application_id)
 
 
+RUNS_QUERY = "SELECT DISTINCT VALUE c.run_id FROM c WHERE IS_STRING(c.run_id)"
+RUN_DOCS_QUERY = "SELECT * FROM c WHERE c.run_id = @run"
+
+
+class CosmosOps:
+    """측정 실행별 신청 투영(applications 읽기 전용). 원문 필드는 project()가 버린다."""
+
+    def __init__(self, applications: Any) -> None:
+        self._applications = applications
+
+    def runs(self) -> list[str]:
+        return list(self._applications.query_items(query=RUNS_QUERY, enable_cross_partition_query=True))
+
+    def by_run(self, run_id: str) -> list[dict[str, Any]]:
+        items = self._applications.query_items(
+            query=RUN_DOCS_QUERY, parameters=[{"name": "@run", "value": run_id}], enable_cross_partition_query=True
+        )
+        return [project(d) for d in items]
+
+
 class BlobRawStore:
     def __init__(self, account_url: str, credential: Any) -> None:
         from azure.storage.blob import BlobServiceClient
@@ -221,4 +242,5 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
         queue=StorageQueueSender(_queue_factory(cfg["QUEUE_ENDPOINT"], credential)),
         pseudonym_key=load_pseudonym_key(env, credential),
         demo_principal=demo,
+        ops=CosmosOps(db.get_container_client(APPLICATIONS)),
     )

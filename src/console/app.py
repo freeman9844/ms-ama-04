@@ -31,6 +31,7 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
+from console.ops import AXIS_LABELS, STEP_LABELS, OpsStore, default_run, ops_view, sorted_runs
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
@@ -122,6 +123,7 @@ class ConsoleDeps:
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(KST))
     privacy: PrivacyStore | None = None
     new_grievance_id: Callable[[], str] = field(default=_new_grievance_id)
+    ops: OpsStore | None = None
 
 
 def _krw(value: Any) -> str:
@@ -139,6 +141,9 @@ def _templates() -> Environment:
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
     for name, labels in LABEL_FILTERS.items():
         env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
+    env.filters["pct"] = lambda v: f"{v * 100:.1f}%" if isinstance(v, int | float) else "-"
+    env.filters["usd"] = lambda v: f"${v:,.4f}" if isinstance(v, int | float) else "-"
+    env.filters["num"] = lambda v, d=1: f"{v:.{d}f}" if isinstance(v, int | float) else "-"
     env.globals.update(
         htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS
     )
@@ -465,6 +470,23 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def grievances(request: Request) -> HTMLResponse:
         user = viewer(request)
         return render("grievances.html", user, rows=privacy().list_grievances(LIST_LIMIT))
+
+    def ops_store() -> OpsStore:
+        if deps.ops is None:
+            raise HTTPException(404, "ops metrics not configured")
+        return deps.ops
+
+    @app.get("/ops", response_class=HTMLResponse)
+    def ops_page(request: Request, run: str | None = None) -> HTMLResponse:
+        user = viewer(request)
+        store = ops_store()
+        runs = sorted_runs(store.runs())
+        if run is not None and run not in runs:
+            raise HTTPException(404, "run not found")
+        selected = run or default_run(runs)
+        summary = ops_view(store.by_run(selected)) if selected else None
+        return render("ops.html", user, runs=runs, selected=selected, s=summary,
+                      AXIS_LABELS=AXIS_LABELS, STEP_LABELS=STEP_LABELS)
 
     def grievance_or_404(application_id: str, grievance_id: str) -> dict[str, Any]:
         doc = privacy().get_grievance(application_id, grievance_id)
