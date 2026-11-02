@@ -6,7 +6,7 @@
 ## 맥락
 과제는 "추론 처리가 국내에 머무를 것(processing stays in-country)"을 요구하지만, Korea Central regional 배포를 쓰기 어렵고 Global Standard는 추론 요청이 어느 Azure 리전에서든 처리될 수 있다. 상위 Spec §4.2(ADR-002)는 이 트레이드오프를 다룬다(`docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §4.2).
 
-상위 Spec §4.2 ADR-002 원문 요지:
+상위 Spec §4.2 ADR-002의 요지:
 
 > **결정:** Global Standard 배포를 쓴다. **충돌:** 과제의 국내 처리 제약과 충돌한다. **완화책:** ① 모델 전송 전 가명화(상호·대표자명·계좌·사업자번호 토큰화 후 복원), ② 최소 전송(파생 지표·집계값), ③ 저장 데이터는 국내(Korea Central), ④ 가명화 누락률·PII 스캔 측정. **운영 전환 조건:** Korea Central regional 배포나 PTU로 전환, 중간 단계로 Data Zone Standard(APAC).
 

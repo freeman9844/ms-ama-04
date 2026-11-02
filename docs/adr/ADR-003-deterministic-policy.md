@@ -17,8 +17,8 @@
 | Policy 실패 시 fail-open(기본 승인 진행) | 가용성 높음 | 판정 없이 승인이 새어 신용 리스크·규제 위반. 거부(fail-closed)가 안전 |
 
 ## 결과
-- 장점: 모든 판정에 규칙 버전·reason code가 붙어 설명 가능하고, 서비스 장애가 자동 승인으로 이어지지 않는다. 실측 policy-down에서 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`로 복귀, `alert-policy-circuit-open` 발화(`ops/reports/load-20261102110233/report.md` 4장, 원시 `ops/reports/fault-20261102111750/`).
-- 대가: Policy 장애 시 심사역 수동 심사로 부하가 쏠리고 자동 처리량이 떨어진다. 서킷 상태가 인스턴스별이라(ADR-001) 신청별 시험 호출 수가 다르다.
+- 장점: 모든 판정에 규칙 버전·reason code가 붙어 설명 가능하고, 서비스 장애가 자동 승인으로 이어지지 않는다. 실측 policy-down에서 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`로 복귀, `alert-policy-circuit-open` 발화(`docs/runbook/deploy-history.md:581`; 원시 `ops/reports/fault-20261102111750/`).
+- 대가: Policy 장애 시 심사역 수동 심사로 부하가 쏠리고 자동 처리량이 떨어진다. 서킷 상태가 인스턴스별이라(ADR-001) 신청별 시험(half-open) 호출 수가 다르다(`docs/runbook/deploy-history.md:581`).
 
 ## 재검토 조건
 - 규칙셋이 커져 규칙 엔진 외부화(예: 전용 룰 서비스·DMN)가 필요할 때.
@@ -29,5 +29,5 @@
 - 구현: `src/policy/rulesets/v1.yaml`, `src/policy/rules.py`, `src/policy/engine.py:66`, `src/policy/app.py`.
 - fail-closed: `src/orchestrator/journey/orchestration.py:198-201`, `src/orchestrator/journey/validation.py:21-24`.
 - 서킷: `src/orchestrator/journey/circuit.py`, `src/orchestrator/journey/adapters.py`.
-- 실측: `ops/reports/load-20261102110233/report.md` 4장.
+- 실측: `ops/reports/load-20261102110233/report.md` 4장(정책 호출 수·`circuit_open`), 서킷 half-open·경보는 `docs/runbook/deploy-history.md:581`.
 - 상위 Spec: `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §4.1.

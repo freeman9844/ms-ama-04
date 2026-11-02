@@ -6,7 +6,7 @@
 ## 맥락
 신용 대출 심사는 **감사 가능성**(모든 단계·근거가 남아야 함)과 **재개 가능성**(며칠 단위 심사역 대기 중에도 흐름이 보존되어야 함)이 핵심이다. 과제 요구는 "결정론적 정책 엔진 + 심사역 승인"이므로, 자율 판단은 쓰되 흐름 자체는 결정론적이어야 한다. 상위 Spec §2.1(접근안 선택)은 세 접근안을 비교해 **A안**을 채택했다(`docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.1).
 
-상위 Spec §2.1 원문의 결정:
+상위 Spec §2.1의 요지:
 
 > **A. Durable 오케스트레이터 + Foundry 에이전트 + 이벤트 기반 L4 — 채택.** 신청 건별 진행 흐름은 Durable Functions 상태 그래프로 관리하고, 각 단계 안에서 Foundry 에이전트가 도구를 써서 자율 판단하며, L4 에이전트는 이벤트에 반응한다.
 
@@ -22,7 +22,7 @@
 
 ## 결과
 - 장점: 흐름이 결정론적이라 감사·재개가 보장되고, `wait_for_external_event`·durable timer가 HITL 대기·동의 만료 요구에 바로 대응한다. 자율성은 에이전트 단계 안으로 격리된다.
-- 대가: 서킷 브레이커 상태가 Flex 인스턴스(프로세스) 단위라 여러 인스턴스로 확장되면 전역 open이 보장되지 않는다(`src/orchestrator/journey/circuit.py`, 실측 `ops/reports/load-20261102110233/report.md` 4장 policy-down: 신청별 half-open 호출 수 상이). Durable 실행 기록이 남는다(동의 ID·상태만, 개인정보 없음).
+- 대가: 서킷 브레이커 상태가 Flex 인스턴스(프로세스) 단위라 여러 인스턴스로 확장되면 전역 open이 보장되지 않는다(`src/orchestrator/journey/circuit.py`; 서킷이 Flex 인스턴스마다 따로라 신청별 시험(half-open) 호출 수가 다름은 `docs/runbook/deploy-history.md:581`). Durable 실행 기록이 남는다(동의 ID·상태만, 개인정보 없음).
 
 ## 재검토 조건
 - Flex가 다중 인스턴스로 상시 확장되어 분산 서킷(공유 상태)이 필요할 때.
@@ -33,4 +33,4 @@
 - 구현: `src/orchestrator/journey/orchestration.py:249`(`wait_for_external_event`)·`:252`(`create_timer`), `src/orchestrator/journey/consent.py`, `src/orchestrator/host.json`, `infra/modules/functions.bicep`.
 - 상위 Spec: `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.1.
 - 아키텍처 배경·장애 도메인: [../architecture.md](../architecture.md).
-- 서킷 인스턴스별 실측: `ops/reports/load-20261102110233/report.md` 4장, [../runbook/deploy-history.md](../runbook/deploy-history.md).
+- 서킷 인스턴스별(half-open) 실측: `docs/runbook/deploy-history.md:581`, [../runbook/deploy-history.md](../runbook/deploy-history.md).
