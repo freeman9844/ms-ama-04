@@ -65,6 +65,12 @@ def test_azd_params_map_closed_sentinel_to_empty_ip(expand_azd):
     assert params["operatorIp"] == ""
     assert params["serviceBusEnabled"] is True
     assert params["chatModelSku"] == "GlobalStandard"
+    assert params["opsAlertEmail"] == ""
+
+
+def test_azd_params_pass_ops_alert_email(expand_azd):
+    params = expand_azd({"AZURE_ENV_NAME": "amatest", "OPS_ALERT_EMAIL": "ops@example.com"}).root_parameters()
+    assert params["opsAlertEmail"] == "ops@example.com"
 
 
 def test_azd_params_pass_operator_ip_and_flags(expand_azd):

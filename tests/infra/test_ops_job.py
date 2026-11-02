@@ -19,7 +19,7 @@ def test_ops_job_runs_opsjob_with_ops_identity(variant):
     job = _ops(variant)
     props = job["properties"]
     assert props["configuration"]["triggerType"] == "Manual"
-    assert props["configuration"]["replicaTimeout"] == 2700
+    assert props["configuration"]["replicaTimeout"] == 3600
     assert list(job["identity"]["userAssignedIdentities"])[0].endswith("/id-ops-amatest")
     container = props["template"]["containers"][0]
     assert container["name"] == "ops" and container["image"] == "acramatest.azurecr.io/eval:v1"
@@ -91,3 +91,9 @@ def test_foundry_project_traces_to_app_insights(variant):
 @pytest.mark.parametrize("output", ["OPS_JOB_NAME", "APPLICATIONINSIGHTS_RESOURCE_ID"])
 def test_ops_outputs_exposed_to_azd(output):
     assert output in _compile(INFRA / "main.bicep")["outputs"]
+
+
+def test_trace_connection_waits_for_capability_host():
+    # caphost 프로비저닝 중 프로젝트 연결 PUT은 409가 난다.
+    [insights] = [m for m in _resources(_compile(INFRA / "resources.bicep")) if m.get("name") == "ops-insights"]
+    assert any("'foundry-caphost'" in d for d in insights.get("dependsOn", []))

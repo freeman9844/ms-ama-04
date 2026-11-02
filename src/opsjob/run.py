@@ -79,10 +79,11 @@ def config_from_env(env: Mapping[str, str], out_dir: Path = Path("/tmp/ops")) ->
         last = count if mode == "load" else len(applicants)
         if not _APPLICATION_ID.match(message(run_id, last, "", datetime.now(UTC), source)["application_id"]):
             raise ValueError("OPS_RUN_ID: application_id 패턴 위반")
+    # 대기 기본값 1500초: 최악 2·대기 + 23·15초 = 3345초가 job-ops replicaTimeout(3600초) 안에 든다.
     return Config(
         mode=mode, run_id=run_id, count=count, interval_s=float(env.get("OPS_INTERVAL_S", 15)),
         applicants=applicants, source=source,
-        run_ids=run_ids, wait_s=float(env.get("OPS_WAIT_S", 1800)), out_dir=out_dir,
+        run_ids=run_ids, wait_s=float(env.get("OPS_WAIT_S", 1500)), out_dir=out_dir,
     )
 
 

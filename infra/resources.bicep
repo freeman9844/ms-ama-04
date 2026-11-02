@@ -729,7 +729,7 @@ module opsJob 'modules/eval-job.bicep' = {
     image: evalImage
     containerName: 'ops'
     command: [ '/opt/venv/bin/python', '-m', 'opsjob' ]
-    replicaTimeout: 2700
+    replicaTimeout: 3600
     envVars: [
       { name: 'COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'COSMOS_DATABASE', value: cosmos.outputs.databaseName }
@@ -751,6 +751,8 @@ module opsInsights 'modules/ops-insights.bicep' = {
     projectPrincipalId: aiProject.outputs.principalId
     alertEmail: opsAlertEmail
   }
+  // caphost 프로비저닝 중 프로젝트 연결 PUT은 409가 나므로 뒤에 둡니다.
+  dependsOn: [ aiCapHost ]
 }
 
 output OPS_JOB_NAME string = opsJob.outputs.name
