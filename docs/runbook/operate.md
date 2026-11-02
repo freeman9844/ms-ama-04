@@ -6,12 +6,12 @@
 
 | 명령 | 용도 |
 |------|------|
-| `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창). 실측 11.0분(Cosmos 갱신이 약 8분) |
+| `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창). 실측 11.0분(P2, Cosmos 갱신이 약 8분; 최근 실측은 [deploy](deploy.md#배포-창)) |
 | `python -m ops window status` | 창 상태 확인. 공인 IP가 바뀌었으면 경고(종료 코드 2) |
-| `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행). 실측 10.8분 |
-| `python -m ops deploy [policy\|mockapi\|console\|orchestrator\|all]` | 앱 배포(P3·P4b): 정책·Mock·콘솔 이미지 ACR Build → 프로비저닝, Function zip. `window open --acr` 필요 |
+| `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행). 실측 10.8분(P2) |
+| `python -m ops deploy [policy\|mockapi\|console\|eval\|orchestrator\|all]` | 앱 배포(P3·P4b): 정책·Mock·콘솔·평가(`eval`) 이미지 ACR Build → 프로비저닝, Function zip. `window open --acr` 필요 |
 | `python -m ops smoke` | VNet 안 smoke Job 실행 + 운영자 PC에서 콘솔 로그인 관문 확인(P4b) |
-| `python -m ops pause` / `resume` | Service Bus Premium 삭제/복구(비용 절감). 실측 pause 5.8분, resume 4.7분 |
+| `python -m ops pause` / `resume` | Service Bus Premium 삭제/복구(비용 절감). 실측 pause 5.8분, resume 4.7분(P2) |
 | `python -m ops teardown --confirm rg-amalend` | capability host → Foundry 계정 purge → 리소스 그룹 삭제 → Key Vault purge |
 
 teardown 뒤 같은 azd 환경으로 다시 만들 때는 **다른 `ops` 명령보다 먼저 `azd provision --no-prompt`를 실행**하세요.

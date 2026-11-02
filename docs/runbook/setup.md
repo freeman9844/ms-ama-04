@@ -40,7 +40,7 @@ azd env set OPERATOR_IP closed
 azd provision --preview
 azd provision --no-prompt          # 실측: 성공 실행 7.6분(최초 실패 2회 포함 누적 약 28분)
 azd env set DEPLOY_CAPHOST false   # 이후 재프로비저닝에서 capability host 재생성 방지
-python -m ops smoke                # VNet 안에서 Private Endpoint 경로 검증(실측 약 1.2분, 21개 점검)
+python -m ops smoke                # VNet 안에서 Private Endpoint 경로 검증(실측 약 1.2분, 21개 점검, P2)
 ```
 
 이후 재프로비저닝(capability host 제외)은 약 3.5분, smoke Job 스크립트(`src/ops/smoke_checks.py`)는
@@ -60,7 +60,7 @@ Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provisio
 
 `python -m ops smoke`는 두 가지를 확인합니다(`src/ops/cli.py`의 `smoke` 명령).
 
-1. VNet 안에서 smoke Job을 실행해 Private Endpoint 경로·모델·데이터 서비스·정책/Mock 상태·신청 여정까지 점검합니다. 점검 항목 이름은 [operate](operate.md#smoke)에 있습니다.
+1. VNet 안에서 smoke Job을 실행해 Private Endpoint 경로·모델·데이터 서비스·정책/Mock 상태·신청 여정까지 점검합니다. 점검 항목 이름은 [operate](operate.md#smoke)에 있습니다. 점검 개수는 단계마다 늘어 최초 배포(P2)는 21개, 이후 24개(P5b)였습니다.
 2. 운영자 PC에서 콘솔 로그인 관문을 확인합니다(`src/ops/console_gate.py`). 로그인 없이 들어가면 Entra 로그인으로 리디렉션되거나(데모 모드에서는 200), 현재 IP가 막혔으면 403을 알려 줍니다.
 
 콘솔 접속 주소는 azd 환경 값 `CONSOLE_URL`입니다.
