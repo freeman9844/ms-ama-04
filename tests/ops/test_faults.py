@@ -85,3 +85,31 @@ def test_revert_failure_is_reported(fake_runner):
         run_scenario(runner, "source-flaky", submit_fn=submit, sleep=lambda s: None)
     assert info.value.__cause__ is original
     assert "python -m ops fault source off" in str(info.value)
+
+
+def test_toggle_on_timeout_still_reverts(fake_runner):
+    # 켜기 갱신은 적용됐지만 준비 대기가 시간 초과 → 원복을 시도하고 원래 오류를 올린다.
+    runner = fake_runner(ENV).on(*SHOW, results=[props(), props("unavailable", ready=False),
+                                                 props("unavailable", ready=False),
+                                                 props("unavailable", ready=False), props()])
+
+    def submit(r, applicants, **kw):
+        raise AssertionError("제출하면 안 됨")
+
+    with pytest.raises(OpsError, match="새 리비전이 준비되지 않았습니다"):
+        run_scenario(runner, "policy-down", submit_fn=submit, sleep=lambda s: None, poll_limit=2)
+    set_call, revert = runner.commands(*UPDATE)
+    assert "FAULT_MODE=unavailable" in set_call and "--remove-env-vars" in revert
+
+
+def test_revert_parse_failure_is_reported_with_original_cause(fake_runner):
+    runner = fake_runner(ENV).on(*SHOW, results=[props(), props("flaky"), "not json"])
+    original = OpsError("job boom")
+
+    def submit(r, applicants, **kw):
+        raise original
+
+    with pytest.raises(OpsError, match="장애 원복 실패") as info:
+        run_scenario(runner, "source-flaky", submit_fn=submit, sleep=lambda s: None)
+    assert info.value.__cause__ is original
+    assert "python -m ops fault source off" in str(info.value)

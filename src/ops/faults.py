@@ -79,9 +79,10 @@ def run_scenario(runner: Runner, name: str, *, submit_fn: Callable[..., Any] = o
     key, mode = TARGETS[scenario.target]
     app = env[key]
     toggle = {"sleep": sleep, "poll_wait": poll_wait, "poll_limit": poll_limit}
-    _set(az, group, app, mode, **toggle)
     failure: BaseException | None = None
     try:
+        # 켜기 갱신이 적용된 뒤 준비 대기가 실패하거나 중단돼도 finally에서 원복한다(이미 꺼져 있으면 no-op).
+        _set(az, group, app, mode, **toggle)
         result = submit_fn(runner, scenario.applicants, interval_s=scenario.interval_s, sleep=sleep, **job_kw)
     except BaseException as err:
         failure = err
@@ -89,7 +90,7 @@ def run_scenario(runner: Runner, name: str, *, submit_fn: Callable[..., Any] = o
     finally:
         try:
             _set(az, group, app, None, **toggle)
-        except OpsError as err:
+        except Exception as err:  # 조회 응답 해석 오류(JSON·키)도 원복 실패로 알린다
             raise OpsError(f"장애 원복 실패: {app}({FAULT_VAR}={mode}). "
                            f"수동 원복: python -m ops fault {scenario.target} off\n{err}") from (failure or err)
     opsrun.update_meta(result.out_dir, {"fault": {"scenario": name, "app": app, "mode": mode, "reverted": True}})

@@ -65,3 +65,30 @@ def test_dependency_counts_single_line_query(fake_runner):
     kql = call[call.index("--analytics-query") + 1]
     # az.cmd는 큰따옴표·줄바꿈이 든 인자를 깨뜨린다.
     assert "\n" not in kql and '"' not in kql and "'fault-1-01'" in kql
+
+
+def _named(cost_column, rows):
+    return json.dumps({"properties": {
+        "columns": [{"name": cost_column, "type": "Number"}, {"name": "UsageDate", "type": "Number"},
+                    {"name": "MeterCategory", "type": "String"}, {"name": "Currency", "type": "String"}],
+        "rows": [[cost, day, cat, "USD"] for cost, day, cat in rows]}})
+
+
+@pytest.mark.parametrize("column", ["Cost", "PreTaxCost", "CostUSD"])
+def test_cost_column_is_resolved_from_response(fake_runner, column):
+    # 응답 열 이름은 별칭(totalCost)이 아니라 원본 열(Cost·PreTaxCost)로 올 수 있다. 그 밖엔 첫 Number 열.
+    runner = fake_runner(ENV).on("az", "rest", results=[_named(column, ROWS)])
+    usd, _ = monthly_fixed_usd(runner, ENV, date(2026, 11, 2), sleep=lambda s: None)
+    assert usd == 360.0
+
+
+@pytest.mark.parametrize("body", [
+    {"properties": {"columns": [{"name": "UsageDate", "type": "Number"}], "rows": [[20261025]]}},
+    {"properties": {"columns": [{"name": "Cost"}, {"name": "UsageDate"}], "rows": [["x", 20261025]]}},
+    {"properties": {"columns": [{"name": "Cost"}], "rows": [[1.0]]}},
+    {"unexpected": True},
+])
+def test_malformed_response_is_ops_error(fake_runner, body):
+    runner = fake_runner(ENV).on("az", "rest", results=[json.dumps(body)])
+    with pytest.raises(OpsError, match="비용 응답 해석 실패"):
+        monthly_fixed_usd(runner, ENV, date(2026, 11, 2), sleep=lambda s: None)

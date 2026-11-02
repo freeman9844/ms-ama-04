@@ -8,6 +8,7 @@ from ops.azcli import OpsError, Runner, rest_post
 
 API = "2023-11-01"
 EXCLUDED = frozenset({"Foundry Models"})
+COST_COLUMNS = ("totalCost", "Cost", "PreTaxCost")
 DAYS = 7
 RETRIES = 5
 RETRY_WAIT = 20.0  # Probe P6: retry-after 2~20초. az rest는 헤더를 주지 않으므로 상한으로 고정
@@ -44,19 +45,32 @@ def _query(az: Runner, url: str, body: dict, sleep: Callable[[float], None]) -> 
     raise OpsError("unreachable")
 
 
+def _rows(response: dict) -> tuple[list[dict], str]:
+    # 응답 열 이름은 집계 별칭(totalCost)이 아니라 원본 열(Cost·PreTaxCost)로 올 수 있다.
+    props = response["properties"]
+    columns = props["columns"]
+    names = [c["name"] for c in columns]
+    cost = next((n for n in COST_COLUMNS if n in names), None) or next(
+        (c["name"] for c in columns if c.get("type") == "Number" and c["name"] != "UsageDate"), None)
+    if cost is None:
+        raise KeyError(f"비용 열 없음({', '.join(names)})")
+    return [dict(zip(names, r, strict=True)) for r in props["rows"]], cost
+
+
 def monthly_fixed_usd(az: Runner, env: dict[str, str], today: date, *, fx_krw_per_usd: float | None = None,
                       sleep: Callable[[float], None]) -> tuple[float, str]:
     start, end = period(today)
     url = (f"https://management.azure.com/subscriptions/{env['AZURE_SUBSCRIPTION_ID']}/resourceGroups/"
            f"{env['AZURE_RESOURCE_GROUP']}/providers/Microsoft.CostManagement/query?api-version={API}")
-    props = _query(az, url, _body(start, end), sleep)["properties"]
-    names = [c["name"] for c in props["columns"]]
-    rows = [dict(zip(names, r)) for r in props["rows"]]
-    days = {r["UsageDate"] for r in rows}
+    try:
+        rows, cost = _rows(_query(az, url, _body(start, end), sleep))
+        days = {r["UsageDate"] for r in rows}
+        kept = [r for r in rows if r.get("MeterCategory") not in EXCLUDED]
+        total = sum(float(r[cost]) for r in kept)
+    except (KeyError, ValueError, TypeError, IndexError) as err:
+        raise OpsError(f"비용 응답 해석 실패({type(err).__name__}: {err})") from err
     if not days:
         raise OpsError(f"비용 데이터 없음({start}~{end})")
-    kept = [r for r in rows if r.get("MeterCategory") not in EXCLUDED]
-    total = sum(float(r["totalCost"]) for r in kept)
     currencies = {r.get("Currency") for r in rows} - {None}
     note = ""
     if currencies - {"USD"}:

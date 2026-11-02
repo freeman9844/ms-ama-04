@@ -131,3 +131,19 @@ def test_metrics_recollects_missing_runs_and_adds_fault_section(fake_runner, tmp
     assert fault["scenario"] == "policy-down" and fault["reverted"] is True and seen["ids"] == ["fault-1-01"]
     assert fault["applications"][0]["flags"] == ["policy_unavailable"]
     assert "policy-down" in (out / "report.md").read_text(encoding="utf-8")
+
+
+def test_metrics_malformed_cost_response_degrades(fake_runner, tmp_path):
+    _save(tmp_path, "load-1", [doc("load-1", 1)])
+    runner = fake_runner(ENV).on("az", "rest", results=['{"properties": {"columns": [], "rows": [[1]]}}'])
+    out = metrics(runner, "load-1", out_root=tmp_path, now=T0, sleep=lambda s: None)
+    fixed = json.loads((out / "metrics.json").read_text(encoding="utf-8"))["summary"]["fixed"]
+    assert fixed["monthly_usd"] is None and fixed["source"].startswith("측정 불가(비용 응답 해석 실패")
+
+
+def test_load_rejects_schedule_beyond_job_timeout(fake_runner, tmp_path):
+    runner = fake_runner(ENV)
+    # (24-1)×30 + 2×1500 = 3690초 > replicaTimeout 3600
+    with pytest.raises(OpsError, match="3600"):
+        load(runner, count=24, interval_s=30, out_root=tmp_path)
+    assert runner.commands("az") == []

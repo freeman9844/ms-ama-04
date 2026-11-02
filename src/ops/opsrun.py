@@ -22,6 +22,8 @@ from opsmetrics.summary import summarize
 REPORTS = Path(__file__).resolve().parents[2] / "ops" / "reports"
 REQUIRED = ("docs.json", "summary.json")
 MAX_COUNT = 24
+JOB_TIMEOUT_S = 3600  # job-ops replicaTimeout
+JOB_WAIT_S = 1500  # opsjob OPS_WAIT_S 기본값(예산 가드 표본 대기 + 마지막 대기, 각각 최대)
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,10 @@ def load(runner: Runner, *, count: int = MAX_COUNT, interval_s: float = 15, now:
          **job_kw: Any) -> JobRun:
     if not 1 <= count <= MAX_COUNT:
         raise OpsError(f"--count는 1~{MAX_COUNT}입니다(균형 격자 크기)")
+    budget = (count - 1) * interval_s + 2 * JOB_WAIT_S
+    if budget > JOB_TIMEOUT_S:
+        raise OpsError(f"제출 일정이 Job 제한 시간을 넘습니다: (건수-1)×간격 + 대기 2×{JOB_WAIT_S}초 = {budget:g}초 "
+                       f"> {JOB_TIMEOUT_S}초. --count나 --interval을 줄이세요.")
     return run_job(runner, new_run_id("load", now or _now()),
                    {"OPS_MODE": "load", "OPS_COUNT": str(count), "OPS_INTERVAL_S": f"{interval_s:g}",
                     "OPS_SOURCE": "load"}, **job_kw)
