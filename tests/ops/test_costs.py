@@ -6,7 +6,7 @@ import pytest
 
 from ops.azcli import OpsError
 from ops.costs import monthly_fixed_usd, period
-from ops.kql import dependency_counts
+from ops.kql import dependency_counts, relabel, target_label
 
 ENV = {"AZURE_SUBSCRIPTION_ID": "sub", "AZURE_RESOURCE_GROUP": "rg"}
 
@@ -60,13 +60,43 @@ def test_dependency_counts_single_line_query(fake_runner):
                         "total": "3", "failed": "3"}])
     runner = fake_runner().on("az", "monitor", "log-analytics", "query", results=[rows])
     assert dependency_counts(runner, "law", ["fault-1-01"], sleep=lambda s: None) == {
-        "fault-1-01": [{"target": "ca-policy", "role": "orchestrator", "total": 3, "failed": 3}]}
+        "fault-1-01": [{"target": "policy", "role": "orchestrator", "total": 3, "failed": 3}]}
     call = runner.commands("az", "monitor")[0]
     kql = call[call.index("--analytics-query") + 1]
     # az.cmd는 큰따옴표·줄바꿈이 든 인자를 깨뜨린다.
     assert "\n" not in kql and '"' not in kql and "'fault-1-01'" in kql
     # Policy ASGI 내부 스팬(`POST /v1/decisions http send` 등)은 호출 증거가 아니다.
     assert "not(Name endswith ' http send' or Name endswith ' http receive')" in kql
+
+
+@pytest.mark.parametrize(("target", "label"), [
+    ("stfnabc.queue.core.windows.net:None", "storage-queue"),
+    ("stdatabc.blob.core.windows.net:None", "storage-blob"),
+    ("cosmos-abc-koreacentral.documents.azure.com:None", "cosmos"),
+    ("ais-abc.services.ai.azure.com", "foundry"),
+    ("kv-abc.vault.azure.net", "key-vault"),
+    ("ca-mockapi.beach-123.koreacentral.azurecontainerapps.io", "mockapi"),
+    ("ca-policy", "policy"),
+    ("169.254.255.2:8081", "link-local"),
+    ("10.0.0.4", "ip-address"),
+    ("api.example.com", "external-host"),
+    ("API.Example.COM:443", "external-host"),
+    ("ContainerProxy.read_item", "ContainerProxy.read_item"),
+    ("invoke_agent data-assembly", "invoke_agent data-assembly"),
+    ("unknown", "unknown"),
+])
+def test_target_label_hides_resource_hostnames(target, label):
+    assert target_label(target) == label
+
+
+def test_relabel_merges_rows_with_same_label_and_role():
+    deps = {"a": [{"target": "x.queue.core.windows.net:None", "role": "orchestrator", "total": 1, "failed": 0},
+                  {"target": "y.queue.core.windows.net:None", "role": "orchestrator", "total": 2, "failed": 1},
+                  {"target": "y.queue.core.windows.net:None", "role": "policy", "total": 1, "failed": 0}],
+            "b": []}
+    assert relabel(deps) == {"a": [{"target": "storage-queue", "role": "orchestrator", "total": 3, "failed": 1},
+                                   {"target": "storage-queue", "role": "policy", "total": 1, "failed": 0}],
+                             "b": []}
 
 
 def _named(cost_column, rows):

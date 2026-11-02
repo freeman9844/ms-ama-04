@@ -2,11 +2,55 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 
 from ops.azcli import OpsError, Runner
 
 LOOKBACK = "3d"
+
+_SUFFIX_LABELS = (
+    (".queue.core.windows.net", "storage-queue"),
+    (".blob.core.windows.net", "storage-blob"),
+    (".table.core.windows.net", "storage-table"),
+    (".documents.azure.com", "cosmos"),
+    (".services.ai.azure.com", "foundry"),
+    (".openai.azure.com", "foundry"),
+    (".cognitiveservices.azure.com", "foundry"),
+    (".vault.azure.net", "key-vault"),
+    (".search.windows.net", "ai-search"),
+    (".servicebus.windows.net", "service-bus"),
+)
+_IPV4 = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+_HOSTNAME = re.compile(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+")
+
+
+def target_label(target: str) -> str:
+    """의존성 대상의 리소스 호스트명을 역할 라벨로 바꾼다(보고서에 리소스 이름을 남기지 않음). 호스트가 아니면 그대로."""
+    host = target.split(":", 1)[0].lower()
+    for suffix, label in _SUFFIX_LABELS:
+        if host.endswith(suffix):
+            return label
+    if _IPV4.fullmatch(host):
+        return "link-local" if host.startswith("169.254.") else "ip-address"
+    if host.startswith("ca-") and (host.endswith(".azurecontainerapps.io") or "." not in host):
+        return host.split(".", 1)[0][3:]
+    if _HOSTNAME.fullmatch(host):
+        return "external-host"
+    return target
+
+
+def relabel(deps: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for app, rows in deps.items():
+        merged: dict[tuple[str, str], dict] = {}
+        for r in rows:
+            key = (target_label(r["target"]), r["role"])
+            m = merged.setdefault(key, {"target": key[0], "role": r["role"], "total": 0, "failed": 0})
+            m["total"] += r["total"]
+            m["failed"] += r["failed"]
+        out[app] = list(merged.values())
+    return out
 
 
 def _query(application_ids: list[str]) -> str:
@@ -38,4 +82,4 @@ def dependency_counts(az: Runner, workspace: str, application_ids: list[str], *,
     for r in rows:
         out.setdefault(r["app"], []).append({"target": r["Target"], "role": r["AppRoleName"],
                                              "total": int(r["total"]), "failed": int(r["failed"])})
-    return out
+    return relabel(out)

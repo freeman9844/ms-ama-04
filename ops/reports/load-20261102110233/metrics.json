@@ -376,7 +376,7 @@
       "dependencies": {
         "fault-20261102111447-01": [
           {
-            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "target": "storage-queue",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -388,7 +388,7 @@
             "failed": 0
           },
           {
-            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "target": "cosmos",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -400,7 +400,7 @@
             "failed": 0
           },
           {
-            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "mockapi",
             "role": "orchestrator",
             "total": 5,
             "failed": 2
@@ -412,7 +412,7 @@
             "failed": 0
           },
           {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "target": "foundry",
             "role": "orchestrator",
             "total": 4,
             "failed": 0
@@ -426,7 +426,7 @@
         ],
         "fault-20261102111447-02": [
           {
-            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "target": "storage-queue",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -438,7 +438,7 @@
             "failed": 0
           },
           {
-            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "target": "cosmos",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -450,13 +450,13 @@
             "failed": 0
           },
           {
-            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "mockapi",
             "role": "orchestrator",
             "total": 9,
             "failed": 4
           },
           {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "target": "storage-blob",
             "role": "orchestrator",
             "total": 6,
             "failed": 0
@@ -480,7 +480,7 @@
             "failed": 0
           },
           {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "target": "foundry",
             "role": "orchestrator",
             "total": 4,
             "failed": 0
@@ -601,7 +601,7 @@
       "dependencies": {
         "fault-20261102111750-01": [
           {
-            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "target": "storage-queue",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -613,7 +613,7 @@
             "failed": 0
           },
           {
-            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "target": "cosmos",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -625,13 +625,13 @@
             "failed": 0
           },
           {
-            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "mockapi",
             "role": "orchestrator",
             "total": 5,
             "failed": 0
           },
           {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "target": "storage-blob",
             "role": "orchestrator",
             "total": 2,
             "failed": 0
@@ -655,7 +655,7 @@
             "failed": 0
           },
           {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "target": "foundry",
             "role": "orchestrator",
             "total": 3,
             "failed": 0
@@ -667,7 +667,7 @@
             "failed": 0
           },
           {
-            "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "policy",
             "role": "orchestrator",
             "total": 2,
             "failed": 2
@@ -675,13 +675,13 @@
         ],
         "fault-20261102111750-02": [
           {
-            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "target": "storage-queue",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
           },
           {
-            "target": "169.254.255.2:8081",
+            "target": "link-local",
             "role": "orchestrator",
             "total": 3,
             "failed": 0
@@ -693,7 +693,7 @@
             "failed": 0
           },
           {
-            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "target": "cosmos",
             "role": "orchestrator",
             "total": 9,
             "failed": 0
@@ -705,7 +705,7 @@
             "failed": 0
           },
           {
-            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "mockapi",
             "role": "orchestrator",
             "total": 5,
             "failed": 0
@@ -723,7 +723,7 @@
             "failed": 0
           },
           {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "target": "storage-blob",
             "role": "orchestrator",
             "total": 8,
             "failed": 0
@@ -747,7 +747,7 @@
             "failed": 0
           },
           {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "target": "foundry",
             "role": "orchestrator",
             "total": 7,
             "failed": 0
@@ -765,7 +765,7 @@
             "failed": 0
           },
           {
-            "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "policy",
             "role": "orchestrator",
             "total": 2,
             "failed": 2
@@ -773,7 +773,7 @@
         ],
         "fault-20261102111750-03": [
           {
-            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "target": "storage-queue",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -785,7 +785,7 @@
             "failed": 0
           },
           {
-            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "target": "cosmos",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -797,13 +797,13 @@
             "failed": 0
           },
           {
-            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "mockapi",
             "role": "orchestrator",
             "total": 5,
             "failed": 0
           },
           {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "target": "storage-blob",
             "role": "orchestrator",
             "total": 3,
             "failed": 0
@@ -827,7 +827,7 @@
             "failed": 0
           },
           {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "target": "foundry",
             "role": "orchestrator",
             "total": 3,
             "failed": 0
