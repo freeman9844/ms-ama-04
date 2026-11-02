@@ -50,3 +50,21 @@ def test_ops_error_returns_1(fake_runner, capsys):
         raise OpsError("azd 실패")
     assert main(["resume"], runner=broken, out=io.StringIO()) == 1
     assert "azd 실패" in capsys.readouterr().err
+
+
+def test_fault_and_metrics_dispatch(monkeypatch, fake_runner, tmp_path):
+    import ops.cli as cli
+
+    seen = []
+    monkeypatch.setattr(cli.faults, "set_fault", lambda r, target, on: seen.append(("set", target, on)))
+    monkeypatch.setattr(cli.faults, "status", lambda r: {"source": "off", "policy": "unavailable"})
+    monkeypatch.setattr(cli.opsrun, "metrics", lambda r, run, **kw: seen.append(("metrics", run, kw)) or tmp_path)
+    out = io.StringIO()
+    assert cli.main(["fault", "source", "flaky"], runner=fake_runner(), out=out) == 0
+    assert cli.main(["fault", "policy", "off"], runner=fake_runner(), out=out) == 0
+    assert cli.main(["fault", "status"], runner=fake_runner(), out=out) == 0
+    assert cli.main(["metrics", "--run", "load-1", "--fault-runs", "f-1", "f-2", "--fixed-monthly-usd", "50"],
+                    runner=fake_runner(), out=out) == 0
+    assert seen[:2] == [("set", "source", True), ("set", "policy", False)]
+    assert seen[2][2]["fault_runs"] == ["f-1", "f-2"] and seen[2][2]["fixed_monthly_usd"] == 50.0
+    assert "policy: unavailable" in out.getvalue()

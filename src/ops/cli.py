@@ -6,6 +6,7 @@ import sys
 from typing import Callable
 
 from ops import deploy as deploy_module
+from ops import faults, opsrun
 from ops.azcli import OpsError, Runner, subprocess_runner
 from ops.azdenv import get_env
 from ops.console_gate import check_console_gate
@@ -35,6 +36,22 @@ def build_parser() -> argparse.ArgumentParser:
     evaluator = commands.add_parser("eval", help="평가 Job 실행 후 리포트를 eval/reports/<실행>/에 저장")
     evaluator.add_argument("--suite", default="all", choices=EVAL_SUITES)
     evaluator.add_argument("--collect", metavar="EXECUTION", help="Job을 다시 돌리지 않고 끝난 실행의 리포트만 회수")
+    loader = commands.add_parser("load", help="job-ops로 균형 격자 신청을 제출하고 결과를 ops/reports/<run>/에 저장")
+    loader.add_argument("--count", type=int, default=opsrun.MAX_COUNT, help="제출 건수(1~24)")
+    loader.add_argument("--interval", type=float, default=15.0, help="제출 간격 초")
+    meter = commands.add_parser("metrics", help="SLO·비용·공정성 보고서(ops/reports/<run>/report.md)")
+    meter.add_argument("--run", required=True, help="ops load가 출력한 run ID")
+    meter.add_argument("--fault-runs", nargs="*", default=[], help="ops fault run이 출력한 run ID")
+    meter.add_argument("--fixed-monthly-usd", type=float, help="고정비(월, USD) 수동 입력")
+    meter.add_argument("--fx-krw-per-usd", type=float, help="비용 통화가 KRW일 때 환율")
+    meter.add_argument("--recollect", action="store_true", help="job-ops로 신청 상태를 다시 수집")
+    fault = commands.add_parser("fault", help="장애 주입(리비전 갱신)")
+    fault_actions = fault.add_subparsers(dest="action", required=True)
+    fault_actions.add_parser("source", help="Mock 데이터 원천 일시 오류").add_argument("mode", choices=("flaky", "off"))
+    fault_actions.add_parser("policy", help="Policy 서비스 503").add_argument("mode", choices=("on", "off"))
+    fault_actions.add_parser("status", help="현재 장애 모드")
+    fault_actions.add_parser("run", help="토글 → 제출 → 대기 → 원복").add_argument(
+        "scenario", choices=tuple(faults.SCENARIOS))
     deployer = commands.add_parser("deploy", help="정책·Mock·콘솔·평가 이미지(ACR Build)와 Function 코드 배포")
     deployer.add_argument("target", nargs="?", default="all", choices=deploy_module.TARGETS)
     destroy = commands.add_parser("teardown", help="환경 전체 삭제")
@@ -84,6 +101,30 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             print(f"평가 완료: {result.execution} (partial={summary.get('partial')}, "
                   f"사용 ${summary.get('spent_usd')}, 실패 {failures}건)", file=out)
             print(f"리포트: {result.out_dir}", file=out)
+        elif args.command == "load":
+            result = opsrun.load(runner, count=args.count, interval_s=args.interval,
+                                 progress=lambda m: print(m, file=out))
+            s = result.summary
+            print(f"제출 {s['submitted']}건, 도달 {s['reached']}건, 미도달 {len(s['unreached'])}건 "
+                  f"(run {result.run_id})", file=out)
+            if s.get("aborted"):
+                print(f"예산 가드로 제출 중단: 예상 ${s['guard']['projected_usd']:.2f}", file=out)
+            print(f"다음: python -m ops metrics --run {result.run_id}", file=out)
+        elif args.command == "metrics":
+            path = opsrun.metrics(runner, args.run, fault_runs=args.fault_runs,
+                                  fixed_monthly_usd=args.fixed_monthly_usd, fx_krw_per_usd=args.fx_krw_per_usd,
+                                  recollect=args.recollect)
+            print(f"보고서: {path / 'report.md'}", file=out)
+        elif args.command == "fault" and args.action == "status":
+            for target, mode in faults.status(runner).items():
+                print(f"{target}: {mode}", file=out)
+        elif args.command == "fault" and args.action == "run":
+            result = faults.run_scenario(runner, args.scenario, progress=lambda m: print(m, file=out))
+            print(f"{args.scenario} 완료, 원복 확인: run {result.run_id} "
+                  f"(도달 {result.summary['reached']}/{result.summary['submitted']})", file=out)
+        elif args.command == "fault":
+            faults.set_fault(runner, args.action, args.mode in ("flaky", "on"))
+            print(f"{args.action} 장애 모드: {args.mode}", file=out)
         elif args.command == "teardown":
             teardown(runner, args.confirm)
             print(f"{args.confirm} 삭제를 마쳤습니다.", file=out)

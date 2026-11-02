@@ -1,8 +1,11 @@
 """외부 명령(az, azd) 실행기. 테스트에서는 같은 호출 형식의 가짜로 바꿉니다."""
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import tempfile
 from typing import Callable
 
 Runner = Callable[..., str]  # runner(args: list[str], *, stream: bool = False) -> str
@@ -55,3 +58,13 @@ def subscription_runner(runner: Runner, env: dict[str, str]) -> Runner:
         return runner(args, stream=stream)
 
     return scoped
+
+
+def rest_post(az: Runner, url: str, body: dict) -> dict:
+    """az rest POST. az.cmd는 따옴표가 든 인자를 깨뜨리므로 본문은 임시 파일로 넘긴다."""
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+        json.dump(body, f)
+    try:
+        return json.loads(az(["az", "rest", "--method", "post", "--url", url, "--body", f"@{f.name}"]) or "{}")
+    finally:
+        os.unlink(f.name)
