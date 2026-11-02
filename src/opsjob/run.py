@@ -22,7 +22,10 @@ MAX_COUNT = len(LOAD_GRID)
 GUARD_SAMPLE = 3
 BUDGET_GUARD_USD = 4.0
 POLL_S = 15
+SOURCES = ("load", "fault")
 _RUN_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+# journey.models.APPLICATION_ID_PATTERN. 어긋난 메시지는 진입점이 경고만 남기고 버린다.
+_APPLICATION_ID = re.compile(r"^[a-z0-9][a-z0-9-]{2,62}$")
 
 
 class Queue(Protocol):
@@ -63,9 +66,22 @@ def config_from_env(env: Mapping[str, str], out_dir: Path = Path("/tmp/ops")) ->
     run_ids = _csv(env.get("OPS_RUN_IDS"))
     if not all(_RUN_ID.match(r) for r in run_ids):
         raise ValueError("OPS_RUN_IDS")
+    if mode == "collect" and not run_ids:
+        raise ValueError("OPS_RUN_IDS 필요(collect)")
+    applicants = _csv(env.get("OPS_APPLICANTS"))
+    if mode == "submit" and not applicants:
+        raise ValueError("OPS_APPLICANTS 필요(submit)")
+    source = env.get("OPS_SOURCE", "load")
+    if source not in SOURCES:
+        raise ValueError(f"OPS_SOURCE: {source}")
+    if mode != "collect":
+        # 번호가 가장 큰(가장 긴) application_id까지 진입 패턴을 만족해야 한다.
+        last = count if mode == "load" else len(applicants)
+        if not _APPLICATION_ID.match(message(run_id, last, "", datetime.now(UTC), source)["application_id"]):
+            raise ValueError("OPS_RUN_ID: application_id 패턴 위반")
     return Config(
         mode=mode, run_id=run_id, count=count, interval_s=float(env.get("OPS_INTERVAL_S", 15)),
-        applicants=_csv(env.get("OPS_APPLICANTS")), source=env.get("OPS_SOURCE", "load"),
+        applicants=applicants, source=source,
         run_ids=run_ids, wait_s=float(env.get("OPS_WAIT_S", 1800)), out_dir=out_dir,
     )
 
@@ -101,8 +117,9 @@ def _wait(store: Store, run_id: str, ids: set[str], deadline: datetime, clock, s
 def _guard(docs: list[dict[str, Any]], count: int, prices: dict) -> dict[str, Any]:
     cost = ai_cost([project(d) for d in docs], prices)
     per_app = cost["per_application_usd"] or 0.0
+    # 단가 없는 호출은 비용 0으로 잡혀 과소 추정이 된다. 중단 사유는 아니고 기록만 한다.
     return {"sample": len(docs), "per_application_usd": per_app, "projected_usd": per_app * count,
-            "limit_usd": BUDGET_GUARD_USD}
+            "limit_usd": BUDGET_GUARD_USD, "unpriced_calls": cost["unpriced_calls"]}
 
 
 def _write(cfg: Config, runs: dict[str, list[dict[str, Any]]], summary: dict[str, Any]) -> list[Path]:
