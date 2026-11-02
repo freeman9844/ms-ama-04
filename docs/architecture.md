@@ -1,6 +1,6 @@
 # 아키텍처
 
-동의 기반 합성 데이터로 SME 현금흐름 대출을 심사·모니터링·추심하는 에이전트 시스템의 as-built 아키텍처다. 신청 건별 흐름은 Durable Functions 오케스트레이터가 결정론적 상태 그래프로 관리하고, 각 단계 안에서 Foundry 프롬프트 에이전트가 도구를 써서 자율 판단한다. 신용 규칙은 LLM 밖의 결정론적 Policy Engine이 판정하고, 최종 결정은 심사역이 콘솔에서 내린다. 전 구간이 VNet 격리 + Private Endpoint로 닫혀 있고 무키(managed identity) 인증을 쓴다.
+동의 기반 합성 데이터로 SME 현금흐름 대출을 심사·모니터링·추심하는 에이전트 시스템의 as-built 아키텍처다. 신청 건별 흐름은 Durable Functions 오케스트레이터가 결정론적 상태 그래프로 관리하고, 각 단계 안에서 Foundry 프롬프트 에이전트가 도구를 써서 자율 판단한다. 신용 규칙은 LLM 밖의 결정론적 Policy Engine이 판정하고, 최종 결정은 심사역이 콘솔에서 내린다. 데이터·제어 평면은 VNet 격리 + Private Endpoint로 닫혀 있고 무키(managed identity) 인증을 쓰며, 외부로 열린 진입점은 운영자 IP 허용목록과 Entra 인증을 건 콘솔뿐이다.
 
 > **합성 데이터 기준.** 실제 마이데이터·홈택스·PG API 대신 합성 데이터와 Mock API를 쓴다. 실측 수치는 `ops/reports/load-20261102110233/report.md`, `eval/reports/job-eval-9imbutm/report.md`에서 인용하며, 배포·운영 실행 기록은 [runbook/deploy-history.md](runbook/deploy-history.md)에 있다.
 
@@ -12,7 +12,7 @@
 flowchart LR
   borrower["차주 시뮬레이터"]
   officer["심사역 / 심사 관리자 / 감사자"]
-  operator["운영자 (배포 창)"]
+  operator["운영자"]
   subgraph azure["Azure 경계 (Korea Central, VNet 격리)"]
     console["Officer Console"]
     orch["Journey Orchestrator"]
@@ -22,14 +22,15 @@ flowchart LR
   end
   borrower -->|신청 제출| orch
   officer -->|로그인 / 승인·조건부·거절| console
-  operator -.->|배포 창에만 허용| console
+  operator -->|상시: IP 허용 + Entra| console
+  operator -.->|배포 창: 데이터 평면 작업| orch
   console --> orch
   orch <--> foundry
   orch <--> policy
   orch <--> mock
 ```
 
-차주·심사역·운영자는 모두 콘솔 또는 접수 경로로만 들어온다. 운영자 데이터 평면 작업은 배포 창에서만 열린다(아래 [네트워크](#네트워크)).
+차주는 접수 경로로, 심사역·운영자는 콘솔로 들어온다. 콘솔은 상시 external이지만 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:42-46`)과 Entra 인증으로 막는다. 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
 
 ## 컨테이너
 
@@ -47,6 +48,8 @@ flowchart TB
     smoke["smoke / eval / ops Job"]
   end
   foundry["Foundry Agent Service<br/>프롬프트 에이전트 + 모델"]
+  search["AI Search"]
+  acr["Container Registry"]
   cosmos["Cosmos DB (NoSQL)"]
   blob["Blob Storage"]
   queues["Storage Queues"]
@@ -58,6 +61,7 @@ flowchart TB
   console -->|명령| queues
   queues --> orch
   orch --> foundry
+  foundry -.->|벡터 저장소| search
   orch --> policy
   orch --> mock
   orch --> cosmos
@@ -65,6 +69,8 @@ flowchart TB
   orch -.->|이벤트, 활성 시| sb
   sb -.-> orch
   orch --> kv
+  acr -.->|이미지| console
+  acr -.->|이미지| int
   console --> obs
   orch --> obs
   policy --> obs
@@ -74,12 +80,15 @@ flowchart TB
 |---|---|---|---|---|---|
 | Officer Console | Container Apps external `cae-web` | 신청 목록·근거 열람, 승인/조건부/거절, 조기경보·공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra) + 운영자 IP 허용. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
-| Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
-| Mock API | Container Apps internal `cae-int` | 합성 원천 데이터 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | Blob(합성 데이터) | 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
+| Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
+| Mock API | Container Apps internal `cae-int` | 합성 원천 데이터 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | 합성 데이터(프로세스 내 생성) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
+| AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
+| Container Registry | Azure Container Registry + PE | 콘솔·Policy·Mock·Job 컨테이너 이미지 | 이미지 | MI `AcrPull`, 배포 창에 운영자 push | `infra/modules/acr.bicep` |
+| smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | Cosmos·Blob(읽기) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
 | Service Bus | Service Bus Premium + PE | `consent`·`flow.updated`·`alert.raised`·`grievance` 토픽. 평상시 pause(삭제) | 없음 | Managed Identity | `infra/modules/servicebus.bicep`, `src/ops/lifecycle.py` |
 | 데이터 저장소 | Cosmos DB(NoSQL), Blob Storage | 신청·동의·분류·대출·경보·삭제 증명·이의, 원천 데이터·리포트 | — | Cosmos SQL RBAC, Storage Entra RBAC | `infra/modules/cosmos.bicep`, `infra/modules/storage.bicep` |
-| 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics, AI Content Safety(AI Services 계정) | 비밀·무키 인증·관측성·Prompt Shields | — | RBAC | `infra/modules/keyvault.bicep`, `infra/modules/identities.bicep`, `infra/modules/monitoring.bicep` |
+| 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics | 비밀·무키 인증·관측성 | — | RBAC | `infra/modules/keyvault.bicep`, `infra/modules/identities.bicep`, `infra/modules/monitoring.bicep` |
 
 **경계 원칙:** 구성요소 사이에는 `src/shared/contracts.py`의 버전드 Pydantic 계약만 오간다. 에이전트는 서로 직접 호출하지 않고, handoff는 오케스트레이터나 이벤트로만 일어난다. 사내 도구(Mock API·Policy·데이터 조회)는 Foundry가 아니라 VNet 안 오케스트레이터가 실행해 감사 로그에 남긴다.
 
@@ -98,13 +107,13 @@ flowchart TB
   end
   operator["운영자 IP"]
   pe -->|Private DNS| data["Foundry·Cosmos·Storage·Search·KV·Service Bus·ACR·Functions"]
-  operator -.->|배포 창에만: public 허용| appsweb
-  operator -.->|배포 창에만: public 허용| fn
+  operator -->|상시: IP 허용 + Entra| appsweb
+  operator -.->|배포 창: public 허용| fn
   appsweb --> appsint
   fn --> appsint
 ```
 
-평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경에서 운영자 IP 허용목록 + Entra 인증 둘 다 건다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
+평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경이지만 상시 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:42-46`)과 Entra 인증으로 막으며, 배포 창 토글과 무관하게 열려 있다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
 
 | 서브넷 | 주소 | 위임 | 용도 |
 |---|---|---|---|
@@ -135,7 +144,7 @@ sequenceDiagram
   O->>P: 정책 판정 (fail-closed)
   O->>A: 신용 평가 (analyst ↔ reviewer, 최대 3회)
   O->>C: 단계별 스냅샷 저장
-  O->>U: 심사역 대기 (waitForExternalEvent, SLA 타이머)
+  O->>U: 심사역 대기 (wait_for_external_event, SLA 타이머)
   U->>O: 승인 / 조건부 / 거절
   O->>C: 모니터링 등록 (거절 아니면)
 ```
@@ -189,7 +198,7 @@ flowchart LR
 | Foundry 에이전트·모델 | 심사 단계 지연·실패 | 평가 활동은 예외를 올리지 않고 `assessment_unavailable` 플래그만 남긴 채 심사역 단계로 넘김(결정 권한 없음). 안전망·템플릿 폴백 | 에이전트 단계 성공률 100.0%(ok 72/72) `ops/reports/load-20261102110233/report.md` |
 | Mock API | 데이터 수집 실패 | 동의 범위 안 재시도 + 안전망 수집. 불완전이면 "데이터 불완전"으로 심사역에게 넘김 | source-flaky 회복: mockapi 호출 일부 실패에도 전 신청 `awaiting_officer` 복귀(`ops/reports/fault-20261102111447/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Policy Engine | 판정 불가 | fail-closed: 판정 없이 진행 안 함. `policy_unavailable`+`assessment_unavailable` 플래그, 심사역 판단으로 넘김. 호출에 프로세스 단위 서킷(`src/orchestrator/journey/circuit.py`) | policy-down: 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`(`ops/reports/fault-20261102111750/`) — `ops/reports/load-20261102110233/report.md` 4장 |
-| Service Bus | L4 이벤트 지연 | 세션·멱등 소비·dead-letter. 평상시 pause 시 `monitoring-replay` 큐 인라인 처리 | — |
+| Service Bus | L4 이벤트 지연 | 세션 구독(`requiresSession`)·중복 감지(멱등 지원)·만료 dead-letter. 평상시 pause 시 `monitoring-replay` 큐 인라인 처리 | 세션·중복 감지·`deadLetteringOnMessageExpiration` 설정 `infra/modules/servicebus.bicep` |
 
 **한계:** 서킷 브레이커는 프로세스(Flex 인스턴스) 단위다(`src/orchestrator/journey/circuit.py`). Flex가 여러 인스턴스로 확장되면 서킷 상태가 인스턴스별로 따로 쌓여 전역 open이 보장되지 않는다. 분산 서킷은 운영 전환 과제다(ADR-007 범위).
 
@@ -200,7 +209,7 @@ flowchart LR
 | 처리량 | Functions Flex `maximumInstanceCount: 40`, Container Apps 수평 확장 | 인스턴스 상한 상향, 동시성 조정 |
 | 데이터 | Cosmos DB 기본 RU | 컨테이너별 RU 상향·자동 확장 |
 | 모델 | Global Standard, 배포 `gpt-5.4`/`gpt-5.4-mini`/`decision-1` | TPM 쿼터 상향 |
-| 분류 비용 | 규칙(classify-v1) 선분류 + 정규화·중복 제거 + 캐시 + Decision-1, 폴백만 mini LLM | 규칙 커버리지 80.0%·캐시 적중 25.0%로 신청당 Decision-1 8.375회(`eval/reports/job-eval-9imbutm/report.md` 2장). mini 단독 대비 호출·비용 절감 |
+| 분류 비용 | 규칙(classify-v1) 선분류 + 정규화·중복 제거 + 캐시 + Decision-1, 폴백만 mini LLM | 규칙 커버리지 80.0%·캐시 적중 25.0%. `decision-1+mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. Decision-1 호출은 신청당 8.375회지만 단가 미확인이라 총비용 효과는 미검증(`eval/reports/job-eval-9imbutm/report.md` 2장) |
 | 지연·단가 | Global Standard | PTU 전환(예측 가능 지연·단가, ADR-002) |
 | 가용성 | 단일 리전(Korea Central) | 다중 리전 DR(문서만) |
 
@@ -215,5 +224,6 @@ flowchart LR
 | 서킷 브레이커 | 프로세스(Flex 인스턴스) 단위 | 분산 서킷(공유 상태) |
 | 가용성 | 단일 리전 | 다중 리전 DR |
 | 모델 배포 | Global Standard | Data Zone / PTU(ADR-002) |
+| 입력 방어 | 없음(미구축) | AI Content Safety Prompt Shields 등 프롬프트 입력 방어(상위 Spec §2.3). 현재 `infra/`·`src/`에 Content Safety/Prompt Shields 구현 없음 |
 
 ADR-001·ADR-002·ADR-007 등은 별도 ADR 문서로 정리 예정이다.
