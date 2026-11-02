@@ -4,6 +4,7 @@
 """
 
 import dataclasses
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -23,6 +24,13 @@ STEPS = {
     "evaluate_policy": "policy",
     "assess_credit": "assess",
 }
+_DETAIL_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_.=-]*")
+
+
+def safe_detail(detail: str) -> str:
+    """단계 기록에는 예외 종류·표준 코드만 남긴다(예외 메시지에 원천 값이 섞일 수 있음)."""
+    m = _DETAIL_TOKEN.match(detail.strip())
+    return (m.group(0) if m else "error")[:DETAIL_MAX]
 
 
 class MeteredRunner:
@@ -69,7 +77,7 @@ def outcome_of(step: str, result: Any) -> tuple[str, str | None]:
             return "degraded", FLAG_AGENT_FALLBACK
     if step == "assess" and result.get("assessment") is None:
         error = (result.get("record") or {}).get("error")
-        return "failed", str(error)[:DETAIL_MAX] if error else None
+        return "failed", safe_detail(str(error)) if error else None
     return "ok", None
 
 
@@ -78,7 +86,7 @@ def _classify_substep(result: Any, usage: list[dict[str, Any]], started: str, en
     if not isinstance(classification, dict):
         return []
     if "error" in classification:
-        outcome, detail = "failed", str(classification["error"])[:DETAIL_MAX]
+        outcome, detail = "failed", safe_detail(str(classification["error"]))
     else:
         outcome, detail = "ok", None
     calls = int(((classification.get("metrics") or {}).get("decision_calls")) or 0)
@@ -102,7 +110,7 @@ def _record(step: str, outcome: str, started: datetime, ended: datetime, usage: 
         "usage": usage,
     }
     if detail:
-        rec["detail"] = detail[:DETAIL_MAX]
+        rec["detail"] = safe_detail(detail)
     return rec
 
 

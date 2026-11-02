@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from journey import metering
-from journey.metering import METER_KEY, MeteredRunner, failed_record, outcome_of, run_metered, step_records
+from journey.metering import METER_KEY, MeteredRunner, failed_record, outcome_of, run_metered, safe_detail, step_records
 
 T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
@@ -168,6 +168,28 @@ def test_step_records_shape_and_fallback():
     assert (bad["outcome"], bad["usage"], bad["duration_ms"], bad["agent"]) == ("degraded", [], 3000, True)
 
 
-def test_failed_record_truncates_detail():
-    rec = failed_record("underwrite", T0, T0 + timedelta(seconds=1), RuntimeError("x" * 500))
-    assert rec["outcome"] == "failed" and len(rec["detail"]) == metering.DETAIL_MAX
+def test_failed_record_keeps_only_exception_type():
+    rec = failed_record("underwrite", T0, T0 + timedelta(seconds=1), RuntimeError("계좌 110-123 잔액 5,000,000"))
+    assert rec["outcome"] == "failed" and rec["detail"] == "RuntimeError"
+
+
+@pytest.mark.parametrize(("raw", "safe"), [
+    ("ValueError: 적요 '홍길동 이체'", "ValueError"),
+    ("agents_disabled", "agents_disabled"),
+    ("status=partial", "status=partial"),
+    ("  KeyError: 'x'", "KeyError"),
+    ("동의가 만료되었습니다", "error"),
+    ("!! boom", "error"),
+])
+def test_safe_detail_keeps_leading_code_only(raw, safe):
+    assert safe_detail(raw) == safe
+
+
+def test_safe_detail_truncates_long_code():
+    assert len(safe_detail("A" * 500)) == metering.DETAIL_MAX
+
+
+def test_classify_error_detail_has_no_message():
+    out = run_metered("underwrite", lambda d, p: {"classification": {"error": "ValueError: 적요 '홍길동'"}},
+                      FakeDeps(Clock()), {})
+    assert out[METER_KEY]["substeps"][0]["detail"] == "ValueError"

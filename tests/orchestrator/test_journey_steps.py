@@ -113,7 +113,7 @@ def test_failed_activity_is_recorded_as_failed_step(run_journey):
     # 정책 실패는 거절만 허용(fail-closed)하므로 승인 시도 뒤 거절로 끝낸다.
     _, ctx = run_journey(START, acts(evaluate_policy=boom), [("event", APPROVE), ("event", DECLINE)])
     policy = [s for s in ctx.saved[-1]["steps"] if s["step"] == "policy"][0]
-    assert policy["outcome"] == "failed" and policy["detail"] == "RuntimeError: down"
+    assert policy["outcome"] == "failed" and policy["detail"] == "RuntimeError"
 
 
 def test_meta_and_tags_are_passed_only_when_present(run_journey):
