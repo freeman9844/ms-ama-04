@@ -1,6 +1,6 @@
 {
   "run_id": "load-20261102110233",
-  "generated_at": "2026-11-02T11:23:13.721392+00:00",
+  "generated_at": "2026-11-02T12:00:58.365519+00:00",
   "load": {
     "run_id": "load-20261102110233",
     "mode": "load",
@@ -376,25 +376,25 @@
       "dependencies": {
         "fault-20261102111447-01": [
           {
-            "target": "QueueClient.send_message",
-            "role": "orchestrator",
-            "total": 1,
-            "failed": 0
-          },
-          {
             "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
           },
           {
-            "target": "ContainerProxy.upsert_item",
+            "target": "QueueClient.send_message",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
           },
           {
             "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -412,37 +412,19 @@
             "failed": 0
           },
           {
-            "target": "invoke_agent data-assembly",
-            "role": "orchestrator",
-            "total": 1,
-            "failed": 0
-          },
-          {
             "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
             "role": "orchestrator",
             "total": 4,
             "failed": 0
           },
           {
-            "target": "POST /v1/decisions http send",
-            "role": "policy",
-            "total": 2,
-            "failed": 0
-          },
-          {
-            "target": "POST /v1/decisions http receive",
-            "role": "policy",
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
             "total": 1,
             "failed": 0
           }
         ],
         "fault-20261102111447-02": [
-          {
-            "target": "QueueClient.send_message",
-            "role": "orchestrator",
-            "total": 1,
-            "failed": 0
-          },
           {
             "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
             "role": "orchestrator",
@@ -450,7 +432,7 @@
             "failed": 0
           },
           {
-            "target": "ContainerProxy.upsert_item",
+            "target": "QueueClient.send_message",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -462,14 +444,20 @@
             "failed": 0
           },
           {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
             "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
             "role": "orchestrator",
             "total": 9,
             "failed": 4
           },
           {
-            "target": "unknown",
-            "role": "responsesapi",
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "role": "orchestrator",
             "total": 6,
             "failed": 0
           },
@@ -480,27 +468,27 @@
             "failed": 0
           },
           {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
-            "role": "orchestrator",
-            "total": 6,
-            "failed": 0
-          },
-          {
             "target": "ContainerClient.create_container",
             "role": "orchestrator",
             "total": 3,
             "failed": 2
           },
           {
-            "target": "invoke_agent data-assembly",
-            "role": "orchestrator",
-            "total": 1,
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
             "failed": 0
           },
           {
             "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
             "role": "orchestrator",
             "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
             "failed": 0
           }
         ]
@@ -613,19 +601,13 @@
       "dependencies": {
         "fault-20261102111750-01": [
           {
-            "target": "QueueClient.send_message",
-            "role": "orchestrator",
-            "total": 1,
-            "failed": 0
-          },
-          {
             "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
           },
           {
-            "target": "ContainerProxy.upsert_item",
+            "target": "QueueClient.send_message",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -637,33 +619,27 @@
             "failed": 0
           },
           {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
             "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
             "role": "orchestrator",
             "total": 5,
             "failed": 0
           },
           {
-            "target": "POST /v1/decisions http send",
-            "role": "policy",
-            "total": 6,
-            "failed": 3
-          },
-          {
-            "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
             "role": "orchestrator",
             "total": 2,
-            "failed": 2
+            "failed": 0
           },
           {
             "target": "ContainerClient.upload_blob",
             "role": "orchestrator",
             "total": 1,
-            "failed": 0
-          },
-          {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
-            "role": "orchestrator",
-            "total": 2,
             "failed": 0
           },
           {
@@ -679,37 +655,25 @@
             "failed": 0
           },
           {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
             "target": "invoke_agent data-assembly",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
           },
           {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
-            "role": "orchestrator",
-            "total": 3,
-            "failed": 0
-          }
-        ],
-        "fault-20261102111750-02": [
-          {
-            "target": "POST /v1/decisions http send",
-            "role": "policy",
-            "total": 4,
-            "failed": 2
-          },
-          {
             "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
             "role": "orchestrator",
             "total": 2,
             "failed": 2
-          },
-          {
-            "target": "QueueClient.send_message",
-            "role": "orchestrator",
-            "total": 1,
-            "failed": 0
-          },
+          }
+        ],
+        "fault-20261102111750-02": [
           {
             "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
             "role": "orchestrator",
@@ -723,7 +687,7 @@
             "failed": 0
           },
           {
-            "target": "ContainerProxy.upsert_item",
+            "target": "QueueClient.send_message",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -732,6 +696,12 @@
             "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
             "role": "orchestrator",
             "total": 9,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
             "failed": 0
           },
           {
@@ -753,15 +723,15 @@
             "failed": 0
           },
           {
-            "target": "ContainerClient.upload_blob",
-            "role": "orchestrator",
-            "total": 4,
-            "failed": 0
-          },
-          {
             "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
             "role": "orchestrator",
             "total": 8,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 4,
             "failed": 0
           },
           {
@@ -771,9 +741,9 @@
             "failed": 3
           },
           {
-            "target": "invoke_agent data-assembly",
-            "role": "orchestrator",
-            "total": 1,
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
             "failed": 0
           },
           {
@@ -783,9 +753,9 @@
             "failed": 0
           },
           {
-            "target": "unknown",
-            "role": "responsesapi",
-            "total": 6,
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
             "failed": 0
           },
           {
@@ -793,47 +763,17 @@
             "role": "orchestrator",
             "total": 1,
             "failed": 0
+          },
+          {
+            "target": "ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 2
           }
         ],
         "fault-20261102111750-03": [
           {
-            "target": "unknown",
-            "role": "responsesapi",
-            "total": 4,
-            "failed": 0
-          },
-          {
-            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
-            "role": "orchestrator",
-            "total": 3,
-            "failed": 0
-          },
-          {
-            "target": "ContainerClient.create_container",
-            "role": "orchestrator",
-            "total": 2,
-            "failed": 1
-          },
-          {
-            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
-            "role": "orchestrator",
-            "total": 3,
-            "failed": 0
-          },
-          {
-            "target": "ContainerClient.upload_blob",
-            "role": "orchestrator",
-            "total": 1,
-            "failed": 0
-          },
-          {
-            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
-            "role": "orchestrator",
-            "total": 5,
-            "failed": 0
-          },
-          {
-            "target": "invoke_agent data-assembly",
+            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -845,7 +785,7 @@
             "failed": 0
           },
           {
-            "target": "stfngaz7yh2zic7zc.queue.core.windows.net:None",
+            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
             "role": "orchestrator",
             "total": 1,
             "failed": 0
@@ -857,7 +797,43 @@
             "failed": 0
           },
           {
-            "target": "cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None",
+            "target": "ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "stdatgaz7yh2zic7zc.blob.core.windows.net:None",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 1
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "ais-gaz7yh2zic7zc.services.ai.azure.com",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
             "role": "orchestrator",
             "total": 1,
             "failed": 0

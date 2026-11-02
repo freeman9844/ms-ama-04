@@ -1,6 +1,6 @@
 # 운영 지표 보고서 — load-20261102110233
 
-> 합성 데이터 기준. 신청 24건, 생성 2026-11-02T11:23:13.721392+00:00.
+> 합성 데이터 기준. 신청 24건, 생성 2026-11-02T12:00:58.365519+00:00.
 
 ## 1. SLO
 
@@ -81,27 +81,25 @@ AI 비용 합계 $1.0157, 신청당 $0.0423 (캐시 할인 미반영 상한, 단
 
 | 신청 | 대상 | 역할 | 호출 | 실패 |
 |---|---|---|---|---|
-| fault-20261102111447-01 | QueueClient.send_message | orchestrator | 1 | 0 |
 | fault-20261102111447-01 | stfngaz7yh2zic7zc.queue.core.windows.net:None | orchestrator | 1 | 0 |
-| fault-20261102111447-01 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
+| fault-20261102111447-01 | QueueClient.send_message | orchestrator | 1 | 0 |
 | fault-20261102111447-01 | cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None | orchestrator | 1 | 0 |
+| fault-20261102111447-01 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
 | fault-20261102111447-01 | ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 5 | 2 |
 | fault-20261102111447-01 | unknown | responsesapi | 6 | 0 |
-| fault-20261102111447-01 | invoke_agent data-assembly | orchestrator | 1 | 0 |
 | fault-20261102111447-01 | ais-gaz7yh2zic7zc.services.ai.azure.com | orchestrator | 4 | 0 |
-| fault-20261102111447-01 | POST /v1/decisions http send | policy | 2 | 0 |
-| fault-20261102111447-01 | POST /v1/decisions http receive | policy | 1 | 0 |
-| fault-20261102111447-02 | QueueClient.send_message | orchestrator | 1 | 0 |
+| fault-20261102111447-01 | invoke_agent data-assembly | orchestrator | 1 | 0 |
 | fault-20261102111447-02 | stfngaz7yh2zic7zc.queue.core.windows.net:None | orchestrator | 1 | 0 |
-| fault-20261102111447-02 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
+| fault-20261102111447-02 | QueueClient.send_message | orchestrator | 1 | 0 |
 | fault-20261102111447-02 | cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None | orchestrator | 1 | 0 |
+| fault-20261102111447-02 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
 | fault-20261102111447-02 | ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 9 | 4 |
-| fault-20261102111447-02 | unknown | responsesapi | 6 | 0 |
-| fault-20261102111447-02 | ContainerClient.upload_blob | orchestrator | 3 | 0 |
 | fault-20261102111447-02 | stdatgaz7yh2zic7zc.blob.core.windows.net:None | orchestrator | 6 | 0 |
+| fault-20261102111447-02 | ContainerClient.upload_blob | orchestrator | 3 | 0 |
 | fault-20261102111447-02 | ContainerClient.create_container | orchestrator | 3 | 2 |
-| fault-20261102111447-02 | invoke_agent data-assembly | orchestrator | 1 | 0 |
+| fault-20261102111447-02 | unknown | responsesapi | 6 | 0 |
 | fault-20261102111447-02 | ais-gaz7yh2zic7zc.services.ai.azure.com | orchestrator | 4 | 0 |
+| fault-20261102111447-02 | invoke_agent data-assembly | orchestrator | 1 | 0 |
 
 ### policy-down (run fault-20261102111750, 원복 확인)
 
@@ -113,44 +111,42 @@ AI 비용 합계 $1.0157, 신청당 $0.0423 (캐시 할인 미반영 상한, 단
 
 | 신청 | 대상 | 역할 | 호출 | 실패 |
 |---|---|---|---|---|
-| fault-20261102111750-01 | QueueClient.send_message | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | stfngaz7yh2zic7zc.queue.core.windows.net:None | orchestrator | 1 | 0 |
-| fault-20261102111750-01 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
+| fault-20261102111750-01 | QueueClient.send_message | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None | orchestrator | 1 | 0 |
+| fault-20261102111750-01 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 5 | 0 |
-| fault-20261102111750-01 | POST /v1/decisions http send | policy | 6 | 3 |
-| fault-20261102111750-01 | ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 2 | 2 |
-| fault-20261102111750-01 | ContainerClient.upload_blob | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | stdatgaz7yh2zic7zc.blob.core.windows.net:None | orchestrator | 2 | 0 |
+| fault-20261102111750-01 | ContainerClient.upload_blob | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | ContainerClient.create_container | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | unknown | responsesapi | 4 | 0 |
-| fault-20261102111750-01 | invoke_agent data-assembly | orchestrator | 1 | 0 |
 | fault-20261102111750-01 | ais-gaz7yh2zic7zc.services.ai.azure.com | orchestrator | 3 | 0 |
-| fault-20261102111750-02 | POST /v1/decisions http send | policy | 4 | 2 |
-| fault-20261102111750-02 | ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 2 | 2 |
-| fault-20261102111750-02 | QueueClient.send_message | orchestrator | 1 | 0 |
+| fault-20261102111750-01 | invoke_agent data-assembly | orchestrator | 1 | 0 |
+| fault-20261102111750-01 | ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 2 | 2 |
 | fault-20261102111750-02 | stfngaz7yh2zic7zc.queue.core.windows.net:None | orchestrator | 1 | 0 |
 | fault-20261102111750-02 | 169.254.255.2:8081 | orchestrator | 3 | 0 |
-| fault-20261102111750-02 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
+| fault-20261102111750-02 | QueueClient.send_message | orchestrator | 1 | 0 |
 | fault-20261102111750-02 | cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None | orchestrator | 9 | 0 |
+| fault-20261102111750-02 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
 | fault-20261102111750-02 | ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 5 | 0 |
 | fault-20261102111750-02 | ContainerProxy.read_item | orchestrator | 3 | 0 |
 | fault-20261102111750-02 | ContainerProxy.replace_item | orchestrator | 2 | 0 |
-| fault-20261102111750-02 | ContainerClient.upload_blob | orchestrator | 4 | 0 |
 | fault-20261102111750-02 | stdatgaz7yh2zic7zc.blob.core.windows.net:None | orchestrator | 8 | 0 |
+| fault-20261102111750-02 | ContainerClient.upload_blob | orchestrator | 4 | 0 |
 | fault-20261102111750-02 | ContainerClient.create_container | orchestrator | 4 | 3 |
-| fault-20261102111750-02 | invoke_agent data-assembly | orchestrator | 1 | 0 |
-| fault-20261102111750-02 | ais-gaz7yh2zic7zc.services.ai.azure.com | orchestrator | 7 | 0 |
 | fault-20261102111750-02 | unknown | responsesapi | 6 | 0 |
+| fault-20261102111750-02 | ais-gaz7yh2zic7zc.services.ai.azure.com | orchestrator | 7 | 0 |
+| fault-20261102111750-02 | invoke_agent data-assembly | orchestrator | 1 | 0 |
 | fault-20261102111750-02 | invoke_agent txn-classifier | orchestrator | 1 | 0 |
+| fault-20261102111750-02 | ca-policy.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 2 | 2 |
+| fault-20261102111750-03 | stfngaz7yh2zic7zc.queue.core.windows.net:None | orchestrator | 1 | 0 |
+| fault-20261102111750-03 | QueueClient.send_message | orchestrator | 1 | 0 |
+| fault-20261102111750-03 | cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None | orchestrator | 1 | 0 |
+| fault-20261102111750-03 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
+| fault-20261102111750-03 | ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 5 | 0 |
+| fault-20261102111750-03 | stdatgaz7yh2zic7zc.blob.core.windows.net:None | orchestrator | 3 | 0 |
+| fault-20261102111750-03 | ContainerClient.create_container | orchestrator | 2 | 1 |
+| fault-20261102111750-03 | ContainerClient.upload_blob | orchestrator | 1 | 0 |
 | fault-20261102111750-03 | unknown | responsesapi | 4 | 0 |
 | fault-20261102111750-03 | ais-gaz7yh2zic7zc.services.ai.azure.com | orchestrator | 3 | 0 |
-| fault-20261102111750-03 | ContainerClient.create_container | orchestrator | 2 | 1 |
-| fault-20261102111750-03 | stdatgaz7yh2zic7zc.blob.core.windows.net:None | orchestrator | 3 | 0 |
-| fault-20261102111750-03 | ContainerClient.upload_blob | orchestrator | 1 | 0 |
-| fault-20261102111750-03 | ca-mockapi.ambitiousbeach-549217a1.koreacentral.azurecontainerapps.io | orchestrator | 5 | 0 |
 | fault-20261102111750-03 | invoke_agent data-assembly | orchestrator | 1 | 0 |
-| fault-20261102111750-03 | QueueClient.send_message | orchestrator | 1 | 0 |
-| fault-20261102111750-03 | stfngaz7yh2zic7zc.queue.core.windows.net:None | orchestrator | 1 | 0 |
-| fault-20261102111750-03 | ContainerProxy.upsert_item | orchestrator | 1 | 0 |
-| fault-20261102111750-03 | cosmos-gaz7yh2zic7zc-koreacentral.documents.azure.com:None | orchestrator | 1 | 0 |
