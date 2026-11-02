@@ -1,0 +1,77 @@
+# 배포 (deploy)
+
+코드나 인프라 변경을 Azure에 올리는 사람을 위한 안내입니다. 명령과 옵션은 `src/ops/cli.py`·`src/ops/deploy.py`·`src/ops/window.py` 기준입니다.
+대상 환경 값(리소스 그룹, 앱 이름 등)은 `azd env get-values`에서 읽습니다.
+
+## 배포 창
+
+Azure 서비스는 기본적으로 사설 엔드포인트 전용입니다. 이미지 빌드나 Function 코드 배포처럼 운영자 PC에서 직접 접근해야 하는 작업은 **배포 창** 동안에만 운영자 공인 IP 하나(`<운영자 공인 IP>/32`)에 접근을 허용하고, 끝나면 닫습니다. ADR-004에 설계 근거가 있고, 상위 설계는 `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2입니다.
+
+| 명령 | 하는 일 |
+|------|---------|
+| `python -m ops window open [--ip <IP>] [--acr]` | `OPERATOR_IP`·`CONSOLE_IP`를 현재 공인 IP(또는 `--ip`)로 정하고 `azd provision`을 실행해 Foundry 계정·Functions 등에 운영자 IP 규칙을 넣습니다. `--acr`이면 `ACR_PUBLIC=true`로 ACR도 열어 `az acr build`가 가능해집니다. |
+| `python -m ops window status` | 창 상태와 현재 공인 IP를 보여 줍니다. IP가 허용값과 다르면 경고하고 종료 코드 2로 끝납니다. |
+| `python -m ops window close` | `OPERATOR_IP=closed`, `ACR_PUBLIC=false`로 다시 프로비저닝합니다. `CONSOLE_IP`는 그대로 둡니다. |
+
+- 창은 프로비저닝을 동반하므로 몇 분이 걸립니다. 실측: 열기 3.7분·닫기 3.7분(P5b), 열기 6.6분·닫기 5.4분(P6b, job-ops·경보·Workbook 첫 생성 포함) — `docs/runbook/deploy-history.md`의 "실제 배포 기록(P5b…)"과 "실제 실행 기록(P6b…)" 표.
+- 일부 서비스(Key Vault, Cosmos DB, Storage)는 테넌트 정책 때문에 창을 열어도 운영자 PC에서 접근할 수 없습니다. 그 서비스의 데이터 작업은 VNet 안 Job으로 합니다([deploy-history](deploy-history.md)의 "알려진 제약" 절).
+
+## 구성요소별 배포
+
+`python -m ops deploy <대상>`의 대상은 `src/ops/deploy.py`의 `TARGETS`입니다. 대상을 생략하면 `all`입니다.
+
+| 대상 | 배포하는 것 | 이미지 환경 키 | 필요한 창 |
+|------|-------------|----------------|-----------|
+| `policy` | 정책 엔진 이미지(`src/policy/Dockerfile`) | `SERVICE_POLICY_IMAGE_NAME` | `window open --acr` |
+| `mockapi` | Mock 마이데이터·국세청·PG 이미지(`src/mockapis/Dockerfile`) | `SERVICE_MOCKAPI_IMAGE_NAME` | `window open --acr` |
+| `console` | 심사역 콘솔 이미지(`src/console/Dockerfile`) | `SERVICE_CONSOLE_IMAGE_NAME` | `window open --acr` |
+| `eval` | 평가·운영 측정 Job 이미지(`src/evals/Dockerfile`) | `SERVICE_EVAL_IMAGE_NAME` | `window open --acr` |
+| `orchestrator` | Functions 코드 zip(`src/orchestrator`+`src/agents`+`src/shared`, Linux wheel 동봉) | — | `window open` |
+| `all` | 위 이미지 4개 + 프로비저닝 1회 + Functions zip | — | `window open --acr` |
+
+- 이미지 대상은 `az acr build`로 이미지를 만든 뒤 azd 환경에 이미지 이름을 기록하고 `azd provision`으로 Container App·Job을 갱신합니다. ACR 창이 닫혀 있으면 오류로 멈춥니다.
+- `orchestrator`는 운영자 IP 창이 닫혀 있으면 멈춥니다. 원격 빌드는 쓰지 않습니다.
+
+### 공통 순서
+
+```powershell
+python -m ops window open --acr      # 이미지를 빌드하지 않는 배포(orchestrator만)는 --acr 없이
+python -m ops deploy <대상>
+python -m ops window close           # 작업 뒤 반드시 닫기
+python -m ops smoke                  # 배포 뒤 확인
+```
+
+Service Bus 이벤트까지 보려면 앞에 `python -m ops resume`을, 비용을 줄이려면 끝에 `python -m ops pause`를 붙입니다([operate](operate.md)).
+
+주의:
+
+- 오케스트레이터(`orchestrator`)를 배포하기 전에 실행 중인 신청 여정이 없는지 확인합니다. 원문(P5b): 배포 전에 실행 중인 신청 여정이 없는지 확인합니다(여정 코드가 바뀌어 실행 중 인스턴스는 replay가 어긋날 수 있음).
+- 배포 직후 `ops smoke`는 `journey`·`consent` 점검으로 새 코드가 실제 신청 여정을 끝까지 처리하는지 확인합니다. 점검 항목은 [operate](operate.md#smoke)에 있습니다.
+
+## 운영자 IP가 바뀔 때
+
+운영자 PC의 공인 IP가 연결마다 바뀌면(관측: 서로 다른 /24 대역 두 개) `ops window open`으로 허용한 IP와 달라져 배포·콘솔이 403이 됩니다. README P6b 문제 대응 원문:
+
+- 운영자 PC 공인 IP가 연결마다 바뀌어 배포·콘솔이 403: `ops window status`의 IP와 다른 IP를 Functions 접근 제한·console ingress에
+  `operator-alt` 규칙으로 잠시 추가하고, 작업 뒤 지웁니다(`ops window close`는 Functions 규칙을 Bicep 상태로 되돌립니다).
+
+`ops window status`로 허용 IP와 현재 IP를 비교한 뒤, 다음 절차로 **임시 규칙**을 넣고 작업이 끝나면 지웁니다. 값은 `azd env get-values`의 `AZURE_RESOURCE_GROUP`, `FUNCTION_APP_NAME`, `CONSOLE_APP_NAME`에서 읽습니다.
+
+```powershell
+# 1) 현재 공인 IP를 임시 허용(Functions: priority 110, 콘솔 ingress)
+az functionapp config access-restriction add -g <resource-group> -n <function-app> `
+  --rule-name operator-alt --action Allow --ip-address <IP>/32 --priority 110
+az containerapp ingress access-restriction set -g <resource-group> -n <console-app> `
+  --rule-name operator-alt --action Allow --ip-address <IP>/32
+
+# 2) 배포·확인 작업을 수행
+
+# 3) 작업 뒤 임시 규칙 제거
+az functionapp config access-restriction remove -g <resource-group> -n <function-app> --rule-name operator-alt
+az containerapp ingress access-restriction remove -g <resource-group> -n <console-app> --rule-name operator-alt
+```
+
+- Functions 규칙 이름 `operator`(priority 100)는 `window open`이 만드는 규칙입니다(`infra/modules/functions.bicep`). 임시 규칙은 이름을 `operator-alt`로 달리 하고 priority 110을 씁니다. SCM 사이트는 주 사이트 규칙을 따르므로(`scmIpSecurityRestrictionsUseMain`) 같은 규칙으로 zip 배포가 됩니다.
+- Container Apps ingress 규칙에는 priority 옵션이 없습니다(`az containerapp ingress access-restriction set --help`). 모든 규칙이 같은 `--action`이어야 합니다.
+- `ops window close`는 Functions 규칙만 Bicep 상태로 되돌립니다. 콘솔 ingress의 `operator-alt` 규칙은 위 3)으로 직접 지웁니다.
+- 프로비저닝(`ops window open|close`, `ops deploy`의 프로비저닝 단계)은 두 규칙 목록을 Bicep 선언(`infra/modules/functions.bicep`, `infra/modules/container-app.bicep`)으로 다시 쓰므로 임시 규칙이 사라질 수 있습니다. 프로비저닝 뒤 접근이 다시 403이면 1)을 반복합니다.
