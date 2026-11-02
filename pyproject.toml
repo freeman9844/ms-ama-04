@@ -21,10 +21,11 @@ dev = [
   "pytest>=8.2",
   "azure-functions==1.25.0",
   "azure-functions-durable==1.7.0",
+  "azure-identity==1.27.0",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/shared", "src/policy", "src/mockapis", "src/ops", "src/agents", "src/console"]
+packages = ["src/shared", "src/policy", "src/mockapis", "src/ops", "src/agents", "src/console", "src/evals"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "src/orchestrator"]
