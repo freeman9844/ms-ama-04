@@ -30,10 +30,13 @@ class ConsentResponse(BaseModel):
     expires_at: datetime
 
 
+FAULT_MODES = ("none", "unavailable", "flaky")
+
+
 class FaultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["none", "unavailable"]
+    mode: Literal["none", "unavailable", "flaky"]
 
 
 def _error(status: int, code: str) -> HTTPException:
@@ -45,12 +48,17 @@ def create_app(
     secret: bytes,
     clock: Callable[[], datetime],
     flows: Mapping[str, PostLoanFlow] | None = None,
+    fault: str = "none",
 ) -> FastAPI:
+    if fault not in FAULT_MODES:
+        raise ValueError(f"FAULT_MODE: {fault}")
     app = FastAPI(title="Mock MyData/Tax/PG API")
     registry = ConsentRegistry()
-    state = {"fault": "none"}
+    state = {"fault": fault}
+    # flaky: (동의, 경로)마다 첫 요청만 503
+    seen: set[tuple[str, str]] = set()
 
-    def authorize(authorization: str | None, scope: ConsentScope) -> SyntheticCase:
+    def authorize(authorization: str | None, scope: ConsentScope, path: str) -> SyntheticCase:
         if state["fault"] == "unavailable":
             raise _error(503, "unavailable")
         if not authorization or not authorization.startswith("Bearer "):
@@ -60,6 +68,9 @@ def create_app(
             grant = verify_token(token, secret, scope, clock(), registry.revoked_ids)
         except ConsentError as exc:
             raise _error(403 if exc.code == "scope" else 401, exc.code) from None
+        if state["fault"] == "flaky" and (grant.consent_id, path) not in seen:
+            seen.add((grant.consent_id, path))
+            raise _error(503, "flaky")
         return cases[grant.applicant_id]
 
     @app.get("/healthz")
@@ -85,18 +96,18 @@ def create_app(
 
     @app.get("/mydata/profile")
     def get_profile(authorization: AuthHeader = None) -> ApplicantProfile:
-        return authorize(authorization, ConsentScope.ACCOUNT).profile
+        return authorize(authorization, ConsentScope.ACCOUNT, "/mydata/profile").profile
 
     @app.get("/mydata/transactions")
     def get_transactions(authorization: AuthHeader = None) -> list[Transaction]:
-        return list(authorize(authorization, ConsentScope.ACCOUNT).transactions)
+        return list(authorize(authorization, ConsentScope.ACCOUNT, "/mydata/transactions").transactions)
 
     @app.get("/mydata/flow")
     def get_flow(
         authorization: AuthHeader = None, start: date | None = None, end: date | None = None
     ) -> list[Transaction]:
         """대출 실행 이후 거래(조기경보 재생용). start·end는 포함 구간이다."""
-        case = authorize(authorization, ConsentScope.ACCOUNT)
+        case = authorize(authorization, ConsentScope.ACCOUNT, "/mydata/flow")
         flow = (flows or {}).get(case.profile.applicant_id)
         if flow is None:
             raise _error(404, "no_flow")
@@ -108,15 +119,16 @@ def create_app(
 
     @app.get("/tax/filings")
     def get_tax_filings(authorization: AuthHeader = None) -> list[TaxFiling]:
-        return list(authorize(authorization, ConsentScope.TAX).tax_filings)
+        return list(authorize(authorization, ConsentScope.TAX, "/tax/filings").tax_filings)
 
     @app.get("/pg/settlements")
     def get_pg_settlements(authorization: AuthHeader = None) -> list[PgSettlement]:
-        return list(authorize(authorization, ConsentScope.PG).pg_settlements)
+        return list(authorize(authorization, ConsentScope.PG, "/pg/settlements").pg_settlements)
 
     @app.post("/admin/faults", status_code=204)
     def set_fault(req: FaultRequest) -> Response:
         state["fault"] = req.mode
+        seen.clear()
         return Response(status_code=204)
 
     return app

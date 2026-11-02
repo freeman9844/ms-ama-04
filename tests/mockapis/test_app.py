@@ -150,3 +150,33 @@ def test_postloan_flow_needs_account_scope_and_filters_by_window(clock):
 def test_postloan_flow_missing_is_404(client):
     h = _auth(_consent(client)["token"])
     assert client.get("/mydata/flow", headers=h).json()["detail"] == {"code": "no_flow"}
+
+def test_flaky_fails_first_request_per_consent_and_path(clock):
+    cases = {"a1": generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)}
+    client = TestClient(create_app(cases, SECRET, clock, fault="flaky"))
+    auth = _auth(_consent(client)["token"])
+    first = client.get("/mydata/profile", headers=auth)
+    assert first.status_code == 503 and first.json()["detail"] == {"code": "flaky"}
+    assert client.get("/mydata/profile", headers=auth).status_code == 200
+    assert client.get("/tax/filings", headers=auth).status_code == 503  # 다른 경로는 다시 첫 요청
+    other = _auth(_consent(client)["token"])
+    assert client.get("/mydata/profile", headers=other).status_code == 503  # 다른 동의도 첫 요청
+
+
+def test_flaky_does_not_hide_auth_errors(clock):
+    cases = {"a1": generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)}
+    client = TestClient(create_app(cases, SECRET, clock, fault="flaky"))
+    assert client.get("/mydata/profile").status_code == 401
+
+
+def test_admin_fault_flaky_and_reset(client):
+    auth = _auth(_consent(client)["token"])
+    assert client.post("/admin/faults", json={"mode": "flaky"}).status_code == 204
+    assert client.get("/mydata/profile", headers=auth).status_code == 503
+    assert client.post("/admin/faults", json={"mode": "none"}).status_code == 204
+    assert client.get("/mydata/profile", headers=auth).status_code == 200
+
+
+def test_unknown_fault_mode_rejected(clock):
+    with pytest.raises(ValueError):
+        create_app({}, SECRET, clock, fault="weird")
