@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -118,6 +119,44 @@ def test_run_metered_logs_and_reraises(monkeypatch):
         run_metered("underwrite", lambda d, p: (_ for _ in ()).throw(ValueError("bad")), FakeDeps(Clock()), {})
     assert logged[0]["outcome"] == "failed" and logged[0]["detail"].startswith("ValueError")
 
+
+class RecSpan:
+    def __init__(self):
+        self.attrs = {}
+
+    def set_attribute(self, k, v):
+        self.attrs[k] = v
+
+
+def _capture_spans(monkeypatch):
+    spans = []
+
+    @contextmanager
+    def span(name, attributes):
+        sp = RecSpan()
+        spans.append((name, sp))
+        yield sp
+
+    monkeypatch.setattr(metering.telemetry, "span", span)
+    return spans
+
+
+@pytest.mark.parametrize(("result", "outcome"), [
+    ({"status": "complete", "flags": []}, "ok"),
+    ({"status": "partial", "flags": []}, "degraded"),
+])
+def test_activity_span_carries_outcome(monkeypatch, result, outcome):
+    spans = _capture_spans(monkeypatch)
+    run_metered("assemble_data", lambda d, p: result, FakeDeps(Clock()), {"application_id": "a"})
+    (name, sp) = spans[0]
+    assert name == "journey.assemble_data" and sp.attrs["outcome"] == outcome
+
+
+def test_activity_span_outcome_failed_on_exception(monkeypatch):
+    spans = _capture_spans(monkeypatch)
+    with pytest.raises(ValueError):
+        run_metered("evaluate_policy", lambda d, p: (_ for _ in ()).throw(ValueError("x")), FakeDeps(Clock()), {})
+    assert spans[0][1].attrs["outcome"] == "failed"
 
 def test_step_records_shape_and_fallback():
     t1, t2 = T0, T0 + timedelta(seconds=3)

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from opsmetrics.cost import ai_cost, unit_economics
-from opsmetrics.fairness import fairness
+from opsmetrics.fairness import fairness, gap_pp_from_env
 from opsmetrics.prices import load_prices
 from opsmetrics.projection import archetype_of, project
 from opsmetrics.slo import agent_success, latency, nearest_rank
@@ -163,3 +163,12 @@ def test_summary_has_basis_and_sections():
 def test_load_prices_skips_meta():
     prices = load_prices()
     assert "_source" not in prices and "gpt-5.4-mini" in prices
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    (None, 20.0), ("", 20.0), ("35", 35.0), (" 12.5 ", 12.5),
+    ("abc", 20.0), ("-1", 20.0), ("nan", 20.0), ("inf", 20.0),
+])
+def test_gap_pp_from_env_falls_back_on_invalid(raw, expected):
+    env = {} if raw is None else {"FAIRNESS_GAP_PP": raw}
+    assert gap_pp_from_env(env) == expected

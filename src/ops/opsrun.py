@@ -16,6 +16,7 @@ from ops.azdenv import get_env
 from ops.jobs import collect_with_retry, start_job, wait_job
 from ops.opsreport import render
 from ops.smoke_runner import log_hint
+from opsmetrics.fairness import gap_pp_from_env
 from opsmetrics.prices import load_prices
 from opsmetrics.summary import summarize
 
@@ -156,7 +157,7 @@ def metrics(runner: Runner, run_id: str, *, fault_runs: Sequence[str] = (), fixe
         "run_id": run_id,
         "generated_at": now.isoformat(),
         "load": _read(load_summary) if load_summary.exists() else None,
-        "summary": summarize(docs[run_id], load_prices(), fixed, source),
+        "summary": summarize(docs[run_id], load_prices(), fixed, source, gap_pp=gap_pp_from_env()),
         "faults": [_fault_section(az, env, r, docs[r], root, kql_fn, sleep) for r in fault_runs],
     }
     _write(out / "metrics.json", data)

@@ -104,6 +104,14 @@ def test_metrics_manual_fixed_cost_skips_query(fake_runner, tmp_path):
     assert summary["unit_economics"][0]["fixed_usd"] == 1.0
 
 
+def test_metrics_reads_fairness_gap_override(fake_runner, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAIRNESS_GAP_PP", "35")
+    _save(tmp_path, "load-1", [doc("load-1", 1)])
+    out = metrics(fake_runner(ENV), "load-1", out_root=tmp_path, now=T0, fixed_monthly_usd=1.0)
+    summary = json.loads((out / "metrics.json").read_text(encoding="utf-8"))["summary"]
+    assert summary["fairness"]["threshold_pp"] == 35.0
+    assert "임계값 35pp" in (out / "report.md").read_text(encoding="utf-8")
+
 def test_metrics_recollects_missing_runs_and_adds_fault_section(fake_runner, tmp_path):
     _save(tmp_path, "load-1", [doc("load-1", 1)])
     fault_docs = [{**doc("fault-1", 1), "source": "fault", "flags": ["policy_unavailable"]}]

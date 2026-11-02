@@ -3,7 +3,7 @@
 from typing import Any
 
 from opsmetrics.cost import ai_cost, unit_economics
-from opsmetrics.fairness import fairness
+from opsmetrics.fairness import DEFAULT_GAP_PP, fairness
 from opsmetrics.slo import agent_success, latency
 
 BASIS = "합성 데이터 기준"
@@ -14,7 +14,7 @@ def summarize(
     prices: dict[str, dict[str, Any]],
     fixed_monthly_usd: float | None = None,
     fixed_source: str | None = None,
-    gap_pp: float = 20.0,
+    gap_pp: float = DEFAULT_GAP_PP,
 ) -> dict[str, Any]:
     cost = ai_cost(docs, prices)
     return {

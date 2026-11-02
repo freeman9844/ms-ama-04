@@ -98,3 +98,21 @@ def test_client_error_does_not_trip_breaker():
 def test_success_passes_through():
     b = breaker(Clock())
     assert api(lambda r: httpx.Response(200, json=DECISION), b).decide({})["decision"] == "eligible"
+
+
+def test_unexpected_error_in_half_open_trial_reopens_circuit():
+    # httpx 밖의 예외가 시험 호출에서 나도 결과를 기록해야 한다. 아니면 half_open에 갇혀 영영 막힌다.
+    clock = Clock()
+    b = breaker(clock)
+    for _ in range(3):
+        b.failure()
+    clock.t = 61
+
+    def handler(request):
+        raise RuntimeError("boom")
+
+    with pytest.raises(PolicyUnavailable, match="RuntimeError"):
+        api(handler, b).decide({})
+    assert b.state == "open"
+    clock.t = 122
+    assert b.allow()

@@ -140,12 +140,15 @@ def run_metered(activity: str, fn: Callable[[Any, dict], Any], deps: Any, payloa
     runner = MeteredRunner(deps.agents) if getattr(deps, "agents", None) is not None else None
     inner = dataclasses.replace(deps, agents=runner) if runner is not None else deps
     started = deps.clock()
-    with telemetry.span(f"journey.{activity}", {"application_id": app_id, "step": step, **tags}):
+    with telemetry.span(f"journey.{activity}", {"application_id": app_id, "step": step, **tags}) as sp:
         try:
             result = fn(inner, payload)
         except Exception as e:
+            telemetry.set_attrs(sp, {"outcome": "failed"})
             telemetry.record_step(failed_record(step, started, deps.clock(), e), application_id=app_id, tags=tags)
             raise
+        outcome, detail = outcome_of(step, result)
+        telemetry.set_attrs(sp, {"outcome": outcome})
     ended = deps.clock()
     usage = runner.entries() if runner is not None else []
     s, e = started.isoformat(), ended.isoformat()
@@ -153,7 +156,6 @@ def run_metered(activity: str, fn: Callable[[Any, dict], Any], deps: Any, payloa
         substeps, usage = _classify_substep(result, usage, s, e), []
     else:
         substeps = []
-    outcome, detail = outcome_of(step, result)
     meter = {"started_at": s, "ended_at": e, "outcome": outcome, "usage": usage, "substeps": substeps}
     if detail:
         meter["detail"] = detail

@@ -1,5 +1,9 @@
 """세그먼트별 추천 approve율·eligible율 격차. 업력 축은 규칙 R104로 설명되므로 경보 대상이 아니다."""
 
+import logging
+import math
+import os
+from collections.abc import Mapping
 from typing import Any
 
 from opsmetrics.projection import archetype_of
@@ -7,7 +11,25 @@ from opsmetrics.projection import archetype_of
 AXES = ("industry", "region", "business_age_band")
 POLICY_EXPLAINED = frozenset({"business_age_band"})
 RECOMMENDATIONS = ("approve", "conditional", "refer", "decline")
+DEFAULT_GAP_PP = 20.0
+GAP_ENV = "FAIRNESS_GAP_PP"
 
+log = logging.getLogger(__name__)
+
+
+def gap_pp_from_env(env: Mapping[str, str] = os.environ) -> float:
+    """경보 임계값(pp). `FAIRNESS_GAP_PP`가 없거나 숫자·0 이상이 아니면 경고하고 기본 20pp를 쓴다."""
+    raw = (env.get(GAP_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_GAP_PP
+    try:
+        value = float(raw)
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value < 0:
+        log.warning("%s=%r 무시, 기본 %gpp 사용", GAP_ENV, raw, DEFAULT_GAP_PP)
+        return DEFAULT_GAP_PP
+    return value
 
 def _rates(group: list[dict[str, Any]]) -> dict[str, Any]:
     assessed = [p for p in group if p.get("assessment")]
@@ -40,7 +62,7 @@ def _by(docs: list[dict[str, Any]], axis: str) -> dict[str, list[dict[str, Any]]
     return groups
 
 
-def fairness(docs: list[dict[str, Any]], gap_pp: float = 20.0, min_samples: int = 5) -> dict[str, Any]:
+def fairness(docs: list[dict[str, Any]], gap_pp: float = DEFAULT_GAP_PP, min_samples: int = 5) -> dict[str, Any]:
     axes, alerts = {}, []
     for axis in AXES:
         values = {}

@@ -3,6 +3,7 @@
 from collections.abc import Iterable
 from typing import Any, Protocol
 
+from opsmetrics.fairness import gap_pp_from_env
 from opsmetrics.prices import load_prices
 from opsmetrics.summary import summarize
 
@@ -30,4 +31,4 @@ def default_run(runs: Iterable[str]) -> str | None:
 
 
 def ops_view(docs: list[dict[str, Any]]) -> dict[str, Any]:
-    return summarize(docs, load_prices())
+    return summarize(docs, load_prices(), gap_pp=gap_pp_from_env())

@@ -96,7 +96,8 @@ class HttpPolicyApi:
             raise PolicyUnavailable("circuit_open")
         try:
             r = self._client.post("/v1/decisions", json=features)
-        except httpx.HTTPError as e:
+        except Exception as e:
+            # httpx 밖의 예외도 실패로 기록한다. 아니면 half_open 시험이 끝나지 않아 서킷이 영영 막힌다.
             if b is not None:
                 b.failure()
             raise PolicyUnavailable(type(e).__name__) from e

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from console.app import ConsoleDeps, create_app
 from console.auth import AUDITOR
-from console.ops import default_run, sorted_runs
+from console.ops import default_run, ops_view, sorted_runs
 
 OID = "http://schemas.microsoft.com/identity/claims/objectidentifier"
 T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
@@ -115,3 +115,12 @@ def test_ops_page_requires_role_and_configuration():
 def test_nav_links_to_ops():
     html = client(FakeOps({})).get("/ops", headers=AUDITOR_H).text
     assert '<a href="/ops">운영 지표</a>' in html
+
+
+def test_ops_view_reads_fairness_gap_override(monkeypatch):
+    monkeypatch.setenv("FAIRNESS_GAP_PP", "100")
+    fair = ops_view(skewed())["fairness"]
+    assert fair["threshold_pp"] == 100.0 and fair["alerts"] == []
+    monkeypatch.setenv("FAIRNESS_GAP_PP", "oops")  # 잘못된 값은 기본 20pp로 — 화면은 깨지지 않는다
+    fair = ops_view(skewed())["fairness"]
+    assert fair["threshold_pp"] == 20.0 and fair["alerts"]
