@@ -472,3 +472,49 @@ python -m ops smoke                        # journey 승인 뒤 consent가 삭�
 - 삭제가 끝난 뒤 늦게 끝난 에이전트 실행의 대화·컨테이너는 한 번만 지우고 `late_cleanup`에 기록합니다. 그 삭제가 실패해도 증명은 완료로
   남고 자동 재시도하지 않습니다. 실행 직후 삭제에 실패한 Code Interpreter 컨테이너가 그 사이 만료되면 삭제가 404라 미확인으로 남습니다.
 - P5b 이전 동의는 명령이 올 때까지 수명주기가 없습니다. 이의제기 중복 확인과 저장은 원자적이지 않습니다(같은 ID 재전송만 막음).
+
+## 평가 하네스(P6a)
+
+에이전트 품질·안전·비용을 **실제 Azure 모델로 측정**합니다(스펙 `2026-11-01-p6a-eval-harness-design.md`). 모든 숫자는
+**합성 데이터 기준**이며 표본이 작아 경향으로만 해석합니다.
+
+- **방식**: 컴포넌트 평가. 평가 Job(`job-eval`, VNet 안 Container Apps Job)이 에이전트 함수를 직접 부르고 모델 호출만 실제 Azure로 보냅니다.
+  Policy·Mock·저장소는 프로세스 안 메모리라 운영 Cosmos·에이전트를 건드리지 않습니다. 평가용 에이전트 이름은 `eval-<이름>-<모델>`이고
+  실행 뒤 대화·컨테이너를 지웁니다.
+- **suite**: `classify`(Decision-1+mini 폴백 / mini / gpt-5.4, 임계값 곡선), `underwriting`(gpt-5.4 / mini analyst, 근거 인용률·세무 불일치
+  탐지·Policy 일치·LLM-judge), `early_warning`(6경로 × 13주 재생, 탐지기 단독 기준선), `safety`(주입 방어율·PII 누출률·반사실 쌍).
+- **계측**: httpx 전송 계층에서 호출마다 모델·토큰·지연·재시도·PII 종류를 기록하고(본문은 남기지 않음) 단가표(`src/evals/prices.json`)로
+  비용을 계산합니다. 예산 가드 `EVAL_BUDGET_USD`(기본 $5)를 넘으면 남은 케이스를 건너뛰고 `partial`로 표시합니다. Decision-1은 공개 단가가 없어
+  비용에서 빠지고 호출 수만 보고합니다.
+- **결과**: `eval/reports/<실행 이름>/`의 `summary.json`(전체 수치), `report.md`(한국어 리포트, 실패 유형 카탈로그, 사람 검토 표본, 한계),
+  `calls.jsonl`(호출 계측). Job은 같은 파일을 Blob `eval-reports/<실행 이름>/`에도 올립니다.
+
+```powershell
+python -m evals --fake --out $env:TEMP\eval-fake    # 로컬 회귀(모델 호출 없음, 같은 형식의 리포트)
+python -m ops window open --acr                     # 평가 이미지 빌드에만 필요
+python -m ops deploy eval                           # az acr build → SERVICE_EVAL_IMAGE_NAME → provision(job-eval 갱신)
+python -m ops window close
+python -m ops eval --suite all                      # Job 시작 → 종료 대기 → Log Analytics에서 리포트 복원 → eval/reports/
+```
+
+- `ops eval --suite <이름>`은 Job 정의(이미지·env·관리 ID)를 그대로 복사하고 `EVAL_SUITE`만 바꿔 ARM `start`로 시작합니다.
+- 리포트 회수: Job은 결과 파일을 gzip+base64 6,000자 조각(`EVALCHUNK …` 줄)으로 stdout에 남기고, `ops eval`이
+  `ContainerAppConsoleLogs_CL`에서 실행 이름으로 모아 sha256을 확인합니다. 데이터 스토리지(stdat) 네트워크는 열지 않습니다.
+- 관리 ID `id-eval`: Foundry(Azure AI User, Cognitive Services OpenAI User), ACR(AcrPull), stdat `eval-reports` 컨테이너만
+  (Storage Blob Data Contributor). Cosmos·Key Vault·큐 권한은 없습니다.
+
+### 문제 대응(P6a)
+
+- `ops eval`이 `평가 실패: … 상태 Failed`: 출력된 Log Analytics 쿼리로 Job 로그를 봅니다(`[eval]` 줄, 예외). 이미지가 자리표시면 `ops deploy eval`부터.
+- `리포트 복원 실패: 조각 누락`: 로그 수집이 늦었거나 Job이 리포트를 쓰기 전에 끝났습니다. Blob `eval-reports/<실행 이름>/`의 원본을 받습니다.
+- 리포트에 `agent_error`가 많음: `calls.jsonl`의 `status`·`retries`·`error`를 봅니다(429 → 쿼터, 401/403 → `id-eval` 역할).
+- 로컬에서 실제 모델로 돌릴 때(`AzureCliCredential`)는 `AI_PROJECT_ENDPOINT`·`AI_ACCOUNT_ENDPOINT`를 설정하고 운영자 IP 창을 엽니다.
+  토큰은 만료 5분 전까지 재사용합니다(호출마다 `az`를 띄우면 느리고 간헐적으로 실패).
+
+### 알려진 제약(P6a)
+
+- 컴포넌트 평가라 큐·Durable을 포함한 전 구간 지연은 재지 않습니다(P6b App Insights).
+- 반사실·주입은 케이스당 1회 실행이라 LLM 변동과 구분되지 않습니다. 반사실 불일치 0건은 "이 표본에서 관찰되지 않음"입니다.
+- 분류 표본은 어려운 적요 뱅크를 넣어도 구성 간 차이가 작을 수 있습니다(천장 효과면 리포트 한계 절에 표시).
+- judge 점수는 LLM 평가라 참고값입니다. `report.md`의 사람 검토 표본 3건을 채워 함께 봅니다.
+- Foundry 포털 평가 업로드, 운영 데이터 기준 공정성 대시보드, SLO는 범위 밖입니다(P6b).
