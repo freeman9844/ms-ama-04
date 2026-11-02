@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-STEP_NAMES = {"assemble": "데이터 수집", "classify": "거래 분류", "assess": "신용 평가"}
-AXIS_NAMES = {"industry": "업종", "region": "지역", "business_age_band": "업력"}
+from opsmetrics.labels import AXIS_LABELS, STEP_LABELS
 
 
 def _pct(x: float | None) -> str:
@@ -39,7 +38,7 @@ def _slo(s: dict[str, Any]) -> list[str]:
         "", "| 단계 | ok | degraded | failed |", "|---|---|---|---|",
     ]
     for step, c in sorted(ag["by_step"].items()):
-        lines.append(f"| {STEP_NAMES.get(step, step)} | {c['ok']} | {c['degraded']} | {c['failed']} |")
+        lines.append(f"| {STEP_LABELS.get(step, step)} | {c['ok']} | {c['degraded']} | {c['failed']} |")
     return lines
 
 
@@ -70,7 +69,7 @@ def _fairness(s: dict[str, Any]) -> list[str]:
     lines = ["", "## 3. 공정성(추천 approve율)", "",
              f"임계값 {f['threshold_pp']:g}pp, 값별 평가 표본 < {f['min_samples']}이면 격차 계산에서 제외합니다."]
     for axis, a in f["axes"].items():
-        lines += ["", f"### {AXIS_NAMES.get(axis, axis)}", "",
+        lines += ["", f"### {AXIS_LABELS.get(axis, axis)}", "",
                   "| 값 | 신청 | 평가 | approve율 | eligible율 | 비고 |", "|---|---|---|---|---|---|"]
         for value, v in a["values"].items():
             lines.append(f"| {value} | {v['n']} | {v['assessed']} | {_pct(v['approve_rate'])} | "

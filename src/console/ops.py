@@ -4,12 +4,9 @@ from collections.abc import Iterable
 from typing import Any, Protocol
 
 from opsmetrics.fairness import gap_pp_from_env
+from opsmetrics.labels import AXIS_LABELS, STEP_LABELS
 from opsmetrics.prices import load_prices
 from opsmetrics.summary import summarize
-
-AXIS_LABELS = {"industry": "업종", "region": "지역", "business_age_band": "업력"}
-STEP_LABELS = {"consent": "동의", "assemble": "자료 조립", "classify": "거래 분류", "underwrite": "심사 분석",
-               "policy": "정책 판정", "assess": "신용 평가"}
 
 
 class OpsStore(Protocol):

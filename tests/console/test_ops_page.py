@@ -124,3 +124,13 @@ def test_ops_view_reads_fairness_gap_override(monkeypatch):
     monkeypatch.setenv("FAIRNESS_GAP_PP", "oops")  # 잘못된 값은 기본 20pp로 — 화면은 깨지지 않는다
     fair = ops_view(skewed())["fairness"]
     assert fair["threshold_pp"] == 20.0 and fair["alerts"]
+
+
+def test_ops_page_and_report_use_timeline_step_terms():
+    from console.app import STATUS_LABELS
+    from console.ops import AXIS_LABELS, STEP_LABELS
+    from ops.opsreport import AXIS_LABELS as REPORT_AXES, STEP_LABELS as REPORT_STEPS
+
+    assert (STEP_LABELS, AXIS_LABELS) == (REPORT_STEPS, REPORT_AXES)
+    assert STEP_LABELS["assemble"] == STATUS_LABELS["data_assembled"]  # "데이터 수집"
+    assert STEP_LABELS["underwrite"] == STATUS_LABELS["underwritten"]  # "심사 지표 산출"
