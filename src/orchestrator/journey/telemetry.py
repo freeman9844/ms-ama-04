@@ -4,7 +4,7 @@
 """
 
 import logging
-from contextlib import nullcontext
+from contextlib import contextmanager
 from typing import Any
 
 from shared.otel import configure_monitor
@@ -18,14 +18,36 @@ def setup() -> bool:
     return configure_monitor(LOGGER, instrument_httpx=True)
 
 
+@contextmanager
 def span(name: str, attributes: dict[str, Any]):
+    """활동 스팬. 스팬 생성·시작·종료 실패는 삼키고, 본문 예외는 그대로 전파한다."""
     try:
         from opentelemetry import trace
 
         attrs = {k: v for k, v in attributes.items() if isinstance(v, (str, int, float, bool))}
-        return trace.get_tracer("journey").start_as_current_span(name, attributes=attrs)
+        cm = trace.get_tracer("journey").start_as_current_span(name, attributes=attrs)
     except Exception:  # noqa: BLE001
-        return nullcontext()
+        cm = None
+    sp = None
+    if cm is not None:
+        try:
+            sp = cm.__enter__()
+        except Exception:  # noqa: BLE001
+            cm = None
+    try:
+        yield sp
+    except BaseException as e:
+        if cm is not None:
+            try:
+                cm.__exit__(type(e), e, e.__traceback__)
+            except Exception:  # noqa: BLE001
+                pass
+        raise
+    if cm is not None:
+        try:
+            cm.__exit__(None, None, None)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def set_attrs(span: Any, attributes: dict[str, Any]) -> None:
