@@ -109,7 +109,7 @@ def test_all_builds_every_image_provisions_once_then_deploys_function(fake_runne
     runner = fake_runner(ENV)
     deploy(runner, "all", root=repo, tag="t2")
     tags = [c[c.index("-t") + 1] for c in runner.commands("az", "acr", "build")]
-    assert tags == ["policy:t2", "mockapi:t2", "console:t2"]
+    assert tags == ["policy:t2", "mockapi:t2", "console:t2", "eval:t2"]
     assert runner.env["SERVICE_MOCKAPI_IMAGE_NAME"] == "acrx.azurecr.io/mockapi:t2"
     assert runner.env["SERVICE_CONSOLE_IMAGE_NAME"] == "acrx.azurecr.io/console:t2"
     assert len(runner.commands("azd", "provision")) == 1
@@ -132,5 +132,13 @@ def test_console_image_built_from_repo_root(fake_runner, repo):
     [build] = runner.commands("az", "acr", "build")
     assert build[build.index("-f") + 1] == "src/console/Dockerfile"
     assert str(repo) in build
-    assert runner.env["SERVICE_CONSOLE_IMAGE_NAME"] == "acrx.azurecr.io/console:t3"
+    assert runner.commands(*ZIP_DEPLOY) == []
+
+
+def test_eval_image_built_from_repo_root(fake_runner, repo):
+    runner = fake_runner(ENV)
+    assert deploy(runner, "eval", root=repo, tag="t4") == ["acrx.azurecr.io/eval:t4"]
+    [build] = runner.commands("az", "acr", "build")
+    assert build[build.index("-f") + 1] == "src/evals/Dockerfile"
+    assert runner.env["SERVICE_EVAL_IMAGE_NAME"] == "acrx.azurecr.io/eval:t4"
     assert runner.commands(*ZIP_DEPLOY) == []

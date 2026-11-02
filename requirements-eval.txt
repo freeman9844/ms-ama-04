@@ -1,0 +1,6 @@
+# 평가 하니스 Job 컨테이너 의존성(고정). 로컬 개발은 pyproject.toml을 씁니다.
+# 판정자는 자체 구현이라 azure-ai-evaluation은 쓰지 않습니다.
+pydantic==2.14.1
+PyYAML==6.0.3
+httpx==0.28.1
+azure-identity==1.27.0
