@@ -31,7 +31,7 @@ async def handle_start(client: Any, body: str) -> str | None:
     if not should_start(status):
         log.info("중복 신청 무시: %s (%s)", req.application_id, status)
         return None
-    return await client.start_new(ORCHESTRATOR, req.application_id, req.model_dump(mode="json"))
+    return await client.start_new(ORCHESTRATOR, req.application_id, req.model_dump(mode="json", exclude_none=True))
 
 
 async def handle_decision(client: Any, body: str) -> bool:

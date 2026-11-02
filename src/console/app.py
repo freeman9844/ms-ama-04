@@ -243,10 +243,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 applicant_id=form.get("applicant_id", "").strip(),
                 requested_amount_krw=_int(form.get("requested_amount_krw", "")),
                 requested_tenor_months=_int(form.get("requested_tenor_months", "")),
+                submitted_at=deps.clock(),
+                source="console",
             )
         except ValidationError:
             return render("new.html", user, 422, error="신청 정보가 올바르지 않습니다.", form=form)
-        deps.queue.send(START_QUEUE, req.model_dump(mode="json"))
+        deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)

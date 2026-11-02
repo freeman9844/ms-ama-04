@@ -12,8 +12,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE
+from journey.metering import METER_KEY, TAGS_KEY, failed_record, step_records
 from journey.models import KST, WITHDRAWN_EVENT, StartRequest, Status
 from journey.validation import validate_officer_decision
+from shared.segments import segment_of
 
 ORCHESTRATOR = "application_journey"
 EVENT_OFFICER_DECISION = "officer_decision"
@@ -68,6 +70,22 @@ def _fail(ctx: Any, retry: Any, doc: dict[str, Any], stage: str, error: Exceptio
     return _result(doc)
 
 
+def _tags(req: StartRequest) -> dict[str, str]:
+    return {k: v for k, v in (("source", req.source), ("run_id", req.run_id)) if v}
+
+
+def _tagged(payload: dict[str, Any], tags: dict[str, str]) -> dict[str, Any]:
+    return {**payload, TAGS_KEY: tags} if tags else payload
+
+
+def _metered(doc: dict[str, Any], step: str, result: Any, started: datetime, ended: datetime) -> Any:
+    """`_meter`를 떼어 steps[]에 옮긴다. 결과 객체는 고치지 않는다."""
+    meter = result.get(METER_KEY) if isinstance(result, dict) else None
+    clean = {k: v for k, v in result.items() if k != METER_KEY} if isinstance(result, dict) else result
+    doc["steps"].extend(step_records(step, meter, clean, started, ended))
+    return clean
+
+
 def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
     return {
         "id": req.application_id,
@@ -76,6 +94,11 @@ def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
         "requested_amount_krw": req.requested_amount_krw,
         "requested_tenor_months": req.requested_tenor_months,
         "received_at": received.isoformat(),
+        "submitted_at": req.submitted_at.isoformat() if req.submitted_at else None,
+        "source": req.source,
+        "run_id": req.run_id,
+        "segment": None,
+        "steps": [],
         "as_of": received.astimezone(KST).date().isoformat(),
         "status": None,
         "updated_at": None,
@@ -101,29 +124,40 @@ def journey(ctx: Any, retry: Any) -> Steps:
     doc = _new_document(req, _now(ctx))
     yield from _advance(ctx, retry, doc, Status.RECEIVED)
 
+    tags = _tags(req)
+    started = _now(ctx)
     try:
         consent = yield ctx.call_activity_with_retry(
-            "request_consent", retry, {"application_id": req.application_id, "applicant_id": req.applicant_id}
+            "request_consent", retry,
+            _tagged({"application_id": req.application_id, "applicant_id": req.applicant_id}, tags),
         )
     except Exception as e:  # noqa: BLE001 - 활동 실패는 문서에 기록하고 종료한다
+        doc["steps"].append(failed_record("consent", started, _now(ctx), e))
         return (yield from _fail(ctx, retry, doc, "request_consent", e))
+    consent = _metered(doc, "consent", consent, started, _now(ctx))
     # 동의 토큰은 문서에 남기지 않는다(활동 입력으로만 전달).
     doc["consent"] = {k: consent[k] for k in ("consent_id", "scopes", "expires_at")}
     yield from _advance(ctx, retry, doc, Status.CONSENT_GRANTED)
 
+    started = _now(ctx)
     try:
         # 에이전트 실행은 비용이 들고 안전망이 있으므로 활동 재시도를 걸지 않는다.
         assembly = yield ctx.call_activity(
             "assemble_data",
-            {
-                "application_id": req.application_id,
-                "consent_id": consent["consent_id"],
-                "token": consent["token"],
-                "scopes": consent["scopes"],
-            },
+            _tagged(
+                {
+                    "application_id": req.application_id,
+                    "consent_id": consent["consent_id"],
+                    "token": consent["token"],
+                    "scopes": consent["scopes"],
+                },
+                tags,
+            ),
         )
     except Exception as e:  # noqa: BLE001
+        doc["steps"].append(failed_record("assemble", started, _now(ctx), e))
         return (yield from _fail(ctx, retry, doc, "assemble_data", e))
+    assembly = _metered(doc, "assemble", assembly, started, _now(ctx))
     doc["assembly"] = assembly
     doc["flags"].extend(assembly.get("flags", []))
 
@@ -132,50 +166,70 @@ def journey(ctx: Any, retry: Any) -> Steps:
         yield from _advance(ctx, retry, doc, Status.DATA_INCOMPLETE)
     else:
         yield from _advance(ctx, retry, doc, Status.DATA_ASSEMBLED)
+        started = _now(ctx)
         try:
             underwriting = yield ctx.call_activity_with_retry(
                 "underwrite",
                 retry,
-                {
-                    "application_id": req.application_id,
-                    "consent_id": consent["consent_id"],
-                    "as_of": doc["as_of"],
-                    "requested_amount_krw": req.requested_amount_krw,
-                    "requested_tenor_months": req.requested_tenor_months,
-                },
+                _tagged(
+                    {
+                        "application_id": req.application_id,
+                        "consent_id": consent["consent_id"],
+                        "as_of": doc["as_of"],
+                        "requested_amount_krw": req.requested_amount_krw,
+                        "requested_tenor_months": req.requested_tenor_months,
+                    },
+                    tags,
+                ),
             )
         except Exception as e:  # noqa: BLE001
+            doc["steps"].append(failed_record("underwrite", started, _now(ctx), e))
             return (yield from _fail(ctx, retry, doc, "underwrite", e))
+        underwriting = _metered(doc, "underwrite", underwriting, started, _now(ctx))
+        doc["segment"] = segment_of(underwriting.get("features"))
         doc["underwriting"] = underwriting
         doc["flags"].extend(underwriting.get("flags", []))
         yield from _advance(ctx, retry, doc, Status.UNDERWRITTEN)
+        started = _now(ctx)
         try:
-            doc["policy"] = yield ctx.call_activity_with_retry("evaluate_policy", retry, underwriting["features"])
-        except Exception:  # noqa: BLE001 - 정책 결과 없음 = 거절만 허용(fail-closed)
+            result = yield ctx.call_activity_with_retry(
+                "evaluate_policy", retry, _tagged(underwriting["features"], tags)
+            )
+        except Exception as e:  # noqa: BLE001 - 정책 결과 없음 = 거절만 허용(fail-closed)
+            doc["steps"].append(failed_record("policy", started, _now(ctx), e))
             doc["flags"].append(FLAG_POLICY_UNAVAILABLE)
             doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
         else:
-            yield from _assess(ctx, retry, doc, consent["consent_id"], underwriting)
+            doc["policy"] = _metered(doc, "policy", result, started, _now(ctx))
+            yield from _assess(ctx, retry, doc, consent["consent_id"], underwriting, tags)
 
     return (yield from _await_officer(ctx, retry, doc, req.sla_hours))
 
 
-def _assess(ctx: Any, retry: Any, doc: dict[str, Any], consent_id: str, underwriting: dict[str, Any]) -> Steps:
+def _assess(
+    ctx: Any, retry: Any, doc: dict[str, Any], consent_id: str, underwriting: dict[str, Any], tags: dict[str, str]
+) -> Steps:
     """정책 결과를 근거로 분석·검토 에이전트를 돌린다. 실패해도 심사역 단계로 넘어간다(결정 권한 없음)."""
+    started = _now(ctx)
     try:
         # 에이전트 실행은 비용이 들고 반성 루프가 안에 있으므로 활동 재시도를 걸지 않는다.
         result = yield ctx.call_activity(
             "assess_credit",
-            {
-                "application_id": doc["application_id"],
-                "consent_id": consent_id,
-                "underwriting": underwriting,
-                "policy": doc["policy"],
-            },
+            _tagged(
+                {
+                    "application_id": doc["application_id"],
+                    "consent_id": consent_id,
+                    "underwriting": underwriting,
+                    "policy": doc["policy"],
+                },
+                tags,
+            ),
         )
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        doc["steps"].append(failed_record("assess", started, _now(ctx), e))
         doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
         return None
+    result = _metered(doc, "assess", result, started, _now(ctx))
     doc["assessment"] = result.get("assessment")
     doc["assessment_run"] = result.get("record")
     doc["flags"].extend(result.get("flags", []))

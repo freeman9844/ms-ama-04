@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -204,9 +205,13 @@ def test_new_application_is_enqueued_and_redirects(env):
         "requested_tenor_months": "12"})
     assert resp.status_code == 303
     assert resp.headers["location"] == "/applications/app-20261101-abc123"
-    assert queue.sent == [("applications-start", {
+    (queue_name, sent), = queue.sent
+    submitted_at = sent.pop("submitted_at")
+    assert datetime.fromisoformat(submitted_at).tzinfo is not None
+    assert (queue_name, sent) == ("applications-start", {
         "application_id": "app-20261101-abc123", "applicant_id": "demo-cafe-001",
-        "requested_amount_krw": 30_000_000, "requested_tenor_months": 12, "sla_hours": 24.0})]
+        "requested_amount_krw": 30_000_000, "requested_tenor_months": 12, "sla_hours": 24.0,
+        "source": "console"})
 
 
 @pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_tenor_months": "61"},
