@@ -1,0 +1,11 @@
+{
+  "run_id": "fault-20261102111750",
+  "execution": "job-ops-u243nac",
+  "mode": "submit",
+  "fault": {
+    "scenario": "policy-down",
+    "app": "ca-policy",
+    "mode": "unavailable",
+    "reverted": true
+  }
+}
