@@ -1,0 +1,6 @@
+{
+  "_source": "Azure OpenAI Global Standard 단가(USD/1M 토큰), azurespeed.com 집계·Azure 가격 페이지 기준 2026-11 확인. 캐시 입력 할인은 반영하지 않아 상한 추정이다. Decision-1은 공개 단가를 확인하지 못해 비용 집계에서 '단가 미확인' 호출 수로만 남긴다.",
+  "gpt-5.4": {"input_per_1m": 2.5, "output_per_1m": 15.0},
+  "gpt-5.4-mini": {"input_per_1m": 0.75, "output_per_1m": 4.5},
+  "decision-1": {"input_per_1m": null, "output_per_1m": null}
+}
