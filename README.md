@@ -497,6 +497,29 @@ python -m ops window close
 python -m ops eval --suite all                      # Job 시작 → 종료 대기 → Log Analytics에서 리포트 복원 → eval/reports/
 ```
 
+실제 실행 기록(P6a, 2026-11-02, koreacentral):
+
+| 단계 | 실측 |
+|---|---|
+| `ops window open --acr` | 3.6~4.0분 |
+| `ops deploy eval` | 4.3~5.3분(ACR 빌드 40초, 이미지 압축 레이어 합 약 68.9 MiB) |
+| `ops window close` | 3.4~3.8분 |
+| `ops eval --suite all` | 17.9분(Job 실행 17.1분: classify 약 1.2분, underwriting·early_warning 각 약 7분, safety 약 35초) |
+| 실행 이름 / 비용 | `job-eval-9imbutm` / $1.93(단가 확인분, 예산 $5, `partial=False`), 모델 호출 341회, HTTP 오류·재시도 0, 정리 129건 삭제·실패 0 |
+
+주요 실측값(합성 데이터 기준, `eval/reports/job-eval-9imbutm/`):
+
+| 영역 | 결과 |
+|---|---|
+| 분류(n=규칙 미해결 고유 적요 80그룹, 3구성) | 규칙만으로 80.0% 분류. 세 구성 모두 macro F1 1.00(천장 효과) → 비용·지연으로 비교: Decision-1+mini 폴백 22.5%(임계값 0.7)·$0.0047(+Decision-1 60회, p50 349ms), mini $0.0123, gpt-5.4 $0.0410 |
+| 심사(n=8, 검토자 mini 고정) | 분석가 gpt-5.4: 1라운드 근거 통과 100%, 최종 87.5%, 검토 통과 87.5%, 건당 $0.063 / mini: 62.5%·62.5%·62.5%, 건당 $0.020. 두 모델 모두 Policy 일치·세무 불일치 탐지 100%, judge G/R/C 4.12/5.00/4.75(gpt-5.4)·4.12/4.88/5.00(mini) |
+| 조기경보(n=6경로 × 13주) | mini precision/recall 1.0/1.0, 평균 리드 71.7일, $0.19 / gpt-5.4 1.0/1.0(5경로, 1경로 agent_error), 70.5일, $0.80 / 탐지기 단독 precision 0.5 |
+| 안전성 | 주입 저항률 100%(판별 가능 2건 × 2모델), 반사실 쌍 일관성 100%(2쌍), 모델 입출력 PII 0/341회 |
+| 사람 검토(표본 3건, mini 설명) | 정확성·근거 충분성·이해 용이성 모두 5/5(프로젝트 담당자 검토). judge 점수와 같은 방향 |
+
+첫 실행에서 찾아 고친 결함: azd 출력 누락(`EVAL_JOB_NAME`), 비루트 사용자의 리포트 폴더 쓰기 권한, Foundry 응답 ID(`resp_<16진수>`)의
+숫자열을 계좌번호로 본 PII 오탐(50건 → 0건).
+
 - `ops eval --suite <이름>`은 Job 정의(이미지·env·관리 ID)를 그대로 복사하고 `EVAL_SUITE`만 바꿔 ARM `start`로 시작합니다.
 - 리포트 회수: Job은 결과 파일을 gzip+base64 6,000자 조각(`EVALCHUNK …` 줄)으로 stdout에 남기고, `ops eval`이
   `ContainerAppConsoleLogs_CL`에서 실행 이름으로 모아 sha256을 확인합니다. 데이터 스토리지(stdat) 네트워크는 열지 않습니다.
