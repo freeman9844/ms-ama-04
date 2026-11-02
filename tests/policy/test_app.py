@@ -65,3 +65,26 @@ def test_main_uses_env_rules_path(monkeypatch, tmp_path):
     sys.modules.pop("policy.main", None)
     module = importlib.import_module("policy.main")
     assert TestClient(module.app).get("/healthz").json()["rules_version"] == "test-v9"
+
+
+def test_unavailable_fault_returns_503_for_decisions_only(rules, make_features):
+    c = TestClient(create_app(rules, fault="unavailable"))
+    assert c.get("/healthz").status_code == 200
+    r = c.post("/v1/decisions", json=make_features().model_dump(mode="json"))
+    assert r.status_code == 503 and r.json() == {"code": "unavailable"}
+
+
+def test_unknown_fault_mode_is_rejected(rules):
+    with pytest.raises(ValueError):
+        create_app(rules, fault="weird")
+
+
+def test_main_reads_fault_mode(monkeypatch, make_features):
+    monkeypatch.setenv("FAULT_MODE", "unavailable")
+    monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
+    sys.modules.pop("policy.main", None)
+    module = importlib.import_module("policy.main")
+    r = TestClient(module.app).post("/v1/decisions", json=make_features().model_dump(mode="json"))
+    assert r.status_code == 503
+    monkeypatch.delenv("FAULT_MODE")
+    sys.modules.pop("policy.main", None)
