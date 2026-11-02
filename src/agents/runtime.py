@@ -72,6 +72,9 @@ class AgentRun:
     total_tokens: int
     rounds: int
     containers: tuple[str, ...] = ()
+    input_tokens: int = 0
+    output_tokens: int = 0
+    model: str = ""
 
     def record(self) -> dict[str, Any]:
         """감사 기록용 요약. 도구 출력 본문은 원천 Blob에 있으므로 남기지 않는다."""
@@ -90,6 +93,15 @@ class AgentRun:
 
 def _tokens(response: dict[str, Any]) -> int:
     return int((response.get("usage") or {}).get("total_tokens") or 0)
+
+
+def _usage(response: dict[str, Any]) -> tuple[int, int, int]:
+    usage = response.get("usage") or {}
+    return (
+        int(usage.get("input_tokens") or 0),
+        int(usage.get("output_tokens") or 0),
+        int(usage.get("total_tokens") or 0),
+    )
 
 
 def _output_text(response: dict[str, Any]) -> str:
@@ -222,7 +234,7 @@ class FoundryAgents:
             return response
 
         response = respond(input_text)
-        tokens = _tokens(response)
+        inp, out, tokens = _usage(response)
         tool_calls: list[ToolCall] = []
         rounds = 0
         while pending := [o for o in response.get("output", []) if o.get("type") == "function_call"]:
@@ -241,7 +253,8 @@ class FoundryAgents:
                     }
                 )
             response = respond(outputs)
-            tokens += _tokens(response)
+            i, o, t = _usage(response)
+            inp, out, tokens = inp + i, out + o, tokens + t
 
         if response.get("status") != "completed":
             raise AgentError(f"응답 상태 {response.get('status')}", conversation_id)
@@ -249,4 +262,7 @@ class FoundryAgents:
             output = spec.output_model.model_validate_json(_output_text(response))
         except ValidationError as e:
             raise AgentError("출력이 스키마와 맞지 않음", conversation_id) from e
-        return AgentRun(spec.name, version, conversation_id, output, tool_calls, tokens, rounds, tuple(containers))
+        return AgentRun(
+            spec.name, version, conversation_id, output, tool_calls, tokens, rounds, tuple(containers),
+            input_tokens=inp, output_tokens=out, model=spec.model,
+        )
