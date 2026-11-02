@@ -53,7 +53,10 @@ def reassemble(lines: Iterable[str], run_id: str) -> dict[str, bytes]:
         if len(fields) not in (5, 6) or fields[1] != run_id:
             continue
         _, _, name, pos, digest, *rest = fields
-        seq, total = (int(x) for x in pos.split("/"))
+        try:
+            seq, total = (int(x) for x in pos.split("/"))
+        except ValueError as err:
+            raise TransportError(f"{name}: 조각 번호 형식 오류({pos})") from err
         if meta.setdefault(name, (total, digest)) != (total, digest):
             raise TransportError(f"{name}: 조각 메타데이터가 서로 다르다")
         pieces[name][seq] = rest[0] if rest else ""
@@ -62,7 +65,10 @@ def reassemble(lines: Iterable[str], run_id: str) -> dict[str, bytes]:
         missing = [i for i in range(1, total + 1) if i not in pieces[name]]
         if missing:
             raise TransportError(f"{name}: 조각 {len(missing)}/{total}개 누락(예: {missing[:5]})")
-        packed = base64.b64decode("".join(pieces[name][i] for i in range(1, total + 1)))
+        try:
+            packed = base64.b64decode("".join(pieces[name][i] for i in range(1, total + 1)))
+        except ValueError as err:  # binascii.Error 포함
+            raise TransportError(f"{name}: base64 해석 실패") from err
         if hashlib.sha256(packed).hexdigest() != digest:
             raise TransportError(f"{name}: sha256 불일치")
         files[name] = gzip.decompress(packed)

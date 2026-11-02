@@ -125,3 +125,34 @@ def test_cli_eval_prints_summary(fake_runner, tmp_path, monkeypatch):
     assert main(["eval", "--suite", "classify"], runner=runner, out=out) == 0
     text = out.getvalue()
     assert EXEC in text and "$2.5" in text and str(tmp_path / EXEC) in text
+
+
+def test_run_eval_retries_transient_log_query_failure(fake_runner, tmp_path):
+    runner = _runner(fake_runner, OpsError("az monitor: 일시 오류"), _rows(FILES))
+    result = run_eval(runner, out_root=tmp_path, sleep=lambda s: None)
+    assert (tmp_path / EXEC / "summary.json").exists() and result.execution == EXEC
+    assert len(runner.commands(*QUERY)) == 2
+
+
+def test_run_eval_collect_only_recovers_report_of_finished_execution(fake_runner, tmp_path):
+    # 로그 수집이 늦어 복원에 실패한 실행은 Job을 다시 돌리지 않고 회수만 다시 한다.
+    runner = _runner(fake_runner, _rows(FILES))
+    result = run_eval(runner, collect=EXEC, out_root=tmp_path, sleep=lambda s: None)
+    assert result.execution == EXEC and (tmp_path / EXEC / "report.md").read_bytes() == FILES["report.md"]
+    assert runner.commands(*START) == [] and runner.commands(*SHOW) == [] and runner.commands("az", "rest") == []
+
+
+def test_log_give_up_message_points_to_recollect_and_blob_copy(fake_runner, tmp_path):
+    runner = _runner(fake_runner, _rows(FILES, drop=0))
+    with pytest.raises(OpsError) as err:
+        run_eval(runner, out_root=tmp_path, sleep=lambda s: None, log_limit=2)
+    assert f"python -m ops eval --collect {EXEC}" in str(err.value)
+    assert f"eval-reports/{EXEC}/" in str(err.value)
+
+
+def test_cli_eval_collect(fake_runner, tmp_path, monkeypatch):
+    monkeypatch.setattr("ops.eval_runner.REPORTS", tmp_path)
+    runner = _runner(fake_runner, _rows(FILES))
+    out = io.StringIO()
+    assert main(["eval", "--collect", EXEC], runner=runner, out=out) == 0
+    assert str(tmp_path / EXEC) in out.getvalue() and runner.commands(*START) == []

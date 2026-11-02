@@ -39,7 +39,7 @@ def _run_id(lines: list[str], execution: str) -> str:
     return ids.pop()
 
 
-def collect(az: Runner, workspace: str, execution: str) -> dict[str, bytes]:
+def collect_report(az: Runner, workspace: str, execution: str) -> dict[str, bytes]:
     rows = json.loads(az(["az", "monitor", "log-analytics", "query", "-w", workspace,
                           "--analytics-query", _query(execution), "-o", "json"]) or "[]")
     lines = [row.get("Log_s", "") for row in rows]
@@ -74,14 +74,8 @@ def _start(az: Runner, env: dict[str, str], group: str, job: str, suite: str) ->
         os.unlink(f.name)
 
 
-def run_eval(runner: Runner, *, suite: str = "all", out_root: Path | None = None,
-             sleep: Callable[[float], None] | None = None, poll_wait: float = 15, poll_limit: int = 250,
-             log_wait: float = 30, log_limit: int = 20) -> EvalResult:
-    sleep = sleep or time.sleep
-    env = get_env(runner)
-    group, job = env["AZURE_RESOURCE_GROUP"], env["EVAL_JOB_NAME"]
-    az = subscription_runner(runner, env)
-    execution = _start(az, env, group, job, suite)
+def _wait(az: Runner, env: dict[str, str], group: str, job: str, execution: str,
+          sleep: Callable[[float], None], poll_wait: float, poll_limit: int) -> None:
     for _ in range(poll_limit):
         status = az(["az", "containerapp", "job", "execution", "show", "-g", group, "-n", job,
                      "--job-execution-name", execution, "--query", "properties.status", "-o", "tsv"]).strip()
@@ -93,15 +87,34 @@ def run_eval(runner: Runner, *, suite: str = "all", out_root: Path | None = None
     if status != "Succeeded":
         raise OpsError(f"평가 실패: {execution} 상태 {status}\n{log_hint(env, execution)}")
 
+
+def run_eval(runner: Runner, *, suite: str = "all", collect: str | None = None, out_root: Path | None = None,
+             sleep: Callable[[float], None] | None = None, poll_wait: float = 15, poll_limit: int = 250,
+             log_wait: float = 30, log_limit: int = 20) -> EvalResult:
+    """Job을 시작해 끝날 때까지 기다린 뒤 리포트를 회수한다. collect에 실행 이름을 주면 회수만 다시 한다."""
+    sleep = sleep or time.sleep
+    env = get_env(runner)
+    group, job = env["AZURE_RESOURCE_GROUP"], env["EVAL_JOB_NAME"]
+    az = subscription_runner(runner, env)
+    if collect:
+        execution = collect
+    else:
+        execution = _start(az, env, group, job, suite)
+        _wait(az, env, group, job, execution, sleep, poll_wait, poll_limit)
+
     # Log Analytics 수집은 수 분 늦을 수 있어 조각이 모두 모일 때까지 다시 조회한다(기본 최대 10분).
     workspace = env.get("LOG_ANALYTICS_CUSTOMER_ID", "")
     for attempt in range(1, log_limit + 1):
         try:
-            files = collect(az, workspace, execution)
+            files = collect_report(az, workspace, execution)
             break
-        except TransportError as err:
+        except (TransportError, OpsError) as err:  # 조각 누락·수집 지연·일시적 조회 오류
             if attempt == log_limit:
-                raise OpsError(f"리포트 복원 실패: {err}\n{log_hint(env, execution)}") from err
+                container = env.get("EVAL_REPORTS_CONTAINER", "eval-reports")
+                raise OpsError(
+                    f"리포트 복원 실패: {err}\n잠시 뒤 회수만 다시: python -m ops eval --collect {execution}\n"
+                    f"원본 사본: 데이터 스토리지 Blob {container}/{execution}/ (사설 엔드포인트 전용)\n"
+                    f"{log_hint(env, execution)}") from err
             sleep(log_wait)
     out_dir = (out_root or REPORTS) / execution
     out_dir.mkdir(parents=True, exist_ok=True)

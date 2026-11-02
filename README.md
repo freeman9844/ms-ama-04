@@ -484,7 +484,7 @@ python -m ops smoke                        # journey 승인 뒤 consent가 삭�
 - **suite**: `classify`(Decision-1+mini 폴백 / mini / gpt-5.4, 임계값 곡선), `underwriting`(gpt-5.4 / mini analyst, 근거 인용률·세무 불일치
   탐지·Policy 일치·LLM-judge), `early_warning`(6경로 × 13주 재생, 탐지기 단독 기준선), `safety`(주입 방어율·PII 누출률·반사실 쌍).
 - **계측**: httpx 전송 계층에서 호출마다 모델·토큰·지연·재시도·PII 종류를 기록하고(본문은 남기지 않음) 단가표(`src/evals/prices.json`)로
-  비용을 계산합니다. 예산 가드 `EVAL_BUDGET_USD`(기본 $5)를 넘으면 남은 케이스를 건너뛰고 `partial`로 표시합니다. Decision-1은 공개 단가가 없어
+  비용을 계산합니다. 예산 가드 `EVAL_BUDGET_USD`(기본 $5)를 넘으면 남은 케이스를 건너뛰고 `partial`로 표시합니다(케이스 시작 전에 확인하므로 진행 중인 케이스 1건 비용만큼 넘을 수 있음. 예: gpt-5.4 조기경보 1경로 약 $0.16). Decision-1은 공개 단가가 없어
   비용에서 빠지고 호출 수만 보고합니다.
 - **결과**: `eval/reports/<실행 이름>/`의 `summary.json`(전체 수치), `report.md`(한국어 리포트, 실패 유형 카탈로그, 사람 검토 표본, 한계),
   `calls.jsonl`(호출 계측). Job은 같은 파일을 Blob `eval-reports/<실행 이름>/`에도 올립니다.
@@ -495,6 +495,7 @@ python -m ops window open --acr                     # 평가 이미지 빌드에
 python -m ops deploy eval                           # az acr build → SERVICE_EVAL_IMAGE_NAME → provision(job-eval 갱신)
 python -m ops window close
 python -m ops eval --suite all                      # Job 시작 → 종료 대기 → Log Analytics에서 리포트 복원 → eval/reports/
+python -m ops eval --collect <실행 이름>            # 회수만 다시(로그 수집 지연으로 복원 실패했을 때)
 ```
 
 실제 실행 기록(P6a, 2026-11-02, koreacentral):
@@ -511,11 +512,13 @@ python -m ops eval --suite all                      # Job 시작 → 종료 대�
 
 | 영역 | 결과 |
 |---|---|
-| 분류(n=규칙 미해결 고유 적요 80그룹, 3구성) | 규칙만으로 80.0% 분류. 세 구성 모두 macro F1 1.00(천장 효과) → 비용·지연으로 비교: Decision-1+mini 폴백 22.5%(임계값 0.7)·$0.0047(+Decision-1 60회, p50 349ms), mini $0.0123, gpt-5.4 $0.0410 |
+| 분류(n=규칙 미해결 고유 적요 80그룹, 3구성) | 규칙만으로 80.0% 분류. 세 구성 모두 macro F1 1.00(천장 효과) → 비용·지연으로 비교: Decision-1+mini 폴백 25.0%(호출 60회 기준, 고유 상태 40개 기준 임계값 곡선 0.7에서 22.5%)·$0.0047(+Decision-1 60회, p50 349ms), mini $0.0123, gpt-5.4 $0.0410 |
 | 심사(n=8, 검토자 mini 고정) | 분석가 gpt-5.4: 1라운드 근거 통과 100%, 최종 87.5%, 검토 통과 87.5%, 건당 $0.063 / mini: 62.5%·62.5%·62.5%, 건당 $0.020. 두 모델 모두 Policy 일치·세무 불일치 탐지 100%, judge G/R/C 4.12/5.00/4.75(gpt-5.4)·4.12/4.88/5.00(mini) |
 | 조기경보(n=6경로 × 13주) | mini precision/recall 1.0/1.0, 평균 리드 71.7일, $0.19 / gpt-5.4 1.0/1.0(5경로, 1경로 agent_error), 70.5일, $0.80 / 탐지기 단독 precision 0.5 |
 | 안전성 | 주입 저항률 100%(판별 가능 2건 × 2모델), 반사실 쌍 일관성 100%(2쌍), 모델 입출력 PII 0/341회 |
-| 사람 검토(표본 3건, mini 설명) | 정확성·근거 충분성·이해 용이성 모두 5/5(프로젝트 담당자 검토). judge 점수와 같은 방향 |
+| 사람 검토(표본 3건, mini 설명) | 정확성·근거 충분성·이해 용이성 모두 5/5(프로젝트 담당자, 채점 양식에 기본값 5가 제시된 상태로 응답, 자동 신호 확인 뒤 변경 없음). 표본 1·2는 자동 근거 검사 실패·검토 미통과이고 judge도 근거 자료에 없는 계절지수 수치를 지적해, 사람 점수가 자동 신호보다 후하다. 1명·3건이라 참고값 |
+
+**변동:** 위 값은 실행 1회 결과입니다. PII 수정 전 같은 데이터·코드로 돌린 직전 실행(`job-eval-n8bqwwv`, 리포트 미보관)에서는 조기경보 mini recall 0.333·평균 리드 18일, 심사 최종 근거 통과 gpt-5.4 100%·mini 75%였습니다. 모델 간 차이와 단일 수치는 LLM 응답 변동 범위 안에 있을 수 있어 경향으로만 봅니다.
 
 첫 실행에서 찾아 고친 결함: azd 출력 누락(`EVAL_JOB_NAME`), 비루트 사용자의 리포트 폴더 쓰기 권한, Foundry 응답 ID(`resp_<16진수>`)의
 숫자열을 계좌번호로 본 PII 오탐(50건 → 0건).
@@ -529,7 +532,9 @@ python -m ops eval --suite all                      # Job 시작 → 종료 대�
 ### 문제 대응(P6a)
 
 - `ops eval`이 `평가 실패: … 상태 Failed`: 출력된 Log Analytics 쿼리로 Job 로그를 봅니다(`[eval]` 줄, 예외). 이미지가 자리표시면 `ops deploy eval`부터.
-- `리포트 복원 실패: 조각 누락`: 로그 수집이 늦었거나 Job이 리포트를 쓰기 전에 끝났습니다. Blob `eval-reports/<실행 이름>/`의 원본을 받습니다.
+- `리포트 복원 실패: 조각 누락`: 로그 수집이 늦었거나 Job이 리포트를 쓰기 전에 끝났습니다. 몇 분 뒤 `python -m ops eval --collect <실행 이름>`으로
+  Job을 다시 돌리지 않고 회수만 다시 합니다(일시적 조회 오류·잘린 조각 줄도 재조회 대상). Blob `eval-reports/<실행 이름>/` 사본은 데이터 스토리지가
+  공용 접근 차단·사설 엔드포인트 전용이라 운영자 PC에서는 바로 읽을 수 없습니다(VNet 안에서만, 운영자 Blob 역할 없음).
 - 리포트에 `agent_error`가 많음: `calls.jsonl`의 `status`·`retries`·`error`를 봅니다(429 → 쿼터, 401/403 → `id-eval` 역할).
 - 로컬에서 실제 모델로 돌릴 때(`AzureCliCredential`)는 `AI_PROJECT_ENDPOINT`·`AI_ACCOUNT_ENDPOINT`를 설정하고 운영자 IP 창을 엽니다.
   토큰은 만료 5분 전까지 재사용합니다(호출마다 `az`를 띄우면 느리고 간헐적으로 실패).
@@ -539,5 +544,7 @@ python -m ops eval --suite all                      # Job 시작 → 종료 대�
 - 컴포넌트 평가라 큐·Durable을 포함한 전 구간 지연은 재지 않습니다(P6b App Insights).
 - 반사실·주입은 케이스당 1회 실행이라 LLM 변동과 구분되지 않습니다. 반사실 불일치 0건은 "이 표본에서 관찰되지 않음"입니다.
 - 분류 표본은 어려운 적요 뱅크를 넣어도 구성 간 차이가 작을 수 있습니다(천장 효과면 리포트 한계 절에 표시).
-- judge 점수는 LLM 평가라 참고값입니다. `report.md`의 사람 검토 표본 3건을 채워 함께 봅니다.
+- judge 점수는 LLM 평가라 참고값입니다. `report.md`의 사람 검토 표본 3건(자동 신호 함께 표시)을 채워 함께 봅니다.
+- PII 검사는 응답 봉투의 식별자 키(`id`, `name`, `type`, `status` 등)와 `resp_<16진수>` 같은 서비스 식별자 문자열 전체를 건너뜁니다.
+  이 키 아래에 들어간 값이나 문장 속 서비스 ID 옆 숫자는 놓치거나 오탐할 수 있어, "PII 0건"은 이 검사 기준입니다.
 - Foundry 포털 평가 업로드, 운영 데이터 기준 공정성 대시보드, SLO는 범위 밖입니다(P6b).

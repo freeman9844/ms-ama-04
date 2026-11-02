@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("smoke", help="VNet 안 smoke Job 실행 + 콘솔 로그인 관문 확인")
     evaluator = commands.add_parser("eval", help="평가 Job 실행 후 리포트를 eval/reports/<실행>/에 저장")
     evaluator.add_argument("--suite", default="all", choices=EVAL_SUITES)
+    evaluator.add_argument("--collect", metavar="EXECUTION", help="Job을 다시 돌리지 않고 끝난 실행의 리포트만 회수")
     deployer = commands.add_parser("deploy", help="정책·Mock·콘솔·평가 이미지(ACR Build)와 Function 코드 배포")
     deployer.add_argument("target", nargs="?", default="all", choices=deploy_module.TARGETS)
     destroy = commands.add_parser("teardown", help="환경 전체 삭제")
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             print(f"smoke 성공: {run_smoke(runner)}", file=out)
             print(f"콘솔 관문 확인: {check_console_gate(get_env(runner))}", file=out)
         elif args.command == "eval":
-            result = run_eval(runner, suite=args.suite)
+            result = run_eval(runner, suite=args.suite, collect=args.collect)
             summary = result.summary
             failures = sum(summary.get("failure_counts", {}).values())
             print(f"평가 완료: {result.execution} (partial={summary.get('partial')}, "

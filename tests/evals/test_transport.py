@@ -31,3 +31,10 @@ def test_corrupted_piece_fails_hash_check():
 
 def test_chunks_are_deterministic():
     assert chunks("r", "f", DATA) == chunks("r", "f", DATA)
+
+
+@pytest.mark.parametrize("bad", ["{tag} run-1 report.md x/3 abc QUJD", "{tag} run-1 report.md 1/1 abc QUJ"])
+def test_malformed_piece_line_is_a_transport_error(bad):
+    # 잘린 로그 줄(번호·base64 깨짐)도 재조회 대상이 되도록 TransportError로 낸다.
+    with pytest.raises(TransportError):
+        reassemble([bad.format(tag="EVALCHUNK")], "run-1")

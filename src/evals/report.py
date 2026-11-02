@@ -151,6 +151,15 @@ def _safety(s: dict[str, Any]) -> list[str]:
     return out
 
 
+def _signals(r: dict[str, Any]) -> str:
+    grounded = {True: "통과", False: "실패"}.get(r.get("final_grounded"), "없음")
+    review = {True: "통과", False: "미통과"}.get(r.get("review_passed"), "결과 없음")
+    judge = r.get("judge") or {}
+    scores = [judge.get(k) for k in ("groundedness", "relevance", "coherence")]
+    verdict = "판정자 G/R/C " + "/".join(str(s) for s in scores) if None not in scores else "판정자 점수 없음"
+    return f"최종 근거 검사 {grounded}, 검토 {review}, {verdict}"
+
+
 def _human_review(summary: dict[str, Any]) -> list[str]:
     rows = [r for r in summary["suites"].get("underwriting", {}).get("cases", []) if r.get("explanation") and not r.get("injected")]
     picked: list[dict[str, Any]] = []
@@ -160,7 +169,7 @@ def _human_review(summary: dict[str, Any]) -> list[str]:
     out = ["## 8. 사람 검토 표본", "", "심사역이 설명 3건을 읽고 1~5점으로 채운다(판정자 점수와 비교용).", ""]
     for i, r in enumerate(picked[:3], 1):
         out += [f"**{i}. {r['case']}** (모델 {r['config']}, 정책 {r['policy']}, 추천 {r['recommendation']})", "",
-                f"> {r['explanation']}", ""]
+                f"> {r['explanation']}", "", f"자동 신호: {_signals(r)}", ""]
     out += _table(["표본", "정확성", "근거 충분성", "이해 용이성", "메모"], [[i, "", "", "", ""] for i in range(1, len(picked[:3]) + 1)])
     return out
 

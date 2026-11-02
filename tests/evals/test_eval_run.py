@@ -111,6 +111,16 @@ def test_report_flags_classify_ceiling_effect(tmp_path):
     assert "천장 효과" not in report.render_markdown(summary)
 
 
+def test_human_review_samples_show_automatic_signals(tmp_path):
+    # 사람 점수를 자동 신호(근거 검사·검토 통과·판정자 점수)와 나란히 보게 한다.
+    summary, _ = _run(tmp_path, "--suite", "underwriting")
+    row = next(r for r in summary["suites"]["underwriting"]["cases"]
+               if r.get("explanation") and not r.get("injected") and r["policy"] == "eligible")
+    row.update(final_grounded=False, review_passed=False, judge={"groundedness": 4, "relevance": 5, "coherence": 3})
+    section = report.render_markdown(summary).split("## 8.")[1].split("## 9.")[0]
+    assert "최종 근거 검사 실패, 검토 미통과, 판정자 G/R/C 4/5/3" in section
+
+
 def test_emitted_log_chunks_rebuild_the_report(tmp_path):
     summary, lines = _run(tmp_path, "--suite", "early_warning", "--emit")
     files = reassemble(lines, summary["run_id"])
