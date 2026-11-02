@@ -12,6 +12,7 @@ import httpx
 from agents.data_assembly import DEFAULT_MODEL, SourceError
 from agents.runtime import FoundryAgents
 from agents.txn_classify import DecisionClient
+from journey import telemetry
 from journey.activities import (
     ANALYST_MODEL,
     CLASSIFIER_MODEL,
@@ -262,7 +263,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> Deps:
         store=store,
         raw=BlobRawStore(env["DATA_BLOB_ENDPOINT"], credential),
         mock=HttpMockApi(env["MOCKAPI_URL"]),
-        policy=HttpPolicyApi(env["POLICY_URL"], breaker=CircuitBreaker()),
+        policy=HttpPolicyApi(env["POLICY_URL"], breaker=CircuitBreaker(on_change=telemetry.circuit_changed)),
         events=ServiceBusPublisher(fqdn, credential) if fqdn else None,
         pseudonym_key=load_pseudonym_key(env, credential),
         clock=lambda: datetime.now(KST),

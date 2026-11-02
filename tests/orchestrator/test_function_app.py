@@ -170,5 +170,20 @@ def test_requirements_pin_runtime_sdks():
         "azure-keyvault-secrets",
         "httpx",
         "pydantic",
+        "azure-monitor-opentelemetry",
+        "opentelemetry-instrumentation-httpx",
     } <= names
     assert all("==" in line for line in lines)
+
+
+def test_metered_activities_are_wrapped(monkeypatch):
+    import function_app
+
+    seen = []
+    monkeypatch.setattr(function_app, "run_metered", lambda name, fn, d, p: seen.append((name, fn)) or {"ok": 1})
+    monkeypatch.setattr(function_app, "deps", lambda: "deps")
+    assert function_app._metered_activity("underwrite", {"application_id": "a"}) == {"ok": 1}
+    assert seen == [("underwrite", ACTIVITIES["underwrite"])]
+    src = (ROOT / "function_app.py").read_text(encoding="utf-8")
+    for name in ("request_consent", "assemble_data", "underwrite", "evaluate_policy", "assess_credit"):
+        assert f'_metered_activity("{name}", payload)' in src
