@@ -11,5 +11,7 @@ COPY src/mockapis /app/mockapis
 COPY src/evals /app/evals
 ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
 WORKDIR /app
+# 리포트 기본 경로(eval/reports/<실행 이름>). /app은 root 소유라 비루트 사용자에게 미리 넘긴다
+RUN mkdir -p /app/eval/reports && chown -R 65532:65532 /app/eval
 USER 65532
 CMD ["/opt/venv/bin/python", "-m", "evals"]
