@@ -494,7 +494,6 @@ module caPolicy 'modules/container-app.bicep' = {
       { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: monitoring.outputs.appiConnectionString }
       { name: 'OTEL_SERVICE_NAME', value: 'policy' }
       { name: 'OTEL_PYTHON_FASTAPI_EXCLUDED_URLS', value: 'healthz' }
-      { name: 'OTEL_PYTHON_FASTAPI_EXCLUDE_SPANS', value: 'receive,send' }
     ]
   }
 }

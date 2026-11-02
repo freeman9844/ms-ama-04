@@ -52,7 +52,8 @@ def test_policy_exports_otel(variant):
     assert env["OTEL_SERVICE_NAME"] == "policy"
     assert "APPLICATIONINSIGHTS_CONNECTION_STRING" in env
     assert env["OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"] == "healthz"
-    assert env["OTEL_PYTHON_FASTAPI_EXCLUDE_SPANS"] == "receive,send"
+    # send/receive 스팬 제외는 env가 아니라 코드(shared.otel.instrument_fastapi)에서 한다.
+    assert "OTEL_PYTHON_FASTAPI_EXCLUDE_SPANS" not in env
     # 연결 문자열은 배포 시점 값이라 PSRule 펼치기에서는 빈 문자열이다. 컴파일 결과로 배선을 확인한다.
     [policy] = [m for m in _resources(_compile(INFRA / "resources.bicep")) if m.get("name") == "ca-policy"]
     wired = {e["name"]: e["value"] for e in policy["properties"]["parameters"]["envVars"]["value"]}

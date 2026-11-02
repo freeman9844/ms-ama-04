@@ -16,6 +16,8 @@ def _query(application_ids: list[str]) -> str:
             f"let ops = union AppRequests, AppDependencies | where TimeGenerated > ago({LOOKBACK}) "
             "| extend app = tostring(Properties.application_id) | where app in (ids) | distinct OperationId, app; "
             f"AppDependencies | where TimeGenerated > ago({LOOKBACK}) and not(Name startswith 'journey.') "
+            # Policy ASGI 내부 send/receive 스팬(계측 수정 전 데이터)은 호출 수가 아니므로 뺀다.
+            "| where not(Name endswith ' http send' or Name endswith ' http receive') "
             "| join kind=inner ops on OperationId "
             "| summarize total = count(), failed = countif(Success == false) by app, Target, AppRoleName")
 

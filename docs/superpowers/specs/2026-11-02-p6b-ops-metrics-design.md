@@ -338,3 +338,4 @@ Cosmos와 Storage Queue는 IP 창으로도 로컬에서 열리지 않습니다(P
 | §6.2 | `policy-down` 시나리오 제출 간격 90초(`source-flaky`는 5초) | 서킷 cooldown(60초)보다 길게 둬 각 신청이 half-open 시험 → 재open을 거치게 함 |
 | §7.2 | 측정 결과 `ops/reports/<run_id>/`를 커밋 | `eval/reports`와 같은 관례. 투영 허용 필드만 있어 원문 PII 없음 |
 | §1.2 | console `/ops`는 고정비를 계산하지 않음(건당 총비용 "-", 보고서 안내) | console 관리 ID에 Cost Management 권한을 주지 않음 |
+| §5.2 | ASGI send/receive 스팬 제외는 env(`OTEL_PYTHON_FASTAPI_EXCLUDE_SPANS`)가 아니라 코드로 한다: Policy는 배포판의 FastAPI 자동 계측을 끄고(`instrumentation_options={"fastapi": {"enabled": False}}`) `FastAPIInstrumentor.instrument_app(app, exclude_spans=["receive", "send"])`로 직접 계측. `healthz` 제외는 env 그대로. 장애 증거 KQL도 이름이 ` http send`·` http receive`로 끝나는 의존성 행을 뺀다 | 설치된 `opentelemetry-instrumentation-fastapi` 0.66b1은 `exclude_spans`를 env로 읽지 않음(최종 리뷰 I1) |

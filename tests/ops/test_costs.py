@@ -65,6 +65,8 @@ def test_dependency_counts_single_line_query(fake_runner):
     kql = call[call.index("--analytics-query") + 1]
     # az.cmd는 큰따옴표·줄바꿈이 든 인자를 깨뜨린다.
     assert "\n" not in kql and '"' not in kql and "'fault-1-01'" in kql
+    # Policy ASGI 내부 스팬(`POST /v1/decisions http send` 등)은 호출 증거가 아니다.
+    assert "not(Name endswith ' http send' or Name endswith ' http receive')" in kql
 
 
 def _named(cost_column, rows):
