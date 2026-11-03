@@ -1,0 +1,338 @@
+"""미리보기용 합성 데이터와 메모리 저장소. 실제 차주·실제 측정값이 아니다(화면 확인 전용).
+
+신청 11건(상태 골고루), 대출 3건(재생 완료·재생 중·재생 전), 운영 측정 실행 1개를 만든다.
+원천 데이터(RawStore)는 비워 두어 상세 화면은 가명 토큰 복원 불가 상태로 보인다.
+"""
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from console.app import ConsoleDeps
+from console.auth import CREDIT_OFFICER, Principal
+
+KST = timezone(timedelta(hours=9))
+NOW = datetime(2026, 11, 3, 10, 0, tzinfo=KST)
+DAY = NOW.replace(hour=9, minute=0)
+RUN_ID = "load-20261103090000"
+PRINCIPAL = Principal(user_id="preview-officer", name="미리보기 심사역", roles=frozenset({CREDIT_OFFICER}))
+FLOW = ("received", "consent_granted", "data_assembled", "underwritten", "assessed", "awaiting_officer")
+OFFSETS = (0, 20, 65, 100, 190, 195)
+MONTHS = ("2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09")
+REVENUE = (38_000_000, 41_000_000, 36_000_000, 44_000_000, 47_000_000, 42_000_000)
+
+
+def _at(start: datetime, seconds: int) -> str:
+    return (start + timedelta(seconds=seconds)).isoformat()
+
+
+def _timeline(start: datetime, statuses: tuple[str, ...], extra: tuple[tuple[str, int], ...] = ()) -> list[dict]:
+    out = [{"status": s, "at": _at(start, OFFSETS[i])} for i, s in enumerate(statuses)]
+    out += [{"status": s, "at": _at(start, sec)} for s, sec in extra]
+    return out
+
+
+def _monthly() -> list[dict[str, Any]]:
+    return [{"month": m, "revenue": r, "operating_out": round(r * 0.62), "debt_service": 2_400_000,
+             "owner_draw": 3_000_000 + i * 200_000} for i, (m, r) in enumerate(zip(MONTHS, REVENUE, strict=True))]
+
+
+def _assessment(app_id: str, rec: str) -> dict[str, Any]:
+    return {
+        "application_id": app_id,
+        "recommendation": rec,
+        "summary": "최근 6개월 매출이 월 3,600만~4,700만 원으로 안정적이고 상환 여력(DSCR 1.8)이 정책 기준을 넘는다.",
+        "claims": [
+            {"text": "DSCR 1.8로 정책 기준 1.25를 넘는다", "metric_ids": ["M:dscr", "P:R101:threshold"], "txn_ids": []},
+            {"text": "대표자 인출 비율 18%로 기준 35% 안에 있다", "metric_ids": ["S:owner_draw_ratio"], "txn_ids": []},
+        ],
+        "proposed_structure": {"amount_krw": 30_000_000, "tenor_months": 24, "schedule": "level",
+                               "reduced_payment_months": ["02"], "rationale": "비수기 2월 상환액을 줄인다."},
+        "counterfactuals": [
+            {"metric_id": "M:dscr", "current": 1.8, "target": 2.2, "explanation": "DSCR이 2.2 이상이면 금리 구간 A"},
+            {"metric_id": "S:owner_draw_ratio", "current": 0.18, "target": 0.1,
+             "explanation": "대표자 인출을 10% 이하로 줄이면 한도 상향"},
+        ],
+        "review": {"passed": True, "rounds": 2, "issues": []},
+        "models": {"analyst": "gpt-5.4", "reviewer": "gpt-5.4-mini"},
+    }
+
+
+def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "approve", amount: int = 30_000_000,
+         **overrides: Any) -> dict[str, Any]:
+    app_id = f"app-20261103-p{n:02d}"
+    doc: dict[str, Any] = {
+        "id": app_id, "application_id": app_id, "applicant_id": f"preview-{n:02d}",
+        "requested_amount_krw": amount, "requested_tenor_months": 24, "status": status,
+        "received_at": timeline[0]["at"], "updated_at": timeline[-1]["at"], "timeline": timeline,
+        "underwriting": None, "policy": None, "assessment": None, "flags": [],
+        "sla": {"hours": 24, "deadline": (datetime.fromisoformat(timeline[0]["at"]) + timedelta(hours=24)).isoformat(),
+                "escalated": False},
+        "decision_attempts": [], "officer_decision": None, "error": None,
+    }
+    if any(t["status"] == "underwritten" for t in timeline):
+        doc["underwriting"] = {
+            "features": {"dscr": 1.8, "avg_monthly_inflow_krw": 41_333_333, "industry": "cafe"},
+            "signals": {"owner_draw_ratio": 0.18}, "flags": [], "monthly": _monthly(),
+            "classification": None, "category_overrides": {},
+        }
+        doc["policy"] = {
+            "application_id": app_id, "decision": "eligible", "max_amount_krw": 35_000_000, "rate_band": "B",
+            "reason_codes": [
+                {"code": "R101", "message": "DSCR 기준 충족", "field": "dscr", "observed": 1.8, "threshold": 1.25},
+                {"code": "R102", "message": "대표자 인출 비율 기준 이내", "field": "owner_draw_ratio",
+                 "observed": 0.18, "threshold": 0.35},
+                {"code": "R104", "message": "업력 기준 충족(개월)", "field": "business_age_months",
+                 "observed": 48, "threshold": 36},
+            ],
+            "rules_version": "2026.11-v1",
+        }
+    if rec is not None and doc["policy"] is not None:
+        doc["assessment"] = _assessment(app_id, rec)
+    doc.update(overrides)
+    return doc
+
+
+def _start(minutes_ago: int) -> datetime:
+    return NOW - timedelta(minutes=minutes_ago)
+
+
+def applications() -> list[dict[str, Any]]:
+    s = [_start(m) for m in (6, 1500, 300, 280, 260, 240, 30, 2, 90, 12, 1800)]
+    return [
+        _doc(1, "awaiting_officer", _timeline(s[0], FLOW)),
+        _doc(2, "escalated", _timeline(s[1], FLOW, (("escalated", 86_400),)), rec="refer",
+             sla={"hours": 24, "deadline": _at(s[1], 86_400), "escalated": True}),
+        _doc(3, "approved", _timeline(s[2], FLOW, (("approved", 3_600),)),
+             officer_decision={"decision": "approve", "amount_krw": 30_000_000, "officer_id": "preview-officer",
+                               "conditions": [], "reason": "정책 한도 안, 상환 여력 충분"}),
+        _doc(4, "conditionally_approved", _timeline(s[3], FLOW, (("conditionally_approved", 4_000),)),
+             rec="conditional",
+             officer_decision={"decision": "conditional", "amount_krw": 25_000_000, "officer_id": "preview-officer",
+                               "conditions": ["월별 매출 보고"], "reason": "비수기 대비 조건 부여"}),
+        _doc(5, "declined", _timeline(s[4], FLOW, (("declined", 3_000),)), rec="decline",
+             officer_decision={"decision": "decline", "amount_krw": None, "officer_id": "preview-officer",
+                               "conditions": [], "reason": "고금리 차입 중첩"}),
+        _doc(6, "withdrawn", _timeline(s[5], FLOW[:3], (("withdrawn", 120),)), rec=None),
+        _doc(7, "data_incomplete", _timeline(s[6], FLOW[:2], (("data_incomplete", 70),)), rec=None),
+        _doc(8, "received", _timeline(s[7], FLOW[:1]), rec=None),
+        _doc(9, "failed", _timeline(s[8], FLOW[:4], (("failed", 150),)), rec=None,
+             error={"stage": "assess", "message": "모델 응답 시간 초과(합성 예시)"}),
+        _doc(10, "assessed", _timeline(s[9], FLOW[:5]), rec="conditional"),
+        _doc(11, "approved", _timeline(s[10], FLOW, (("approved", 2_400),)), amount=20_000_000,
+             officer_decision={"decision": "approve", "amount_krw": 20_000_000, "officer_id": "preview-officer",
+                               "conditions": [], "reason": "정책 한도 안"}),
+    ]
+
+
+BASELINE = {
+    "avg_weekly_revenue": 9_500_000, "revenue_volatility": 0.12, "cash_buffer_days": 30.0,
+    "operating_daily_krw": 900_000, "tax_bank_match_ratio": 0.97,
+    "seasonal_index": {f"{m:02d}": 1.0 for m in range(1, 13)},
+}
+WEEK_REVENUE = (9_800_000, 9_400_000, 10_100_000, 9_000_000, 8_700_000, 6_100_000, 7_400_000,
+                8_200_000, 7_000_000, 4_800_000, 5_600_000, 6_900_000, 7_800_000)
+WEEK_BUFFER = (31.0, 30.2, 31.5, 29.0, 27.4, 21.0, 22.3, 23.9, 19.5, 12.8, 11.2, 13.6, 15.9)
+TRIGGERS = {6: ["inflow_drop"], 7: ["inflow_drop"], 10: ["inflow_drop", "new_debt"], 11: ["new_debt"]}
+
+
+def _row(week: int) -> dict[str, Any]:
+    start = datetime(2026, 11, 2) + timedelta(weeks=week - 1)
+    revenue = WEEK_REVENUE[week - 1]
+    return {
+        "week": week, "start": start.date().isoformat(), "end": (start + timedelta(days=6)).date().isoformat(),
+        "revenue": revenue, "revenue_ratio": round(revenue / BASELINE["avg_weekly_revenue"], 3),
+        "operating_out": round(revenue * 0.6), "debt_service": 1_000_000,
+        "high_cost_lender": 1_500_000 if week >= 10 else 0, "high_cost_count": 1 if week >= 10 else 0,
+        "loan_proceeds": 0, "unclassified_in": 0, "end_balance": 20_000_000 - week * 600_000,
+        "buffer_days": WEEK_BUFFER[week - 1],
+    }
+
+
+def _weeks(replay_id: str, count: int) -> list[dict[str, Any]]:
+    out, seen = [], set()
+    for week in range(1, count + 1):
+        triggers = TRIGGERS.get(week, [])
+        new = [t for t in triggers if t not in seen]
+        seen.update(triggers)
+        alert_id = f"ew-{replay_id}-w{week:02d}" if new else None
+        out.append({"week": week, "row": _row(week), "triggers": triggers, "new_triggers": new,
+                    "classification": None,
+                    "investigation": {"decision": "alert", "reason": "합성 예시", "record": {}} if new else None,
+                    "alert_id": alert_id})
+    return out
+
+
+def _loan(app_id: str, applicant: str, industry: str, amount: int, monitoring: dict | None) -> dict[str, Any]:
+    return {
+        "id": app_id, "loan_id": app_id, "application_id": app_id, "applicant_id": applicant, "industry": industry,
+        "underwriting_consent_id": None, "decision": "approve", "amount_krw": amount, "tenor_months": 24,
+        "approved_at": (NOW - timedelta(days=1)).isoformat(), "baseline": BASELINE, "monitoring": monitoring,
+        "updated_at": NOW.isoformat(),
+    }
+
+
+def _monitoring(replay_id: str, status: str, weeks: int, started: datetime) -> dict[str, Any]:
+    rows = _weeks(replay_id, weeks)
+    return {
+        "replay_id": replay_id, "consent_id": None, "flow_start": "2026-11-02", "started_at": started.isoformat(),
+        "mode": "inline", "status": status, "processed_week": weeks,
+        "seen_triggers": sorted({t for w in rows for t in w["triggers"]}), "overrides": {}, "weeks": rows,
+        "alert_ids": [w["alert_id"] for w in rows if w["alert_id"]], "error": None,
+    }
+
+
+def _alert(loan_id: str, replay_id: str, week: int, severity: str, restructure: str | None) -> dict[str, Any]:
+    alert_id = f"ew-{replay_id}-w{week:02d}"
+    doc: dict[str, Any] = {
+        "id": alert_id, "schema_version": "1", "alert_id": alert_id, "loan_id": loan_id, "week": week,
+        "as_of": _row(week)["end"], "severity": severity,
+        "summary": f"{week}주차 매출이 기준 대비 크게 줄고 현금 버퍼가 감소했다(합성 예시).",
+        "signals": [{"kind": t, "text": f"{week}주차 {t} 신호", "metric_ids": [f"W:{week}:revenue"], "txn_ids": []}
+                    for t in TRIGGERS[week]],
+        "recommended_action": "hardship_review" if restructure else "monitor", "triggers": TRIGGERS[week],
+        "models": {"investigator": "gpt-5.4"}, "replay_id": replay_id,
+        "status": "restructure_pending" if restructure == "pending_officer" else "handled",
+        "created_at": NOW.isoformat(), "event_error": None,
+        "collections": {"decision": "routed" if restructure else "reminder", "reason": "합성 예시",
+                        "at": NOW.isoformat(),
+                        "contacts": [{"alert_id": alert_id, "on": _row(week)["end"], "at": NOW.isoformat(),
+                                      "script_id": "hardship_offer" if restructure else "soft_reminder",
+                                      "status": "sent", "reason": None, "by": "collections-agent"}],
+                        "record": {}},
+        "restructure": None,
+    }
+    if restructure:
+        doc["restructure"] = {"request_id": f"rs-{alert_id}", "category": "debt_overload",
+                              "note": "고금리 차입 중첩(합성 예시)", "status": restructure,
+                              "created_at": NOW.isoformat()}
+    return doc
+
+
+def loans() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    done = _loan("app-20261103-p03", "preview-03", "카페", 30_000_000,
+                 _monitoring("rp-preview-1", "completed", 13, NOW - timedelta(hours=2)))
+    running = _loan("app-20261103-p04", "preview-04", "한식", 25_000_000,
+                    _monitoring("rp-preview-2", "replaying", 4, NOW - timedelta(minutes=2)))
+    idle = _loan("app-20261103-p11", "preview-11", "편의점", 20_000_000, None)
+    alerts = [_alert(done["id"], "rp-preview-1", 6, "medium", None),
+              _alert(done["id"], "rp-preview-1", 10, "high", "pending_officer")]
+    return [done, running, idle], alerts
+
+
+def _projected(i: int, industry: str, rec: str, region: str, age: str, outcomes: tuple[str, str]) -> dict:
+    sub = DAY + timedelta(minutes=i)
+    usage = [{"model": "gpt-5.4-mini", "input_tokens": 1200, "output_tokens": 150, "calls": 1}]
+    return {
+        "application_id": f"r-{i:02d}", "applicant_id": f"load-healthy-{i:02d}", "status": "awaiting_officer",
+        "submitted_at": sub.isoformat(), "received_at": sub.isoformat(), "source": "load", "run_id": RUN_ID,
+        "segment": {"industry": industry, "region": region, "business_age_band": age},
+        "steps": [{"step": "classify", "outcome": outcomes[0], "agent": True, "usage": usage},
+                  {"step": "assess", "outcome": outcomes[1], "agent": True, "usage": usage}],
+        "timeline": [{"status": "awaiting_officer", "at": (sub + timedelta(minutes=3 + i % 5)).isoformat()}],
+        "flags": [], "policy": {"decision": "eligible", "reason_codes": []},
+        "assessment": {"recommendation": rec}, "officer_decision": None,
+    }
+
+
+def ops_docs() -> list[dict[str, Any]]:
+    plan = ([("카페", "approve")] * 10 + [("한식", r) for r in ("approve", "decline", "refer", "decline", "approve",
+                                                              "decline", "conditional", "decline", "approve", "decline",
+                                                              "refer")]
+            + [("편의점", "approve"), ("편의점", "decline"), ("편의점", "approve")])
+    docs = []
+    for i, (industry, rec) in enumerate(plan):
+        outcomes = ("ok", "degraded" if i % 7 == 3 else ("failed" if i == 20 else "ok"))
+        docs.append(_projected(i, industry, rec, "서울" if i % 2 else "부산", "3년+" if i % 3 else "1~3년", outcomes))
+    return docs
+
+
+class MemoryApplications:
+    def __init__(self, docs: list[dict[str, Any]]):
+        self.docs = {d["id"]: d for d in docs}
+
+    def list_recent(self, limit: int) -> list[dict[str, Any]]:
+        rows = [{"id": d["id"], "applicant_id": d["applicant_id"], "status": d["status"],
+                 "requested_amount_krw": d["requested_amount_krw"], "updated_at": d["updated_at"],
+                 "recommendation": (d.get("assessment") or {}).get("recommendation")} for d in self.docs.values()]
+        return sorted(rows, key=lambda r: r["updated_at"], reverse=True)[:limit]
+
+    def get(self, application_id: str) -> dict[str, Any] | None:
+        return self.docs.get(application_id)
+
+
+class NoRaw:
+    def get_json(self, container: str, name: str) -> None:
+        return None
+
+
+class RecordingQueue:
+    """결정·재생 메시지를 기록만 한다(오케스트레이터 없음)."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, dict[str, Any]]] = []
+
+    def send(self, queue: str, message: dict[str, Any]) -> None:
+        self.sent.append((queue, message))
+
+
+class MemoryMonitoring:
+    def __init__(self, loans: list[dict[str, Any]], alerts: list[dict[str, Any]]):
+        self.loans = {d["id"]: d for d in loans}
+        self.alerts = alerts
+
+    def list_loans(self, limit: int) -> list[dict[str, Any]]:
+        return [{"id": d["id"], "applicant_id": d["applicant_id"], "industry": d["industry"],
+                 "amount_krw": d["amount_krw"], "tenor_months": d["tenor_months"],
+                 "monitoring_status": (d["monitoring"] or {}).get("status"),
+                 "alerts": len(d["monitoring"]["alert_ids"]) if d["monitoring"] else None,
+                 "updated_at": d["updated_at"]} for d in self.loans.values()][:limit]
+
+    def get_loan(self, loan_id: str) -> dict[str, Any] | None:
+        return self.loans.get(loan_id)
+
+    def list_alerts(self, loan_id: str, replay_id: str) -> list[dict[str, Any]]:
+        return [a for a in self.alerts if a["loan_id"] == loan_id and a["replay_id"] == replay_id]
+
+
+class EmptyPrivacy:
+    def consents_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
+        return []
+
+    def consents_for_application(self, application_id: str) -> list[dict[str, Any]]:
+        return []
+
+    def get_consent(self, consent_id: str) -> None:
+        return None
+
+    def get_proof(self, consent_id: str) -> None:
+        return None
+
+    def list_grievances(self, limit: int) -> list[dict[str, Any]]:
+        return []
+
+    def grievances_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
+        return []
+
+    def get_grievance(self, application_id: str, grievance_id: str) -> None:
+        return None
+
+
+class MemoryOps:
+    def __init__(self, runs: dict[str, list[dict[str, Any]]]):
+        self.data = runs
+
+    def runs(self) -> list[str]:
+        return list(self.data)
+
+    def by_run(self, run_id: str) -> list[dict[str, Any]]:
+        return self.data[run_id]
+
+
+def build_deps() -> ConsoleDeps:
+    loan_docs, alerts = loans()
+    return ConsoleDeps(
+        store=MemoryApplications(applications()), raw=NoRaw(), queue=RecordingQueue(),
+        pseudonym_key=b"preview-pseudonym-key-not-secret-0000", demo_principal=PRINCIPAL,
+        monitoring=MemoryMonitoring(loan_docs, alerts), clock=lambda: NOW, privacy=EmptyPrivacy(),
+        ops=MemoryOps({RUN_ID: ops_docs()}),
+    )
