@@ -98,3 +98,15 @@ def test_adr_index_links_every_adr():
     index = ROOT / "docs" / "adr" / "README.md"
     linked = {(index.parent / t).resolve() for t in links(index)}
     assert {p.resolve() for p in (ROOT / "docs" / "adr").glob("ADR-*.md")} <= linked
+
+
+def test_readme_links_every_hub_doc():
+    readme = ROOT / "README.md"
+    linked = {(ROOT / t).resolve() for t in links(readme)}
+    expected = {p.resolve() for p in hub_docs() if p.parent != ROOT and p.parent.name != "adr"}
+    expected.add((ROOT / "docs" / "adr" / "README.md").resolve())
+    assert sorted(_id(p) for p in expected - linked) == []
+
+
+def test_readme_is_an_entry_page():
+    assert len((ROOT / "README.md").read_text(encoding="utf-8").splitlines()) <= 200
