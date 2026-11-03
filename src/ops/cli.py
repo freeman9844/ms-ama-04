@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluator.add_argument("--suite", default="all", choices=EVAL_SUITES)
     evaluator.add_argument("--collect", metavar="EXECUTION", help="Job을 다시 돌리지 않고 끝난 실행의 리포트만 회수")
     loader = commands.add_parser("load", help="job-ops로 균형 격자 신청을 제출하고 결과를 ops/reports/<run>/에 저장")
-    loader.add_argument("--count", type=int, default=opsrun.MAX_COUNT, help="제출 건수(1~24)")
+    loader.add_argument("--count", type=int, default=opsrun.MAX_COUNT, help=f"제출 건수(1~{opsrun.MAX_COUNT})")
     loader.add_argument("--interval", type=float, default=15.0, help="제출 간격 초")
     meter = commands.add_parser("metrics", help="SLO·비용·공정성 보고서(ops/reports/<run>/report.md)")
     meter.add_argument("--run", required=True, help="ops load가 출력한 run ID")

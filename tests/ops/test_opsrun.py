@@ -60,12 +60,12 @@ def test_new_run_id():
 
 def test_load_starts_job_and_saves_outputs(fake_runner, tmp_path):
     run_id = "load-20261102010000"
-    summary = {"run_id": run_id, "submitted": 24, "reached": 24, "unreached": [], "aborted": False}
+    summary = {"run_id": run_id, "submitted": 48, "reached": 48, "unreached": [], "aborted": False}
     runner = _job_runner(fake_runner, run_id, {"docs.json": b'{"runs": {}}', "summary.json": json.dumps(summary).encode()})
     bodies = []
-    result = load(_spy(runner, bodies), count=24, interval_s=15, now=T0, out_root=tmp_path, sleep=lambda s: None)
+    result = load(_spy(runner, bodies), count=48, interval_s=15, now=T0, out_root=tmp_path, sleep=lambda s: None)
     env = {e["name"]: e["value"] for e in bodies[0]["containers"][0]["env"]}
-    assert env == {"OPS_RUN_ID": run_id, "OPS_MODE": "load", "OPS_COUNT": "24", "OPS_INTERVAL_S": "15",
+    assert env == {"OPS_RUN_ID": run_id, "OPS_MODE": "load", "OPS_COUNT": "48", "OPS_INTERVAL_S": "15",
                    "OPS_SOURCE": "load"}
     assert result.summary == summary and result.execution == "job-ops-x1"
     assert json.loads((tmp_path / run_id / "run.json").read_text(encoding="utf-8"))["execution"] == "job-ops-x1"
@@ -73,8 +73,8 @@ def test_load_starts_job_and_saves_outputs(fake_runner, tmp_path):
 
 def test_load_rejects_count_over_grid(fake_runner, tmp_path):
     runner = fake_runner(ENV)
-    with pytest.raises(OpsError, match="1~24"):
-        load(runner, count=25, out_root=tmp_path)
+    with pytest.raises(OpsError, match="1~48"):
+        load(runner, count=49, out_root=tmp_path)
     assert runner.commands("az") == []
 
 
@@ -151,7 +151,7 @@ def test_metrics_malformed_cost_response_degrades(fake_runner, tmp_path):
 
 def test_load_rejects_schedule_beyond_job_timeout(fake_runner, tmp_path):
     runner = fake_runner(ENV)
-    # (24-1)×30 + 2×1500 = 3690초 > replicaTimeout 3600
-    with pytest.raises(OpsError, match="3600"):
-        load(runner, count=24, interval_s=30, out_root=tmp_path)
+    # (48-1)×60 + 2×1500 = 5820초 > replicaTimeout 5400
+    with pytest.raises(OpsError, match="5400"):
+        load(runner, count=48, interval_s=60, out_root=tmp_path)
     assert runner.commands("az") == []

@@ -728,7 +728,7 @@ module opsJob 'modules/eval-job.bicep' = {
     image: evalImage
     containerName: 'ops'
     command: [ '/opt/venv/bin/python', '-m', 'opsjob' ]
-    replicaTimeout: 3600
+    replicaTimeout: 5400
     envVars: [
       { name: 'COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'COSMOS_DATABASE', value: cosmos.outputs.databaseName }

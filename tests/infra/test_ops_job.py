@@ -19,7 +19,7 @@ def test_ops_job_runs_opsjob_with_ops_identity(variant):
     job = _ops(variant)
     props = job["properties"]
     assert props["configuration"]["triggerType"] == "Manual"
-    assert props["configuration"]["replicaTimeout"] == 3600
+    assert props["configuration"]["replicaTimeout"] == 5400
     assert list(job["identity"]["userAssignedIdentities"])[0].endswith("/id-ops-amatest")
     container = props["template"]["containers"][0]
     assert container["name"] == "ops" and container["image"] == "acramatest.azurecr.io/eval:v1"

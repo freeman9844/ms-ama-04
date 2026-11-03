@@ -19,11 +19,12 @@ from ops.smoke_runner import log_hint
 from opsmetrics.fairness import gap_pp_from_env
 from opsmetrics.prices import load_prices
 from opsmetrics.summary import summarize
+from shared.segments import LOAD_GRID
 
 REPORTS = Path(__file__).resolve().parents[2] / "ops" / "reports"
 REQUIRED = ("docs.json", "summary.json")
-MAX_COUNT = 24
-JOB_TIMEOUT_S = 3600  # job-ops replicaTimeout
+MAX_COUNT = len(LOAD_GRID)
+JOB_TIMEOUT_S = 5400  # job-ops replicaTimeout
 JOB_WAIT_S = 1500  # opsjob OPS_WAIT_S 기본값(예산 가드 표본 대기 + 마지막 대기, 각각 최대)
 
 

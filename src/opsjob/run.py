@@ -20,7 +20,7 @@ AMOUNT_KRW = 10_000_000
 TENOR_MONTHS = 12
 MAX_COUNT = len(LOAD_GRID)
 GUARD_SAMPLE = 3
-BUDGET_GUARD_USD = 4.0
+BUDGET_GUARD_USD = 8.0
 POLL_S = 15
 SOURCES = ("load", "fault")
 _RUN_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -79,7 +79,7 @@ def config_from_env(env: Mapping[str, str], out_dir: Path = Path("/tmp/ops")) ->
         last = count if mode == "load" else len(applicants)
         if not _APPLICATION_ID.match(message(run_id, last, "", datetime.now(UTC), source)["application_id"]):
             raise ValueError("OPS_RUN_ID: application_id 패턴 위반")
-    # 대기 기본값 1500초: 최악 2·대기 + 23·15초 = 3345초가 job-ops replicaTimeout(3600초) 안에 든다.
+    # 대기 기본값 1500초: 최악 2·대기 + 47·15초 = 3705초가 job-ops replicaTimeout(5400초) 안에 든다.
     return Config(
         mode=mode, run_id=run_id, count=count, interval_s=float(env.get("OPS_INTERVAL_S", 15)),
         applicants=applicants, source=source,

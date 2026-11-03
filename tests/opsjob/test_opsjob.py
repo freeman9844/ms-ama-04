@@ -96,7 +96,7 @@ def test_wait_reports_unreached(tmp_path):
 
 
 def test_budget_guard_stops_submission(tmp_path):
-    # 건당 1M 입력 토큰 × $1 = $1/건 → 24건 예상 $24 > $4
+    # 건당 1M 입력 토큰 × $1 = $1/건 → 24건 예상 $24 > $8
     summary, q, _ = run_with(tmp_path, store_kw={"tokens": 1_000_000}, count=24)
     assert len(q.sent) == 3 and summary["aborted"] is True
     assert summary["guard"]["projected_usd"] == pytest.approx(24.0)
@@ -131,7 +131,7 @@ def test_config_from_env_validates():
         config_from_env({"OPS_MODE": "load", "OPS_RUN_ID": "ok", "OPS_COUNT": "49"})
     c = config_from_env({"OPS_MODE": "submit", "OPS_RUN_ID": "f-1", "OPS_APPLICANTS": "a,b", "OPS_SOURCE": "fault"})
     assert c.applicants == ("a", "b") and c.count == 48
-    # 최악 2·대기 + 23·15초 = 3345초 < job-ops replicaTimeout 3600초
+    # 최악 2·대기 + 47·15초 = 3705초 < job-ops replicaTimeout 5400초
     assert c.wait_s == 1500 and c.interval_s == 15
 
 @pytest.mark.parametrize("run_id", ["load_1", "v1.2", "-x", "a" * 61])
