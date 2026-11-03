@@ -34,7 +34,7 @@ def _underwrite(cases, applicant_id, transactions=None):
 @pytest.mark.parametrize(
     ("applicant_id", "months", "inflow", "dscr", "buffer", "vol", "match"),
     [
-        ("demo-cafe-001", 12, 32_265_353, 3.802, 124.0, 0.193, 0.983),
+        ("demo-healthy-001", 12, 32_265_353, 3.802, 124.0, 0.193, 0.983),
         ("demo-mismatch-002", 12, 32_360_867, 3.781, 122.7, 0.206, 0.6),
         ("demo-stress-003", 12, 30_451_861, 3.007, 128.1, 0.265, 0.979),
         ("demo-thin-004", 4, 37_407_437, 4.735, 55.9, 0.184, 0.0),
@@ -53,7 +53,7 @@ def test_features_match_calibration(cases, applicant_id, months, inflow, dscr, b
 @pytest.mark.parametrize(
     ("applicant_id", "decision", "codes"),
     [
-        ("demo-cafe-001", "eligible", []),
+        ("demo-healthy-001", "eligible", []),
         ("demo-mismatch-002", "refer", ["R101"]),
         ("demo-stress-003", "eligible", []),
         ("demo-thin-004", "ineligible", ["R001", "R101", "R104"]),
@@ -69,7 +69,7 @@ def test_policy_outcomes_for_demo_applicants(cases, applicant_id, decision, code
 
 
 def test_signals_explain_dscr(cases):
-    s = _underwrite(cases, "demo-cafe-001").signals
+    s = _underwrite(cases, "demo-healthy-001").signals
     assert s["avg_monthly_noi_krw"] == 9_086_020
     assert s["avg_monthly_debt_service_krw"] == 650_000
     assert s["new_installment_krw"] == 1_739_768
@@ -79,11 +79,11 @@ def test_signals_explain_dscr(cases):
 
 def test_high_cost_lender_flag_only_for_stressed_case(cases):
     assert FLAG_HIGH_COST_LENDER in _underwrite(cases, "demo-stress-003").flags
-    assert _underwrite(cases, "demo-cafe-001").flags == []
+    assert _underwrite(cases, "demo-healthy-001").flags == []
 
 
 def test_empty_history_yields_zero_features_and_knockout(cases):
-    uw = _underwrite(cases, "demo-cafe-001", transactions=())
+    uw = _underwrite(cases, "demo-healthy-001", transactions=())
     f = uw.features
     assert (f.months_of_history, f.avg_monthly_inflow_krw) == (0, 0)
     assert (f.dscr, f.cash_buffer_days, f.revenue_volatility, f.tax_bank_match_ratio) == (0.0, 0.0, 0.0, 0.0)
@@ -114,14 +114,14 @@ def _with_overrides(cases, applicant_id, overrides):
 
 
 def test_no_overrides_keeps_calibration_and_reports_zero(cases):
-    uw = _with_overrides(cases, "demo-cafe-001", {})
-    assert uw.features == _underwrite(cases, "demo-cafe-001").features
+    uw = _with_overrides(cases, "demo-healthy-001", {})
+    assert uw.features == _underwrite(cases, "demo-healthy-001").features
     assert uw.signals["semantic_overrides"] == 0
     assert uw.signals["dscr_rules_only"] == uw.features.dscr
 
 
 def test_monthly_series_matches_features(cases):
-    uw = _underwrite(cases, "demo-cafe-001")
+    uw = _underwrite(cases, "demo-healthy-001")
     assert len(uw.monthly) == 12
     assert [r["month"] for r in uw.monthly] == sorted(r["month"] for r in uw.monthly)
     assert uw.monthly[0]["month"] == "2025-11" and uw.monthly[-1]["month"] == "2026-10"
@@ -131,9 +131,9 @@ def test_monthly_series_matches_features(cases):
 
 
 def test_debt_overrides_never_improve_dscr_or_buffer(cases):
-    base = _underwrite(cases, "demo-cafe-001")
-    ids = _unclassified_out(cases, "demo-cafe-001")
-    uw = _with_overrides(cases, "demo-cafe-001", dict.fromkeys(ids, Category.LOAN_REPAYMENT))
+    base = _underwrite(cases, "demo-healthy-001")
+    ids = _unclassified_out(cases, "demo-healthy-001")
+    uw = _with_overrides(cases, "demo-healthy-001", dict.fromkeys(ids, Category.LOAN_REPAYMENT))
     assert uw.signals["semantic_overrides"] == len(ids) > 0
     assert uw.signals["avg_monthly_debt_service_krw"] > base.signals["avg_monthly_debt_service_krw"]
     assert uw.features.dscr <= base.features.dscr
@@ -146,16 +146,16 @@ def test_debt_overrides_never_improve_dscr_or_buffer(cases):
 
 
 def test_high_cost_override_raises_flag(cases):
-    ids = _unclassified_out(cases, "demo-cafe-001")[:1]
-    uw = _with_overrides(cases, "demo-cafe-001", dict.fromkeys(ids, Category.HIGH_COST_LENDER))
+    ids = _unclassified_out(cases, "demo-healthy-001")[:1]
+    uw = _with_overrides(cases, "demo-healthy-001", dict.fromkeys(ids, Category.HIGH_COST_LENDER))
     assert FLAG_HIGH_COST_LENDER in uw.flags
     assert uw.signals["high_cost_lender_count"] == 1
 
 
 def test_overrides_only_apply_to_unclassified_transactions(cases):
     revenue_id = next(
-        t.txn_id for t in cases["demo-cafe-001"].transactions if classify(t) is Category.REVENUE
+        t.txn_id for t in cases["demo-healthy-001"].transactions if classify(t) is Category.REVENUE
     )
-    uw = _with_overrides(cases, "demo-cafe-001", {revenue_id: Category.LOAN_REPAYMENT, "unknown": Category.LOAN_REPAYMENT})
+    uw = _with_overrides(cases, "demo-healthy-001", {revenue_id: Category.LOAN_REPAYMENT, "unknown": Category.LOAN_REPAYMENT})
     assert uw.signals["semantic_overrides"] == 0
-    assert uw.features == _underwrite(cases, "demo-cafe-001").features
+    assert uw.features == _underwrite(cases, "demo-healthy-001").features

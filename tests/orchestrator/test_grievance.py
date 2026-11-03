@@ -21,7 +21,7 @@ TEXT = "매출이 늘었는데 거절되었습니다. 제 연락처는 010-1234-
 APPLICATION = {
     "id": "app-1",
     "application_id": "app-1",
-    "applicant_id": "demo-cafe-001",
+    "applicant_id": "demo-healthy-001",
     "status": "declined",
     "policy": {
         "application_id": "app-1",
@@ -102,7 +102,7 @@ def deps():
 
 
 def submit(deps, **fields):
-    body = {"grievance_id": GID, "application_id": "app-1", "applicant_id": "demo-cafe-001", "text": TEXT, **fields}
+    body = {"grievance_id": GID, "application_id": "app-1", "applicant_id": "demo-healthy-001", "text": TEXT, **fields}
     return handle_grievance(deps, json.dumps(body, ensure_ascii=False))
 
 
@@ -119,7 +119,7 @@ def grievance(deps):
 def test_submission_records_snapshot_and_publishes_without_text(deps):
     assert submit(deps) == "created"
     doc = grievance(deps)
-    assert (doc["id"], doc["application_id"], doc["applicant_id"]) == (GID, "app-1", "demo-cafe-001")
+    assert (doc["id"], doc["application_id"], doc["applicant_id"]) == (GID, "app-1", "demo-healthy-001")
     assert (doc["status"], doc["text"], doc["submitted_at"]) == ("pending_officer", TEXT, NOW.isoformat())
     record = doc["record"]
     assert record["status"] == "declined" and record["officer_decision"] == APPLICATION["officer_decision"]

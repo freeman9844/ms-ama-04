@@ -33,7 +33,7 @@ def test_lifecycle_start_requires_aware_expiry_and_known_initial_action():
 
 
 def test_consent_command_actions():
-    cmd = ConsentCommand(consent_id="abc", action="revoke", requested_by="borrower:demo-cafe-001", application_id="app-1")
+    cmd = ConsentCommand(consent_id="abc", action="revoke", requested_by="borrower:demo-healthy-001", application_id="app-1")
     assert cmd.application_id == "app-1"
     for action in ("expire_now", "remind_now"):
         assert ConsentCommand(consent_id="abc", action=action, requested_by="officer").application_id is None

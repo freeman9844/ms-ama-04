@@ -154,11 +154,11 @@ def granted(deps, conversations=("conv_a",)):
     return consent
 
 
-def consent_for(deps, applicant_id="demo-cafe-001", application_id="app-1"):
+def consent_for(deps, applicant_id="demo-healthy-001", application_id="app-1"):
     return request_consent(deps, {"application_id": application_id, "applicant_id": applicant_id})
 
 
-def assembled(deps, applicant_id="demo-cafe-001"):
+def assembled(deps, applicant_id="demo-healthy-001"):
     consent = consent_for(deps, applicant_id)
     report = assemble_data(
         deps,
@@ -172,7 +172,7 @@ def assembled(deps, applicant_id="demo-cafe-001"):
     return consent, report
 
 
-def end(cid, reason="revoked", trigger="revoke", by="borrower:demo-cafe-001"):
+def end(cid, reason="revoked", trigger="revoke", by="borrower:demo-healthy-001"):
     return {"consent_id": cid, "reason": reason, "trigger": trigger, "requested_by": by}
 
 
@@ -187,8 +187,8 @@ def test_delete_consent_data_removes_everything_and_writes_proof(mock_client):
 
     assert result == {"proof_id": cid, "complete": True, "reason": "revoked"}
     proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
-    assert (proof["consent_id"], proof["application_id"], proof["applicant_id"]) == (cid, "app-1", "demo-cafe-001")
-    assert (proof["reason"], proof["trigger"], proof["requested_by"]) == ("revoked", "revoke", "borrower:demo-cafe-001")
+    assert (proof["consent_id"], proof["application_id"], proof["applicant_id"]) == (cid, "app-1", "demo-healthy-001")
+    assert (proof["reason"], proof["trigger"], proof["requested_by"]) == ("revoked", "revoke", "borrower:demo-healthy-001")
     assert proof["deleted_at"] == NOW.isoformat() and proof["complete"] is True and proof["attempts"] == 1
     assert [(i["kind"], i["target"], i["outcome"]) for i in proof["items"]] == [
         ("raw_container", f"consent-{cid}", "deleted"),
@@ -344,10 +344,10 @@ def test_lifecycle_waits_in_chunks_reminds_then_expires(run_lifecycle):
 
 
 def test_revoke_during_wait_deletes_without_renewal(run_lifecycle):
-    result, ctx = run_lifecycle([("timer",), ("revoke", {"requested_by": "borrower:demo-cafe-001"})])
+    result, ctx = run_lifecycle([("timer",), ("revoke", {"requested_by": "borrower:demo-healthy-001"})])
     assert result["reason"] == "revoked" and result["status"] == "deleted"
     assert names(ctx) == [("delete_consent_data", "revoke"), ("send_consent_notice", "deletion")]
-    assert ctx.called("delete_consent_data")[0].input["requested_by"] == "borrower:demo-cafe-001"
+    assert ctx.called("delete_consent_data")[0].input["requested_by"] == "borrower:demo-healthy-001"
     assert ctx.timers[-1].cancelled
 
 

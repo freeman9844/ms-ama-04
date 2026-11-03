@@ -44,7 +44,7 @@ def make_loan(status="completed", started_at=NOW - timedelta(hours=1), replay_id
         "alert_ids": ["ew-rp-1-w01"], "error": None,
     }
     return {
-        "id": "app-1", "loan_id": "app-1", "application_id": "app-1", "applicant_id": "demo-cafe-001",
+        "id": "app-1", "loan_id": "app-1", "application_id": "app-1", "applicant_id": "demo-healthy-001",
         "industry": "카페", "underwriting_consent_id": "c-1", "decision": "approve", "amount_krw": 20_000_000,
         "tenor_months": 12, "approved_at": "2026-10-31T09:00:00+09:00", "baseline": BASELINE,
         "monitoring": monitoring, "updated_at": NOW.isoformat(),

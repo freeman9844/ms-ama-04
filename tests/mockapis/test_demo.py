@@ -12,7 +12,7 @@ from mockapis.synth import INJECTION_TEXT, Archetype
 from shared.segments import LOAD_GRID
 
 DIGESTS = {
-    "demo-cafe-001": "1179518b691d96f7",
+    "demo-healthy-001": "17a8782d4334a97b",
     "demo-mismatch-002": "3f86f1fcf3d5ccde",
     "demo-stress-003": "da1eee928c6ccfc9",
     "demo-thin-004": "1dbd0c52c90bcb84",
@@ -33,7 +33,7 @@ def _digest(case) -> str:
 def test_build_demo_cases():
     cases = build_demo_cases(date(2026, 10, 1))
     assert {k: v.archetype for k, v in cases.items()} == {
-        "demo-cafe-001": Archetype.HEALTHY_SEASONAL,
+        "demo-healthy-001": Archetype.HEALTHY_SEASONAL,
         "demo-mismatch-002": Archetype.TAX_MISMATCH,
         "demo-stress-003": Archetype.STRESSED,
         "demo-thin-004": Archetype.THIN_FILE,
@@ -75,7 +75,7 @@ def test_postloan_flows_cast_the_cafe_as_the_stacking_hero():
     as_of = date(2026, 11, 2)
     flows = build_postloan_flows(build_demo_cases(as_of), as_of)
     assert {k: f.scenario for k, f in flows.items()} == {
-        "demo-cafe-001": FlowScenario.STACKING,
+        "demo-healthy-001": FlowScenario.STACKING,
         "demo-mismatch-002": FlowScenario.STABLE,
         "demo-stress-003": FlowScenario.STABLE,
         "demo-thin-004": FlowScenario.STABLE,

@@ -145,6 +145,6 @@ def test_smoke_job_has_e2e_config(closed):
     assert config["cosmos_database"] == "lending"
     assert config["policy_url"].startswith("https://ca-policy.")
     assert config["mockapi_url"].startswith("https://ca-mockapi.")
-    assert config["e2e_applicant"] == "demo-cafe-001"
+    assert config["e2e_applicant"] == "demo-healthy-001"
     assert config["ai_account_endpoint"].endswith(".services.ai.azure.com")
     assert config["decision_deployment"] == "decision-1"

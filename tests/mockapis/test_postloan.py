@@ -12,7 +12,7 @@ AS_OF = date(2026, 11, 2)
 
 @pytest.fixture(scope="module")
 def cafe():
-    return build_demo_cases(AS_OF)["demo-cafe-001"]
+    return build_demo_cases(AS_OF)["demo-healthy-001"]
 
 
 def test_same_seed_same_flow(cafe):

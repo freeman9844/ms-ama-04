@@ -59,7 +59,7 @@ GRIEVANCE_QUEUE = "grievances"
 GRIEVANCE_DECISION_QUEUE = "grievance-decisions"
 MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
-DEMO_APPLICANTS = ("demo-cafe-001", "demo-mismatch-002", "demo-stress-003", "demo-thin-004", "demo-injection-005")
+DEMO_APPLICANTS = ("demo-healthy-001", "demo-mismatch-002", "demo-stress-003", "demo-thin-004", "demo-injection-005")
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 # form-action은 넣지 않는다: Easy Auth 세션 만료 시 로그인 리디렉션(login.microsoftonline.com)을 막는다.

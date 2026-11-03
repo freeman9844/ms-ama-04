@@ -16,7 +16,7 @@ AS_OF = date(2026, 11, 2)
 def catalogs():
     cases = build_demo_cases(AS_OF)
     out = {}
-    for applicant_id in ("demo-cafe-001", "demo-thin-004"):
+    for applicant_id in ("demo-healthy-001", "demo-thin-004"):
         case = cases[applicant_id]
         uw = compute_underwriting(
             f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
@@ -30,7 +30,7 @@ def catalogs():
 
 
 def test_catalog_exposes_features_signals_and_policy(catalogs):
-    c = catalogs["demo-cafe-001"]
+    c = catalogs["demo-healthy-001"]
     assert c["M:dscr"] == 3.802
     assert c["M:cash_buffer_days"] == 124.0
     assert c["M:requested_amount_krw"] == 20_000_000
@@ -41,7 +41,7 @@ def test_catalog_exposes_features_signals_and_policy(catalogs):
 
 
 def test_catalog_monthly_series_and_seasonality_index(catalogs):
-    c = catalogs["demo-cafe-001"]
+    c = catalogs["demo-healthy-001"]
     revenues = [v for k, v in c.items() if k.startswith("S:") and k.endswith(":revenue")]
     assert len(revenues) == 12
     assert c["S:2025-11:revenue"] > 0 and "S:2026-10:debt_service" in c

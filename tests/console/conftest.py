@@ -7,7 +7,7 @@ from shared.contracts import ApplicantProfile, Transaction
 
 KEY = b"console-test-pseudonym-key-0123456789"
 PROFILE = ApplicantProfile(
-    applicant_id="demo-cafe-001", business_name="빈스카페", business_reg_no="123-45-67890",
+    applicant_id="demo-healthy-001", business_name="빈스카페", business_reg_no="123-45-67890",
     representative_name="김대표", industry="cafe", region="서울", business_age_months=48,
 )
 TXNS = [
@@ -41,7 +41,7 @@ def make_doc(status: str = "awaiting_officer", **overrides) -> dict:
     doc = {
         "id": "app-1",
         "application_id": "app-1",
-        "applicant_id": "demo-cafe-001",
+        "applicant_id": "demo-healthy-001",
         "requested_amount_krw": 30_000_000,
         "requested_tenor_months": 12,
         "status": status,

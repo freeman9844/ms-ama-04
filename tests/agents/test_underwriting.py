@@ -64,7 +64,7 @@ def cases():
     return build_demo_cases(AS_OF)
 
 
-def context(cases, applicant_id="demo-cafe-001") -> UnderwritingContext:
+def context(cases, applicant_id="demo-healthy-001") -> UnderwritingContext:
     case = cases[applicant_id]
     uw = compute_underwriting(
         f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
@@ -189,7 +189,7 @@ ALL_TOOLS = [
 ]
 
 
-@pytest.mark.parametrize("applicant_id", ["demo-cafe-001", "demo-stress-003", "demo-injection-005"])
+@pytest.mark.parametrize("applicant_id", ["demo-healthy-001", "demo-stress-003", "demo-injection-005"])
 def test_agents_never_see_pii(cases, applicant_id):
     case = cases[applicant_id]
     leaky = copy.deepcopy(GOOD)

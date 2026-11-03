@@ -129,11 +129,11 @@ def deps(mock_client):
     )
 
 
-def consent_for(deps, applicant_id="demo-cafe-001", application_id="app-1"):
+def consent_for(deps, applicant_id="demo-healthy-001", application_id="app-1"):
     return request_consent(deps, {"application_id": application_id, "applicant_id": applicant_id})
 
 
-def assembled(deps, applicant_id="demo-cafe-001"):
+def assembled(deps, applicant_id="demo-healthy-001"):
     consent = consent_for(deps, applicant_id)
     report = assemble_data(
         deps,
@@ -253,7 +253,7 @@ def journey_activities(deps):
 
 START = {
     "application_id": "app-1",
-    "applicant_id": "demo-cafe-001",
+    "applicant_id": "demo-healthy-001",
     "requested_amount_krw": 20_000_000,
     "requested_tenor_months": 12,
 }
@@ -377,7 +377,7 @@ def test_decider_outage_falls_back_to_rules(deps):
     assert result["features"] == base["features"]
 
 
-def assess_input(deps, applicant_id="demo-cafe-001"):
+def assess_input(deps, applicant_id="demo-healthy-001"):
     consent, _ = assembled(deps, applicant_id)
     uw = underwrite(deps, underwrite_input(consent["consent_id"]))
     policy = evaluate_policy(deps, uw["features"])

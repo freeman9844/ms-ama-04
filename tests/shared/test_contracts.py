@@ -224,7 +224,7 @@ def test_claim_requires_evidence_and_known_id_shape():
         Claim(text="근거 없는 주장")
     with pytest.raises(ValidationError):
         Claim(text="x", metric_ids=("dscr",))
-    assert Claim(text="x", txn_ids=("demo-cafe-001-00012",)).metric_ids == ()
+    assert Claim(text="x", txn_ids=("demo-healthy-001-00012",)).metric_ids == ()
 
 
 def test_structure_schedule_consistency():

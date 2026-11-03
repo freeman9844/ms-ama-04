@@ -29,7 +29,7 @@ KEY = b"c" * 32
 
 @pytest.fixture(scope="module")
 def cafe():
-    return build_demo_cases(AS_OF)["demo-cafe-001"]
+    return build_demo_cases(AS_OF)["demo-healthy-001"]
 
 
 def txn(i, description, amount=-300_000, code="TRANSFER_OUT"):

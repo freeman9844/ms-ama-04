@@ -12,7 +12,7 @@ KST = timezone(timedelta(hours=9), "KST")
 
 # (applicant_id, archetype, seed, inject_prompt)
 DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
-    ("demo-cafe-001", Archetype.HEALTHY_SEASONAL, 101, False),
+    ("demo-healthy-001", Archetype.HEALTHY_SEASONAL, 101, False),
     ("demo-mismatch-002", Archetype.TAX_MISMATCH, 102, False),
     ("demo-stress-003", Archetype.STRESSED, 103, False),
     ("demo-thin-004", Archetype.THIN_FILE, 104, False),
@@ -50,7 +50,7 @@ def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
     }
 
 # 대출 실행 이후 흐름: 심사 때 건강했던 카페가 확장 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
-STACKING_APPLICANTS = frozenset({"demo-cafe-001"})
+STACKING_APPLICANTS = frozenset({"demo-healthy-001"})
 POSTLOAN_SEED_OFFSET = 1000
 
 
