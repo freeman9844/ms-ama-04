@@ -78,7 +78,7 @@ python -m ops window close                # 작업 뒤 반드시 닫기
 | [증거 색인](docs/evidence.md) | 평가 루브릭 기준별 주장과 증거, 실측 보고서 목록 |
 | [데모 대본](docs/demo/demo-script.md) | 2분 데모 장면 구성 |
 | [데모 대비책](docs/demo/fallback.md) | 장애 시 대체 경로와 사전 건 |
-| [데모 리허설](docs/demo/rehearsal.md) | 리허설 절차와 기록표(리허설 전이라 기록은 비어 있음) |
+| [데모 리허설](docs/demo/rehearsal.md) | 리허설 절차와 기록표(2026-11-03 실시, 기록은 rehearsal.md) |
 | [환경 준비](docs/runbook/setup.md) | 로컬 개발, Azure 준비, 최초 배포, 데모 모드 |
 | [배포](docs/runbook/deploy.md) | 배포 창, 구성요소별 배포, 운영자 IP 변경 대응 |
 | [운영](docs/runbook/operate.md) | 일시 정지·재개, smoke, 평가, 운영 지표·장애 주입, 비용 관리 |
@@ -108,4 +108,4 @@ python -m ops window close                # 작업 뒤 반드시 닫기
 | P5b | 동의 수명주기·이의제기 | [Plan](docs/superpowers/plans/2026-11-01-p5b-consent-lifecycle-grievance.md) |
 | P6a | 평가 하네스 | [Spec](docs/superpowers/specs/2026-11-01-p6a-eval-harness-design.md) · [Plan](docs/superpowers/plans/2026-11-01-p6a-eval-harness.md) |
 | P6b | 운영 지표·SLO·비용·장애 주입 | [Spec](docs/superpowers/specs/2026-11-02-p6b-ops-metrics-design.md) · [Plan](docs/superpowers/plans/2026-11-02-p6b-ops-metrics.md) |
-| P6c | 문서·데모(진행 중, 실제 환경 리허설 전) | [Spec](docs/superpowers/specs/2026-11-02-p6c-docs-demo-design.md) · [Plan](docs/superpowers/plans/2026-11-02-p6c-docs-demo.md) |
+| P6c | 문서·데모(진행 중, 리허설 2026-11-03 실시) | [Spec](docs/superpowers/specs/2026-11-02-p6c-docs-demo-design.md) · [Plan](docs/superpowers/plans/2026-11-02-p6c-docs-demo.md) |

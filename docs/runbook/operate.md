@@ -19,7 +19,7 @@ azd 환경에 이전 `AI_ACCOUNT_NAME`이 남아 있어, `ops window/pause/resum
 `false`로 바뀌고 새 환경에 capability host가 만들어지지 않습니다.
 
 - `python -m ops pause`: azd 환경의 `SERVICEBUS_ENABLED`를 `false`로 바꾸고 Service Bus 사설 엔드포인트와 네임스페이스를 지운 뒤 프로비저닝으로 출력값을 갱신합니다(`src/ops/lifecycle.py`). 이미 없으면 "이미 없습니다"라고만 알립니다.
-- `python -m ops resume`: `SERVICEBUS_ENABLED`를 `true`로 바꾸고 프로비저닝해 Service Bus를 다시 만듭니다.
+- `python -m ops resume`: `SERVICEBUS_ENABLED`를 `true`로 바꾸고 프로비저닝해 Service Bus를 다시 만듭니다. 재개 뒤에는 구독 규칙이 `subject-label`인지 확인합니다([deploy](deploy.md#service-bus-구독-규칙-확인)).
 - Service Bus가 없는 동안 오케스트레이터는 인라인 모드로 동작합니다(이벤트 발행 생략, `servicebus_disabled` 기록).
 - 실측: pause 5.8분·resume 4.7분(P2), pause 6.0분·resume 4.5분(P4b) — `docs/runbook/deploy-history.md`의 "운영 명령" 표와 "실제 배포 기록(P4b…)" 표.
 

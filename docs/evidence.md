@@ -15,7 +15,7 @@
 | A5. Operations — observability, reliability, performance & cost | 구조적 로그·지표·트레이스와 SLO(측정·판정), 복원력 패턴, 업무 가치 단위 비용 모델을 갖췄다 | [운영 런북](runbook/operate.md), [비용 모델](cost-model.md), `ops/reports/load-20261102110233/report.md`, `ops/reports/fault-20261102111447/summary.json` |
 | A6. AI solution design & evaluation | 모델 선택을 비용·지연·품질로 비교하고, 지표·실패 유형을 정의한 평가 하네스로 측정했다 | `eval/reports/job-eval-9imbutm/report.md`, [ADR-002](adr/ADR-002-model-deployment.md), [ADR-005](adr/ADR-005-classification-model.md) |
 | A7. Agentic autonomy & orchestration | 에이전트가 명확한 가드레일 안에서 자율 판단하고, 핸드오프·반성·상태 그래프 패턴을 의도적으로 썼다 | [에이전트](agents.md), [아키텍처](architecture.md), [ADR-001](adr/ADR-001-orchestration.md), `eval/reports/job-eval-9imbutm/report.md` |
-| B3. Demo & executive hook | 2분 데모로 기능이 아니라 결과("so what")를 보이고 장애 시 복구를 보이는 것이 목표다(리허설로 검증 예정) | [운영 실행 기록](runbook/deploy-history.md), [데모 대본](demo/demo-script.md), [대비책](demo/fallback.md), [리허설 기록](demo/rehearsal.md)(리허설 기록 참조, 값은 리허설 후 채움) |
+| B3. Demo & executive hook | 2분 데모로 기능이 아니라 결과("so what")를 보이고 장애 시 복구를 보이는 것이 목표다. 2026-11-03에 실제 환경에서 리허설을 1회 했고(탐색 위주 약 6분 20초, 2분 시간 측정은 완료하지 못함) 그 결과로 대본·대비책을 보완했다 | [운영 실행 기록](runbook/deploy-history.md), [데모 대본](demo/demo-script.md), [대비책](demo/fallback.md), [리허설 기록](demo/rehearsal.md) |
 | B6. Written communication — deck & capstone documentation | 캡스톤 문서가 완결적이고 탐색 가능하며, 링크·경로가 테스트로 검증된다 | [아키텍처](architecture.md), [한계](limitations.md), [비용 모델](cost-model.md), `tests/docs/test_docs.py` |
 | B7. Use of evidence & data storytelling | 청중이 행동할 수 있는 숫자로 주장을 뒷받침한다(건당 $0.0423, 고정비 월 $304.73, SLO·공정성 격차) | [비용 모델](cost-model.md), `ops/reports/load-20261102110233/report.md`, `eval/reports/job-eval-9imbutm/report.md` |
 
@@ -28,7 +28,7 @@
 | P6b fault — source-flaky(`fault-20261102111447`) | 원천 API 불안정 주입·원복 확인 | 2026-11-02 | [summary.json](../ops/reports/fault-20261102111447/summary.json) |
 | P6b fault — policy-down(`fault-20261102111750`) | 정책 엔진 다운 주입·원복 확인 | 2026-11-02 | [summary.json](../ops/reports/fault-20261102111750/summary.json) |
 | 단계별 smoke·실제 배포 기록 | P2\~P6b 배포 순서·실측 소요·문제 대응·알려진 제약 | 2026-10\~11 | [deploy-history.md](runbook/deploy-history.md) |
-| 리허설 | 2분 데모 리허설·소요 시간 | — | [rehearsal.md](demo/rehearsal.md) (리허설 전, 값은 리허설 후 채움) |
+| 리허설 | 2분 데모 리허설 1회(탐색 위주 약 6분 20초, 2분 시간 측정은 아님)·운영 시각·발견한 문제 | 2026-11-03 | [rehearsal.md](demo/rehearsal.md) |
 
 ---
 

@@ -87,7 +87,11 @@
 ## 배포 상태
 
 - Function 의존성은 운영자 PC에서 Linux wheel로 받아 zip에 넣는다(원격 빌드 미사용). (P3)
-- P6b 검토에서 발견한 I1 수정(Policy 앱의 ASGI `http send`/`http receive` 스팬이 App Insights에서 제외되지 않던 문제 — 제외용 환경변수가 동작하지 않던 설정)은 코드에 반영됐으나 아직 Azure에 배포되지 않았다. (리허설 후 갱신)
+- P6b 검토에서 발견한 I1 수정(Policy 앱의 ASGI `http send`/`http receive` 스팬이 App Insights에서 제외되지 않던 문제 — 제외용 환경변수가 동작하지 않던 설정)은 Azure에 배포됐고 반영을 확인했다. 2026-11-03 리허설에서 최근 45분 Policy 요청 2건(라이브 리허설 건 포함) 중 ` http send`/` http receive` 스팬이 0건이었다([리허설 기록](demo/rehearsal.md)). 표본이 2건이라 경향 확인 수준이다.
+- Service Bus 모드 사후 재생은 2026-11-03 리허설 전까지 라이브에서 검증되지 않았고(그전 재생 실측은 모두 인라인 모드), 리허설에서 구독 규칙 결함을 발견해 고쳤다. Bicep이 `$Default` 이름으로 CorrelationFilter를 PUT하면 규칙이 남지 않고 자동 `1=1` 규칙도 사라져 두 구독(`flow.updated/early-warning`, `alert.raised/collections`)의 규칙이 0개가 되어 재생 메시지가 모두 버려졌다. `subject-label` 규칙을 추가한 수정(커밋 `8cfe7d1`) 뒤 첫 라이브 재생이 약 3.1분에 성공했다(인라인 모드 참고 실측 132초보다 김). 재개·프로비저닝 뒤 규칙 확인은 [배포](runbook/deploy.md#service-bus-구독-규칙-확인)에 있다.
+- 재생 버튼을 두 번 누르면 `replay_in_progress` 확인이 원자적이지 않아 두 실행이 통과해 모니터링 동의가 2개 생기던 경쟁 조건은 `start_replay`의 ETag 조건부 대출 선점으로 고쳤다(커밋 `6c003a5`). 선점에 실패한 요청은 "동시 재생 요청 무시"로 끝난다. 그래도 데모에서는 재생 버튼을 한 번만 누른다.
+- 운영자 공인 IP는 회사 NAT처럼 출구 IP가 여러 개로 회전할 수 있어(2026-11-03 하루 4개 관측) 바뀔 때마다 console ingress와 Functions에 `/32` 임시 규칙을 하나씩 더해야 하고, 프로비저닝(`window open` 등)은 Functions의 임시 규칙을 지우므로 다시 추가해야 한다([배포](runbook/deploy.md#운영자-ip가-바뀔-때)).
+- 2분 데모 리허설은 1회(2026-11-03) 실시했으나 탐색 위주였고 2분 대본 시간 측정은 하지 못했다. 대본은 그 결과로 보완했고 2회차 리허설은 하지 않았다([리허설 기록](demo/rehearsal.md)).
 
 ## 상위 Spec 위험(§7)
 
