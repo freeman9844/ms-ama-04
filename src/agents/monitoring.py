@@ -38,15 +38,28 @@ _UNCLASSIFIED = (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
 
 # 합성 업종 집단 통계(데모용 고정 표). 실제 운영에서는 집단 통계 저장소에서 읽는다.
 _DEFAULT_COHORT = {"index": dict.fromkeys(range(1, 13), 1.0), "high_cost_lender_share": 0.05, "median_buffer_days": 40.0}
+
+
+def _flat(peaks: dict[int, float] | None = None) -> dict[int, float]:
+    return {**dict.fromkeys(range(1, 13), 1.0), **(peaks or {})}
+
+
+# 온라인 셀러 업종 10개. 데모 페르소나(패션의류·식품·뷰티·핸드메이드)는 P8 이전 업종(카페·분식·한식·제과점)의 값을 그대로 쓴다.
 PEER_COHORTS: dict[str, dict[str, Any]] = {
-    "카페": {
+    "패션의류": {
         "index": {1: 0.82, 2: 0.84, 3: 0.95, 4: 1.0, 5: 1.02, 6: 1.08, 7: 1.32, 8: 1.35, 9: 1.0, 10: 0.98, 11: 0.97, 12: 1.15},
         "high_cost_lender_share": 0.06,
         "median_buffer_days": 45.0,
     },
-    "분식": {"index": {**dict.fromkeys(range(1, 13), 1.0), 1: 0.9, 2: 0.9}, "high_cost_lender_share": 0.08, "median_buffer_days": 30.0},
-    "한식": {"index": {**dict.fromkeys(range(1, 13), 1.0), 12: 1.2}, "high_cost_lender_share": 0.07, "median_buffer_days": 35.0},
-    "제과점": {"index": {**dict.fromkeys(range(1, 13), 1.0), 12: 1.25}, "high_cost_lender_share": 0.05, "median_buffer_days": 40.0},
+    "식품": {"index": _flat({1: 0.9, 2: 0.9}), "high_cost_lender_share": 0.08, "median_buffer_days": 30.0},
+    "뷰티": {"index": _flat({12: 1.2}), "high_cost_lender_share": 0.07, "median_buffer_days": 35.0},
+    "핸드메이드": {"index": _flat({12: 1.25}), "high_cost_lender_share": 0.05, "median_buffer_days": 40.0},
+    "리빙": {"index": _flat({3: 1.1, 9: 1.1}), "high_cost_lender_share": 0.05, "median_buffer_days": 40.0},
+    "디지털": {"index": _flat({11: 1.3, 12: 1.2}), "high_cost_lender_share": 0.06, "median_buffer_days": 35.0},
+    "반려동물": {"index": _flat(), "high_cost_lender_share": 0.04, "median_buffer_days": 45.0},
+    "유아동": {"index": _flat({5: 1.3, 12: 1.2}), "high_cost_lender_share": 0.05, "median_buffer_days": 40.0},
+    "스포츠": {"index": _flat({6: 1.15, 7: 1.2, 8: 1.2, 12: 0.85}), "high_cost_lender_share": 0.06, "median_buffer_days": 35.0},
+    "도서·문구": {"index": _flat({2: 1.3, 3: 1.3, 8: 1.1}), "high_cost_lender_share": 0.05, "median_buffer_days": 40.0},
 }
 
 

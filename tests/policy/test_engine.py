@@ -10,7 +10,7 @@ def test_healthy_is_eligible(make_features, rules):
     d = evaluate(make_features(), rules)
     assert d.decision is Decision.ELIGIBLE
     assert d.rate_band == "B"
-    assert d.max_amount_krw == 20_000_000
+    assert d.max_amount_krw == 3_000_000
     assert d.reason_codes == ()
     assert d.rules_version == "2026.11-v1"
 
@@ -53,14 +53,14 @@ def test_ineligible_includes_refer_reasons(make_features, rules):
 
 
 def test_limit_capped_and_rounded(make_features, rules):
-    d = evaluate(make_features(avg_monthly_inflow_krw=12_345_678, requested_amount_krw=25_000_000), rules)
-    assert d.max_amount_krw == 18_500_000
-    d = evaluate(make_features(avg_monthly_inflow_krw=50_000_000, requested_amount_krw=40_000_000), rules)
-    assert d.max_amount_krw == 30_000_000
+    d = evaluate(make_features(avg_monthly_inflow_krw=2_345_678, requested_amount_krw=4_000_000), rules)
+    assert d.max_amount_krw == 3_500_000
+    d = evaluate(make_features(avg_monthly_inflow_krw=10_000_000, requested_amount_krw=8_000_000), rules)
+    assert d.max_amount_krw == 5_000_000
 
 
 def test_limit_below_product_min_is_r900(make_features, rules):
-    d = evaluate(make_features(avg_monthly_inflow_krw=1_500_000), rules)
+    d = evaluate(make_features(avg_monthly_inflow_krw=300_000), rules)
     assert d.decision is Decision.INELIGIBLE
     assert _codes(d) == ["R900"]
 

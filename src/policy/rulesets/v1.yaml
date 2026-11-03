@@ -1,8 +1,8 @@
-# 현금흐름 기반 소상공인 운전자금 대출 정책 v1 (데모용 수치)
+# 현금흐름 기반 온라인 셀러 소액 운전자금 대출 정책 v1 (데모용 수치, 50만~500만 원)
 version: "2026.11-v1"
 product:
-  min_amount_krw: 3000000
-  max_amount_krw: 30000000
+  min_amount_krw: 500000
+  max_amount_krw: 5000000
   inflow_multiplier: 1.5
 knockouts:
   - {code: R001, message: "거래 이력 6개월 미만", field: months_of_history, op: lt, threshold: 6}

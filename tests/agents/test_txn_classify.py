@@ -107,7 +107,7 @@ def test_only_unique_unclassified_descriptions_reach_decision_model(cafe):
     decider = FakeDecider()
     result = run(cafe.transactions, decider)
     sent = sorted(s["description"] for s in decider.states)
-    assert sent == ["(주)빈스토리 원두", "서울우유 유제품"]
+    assert sent == ["(주)동대문패브릭", "CJ대한통운 택배"]
     assert {s["business_industry"] for s in decider.states} == {"카페"}
     assert {(s["direction"], s["transaction_type"]) for s in decider.states} == {("outflow", "TRANSFER_OUT")}
     supplier_txns = [t for t in cafe.transactions if t.description in sent]

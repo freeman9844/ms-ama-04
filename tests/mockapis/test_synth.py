@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from statistics import mean
 
-from mockapis.synth import INJECTION_TEXT, Archetype, TxnCategory, generate_case
+from mockapis.synth import _OPENING_BALANCE, INJECTION_TEXT, Archetype, TxnCategory, generate_case
 
 AS_OF = date(2026, 10, 1)
 
@@ -37,7 +37,7 @@ def test_deterministic_for_same_seed():
 
 def test_balance_chain():
     case = _case()
-    balance = 15_000_000
+    balance = _OPENING_BALANCE
     for t in case.transactions:
         balance += t.amount_krw
         assert t.balance_after_krw == balance

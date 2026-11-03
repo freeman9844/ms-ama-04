@@ -49,7 +49,7 @@ def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
         for a in LOAD_GRID
     }
 
-# 대출 실행 이후 흐름: 심사 때 건강했던 카페가 확장 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
+# 대출 실행 이후 흐름: 심사 때 건강했던 패션의류 셀러가 시즌 재고 선매입 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
 STACKING_APPLICANTS = frozenset({"demo-healthy-001"})
 POSTLOAN_SEED_OFFSET = 1000
 

@@ -5,6 +5,7 @@ import pytest
 from agents.classify import Category, classify
 from agents.features import compute_underwriting
 from agents.monitoring import (
+    PEER_COHORTS,
     Baseline,
     categorize,
     detect,
@@ -13,8 +14,9 @@ from agents.monitoring import (
     weekly_series,
 )
 from mockapis.demo import build_demo_cases
-from mockapis.postloan import FlowScenario, generate_postloan
+from mockapis.postloan import PROCEEDS_KRW, FlowScenario, generate_postloan
 from shared.contracts import EVIDENCE_ID_PATTERN
+from shared.segments import SELLER_INDUSTRIES
 
 AS_OF = date(2026, 11, 2)
 
@@ -66,7 +68,7 @@ def test_categorize_applies_overrides_only_to_unclassified(cafe):
 def test_weekly_series_shapes_stacking(cafe, baseline):
     flow, rows = _rows(cafe, FlowScenario.STACKING, baseline, 3)
     assert [r["week"] for r in rows] == [1, 2, 3]
-    assert rows[1]["loan_proceeds"] == 2_000_000 and rows[1]["high_cost_count"] >= 1
+    assert rows[1]["loan_proceeds"] == PROCEEDS_KRW and rows[1]["high_cost_count"] >= 1
     assert rows[0]["buffer_days"] < baseline.cash_buffer_days / 2
     last = [t for t in flow.transactions if t.booked_on <= week_window(flow.start, 3)[1]][-1]
     assert rows[2]["end_balance"] == last.balance_after_krw
@@ -91,9 +93,14 @@ def test_catalog_ids_are_evidence_ids(cafe, baseline):
     import re
 
     _, rows = _rows(cafe, FlowScenario.STACKING, baseline, 4)
-    catalog = evidence_catalog(rows, baseline, "카페")
-    assert catalog["W:2:loan_proceeds"] == 2_000_000
+    catalog = evidence_catalog(rows, baseline, cafe.profile.industry)
+    assert catalog["W:2:loan_proceeds"] == PROCEEDS_KRW
     assert catalog["B:index:01"] == baseline.seasonal_index[1]
-    assert "B:cohort:index:01" in catalog
+    assert catalog["B:cohort:index:01"] == PEER_COHORTS["패션의류"]["index"][1]
     assert all(re.fullmatch(EVIDENCE_ID_PATTERN, k) for k in catalog)
     assert not any(k.startswith("W:5:") for k in catalog)
+
+
+def test_peer_cohorts_cover_every_seller_industry():
+    assert set(PEER_COHORTS) == set(SELLER_INDUSTRIES)
+    assert all(set(c["index"]) == set(range(1, 13)) for c in PEER_COHORTS.values())

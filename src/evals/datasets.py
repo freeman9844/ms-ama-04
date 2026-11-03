@@ -15,7 +15,7 @@ from mockapis.synth import Archetype, SyntheticCase, TxnCategory, generate_case
 from shared.contracts import Transaction, TxnTypeCode
 
 AS_OF = date(2026, 11, 1)
-REQUESTED_AMOUNT_KRW = 20_000_000
+REQUESTED_AMOUNT_KRW = 3_300_000
 REQUESTED_TENOR_MONTHS = 12
 ARCHETYPES = tuple(Archetype)
 CLASSIFY_SEEDS = (101, 102)

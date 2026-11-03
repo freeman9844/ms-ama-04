@@ -28,10 +28,12 @@ def segment_of(features: Any) -> dict[str, str] | None:
 
 
 LOAD_ARCHETYPES = ("healthy", "mismatch", "stress", "thin")
-LOAD_INDUSTRIES = ("카페", "한식", "제과점")
+# 온라인 마켓플레이스 셀러 업종. 부하 격자는 앞 6개를 쓴다.
+SELLER_INDUSTRIES = ("패션의류", "뷰티", "식품", "리빙", "디지털", "반려동물", "유아동", "스포츠", "핸드메이드", "도서·문구")
+LOAD_INDUSTRIES = SELLER_INDUSTRIES[:6]
 LOAD_REGIONS = ("서울 성동구", "부산 해운대구", "경기 성남시")
 LOAD_AGES = (8, 24, 38)
-LOAD_PER_ARCHETYPE = 6
+LOAD_PER_ARCHETYPE = 12
 LOAD_SEED_BASE = 5000
 
 
@@ -54,7 +56,7 @@ def _grid() -> tuple[LoadApplicant, ...]:
                     applicant_id=f"load-{arch}-{j + 1:02d}",
                     archetype=arch,
                     seed=LOAD_SEED_BASE + a * 100 + j,
-                    industry=LOAD_INDUSTRIES[(j + a) % 3],
+                    industry=LOAD_INDUSTRIES[(j + a) % len(LOAD_INDUSTRIES)],
                     region=LOAD_REGIONS[(j + j // 3 + a) % 3],
                     business_age_months=LOAD_AGES[(j + 2 * (j // 3) + a) % 3],
                 )

@@ -162,7 +162,7 @@ def approved_loan(deps, applicant_id="demo-healthy-001"):
             "application_id": LOAN,
             "consent_id": consent["consent_id"],
             "as_of": AS_OF.isoformat(),
-            "requested_amount_krw": 20_000_000,
+            "requested_amount_krw": 3_300_000,
             "requested_tenor_months": 12,
         },
     )
@@ -173,7 +173,7 @@ def approved_loan(deps, applicant_id="demo-healthy-001"):
             "applicant_id": applicant_id,
             "consent_id": consent["consent_id"],
             "decision": "approve",
-            "amount_krw": 20_000_000,
+            "amount_krw": 3_300_000,
             "tenor_months": 12,
             "decided_at": NOW.isoformat(),
             "underwriting": {"features": uw["features"], "monthly": uw["monthly"]},
@@ -198,7 +198,7 @@ def test_register_monitoring_builds_baseline_and_keeps_replay_state(mock_app):
     deps = make_deps(mock_app)
     approved_loan(deps)
     doc = loan(deps)
-    assert doc["industry"] == "카페" and doc["monitoring"] is None
+    assert doc["industry"] == "패션의류" and doc["monitoring"] is None
     assert doc["baseline"]["avg_weekly_revenue"] > 0 and set(doc["baseline"]["seasonal_index"]) == {f"{m:02d}" for m in range(1, 13)}
     replay(deps)
     approved_loan(deps)

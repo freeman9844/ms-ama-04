@@ -9,14 +9,14 @@ from fastapi.testclient import TestClient
 
 from mockapis.demo import LOAD_ARCHETYPE, build_demo_cases, build_load_cases, load_secret, resolve_as_of
 from mockapis.synth import INJECTION_TEXT, Archetype
-from shared.segments import LOAD_GRID
+from shared.segments import LOAD_GRID, SELLER_INDUSTRIES
 
 DIGESTS = {
-    "demo-healthy-001": "17a8782d4334a97b",
-    "demo-mismatch-002": "3f86f1fcf3d5ccde",
-    "demo-stress-003": "da1eee928c6ccfc9",
-    "demo-thin-004": "1dbd0c52c90bcb84",
-    "demo-injection-005": "1db0ddf6309729d6",
+    "demo-healthy-001": "bc36a6a25567372b",
+    "demo-mismatch-002": "c614b183ee69de7d",
+    "demo-stress-003": "954a8dd87af17a60",
+    "demo-thin-004": "a7544bf6732ffaf9",
+    "demo-injection-005": "fce0813f72ff22e6",
 }
 
 
@@ -68,7 +68,7 @@ def test_main_builds_app(monkeypatch):
     assert TestClient(module.app).get("/healthz").status_code == 200
 
 
-def test_postloan_flows_cast_the_cafe_as_the_stacking_hero():
+def test_postloan_flows_cast_the_healthy_seller_as_the_stacking_hero():
     from mockapis.demo import build_postloan_flows
     from mockapis.postloan import FlowScenario
 
@@ -103,3 +103,9 @@ def test_load_cases_follow_grid():
 def test_load_cases_are_deterministic():
     a, b = build_load_cases(date(2026, 10, 1)), build_load_cases(date(2026, 10, 1))
     assert all(_digest(a[k]) == _digest(b[k]) for k in a)
+
+
+def test_every_applicant_is_an_online_seller():
+    as_of = date(2026, 10, 1)
+    cases = {**build_demo_cases(as_of), **build_load_cases(as_of)}
+    assert {c.profile.industry for c in cases.values()} <= set(SELLER_INDUSTRIES)

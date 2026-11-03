@@ -9,7 +9,7 @@ from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
 
 AS_OF = date(2026, 11, 2)
-AMOUNT = 20_000_000
+AMOUNT = 3_300_000
 TENOR = 12
 
 
@@ -34,11 +34,11 @@ def _underwrite(cases, applicant_id, transactions=None):
 @pytest.mark.parametrize(
     ("applicant_id", "months", "inflow", "dscr", "buffer", "vol", "match"),
     [
-        ("demo-healthy-001", 12, 32_265_353, 3.802, 124.0, 0.193, 0.983),
-        ("demo-mismatch-002", 12, 32_360_867, 3.781, 122.7, 0.206, 0.6),
-        ("demo-stress-003", 12, 30_451_861, 3.007, 128.1, 0.265, 0.979),
-        ("demo-thin-004", 4, 37_407_437, 4.735, 55.9, 0.184, 0.0),
-        ("demo-injection-005", 12, 32_295_059, 3.766, 122.2, 0.193, 0.989),
+        ("demo-healthy-001", 12, 5_360_727, 3.783, 122.2, 0.196, 0.971),
+        ("demo-mismatch-002", 12, 5_448_246, 4.003, 129.8, 0.199, 0.6),
+        ("demo-stress-003", 12, 5_089_967, 3.016, 126.4, 0.271, 0.977),
+        ("demo-thin-004", 4, 6_070_672, 4.357, 51.9, 0.206, 0.0),
+        ("demo-injection-005", 12, 5_420_065, 3.89, 125.7, 0.191, 0.984),
     ],
 )
 def test_features_match_calibration(cases, applicant_id, months, inflow, dscr, buffer, vol, match):
@@ -70,10 +70,10 @@ def test_policy_outcomes_for_demo_applicants(cases, applicant_id, decision, code
 
 def test_signals_explain_dscr(cases):
     s = _underwrite(cases, "demo-healthy-001").signals
-    assert s["avg_monthly_noi_krw"] == 9_086_020
-    assert s["avg_monthly_debt_service_krw"] == 650_000
-    assert s["new_installment_krw"] == 1_739_768
-    assert s["avg_monthly_owner_draw_krw"] == 1_500_000
+    assert s["avg_monthly_noi_krw"] == 1_494_712
+    assert s["avg_monthly_debt_service_krw"] == 108_000
+    assert s["new_installment_krw"] == 287_061
+    assert s["avg_monthly_owner_draw_krw"] == 250_000
     assert s["classification_rules"] == "classify-v1"
 
 
@@ -92,7 +92,7 @@ def test_empty_history_yields_zero_features_and_knockout(cases):
 
 
 def test_monthly_installment_annuity():
-    assert int(monthly_installment(AMOUNT, TENOR)) == 1_739_768
+    assert int(monthly_installment(AMOUNT, TENOR)) == 287_061
 
 
 def _unclassified_out(cases, applicant_id):

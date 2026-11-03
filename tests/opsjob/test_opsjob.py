@@ -128,9 +128,9 @@ def test_config_from_env_validates():
     with pytest.raises(ValueError):
         config_from_env({"OPS_MODE": "load", "OPS_RUN_ID": "bad id"})
     with pytest.raises(ValueError):
-        config_from_env({"OPS_MODE": "load", "OPS_RUN_ID": "ok", "OPS_COUNT": "25"})
+        config_from_env({"OPS_MODE": "load", "OPS_RUN_ID": "ok", "OPS_COUNT": "49"})
     c = config_from_env({"OPS_MODE": "submit", "OPS_RUN_ID": "f-1", "OPS_APPLICANTS": "a,b", "OPS_SOURCE": "fault"})
-    assert c.applicants == ("a", "b") and c.count == 24
+    assert c.applicants == ("a", "b") and c.count == 48
     # 최악 2·대기 + 23·15초 = 3345초 < job-ops replicaTimeout 3600초
     assert c.wait_s == 1500 and c.interval_s == 15
 

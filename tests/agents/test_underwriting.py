@@ -30,24 +30,24 @@ from shared.pseudonymize import find_pii
 
 AS_OF = date(2026, 11, 2)
 KEY = b"u" * 32
-AMOUNT = 20_000_000
+AMOUNT = 3_300_000
 
 GOOD = {
     "recommendation": "approve",
     "summary": "영업현금흐름이 신규 상환액을 충분히 감당한다.",
     "claims": [
-        {"text": "DSCR은 3.802로 정책 하한을 크게 웃돈다.", "metric_ids": ["M:dscr"], "txn_ids": []},
-        {"text": "현금 완충일수는 124일이다.", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
+        {"text": "DSCR은 3.783로 정책 하한을 크게 웃돈다.", "metric_ids": ["M:dscr"], "txn_ids": []},
+        {"text": "현금 완충일수는 122일이다.", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
     ],
     "proposed_structure": {
-        "amount_krw": 20_000_000,
+        "amount_krw": 3_300_000,
         "tenor_months": 12,
         "schedule": "level",
         "reduced_payment_months": [],
         "rationale": "요청 금액이 정책 한도 안이다.",
     },
     "counterfactuals": [
-        {"metric_id": "M:dscr", "current": 3.802, "target": 1.0, "explanation": "DSCR이 1.0 아래면 거절 사유가 된다."}
+        {"metric_id": "M:dscr", "current": 3.783, "target": 1.0, "explanation": "DSCR이 1.0 아래면 거절 사유가 된다."}
     ],
 }
 SUPPORTED = {
@@ -156,7 +156,7 @@ def test_specs_are_strict_with_tools_and_code_interpreter():
 def test_get_metrics_exposes_catalog_policy_and_classification(cases):
     ctx = context(cases)
     out = ctx.handlers()["get_metrics"]({})
-    assert out["metrics"]["M:dscr"] == 3.802 and out["metrics"]["P:max_amount_krw"] == AMOUNT
+    assert out["metrics"]["M:dscr"] == 3.783 and out["metrics"]["P:max_amount_krw"] == AMOUNT
     assert not [k for k in out["metrics"] if k.startswith("S:")]
     assert out["policy"]["decision"] == "eligible" and out["policy"]["reason_codes"] == []
     assert out["classification"] == {"unresolved": 0}
@@ -193,7 +193,7 @@ ALL_TOOLS = [
 def test_agents_never_see_pii(cases, applicant_id):
     case = cases[applicant_id]
     leaky = copy.deepcopy(GOOD)
-    leaky["claims"][0]["text"] = f"{case.profile.representative_name} 대표의 DSCR은 3.802다."
+    leaky["claims"][0]["text"] = f"{case.profile.representative_name} 대표의 DSCR은 3.783다."
     runner = FakeRunner([leaky, GOOD, GOOD], [SUPPORTED, SUPPORTED, SUPPORTED], tool_script=ALL_TOOLS)
     run_assess(context(cases, applicant_id), runner)
     seen = json.dumps({"inputs": [t for _, t in runner.calls], "tools": runner.tool_outputs}, ensure_ascii=False)
@@ -209,8 +209,8 @@ def test_grounded_draft_has_no_issues(cases):
 @pytest.mark.parametrize(
     "text",
     [
-        "세금 신고 일치율은 98.3%다.",
-        "세금 신고 일치율은 0.983이다.",
+        "세금 신고 일치율은 97.1%다.",
+        "세금 신고 일치율은 0.971이다.",
     ],
 )
 def test_percent_and_ratio_forms_match(cases, text):
@@ -219,7 +219,7 @@ def test_percent_and_ratio_forms_match(cases, text):
 
 
 def test_korean_units_rounding_dates_and_small_integers_are_tolerated(cases):
-    text = "2026-03 기준 12개월 평균으로 신규 월상환액은 약 174만원이고 R101 사유는 없다."
+    text = "2026-03 기준 12개월 평균으로 신규 월상환액은 약 29만원이고 R101 사유는 없다."
     d = draft(claims=[{"text": text, "metric_ids": ["M:new_installment_krw"], "txn_ids": []}])
     assert check_grounding(d, context(cases)) == []
 
@@ -253,7 +253,7 @@ def test_evidence_ids_cited_as_transactions_are_treated_as_metrics(cases):
 
 def test_transaction_amounts_can_ground_numbers(cases):
     ctx = context(cases)
-    t = next(t for t in ctx.transactions if t.amount_krw < -1_000_000)
+    t = next(t for t in ctx.transactions if t.amount_krw < -400_000)
     text = f"{t.booked_on:%Y-%m-%d}에 {-t.amount_krw:,}원이 나갔다."
     d = draft(claims=[{"text": text, "metric_ids": [], "txn_ids": [t.txn_id]}])
     assert check_grounding(d, ctx) == []
@@ -271,7 +271,7 @@ def test_recommendation_must_respect_policy(cases):
     thin = context(cases, "demo-thin-004")
     issues = check_grounding(draft(), thin)
     assert any("ineligible" in i for i in issues)
-    over = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 25_000_000})
+    over = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 4_000_000})
     assert any("한도" in i for i in check_grounding(over, context(cases)))
     missing = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 0})
     assert any("proposed_structure" in i for i in check_grounding(missing, context(cases)))

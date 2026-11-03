@@ -1,7 +1,7 @@
 """대출 실행 이후 91일 계좌 흐름 합성(조기경보 재생용, seed 결정론적).
 
 - STABLE: 심사 시점과 같은 영업 패턴. 계절 지수(12월 1.2, 1~2월 0.8)만 움직인다(오탐 미끼).
-- STACKING: 확장 공사대금으로 잔고가 줄어든 뒤 매출이 꺾이고, 2주마다 고금리 대출을 새로 받아
+- STACKING: 시즌 재고 대량 선매입으로 잔고가 줄어든 뒤 매출이 꺾이고, 2주마다 고금리 대출을 새로 받아
   매주 상환이 쌓인다(loan stacking). 급여가 늦어지고 결국 잔고가 0 아래로 내려간다.
   일부 대부·캐피탈 적요는 규칙 분류기가 못 잡도록 만들어 의미 분류의 몫을 남긴다.
 - default_on: 처음으로 일말 잔고가 0 미만이 된 날(부도 대리 지표, P6 평가의 사전 감지 일수 기준).
@@ -13,17 +13,33 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 
-from mockapis.synth import _BASE_DAILY, _CARD_ISSUERS, _PERSONAS, _PG_FEE_RATE, _SEASONAL, SyntheticCase, TxnCategory
+from mockapis.synth import (
+    _BANK_REPAYMENT_KRW,
+    _BASE_DAILY,
+    _CARD_PGS,
+    _HEALTH_INSURANCE_KRW,
+    _MARKETPLACES,
+    _OWNER_DRAW_KRW,
+    _PAYROLL_KRW,
+    _PERSONAS,
+    _PG_FEE_RATE,
+    _RENT_KRW,
+    _SEASONAL,
+    _VAT_KRW,
+    SyntheticCase,
+    TxnCategory,
+)
 from shared.contracts import Transaction, TxnTypeCode
 
 POSTLOAN_DAYS = 91
 STACKING_ONSET_DAY = 7
 CAPEX_DAY = 2
-CAPEX_FLOOR_KRW = 24_000_000
-INSTALLMENT_KRW = 1_600_000
+CAPEX_FLOOR_KRW = 4_000_000
+CAPEX_UNIT_KRW = 10_000
+INSTALLMENT_KRW = 267_000
 INSTALLMENT_DAY = 15
-PROCEEDS_KRW = 2_000_000
-REPAYMENT_PER_LOAN_KRW = 600_000
+PROCEEDS_KRW = 333_000
+REPAYMENT_PER_LOAN_KRW = 100_000
 PAYROLL_DELAY_FROM_DAY = 28
 REVENUE_FLOOR = 0.4
 DECAY_END_DAY = 56
@@ -80,19 +96,19 @@ def generate_postloan(
         nominal = _BASE_DAILY * season
         base = nominal * _revenue_factor(day, stacking)
 
-        add(d, int(base * rng.uniform(0.85, 1.15)), f"{rng.choice(_CARD_ISSUERS)} 매출", "CARD_SETTLE", TxnCategory.REVENUE)
+        add(d, int(base * rng.uniform(0.85, 1.15)), f"{rng.choice(_CARD_PGS)} 카드정산", "CARD_SETTLE", TxnCategory.REVENUE)
         if d.weekday() == 0:
-            platform = rng.choice(("배민", "쿠팡이츠"))
+            platform = rng.choice(_MARKETPLACES)
             gross = int(base * rng.uniform(1.5, 2.5))
             add(d, gross - round(gross * _PG_FEE_RATE), f"{platform} 정산", "PG_SETTLE", TxnCategory.REVENUE)
         if d.day == 5:
-            add(d, -2_500_000, f"임대료 {persona.region}", "AUTO_DEBIT", TxnCategory.RENT)
+            add(d, -_RENT_KRW, f"임대료 {persona.region}", "AUTO_DEBIT", TxnCategory.RENT)
         payroll_day = 20 if stacking and day >= PAYROLL_DELAY_FROM_DAY else 10
         if d.day == payroll_day:
-            for name, pay in zip(persona.employees, (2_800_000, 2_600_000)):
+            for name, pay in zip(persona.employees, _PAYROLL_KRW):
                 add(d, -pay, f"급여 {name}", "TRANSFER_OUT", TxnCategory.PAYROLL)
         if d.day == 10:
-            add(d, -480_000, "국민건강보험공단", "AUTO_DEBIT", TxnCategory.SOCIAL_INSURANCE)
+            add(d, -_HEALTH_INSURANCE_KRW, "국민건강보험공단", "AUTO_DEBIT", TxnCategory.SOCIAL_INSURANCE)
         if d.weekday() == 2:
             # 거래처 대금은 매출보다 늦게 줄어든다(재고·계약). 계절만 반영한 명목 기준으로 쓴다.
             add(d, -int(nominal * 3.0 * rng.uniform(0.9, 1.1)), persona.suppliers[0], "TRANSFER_OUT", TxnCategory.SUPPLIER)
@@ -100,16 +116,16 @@ def generate_postloan(
         if d.day == INSTALLMENT_DAY:
             add(d, -INSTALLMENT_KRW, f"{LENDER} 대출상환", "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT)
         if d.day == 25:
-            add(d, -650_000, "기업은행 대출상환", "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT)
+            add(d, -_BANK_REPAYMENT_KRW, "기업은행 대출상환", "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT)
             if d.month in (1, 7):
-                add(d, -1_800_000, "부가세 국세청", "TAX", TxnCategory.TAX)
+                add(d, -_VAT_KRW, "부가세 국세청", "TAX", TxnCategory.TAX)
         if d.day == 28:
-            add(d, -1_500_000, f"{persona.representative} 개인이체", "TRANSFER_OUT", TxnCategory.OWNER_TRANSFER)
+            add(d, -_OWNER_DRAW_KRW, f"{persona.representative} 개인이체", "TRANSFER_OUT", TxnCategory.OWNER_TRANSFER)
         if stacking:
             if day == CAPEX_DAY:
-                capex = max(opening - CAPEX_FLOOR_KRW, 0) // 100_000 * 100_000
+                capex = max(opening - CAPEX_FLOOR_KRW, 0) // CAPEX_UNIT_KRW * CAPEX_UNIT_KRW
                 if capex:
-                    add(d, -capex, "2호점 인테리어 공사대금", "TRANSFER_OUT", TxnCategory.SUPPLIER)
+                    add(d, -capex, "시즌 재고 대량 선매입", "TRANSFER_OUT", TxnCategory.SUPPLIER)
             if day >= STACKING_ONSET_DAY and (day - STACKING_ONSET_DAY) % 14 == 0:
                 _, _, desc, code = _STACK_LENDERS[loans_taken % len(_STACK_LENDERS)]
                 add(d, PROCEEDS_KRW, desc, code, TxnCategory.LOAN_PROCEEDS)

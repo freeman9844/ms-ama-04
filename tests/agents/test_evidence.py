@@ -20,7 +20,7 @@ def catalogs():
         case = cases[applicant_id]
         uw = compute_underwriting(
             f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
-            as_of=AS_OF, requested_amount_krw=20_000_000, requested_tenor_months=12,
+            as_of=AS_OF, requested_amount_krw=3_300_000, requested_tenor_months=12,
         )
         policy = evaluate(uw.features, load_rules(DEFAULT_RULES_PATH))
         out[applicant_id] = build_catalog(
@@ -31,12 +31,12 @@ def catalogs():
 
 def test_catalog_exposes_features_signals_and_policy(catalogs):
     c = catalogs["demo-healthy-001"]
-    assert c["M:dscr"] == 3.802
-    assert c["M:cash_buffer_days"] == 124.0
-    assert c["M:requested_amount_krw"] == 20_000_000
-    assert c["M:avg_monthly_noi_krw"] == 9_086_020
-    assert c["M:new_installment_krw"] == 1_739_768
-    assert c["P:max_amount_krw"] == 20_000_000
+    assert c["M:dscr"] == 3.783
+    assert c["M:cash_buffer_days"] == 122.2
+    assert c["M:requested_amount_krw"] == 3_300_000
+    assert c["M:avg_monthly_noi_krw"] == 1_494_712
+    assert c["M:new_installment_krw"] == 287_061
+    assert c["P:max_amount_krw"] == 3_300_000
     assert "M:classification_rules" not in c
 
 

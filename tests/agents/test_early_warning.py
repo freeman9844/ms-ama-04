@@ -123,7 +123,7 @@ def test_tool_outputs_are_masked(cafe, baseline):
 def test_rejected_then_accepted_first_wins(ctx):
     runner = FakeRunner(
         script=[
-            ("raise_alert", stacking_alert(ctx, text="고금리 상환 9,999,999원이 나타났다.")),
+            ("raise_alert", stacking_alert(ctx, text="고금리 상환 999,999,999원이 나타났다.")),
             ("raise_alert", stacking_alert(ctx)),
             ("raise_alert", stacking_alert(ctx)),
         ],
@@ -131,7 +131,7 @@ def test_rejected_then_accepted_first_wins(ctx):
     )
     result = investigate(ctx, runner=runner, model=MODEL)
     first, second, third = runner.outputs
-    assert first["accepted"] is False and "9999999" in " ".join(first["issues"]).replace(",", "")
+    assert first["accepted"] is False and "999999999" in " ".join(first["issues"]).replace(",", "")
     assert second == {"accepted": True, "alert_id": ctx.alert_id}
     assert third["accepted"] is False
     assert result.decision == "alert" and result.alert.severity == "high"
@@ -148,7 +148,7 @@ def test_rejected_then_accepted_first_wins(ctx):
         ({"signals": [{"kind": "loan_stacking", "text": "근거", "metric_ids": ["W:9:revenue"], "txn_ids": []}]}, "W:9:revenue"),
         ({"signals": [{"kind": "loan_stacking", "text": "근거", "metric_ids": [], "txn_ids": []}]}, "근거 ID"),
         ({"severity": "high", "recommended_action": "monitor"}, "형식 오류"),
-        ({"summary": "잔고가 123,456,789원 줄었다."}, "summary"),
+        ({"summary": "잔고가 999,999,999원 줄었다."}, "summary"),
     ],
 )
 def test_raise_alert_rejects(ctx, change, needle):
