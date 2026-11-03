@@ -110,7 +110,7 @@ SVG 문자열을 만들지 않고 좌표·길이가 담긴 dict/list만 돌려�
 
 ### 3.4 `src/console/app.py` 연결
 
-- `charts`·`dashboard` 함수를 템플릿 전역으로 등록하거나, 라우트에서 계산해 컨텍스트로 넘깁니다(홈: `summary`, 상세: `steps`, 모니터링: `summary`, 운영: 기존 `s`).
+- 라우트에서 dashboard 함수로 화면 요약을 계산해 컨텍스트 `ui`로 넘깁니다(홈 `home_summary(rows)`, 상세 `detail_summary(view)`, 모니터링 목록 `loans_summary(rows)`, 모니터링 상세 `loan_summary(view)`, 운영 `ops_summary(s, STEP_LABELS)`). 홈·모니터링 목록은 `limit=LIST_LIMIT`도 넘깁니다.
 - 라우트 경로·폼 처리·권한·CSP·htmx 부분 갱신(`/applications/rows`)은 그대로입니다.
 
 ---
@@ -138,7 +138,7 @@ SVG 문자열을 만들지 않고 좌표·길이가 담긴 dict/list만 돌려�
 
 ### 4.3 사후 모니터링 목록 `/loans` (`loans.html`)
 
-- KPI 4장: 모니터링 대출 / 재생 중 / 재생 완료 / 경보 합계. 아래 표는 열 그대로, 모니터링 상태는 배지.
+- KPI 4장: 모니터링 대출 / 진행 중 재생 / 13주 완주(보조 줄 "미실행 N건") / 누적 경보. 상태 배지 문구(`재생 중`·`재생 완료`·`재생 전`)와 겹치지 않게 KPI 라벨을 달리해, 표의 배지를 확인하는 기존 테스트가 KPI 라벨로 우연히 통과하지 않게 합니다. 아래 표는 열 그대로, 모니터링 상태는 배지.
 
 ### 4.4 사후 모니터링 상세 `/loans/<id>` (`loan.html`)
 
@@ -188,7 +188,7 @@ SVG 문자열을 만들지 않고 좌표·길이가 담긴 dict/list만 돌려�
 ## 7. 문서
 
 - `docs/demo/demo-script.md`: 0:15 장면의 화면 설명에 "`타임라인`은 7단계 진행 단계로 표시"를 한 줄 덧붙입니다. 섹션·버튼 이름은 그대로라 다른 수정은 없습니다.
-- `README.md` 또는 `docs/runbook/operate.md`: 로컬 미리보기 명령 한 줄.
+- `docs/runbook/setup.md`의 "로컬 서비스 실행"에 미리보기 명령 한 줄. `docs/demo/demo-script.md`의 사이드바·상단 버튼 위치 표현과 `STATUS_LABELS` 위치(`src/console/statuses.py`)를 고칩니다.
 - 배포(다음 단계): `python -m ops window open --acr` → `python -m ops deploy console` → 확인 → `python -m ops window close`. 이번 범위에서는 실행하지 않습니다.
 
 ---
