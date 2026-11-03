@@ -28,6 +28,9 @@ REQUIRED_DOCS = [
     "docs/adr/ADR-008-vnet-jobs-for-eval-ops.md",
     "docs/adr/ADR-009-deletion-vs-explainability.md",
     "docs/security/threat-model.md",
+    "docs/demo/demo-script.md",
+    "docs/demo/fallback.md",
+    "docs/demo/rehearsal.md",
 ]
 ADR_SECTIONS = ("## 상태", "## 맥락", "## 결정", "## 검토한 대안", "## 결과", "## 재검토 조건", "## 근거")
 FENCE = re.compile(r"```.*?```", re.S)
