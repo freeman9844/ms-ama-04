@@ -1,6 +1,6 @@
 # 아키텍처
 
-동의 기반 합성 데이터로 SME 현금흐름 대출을 심사·모니터링·추심하는 에이전트 시스템의 as-built 아키텍처다. 신청 건별 흐름은 Durable Functions 오케스트레이터가 결정론적 상태 그래프로 관리하고, 각 단계 안에서 Foundry 프롬프트 에이전트가 도구를 써서 자율 판단한다. 신용 규칙은 LLM 밖의 결정론적 Policy Engine이 판정하고, 최종 결정은 심사역이 콘솔에서 내린다. 데이터·제어 평면은 VNet 격리 + Private Endpoint로 닫혀 있고 무키(managed identity) 인증을 쓰며, 외부로 열린 진입점은 운영자 IP 허용목록과 Entra 인증을 건 콘솔뿐이다.
+동의 기반 합성 데이터로 SME 현금흐름 대출을 심사·모니터링·추심하는 에이전트 시스템의 as-built 아키텍처다. 신청 건별 흐름은 Durable Functions 오케스트레이터가 결정론적 상태 그래프로 관리하고, 각 단계 안에서 Foundry 프롬프트 에이전트가 도구를 써서 자율 판단한다. 신용 규칙은 LLM 밖의 결정론적 Policy Engine이 판정하고, 최종 결정은 심사역이 콘솔에서 내린다. 데이터·제어 평면은 VNet 격리 + Private Endpoint로 닫혀 있고 무키(managed identity) 인증을 쓰며, 외부로 열린 진입점은 운영자 IP 허용목록을 건 콘솔뿐이다(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원).
 
 > **합성 데이터 기준.** 실제 마이데이터·홈택스·PG API 대신 합성 데이터와 Mock API를 쓴다. 실측 수치는 `ops/reports/load-20261102110233/report.md`, `eval/reports/job-eval-9imbutm/report.md`에서 인용하며, 배포·운영 실행 기록은 [runbook/deploy-history.md](runbook/deploy-history.md)에 있다.
 
@@ -22,7 +22,7 @@ flowchart LR
   end
   borrower -->|신청 제출| orch
   officer -->|로그인 / 승인·조건부·거절| console
-  operator -->|상시: IP 허용 + Entra| console
+  operator -->|상시: 운영자 IP 허용(데모: Easy Auth 꺼짐)| console
   operator -.->|배포 창: 데이터 평면 작업| orch
   console --> orch
   orch <--> foundry
@@ -30,7 +30,7 @@ flowchart LR
   orch <--> mock
 ```
 
-차주는 접수 경로로, 심사역·운영자는 콘솔로 들어온다. 콘솔은 상시 external이지만 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:42-46`)과 Entra 인증으로 막는다. 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
+차주는 접수 경로로, 심사역·운영자는 콘솔로 들어온다. 콘솔은 상시 external이지만 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막는다(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
 
 ## 컨테이너
 
@@ -107,13 +107,13 @@ flowchart TB
   end
   operator["운영자 IP"]
   pe -->|Private DNS| data["Foundry·Cosmos·Storage·Search·KV·Service Bus·ACR·Functions"]
-  operator -->|상시: IP 허용 + Entra| appsweb
+  operator -->|상시: 운영자 IP 허용(데모: Easy Auth 꺼짐)| appsweb
   operator -.->|배포 창: public 허용| fn
   appsweb --> appsint
   fn --> appsint
 ```
 
-평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경이지만 상시 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:42-46`)과 Entra 인증으로 막으며, 배포 창 토글과 무관하게 열려 있다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
+평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경이지만 상시 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막으며(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원), 배포 창 토글과 무관하게 열려 있다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
 
 | 서브넷 | 주소 | 위임 | 용도 |
 |---|---|---|---|
@@ -219,7 +219,7 @@ flowchart LR
 
 | 항목 | 데모 | 운영 전환 시 |
 |---|---|---|
-| 외부 진입 | 콘솔만 external, 운영자 IP + Entra | internal 환경 앞 Application Gateway(WAF v2) + Entra 단일 진입(월 약 $365, 상위 Spec §2.2) |
+| 외부 진입 | 콘솔만 external, 운영자 IP 허용목록(데모: Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md)) | internal 환경 앞 Application Gateway(WAF v2) + Entra 단일 진입(월 약 $365, 상위 Spec §2.2) |
 | 심사역 인증 | Easy Auth implicit id_token, `consoleAuthEnabled=false` 시 데모 역할 | Entra 로그인 복원(비밀 또는 FIC 기반 인증 코드 흐름, [ADR-007](adr/ADR-007-demo-auth-mode.md)) |
 | 서킷 브레이커 | 프로세스(Flex 인스턴스) 단위 | 분산 서킷(공유 상태) |
 | 가용성 | 단일 리전 | 다중 리전 DR |

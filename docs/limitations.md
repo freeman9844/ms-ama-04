@@ -104,7 +104,7 @@
 | Decision-1 한국어 적요 분류 품질·배포 가능 여부 | 배포·호출 확인, 단 공개 단가 미확인으로 비용은 호출 수만 집계 |
 | 전체 비공개 네트워크 배포 복잡도 | 배포 창 토글로 운영, 실행 기록은 [deploy-history](runbook/deploy-history.md) |
 | 배포 창 동안 PaaS public access 일시 허용 | 운영자 IP만 허용하고 작업 후 닫음, Foundry·Functions만 열림(`docs/security/threat-model.md:74`) |
-| 콘솔 외부 ingress(App Gateway 없음) | 운영자 IP + Entra로 완화, App Gateway WAF는 문서로만 기술(운영 전환 과제) |
+| 콘솔 외부 ingress(App Gateway 없음) | 운영자 IP 허용목록으로 완화(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원), App Gateway WAF는 문서로만 기술(운영 전환 과제) |
 | Decision-1 APAC 배포 문서·CLI 불일치 | 배포 SKU를 파라미터로 두고 배포 성공 |
 | Foundry caphost 삭제 후 서브넷 점유 | teardown 스크립트가 순서·대기 처리 |
 | Durable + 비공개 스토리지 조합 | 검증된 Durable 1.x Python + Azure Storage 백엔드로 배포 |

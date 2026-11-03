@@ -64,7 +64,7 @@
 
 - **일시 정지(`ops pause`)**: 쓰지 않을 때 Service Bus Premium을 내려 고정비의 가장 큰 항목을 없앤다(초기 추정 약 $677). pause 5.8분·resume 4.7분(`docs/runbook/deploy-history.md:55`). pause 중에도 남는 비용 항목은 AI Search·ACR·Private Endpoint 등 상주 리소스다.
 - **배포 창 운영**: public 접근을 배포 창에만 잠깐 열고 닫는다. 주 목적은 비용 절감이 아니라 공격 표면 관리이며(상주 게이트웨이를 두지 않는 운영 방식), 이 자체의 비용 효과는 측정하지 않았다.
-- **모델 등급(정성적 설계 선택)**: 규칙으로 못 푼 적요만 LLM에 보내고, 먼저 선택형 분류 모델(`decision-1`)에 물은 뒤 기권·낮은 확신(0.7 미만)만 `gpt-5.4-mini` 에이전트(`txn-classifier`)가 보완한다([ADR-005](adr/ADR-005-classification-model.md)). 비용을 염두에 둔 등급 선택이지만 `decision-1`은 공개 단가를 확인하지 못해 mini 단독 대비 **비용·호출 수 이점은 측정하지 못했다**. 평가에서 세 구성은 천장 효과로 품질이 같아 비용·지연으로만 비교한다(`eval/reports/job-eval-9imbutm/report.md`).
+- **모델 등급(정성적 설계 선택)**: 규칙으로 못 푼 적요만 LLM에 보내고, 먼저 선택형 분류 모델(`decision-1`)에 물은 뒤 기권·낮은 확신(0.7 미만)만 `gpt-5.4-mini` 에이전트(`txn-classifier`)가 보완한다([ADR-005](adr/ADR-005-classification-model.md)). 비용을 염두에 둔 등급 선택이지만 mini 단독 대비 신청당 호출 수는 측정했다(8.375회 vs 1.000회, 오히려 더 많음). `decision-1`은 공개 단가를 확인하지 못해 **비용 이점은 검증하지 못했다**. 평가에서 세 구성은 천장 효과로 품질이 같아 비용·지연으로만 비교한다(`eval/reports/job-eval-9imbutm/report.md`).
 - **분류 캐시**: 분류 결과를 Cosmos에 캐시해 같은 적요의 재호출을 줄인다(토큰이 든 적요·이체 적요는 캐시 제외).
 - **PTU 손익분기**: 물량이 충분히 크면 Global Standard 종량제 대신 PTU(프로비저닝) 전환이 유리해지는 지점이 생긴다. 다만 데모 표본으로는 손익분기를 산출할 근거가 없어 정성적 과제로만 남긴다(새 수치를 만들지 않는다. [ADR-002](adr/ADR-002-model-deployment.md)).
 - **App Gateway 미구축**: 운영 전환 시 Application Gateway(WAF v2)를 두면 월 약 $365가 더 든다(상위 Spec §2.2, `docs/runbook/deploy-history.md:71`). 데모는 비용 때문에 구축하지 않고 문서로만 기술한다.

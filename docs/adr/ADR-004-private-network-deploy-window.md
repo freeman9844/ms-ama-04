@@ -7,7 +7,7 @@
 금융 데이터 평면은 외부 노출을 최소화해야 한다. 상위 Spec §2.2(네트워크 토폴로지)는 모든 PaaS 리소스를 Private Endpoint로만 접근하고 평상시 public network access를 끄도록 한다(`docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2). 그런데 운영자 PC에서 코드 배포·이미지 빌드·시드 적재 같은 데이터 평면 작업은 직접 접근이 필요하다. 상시 공개나 점프박스는 비용·운영 부담이 크다.
 
 ## 결정
-평상시 Foundry·Cosmos·Storage·AI Search·Key Vault·Service Bus·ACR·Functions의 public network access는 모두 꺼져 있고 Private Endpoint·Private DNS로만 접근한다. 운영자 데이터 평면 작업은 **배포 창** 동안에만 연다: `operatorIp` 파라미터가 있을 때만 Functions의 `publicNetworkAccess`를 `Enabled`로 바꾸고 기본 거부 + 운영자 IP 허용 규칙을 넣는다(`infra/modules/functions.bicep:19`·`:43`·`:47-49`, `windowOpen = !empty(operatorIp)`). ACR는 `az acr build` 에이전트가 IP 규칙 밖이라 빌드 창 동안 `acrPublic`으로 전체 공개한다. 창 조작은 `src/ops/window.py`(`python -m ops window open [--acr] | status | close`)가 `azd provision`으로 수행한다. **콘솔은 예외**다: external 환경이지만 상시 열려 있고 영구 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:42-46`)으로만 막으며 배포 창 토글과 무관하다.
+평상시 Foundry·Cosmos·Storage·AI Search·Key Vault·Service Bus·ACR·Functions의 public network access는 모두 꺼져 있고 Private Endpoint·Private DNS로만 접근한다. 운영자 데이터 평면 작업은 **배포 창** 동안에만 연다: `operatorIp` 파라미터가 있을 때만 Functions의 `publicNetworkAccess`를 `Enabled`로 바꾸고 기본 거부 + 운영자 IP 허용 규칙을 넣는다(`infra/modules/functions.bicep:19`·`:43`·`:47-49`, `windowOpen = !empty(operatorIp)`). ACR는 `az acr build` 에이전트가 IP 규칙 밖이라 빌드 창 동안 `acrPublic`으로 전체 공개한다. 창 조작은 `src/ops/window.py`(`python -m ops window open [--acr] | status | close`)가 `azd provision`으로 수행한다. **콘솔은 예외**다: external 환경이지만 상시 열려 있고 영구 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로만 막으며 배포 창 토글과 무관하다.
 
 ## 검토한 대안
 | 대안 | 장점 | 기각 이유 |
@@ -26,6 +26,6 @@
 - 운영자 IP 고정이 가능해져 `operator-alt` 보완이 불필요할 때.
 
 ## 근거
-- 구현: `infra/modules/functions.bicep:43`(`publicNetworkAccess`), `src/ops/window.py`, `infra/resources.bicep:599`(콘솔 IP 허용), `infra/modules/container-app.bicep:42-46`.
+- 구현: `infra/modules/functions.bicep:43`(`publicNetworkAccess`), `src/ops/window.py`, `infra/resources.bicep:599`(콘솔 IP 허용), `infra/modules/container-app.bicep:46-50`.
 - 실측 소요: [../runbook/deploy-history.md](../runbook/deploy-history.md), 운영 안내 [../runbook/deploy.md](../runbook/deploy.md).
 - 상위 Spec: `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2.

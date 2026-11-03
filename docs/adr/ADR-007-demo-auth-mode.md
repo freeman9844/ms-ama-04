@@ -7,7 +7,7 @@
 상위 Spec §2.2·§4.2는 콘솔에 Entra ID 인증(Easy Auth)과 운영자 IP 허용을 둘 다 적용하고, 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`)로 권한을 나눈다(`docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §4.2). 실제 트리거는 테넌트 정책이 사용자 동의를 막아 로그인 시 "관리자 승인 필요"가 뜬 것이다(`docs/runbook/deploy-history.md:225`). Easy Auth 자체는 구성됐지만, 브라우저의 `새 신청` 제출(POST)이 앱에 도달하지 못하고 빈 403으로 끝나 데모 경로를 검증할 수 없었다(`docs/runbook/deploy-history.md:256-259`). 관리자 동의를 받거나 운영자 본인에게 위임 권한을 부여하기 전에는 평가 데모를 진행할 수 없었다.
 
 ## 결정
-데모에서는 `CONSOLE_AUTH_ENABLED=false`(`infra/main.bicep` `consoleAuthEnabled`)로 Easy Auth를 끈다. 이때 Container App에 `CONSOLE_AUTH_MODE=demo`와 `CONSOLE_DEMO_ROLE`(기본 `CreditOfficer`) 환경 변수를 주입하고(`infra/resources.bicep:609`), 콘솔은 **고정 주체 `demo-operator`**로 동작한다(`src/console/adapters.py:229`). 외부 접근은 **영구 운영자 IP 허용목록만**으로 막는다(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:42-46`). Entra 앱 등록(`infra/modules/console-auth.bicep`, 역할 정의 포함)은 그대로 둬, 전환 시 `CONSOLE_AUTH_ENABLED=true`로 복원한다. 데모 모드에서 Easy Auth가 꺼져 운영자 IP에서 바로 열려야 함은 `src/ops/console_gate.py`가 검증한다.
+데모에서는 `CONSOLE_AUTH_ENABLED=false`(`infra/main.bicep` `consoleAuthEnabled`)로 Easy Auth를 끈다. 이때 Container App에 `CONSOLE_AUTH_MODE=demo`와 `CONSOLE_DEMO_ROLE`(기본 `CreditOfficer`) 환경 변수를 주입하고(`infra/resources.bicep:609`), 콘솔은 **고정 주체 `demo-operator`**로 동작한다(`src/console/adapters.py:229`). 외부 접근은 **영구 운영자 IP 허용목록만**으로 막는다(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`). Entra 앱 등록(`infra/modules/console-auth.bicep`, 역할 정의 포함)은 그대로 둬, 전환 시 `CONSOLE_AUTH_ENABLED=true`로 복원한다. 데모 모드에서 Easy Auth가 꺼져 운영자 IP에서 바로 열려야 함은 `src/ops/console_gate.py`가 검증한다.
 
 ## 검토한 대안
 | 대안 | 장점 | 기각 이유 |
@@ -26,6 +26,6 @@
 - 다중 심사역·감사 추적이 필요해 고정 `demo-operator` 식별로는 부족할 때.
 
 ## 근거
-- 구현: `infra/main.bicep`(`consoleAuthEnabled`·`consoleDemoRole`), `infra/resources.bicep:609`·`:599`, `src/console/adapters.py`, `src/ops/console_gate.py`, `infra/modules/console-auth.bicep`, `infra/modules/container-app.bicep:42-46`.
+- 구현: `infra/main.bicep`(`consoleAuthEnabled`·`consoleDemoRole`), `infra/resources.bicep:609`·`:599`, `src/console/adapters.py`, `src/ops/console_gate.py`, `infra/modules/console-auth.bicep`, `infra/modules/container-app.bicep:46-50`.
 - 상위 Spec: `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §4.2.
 - 운영 전환 표: [../architecture.md](../architecture.md), 배경 [../runbook/deploy-history.md](../runbook/deploy-history.md).

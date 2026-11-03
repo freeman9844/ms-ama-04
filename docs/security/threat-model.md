@@ -44,7 +44,7 @@ flowchart TB
   INT -->|가명화 payload| FOUNDRY
 ```
 
-경계 근거: 콘솔은 `cae-web` 외부 환경(`infra/resources.bicep:463`)에 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-49`)으로 두고, 데모 모드에서는 Easy Auth를 꺼 고정 주체로 동작한다(`infra/resources.bicep:609` `CONSOLE_AUTH_MODE=demo`, [ADR-007](../adr/ADR-007-demo-auth-mode.md); 운영은 Entra Easy Auth 복원). 내부 Job은 `cae-int`(`infra/resources.bicep:441`), Functions의 공개 접근은 배포 창에만 연다(`infra/modules/functions.bicep:43`). 저장 리소스는 Private Endpoint로만 닿지만 콘솔은 실명 복원을 위해 Cosmos·Blob을 직접 읽는다(`src/console/adapters.py:5`).
+경계 근거: 콘솔은 `cae-web` 외부 환경(`infra/resources.bicep:463`)에 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 두고, 데모 모드에서는 Easy Auth를 꺼 고정 주체로 동작한다(`infra/resources.bicep:609` `CONSOLE_AUTH_MODE=demo`, [ADR-007](../adr/ADR-007-demo-auth-mode.md); 운영은 Entra Easy Auth 복원). 내부 Job은 `cae-int`(`infra/resources.bicep:441`), Functions의 공개 접근은 배포 창에만 연다(`infra/modules/functions.bicep:43`). 저장 리소스는 Private Endpoint로만 닿지만 콘솔은 실명 복원을 위해 Cosmos·Blob을 직접 읽는다(`src/console/adapters.py:5`).
 
 ## 자산
 
@@ -74,7 +74,7 @@ flowchart TB
 | I3 | Information Disclosure | 저장 데이터의 네트워크·키 노출 | Cosmos·Blob·KV·Search·Foundry | Cosmos·Blob·Key Vault는 공용 접근·로컬 인증 차단(PE 전용). AI Search는 PE지만 키 인증 유지, Foundry·Functions는 배포 창 동안만 공용 접근 | `infra/modules/cosmos.bicep:24-26`, `infra/modules/search.bicep:20`, `infra/modules/foundry/account.bicep:30` | 구현 |
 | I4 | Information Disclosure | 허용목록 안 데모 역할이 실명(복원값) 열람 | 콘솔 상세 화면 | 데모는 IP 허용목록만으로 접근하는 고정 `CreditOfficer`가 Blob에서 실명을 복원해 상세에 표시 — 실제 신원·세분 권한 없음 | `src/console/adapters.py:5`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
 | D1 | Denial of Service | Policy Engine 장애가 심사 전체로 전파 | 오케스트레이터 | 서킷 브레이커가 `circuit_open`을 올리고 fail-closed로 거절만 허용 | `src/orchestrator/journey/adapters.py:96`, `src/orchestrator/journey/orchestration.py:198-201`, `tests/orchestrator/test_circuit.py:73` | 검증 |
-| D2 | Denial of Service | 공개 진입점 폭주 | Functions·콘솔 | Functions 공개 접근은 배포 창에만, 그 외 Deny 기본값, 콘솔은 IP 허용목록 | `infra/modules/functions.bicep:43`, `infra/modules/functions.bicep:47-49`, `infra/modules/container-app.bicep:46-49` | 구현 |
+| D2 | Denial of Service | 공개 진입점 폭주 | Functions·콘솔 | Functions 공개 접근은 배포 창에만, 그 외 Deny 기본값, 콘솔은 IP 허용목록 | `infra/modules/functions.bicep:43`, `infra/modules/functions.bicep:47-49`, `infra/modules/container-app.bicep:46-50` | 구현 |
 | E1 | Elevation of Privilege | 고정 역할로 권한 획득 | 콘솔 역할 | 운영은 Entra 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`), 데모는 IP 허용목록만으로 `CreditOfficer` 고정 | `src/console/adapters.py:226-229`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
 | E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 역할별로 범위를 나눔: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). 전 경로 스모크용 `id-smoke`는 가장 넓어 엄밀한 최소 권한은 아니다 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
 | E3 | Elevation of Privilege | 에이전트가 허용 밖 도구 호출 | 에이전트 런타임 | 도구 allowlist(`unknown_tool` 반환), 추심은 스크립트 ID enum만 발송 | `src/agents/runtime.py:163`, `src/agents/collections.py:70`, `tests/agents/test_runtime.py:133` | 검증 |
@@ -108,7 +108,7 @@ flowchart TB
 | 거래 분류 캐시(토큰 든 적요 제외) | 파생·내부 | Cosmos `classifications` | 장기 보존 | `docs/runbook/deploy-history.md:145` |
 | 대출·모니터링·경보 | 파생·내부 | Cosmos `loans`·`alerts` | 장기 보존 | `docs/runbook/deploy-history.md:303-304` |
 | 동의·삭제 증명·이의제기 | 증적 | Cosmos `consents`·`deletion_proofs`·`grievances` | 장기 보존 | `docs/runbook/deploy-history.md:388-390` |
-| 신청 진행 상태 | 휘발·내부 | Durable Task 저장소 | 신청 종료 후 정리 | `docs/architecture.md#운영-아키텍처` |
+| 신청 진행 상태 | 휘발·내부 | Durable Task 저장소 | 삭제하지 않음(동의 ID·상태, 활동 입력의 동의 토큰 포함) | `docs/runbook/deploy-history.md:452`, `docs/limitations.md:49` |
 
 원천 데이터는 삭제하고 판단 기록에는 원천 없이도 설명 가능한 파생값·근거 ID만 남긴다. 삭제는 원천 Blob → Mock 동의 레지스트리 → Foundry 대화 → 코드 실행 컨테이너 순으로 멱등하게 수행한다(`src/orchestrator/journey/consent.py:143-153`).
 
@@ -135,7 +135,7 @@ flowchart TB
 
 - **데모 인증:** 외부 콘솔이 WAF 없이 운영자 IP 허용목록에만 기대고(데모는 Easy Auth 꺼짐, `infra/resources.bicep:609`; 운영은 Entra 로그인 복원), 데모 모드는 `CreditOfficer`를 고정 주체 `demo-operator`로 둬 감사 추적에 실제 신원이 없다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
 - **Foundry 트레이스 잔존:** 대화는 삭제하지만 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 입력이 가명화 값뿐이라는 원칙에 기댄다(`docs/runbook/deploy-history.md:606`).
-- **Durable 실행 기록:** 신청 진행 상태는 Durable Task 저장소에 남고 신청 종료 후 정리에 의존한다.
+- **Durable 실행 기록:** 신청 진행 상태는 Durable Task 저장소에 남고 삭제하지 않는다. 활동 입력의 동의 토큰도 함께 남는다([한계](../limitations.md#동의삭제이의제기)).
 - **서킷 인스턴스별:** 서킷 브레이커는 프로세스·인스턴스별이라 전역 상태를 공유하지 않는다(`src/orchestrator/journey/adapters.py:96`).
 - **Prompt Shields 미구현:** 간접 주입 방어 레이어가 없어 `AI8`의 공백이 남는다.
 
