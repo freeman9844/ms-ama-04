@@ -150,6 +150,8 @@ def test_loan_summary_progress_severity_buffer_and_chart():
     colors = [g["bars"][0]["parts"][0]["color"] for g in s["chart"]["groups"]]
     assert colors == ["blue", "red", "red"] and s["chart"]["refs"][0]["label"] == "기준 주매출"
     assert "신규 차입" in s["chart"]["groups"][1]["bars"][0]["parts"][0]["tip"]
+    none_tip = s["chart"]["groups"][2]["bars"][0]["parts"][0]["tip"]
+    assert "None" not in none_tip and "· 버퍼 -일" in none_tip
     top = s["chart"]["groups"][1]["bars"][0]["top"]
     assert [(m["week"], m["y"]) for m in s["markers"]] == [(2, round(top - 6, 2))]
     assert len(s["line"]["segments"]) == 1 and len(s["line"]["points"]) == 2

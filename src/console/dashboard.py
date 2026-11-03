@@ -278,8 +278,9 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     for w in weeks:
         r = w.get("row") or {}
         triggers = w.get("triggers") or []
+        buffer = r.get("buffer_days")
         tip = (f"{w.get('week')}주차 {r.get('start', '')}~{r.get('end', '')} · 매출 {krw_text(r.get('revenue'))}"
-               f" · 버퍼 {r.get('buffer_days', '-')}일")
+               f" · 버퍼 {buffer if charts.is_num(buffer) else '-'}일")
         if triggers:
             tip += " · " + ", ".join(TRIGGER_LABELS.get(t, t) for t in triggers)
         groups.append((f"{w.get('week')}주", [[("revenue", r.get("revenue"), "red" if triggers else "blue", tip)]]))
