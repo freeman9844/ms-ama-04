@@ -20,6 +20,12 @@ $env:MOCK_CONSENT_SECRET = "local-dev-secret-at-least-32-characters!!"
 .\.venv\Scripts\python -m uvicorn policy.main:app --port 8002
 ```
 
+심사 콘솔 화면만 Azure 없이 확인할 때(합성 데이터, 결정·재생 버튼은 메모리에 기록만 함):
+
+```powershell
+.\.venv\Scripts\python -m consolepreview          # http://127.0.0.1:8765/
+```
+
 컨테이너 이미지는 로컬 Docker 없이 ACR Build로 만든다(P3).
 
 ## Azure 준비
