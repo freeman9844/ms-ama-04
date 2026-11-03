@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
@@ -297,6 +298,63 @@ def test_inline_replay_failure_is_recorded_without_retry(mock_app, monkeypatch):
     assert started["replay_id"] == mon["replay_id"]
     assert mon["status"] == "failed" and "foundry down" in mon["error"]
     assert replay(deps)["replay_id"] != started["replay_id"]  # 실패한 재생은 바로 다시 시작할 수 있다
+
+
+def test_lost_claim_race_starts_nothing(mock_app):
+    outbox = Outbox()
+    deps = make_deps(mock_app, events=outbox)
+    approved_loan(deps)
+    store = deps.store
+    store.replace = lambda container, document, etag: False  # 다른 재생이 먼저 대출 문서를 선점했다
+    sent_before, published_before = len(deps.queue.sent), len(outbox.sent)
+    consents_before = {k for k in store.docs if k[0] == "consents"}
+    assert replay(deps) is None
+    assert loan(deps)["monitoring"] is None
+    assert {k for k in store.docs if k[0] == "consents"} == consents_before  # 모니터링 동의를 만들지 않는다
+    assert len(deps.queue.sent) == sent_before and len(outbox.sent) == published_before
+
+
+def test_concurrent_claim_lets_only_one_replay_through(mock_app):
+    deps = make_deps(mock_app, events=Outbox())
+    approved_loan(deps)
+    store, first_read = deps.store, deps.store.read
+    stale = first_read(LOANS, LOAN, LOAN)
+    reads = []
+
+    def racing_read(container, item_id, partition_key):
+        # 두 재생이 모두 같은 옛 문서를 읽은 뒤 서로 선점하려 한다.
+        if container == LOANS and len(reads) < 2:
+            reads.append(1)
+            return deepcopy(stale)
+        return first_read(container, item_id, partition_key)
+
+    store.read = racing_read
+    results = [replay(deps), replay(deps)]
+    assert [r is None for r in results] == [False, True]
+    assert len([k for k in store.docs if k[0] == "consents"]) == 2  # 심사 동의 + 모니터링 동의 하나
+    assert len(deps.events.bodies(TOPIC_FLOW)) == WEEKS
+
+
+def test_failure_after_claim_is_recorded_and_not_blocking(mock_app):
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+
+    class FlowDown:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def fetch(self, kind, token):
+            raise RuntimeError("mock flow down")
+
+    broken = replace(deps, mock=FlowDown(deps.mock))
+    with pytest.raises(RuntimeError, match="mock flow down"):
+        replay(broken)
+    mon = loan(deps)["monitoring"]
+    assert mon["status"] == "failed" and "mock flow down" in mon["error"]
+    assert replay(deps)["replay_id"] != mon["replay_id"]  # failed는 가드에 걸리지 않는다
 
 
 def test_alert_raised_runs_collections_once(mock_app):

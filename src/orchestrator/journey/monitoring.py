@@ -75,35 +75,13 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         # 사후 탐지는 심사 동의로 받은 프로필(가명화 키)이 필요하다. 동의가 끝나면 원천 데이터가 없다.
         log.warning("심사 동의가 끝나 재생할 수 없음: %s (%s)", loan_id, consent.get("status"))
         return None
-    scopes = list(MONITORING_SCOPES)
-    grant = deps.mock.create_consent(loan["applicant_id"], scopes, MONITORING_PURPOSE, CONSENT_TTL_DAYS)
-    consent_id, now = grant["consent_id"], deps.clock().isoformat()
-    schedule_lifecycle(
-        deps,
-        {
-            "id": consent_id,
-            "consent_id": consent_id,
-            "application_id": loan_id,
-            "applicant_id": loan["applicant_id"],
-            "scopes": scopes,
-            "purpose": MONITORING_PURPOSE,
-            "granted_at": now,
-            "expires_at": grant["expires_at"],
-            "status": "granted",
-            "raw_container": raw_container(consent_id),
-            "foundry_conversations": [],
-        },
-    )
-    flow = deps.mock.fetch("flow", grant["token"])
-    txns = _TRANSACTIONS.validate_python(flow)
-    if not txns:
-        raise RuntimeError(f"사후 흐름이 비어 있다: {loan_id}")
-    deps.raw.put_json(raw_container(consent_id), "flow.json", flow)
-    replay_id = f"rp-{uuid4().hex[:10]}"
+    # 동의·흐름 조회보다 먼저 대출 문서를 etag로 선점한다. 더블 클릭으로 큐 메시지가 두 번 오면 둘 다 위 확인을 통과하므로
+    # (아직 아무도 문서에 쓰지 않았다) 선점에 진 쪽은 동의를 만들지 않고 물러난다.
+    now, replay_id = deps.clock().isoformat(), f"rp-{uuid4().hex[:10]}"
     loan["monitoring"] = {
         "replay_id": replay_id,
-        "consent_id": consent_id,
-        "flow_start": min(t.booked_on for t in txns).isoformat(),
+        "consent_id": None,
+        "flow_start": None,
         "started_at": now,
         "mode": "servicebus" if deps.events is not None else "inline",
         "status": "replaying",
@@ -115,9 +93,45 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         "error": None,
     }
     loan["updated_at"] = now
-    deps.store.upsert(LOANS, loan)
+    if not deps.store.replace(LOANS, loan, loan.get("_etag")):
+        log.warning("동시 재생 요청 무시: %s", loan_id)
+        return None
+    try:
+        scopes = list(MONITORING_SCOPES)
+        grant = deps.mock.create_consent(loan["applicant_id"], scopes, MONITORING_PURPOSE, CONSENT_TTL_DAYS)
+        consent_id = grant["consent_id"]
+        schedule_lifecycle(
+            deps,
+            {
+                "id": consent_id,
+                "consent_id": consent_id,
+                "application_id": loan_id,
+                "applicant_id": loan["applicant_id"],
+                "scopes": scopes,
+                "purpose": MONITORING_PURPOSE,
+                "granted_at": now,
+                "expires_at": grant["expires_at"],
+                "status": "granted",
+                "raw_container": raw_container(consent_id),
+                "foundry_conversations": [],
+            },
+        )
+        flow = deps.mock.fetch("flow", grant["token"])
+        txns = _TRANSACTIONS.validate_python(flow)
+        if not txns:
+            raise RuntimeError(f"사후 흐름이 비어 있다: {loan_id}")
+        deps.raw.put_json(raw_container(consent_id), "flow.json", flow)
+        loan["monitoring"].update(consent_id=consent_id, flow_start=min(t.booked_on for t in txns).isoformat())
+        deps.store.upsert(LOANS, loan)
+    except Exception as e:
+        # 선점한 문서가 replaying으로 남으면 30분(REPLAY_GUARD) 동안 콘솔·큐가 막힌다. 실패를 기록하고 원래 예외를 다시 던진다
+        # (이 단계는 LLM을 쓰지 않아 큐 재시도가 싸고, 일시 오류는 재시도로 복구된다).
+        log.exception("재생 시작 실패: %s %s", loan_id, replay_id)
+        loan["monitoring"].update(status="failed", error=f"{type(e).__name__}: {e}"[:300])
+        loan["updated_at"] = deps.clock().isoformat()
+        deps.store.upsert(LOANS, loan)
+        raise
     return {"loan_id": loan_id, "replay_id": replay_id, "mode": loan["monitoring"]["mode"]}
-
 
 def handle_replay(deps: Deps, body: str) -> dict[str, Any] | None:
     try:
