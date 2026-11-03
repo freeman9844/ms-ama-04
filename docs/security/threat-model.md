@@ -138,3 +138,5 @@ flowchart TB
 - **Durable 실행 기록:** 신청 진행 상태는 Durable Task 저장소에 남고 신청 종료 후 정리에 의존한다.
 - **서킷 인스턴스별:** 서킷 브레이커는 프로세스·인스턴스별이라 전역 상태를 공유하지 않는다(`src/orchestrator/journey/adapters.py:96`).
 - **Prompt Shields 미구현:** 간접 주입 방어 레이어가 없어 `AI8`의 공백이 남는다.
+
+잔여 위험의 운영 전환 과제와 as-built 한계 전체는 [한계와 운영 전환](../limitations.md)에 정리했다.

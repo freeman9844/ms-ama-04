@@ -226,4 +226,4 @@ flowchart LR
 | 모델 배포 | Global Standard | Data Zone / PTU([ADR-002](adr/ADR-002-model-deployment.md)) |
 | 입력 방어 | 없음(미구축) | AI Content Safety Prompt Shields 등 프롬프트 입력 방어(상위 Spec §2.3). 현재 `infra/`·`src/`에 Content Safety/Prompt Shields 구현 없음 |
 
-모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)과 연결된다.
+모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)과 연결된다. 이 과제들의 운영 전환 체크리스트는 [한계와 운영 전환](limitations.md)에 있다.

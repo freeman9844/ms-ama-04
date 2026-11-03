@@ -1,0 +1,74 @@
+# 비용 모델
+
+신청 1건을 처리하는 데 드는 비용을 건당 AI 비용과 월 고정비로 나눠 모델링하고, 월 물량에 따른 건당 총비용과 수작업 처리 원가·대출 규모 대비 비율을 본다. 계산 코드는 `src/opsmetrics/cost.py`, 모델 단가는 `src/evals/prices.json`에 있다.
+
+> **합성 데이터 기준.** 모든 수치는 합성 신청 24건을 실제 Azure에 흘린 실측 보고서 `ops/reports/load-20261102110233/report.md`(2장 비용)와 평가 보고서 `eval/reports/job-eval-9imbutm/report.md`, 그리고 배포·운영 실행 기록 [runbook/deploy-history.md](runbook/deploy-history.md)에서만 인용한다. 캐시 입력 할인은 반영하지 않아 상한 추정이다.
+
+## 계산식
+
+```
+건당 총비용 = 건당 AI 비용 + (월 고정비 ÷ 월 물량)
+```
+
+- **건당 AI 비용**: 실측 토큰 × 모델 단가의 합을 신청 수로 나눈 값. 토큰 집계와 단가 적용은 `src/opsmetrics/cost.py`의 `ai_cost`가, 물량별 건당 환산은 `unit_economics`가 계산한다. 단가는 `src/evals/prices.json`(Azure OpenAI Global Standard, USD/1M 토큰)에서 읽는다.
+- **월 고정비**: 모델 사용량과 무관하게 매달 드는 인프라 비용. 물량이 늘수록 건당 분담액이 줄어 규모의 경제가 작동한다.
+- 단가를 확인하지 못한 호출(`decision-1`)은 토큰이 0으로 집계되어 금액에 들어가지 않고 "단가 미확인 호출 수"로만 남는다(`src/evals/prices.json`에서 `decision-1`의 단가는 `null`).
+
+## 건당 AI 비용
+
+실측 24건(`ops/reports/load-20261102110233/report.md` 2장)의 모델별 호출·비용:
+
+| 모델 | 호출 | 비용(USD) | 비고 |
+|---|---|---|---|
+| gpt-5.4 | 70 | $0.885 | 입력 187,149 · 출력 27,803 토큰 |
+| gpt-5.4-mini | 92 | $0.131 | 입력 68,940 · 출력 17,562 토큰 |
+| decision-1 | 48 | — | 토큰 0 · 단가 미확인(집계 제외) |
+
+- AI 비용 합계 $1.016, 신청당 $1.016 ÷ 24건 = **$0.0423**(`ops/reports/load-20261102110233/report.md` 2장).
+- 이 값은 **캐시 할인 미반영 상한**이고 단가 미확인 호출 48건을 제외한 수치다(`docs/runbook/deploy-history.md:577`). 실패한 에이전트 호출은 토큰을 몰라 호출 수만 센다(`docs/runbook/deploy-history.md:602`).
+
+## 월 고정비
+
+- 측정값: **월 $304.73**(`ops/reports/load-20261102110233/report.md` 2장). Cost Management 실측 2026-10-25\~10-31 중 데이터가 있는 하루(10-31) × 30으로 환산했고, Foundry Models 사용량은 제외했다(`docs/runbook/deploy-history.md:578`).
+- 한계: 리소스 그룹 비용 데이터가 있는 하루치만 평균했다. 일시 정지(`ops pause`)·배포 창 여닫기에 따라 크게 달라질 수 있다(`docs/runbook/deploy-history.md:604`).
+
+초기 설계 단계의 월 비용 추정(`docs/runbook/deploy-history.md:62`)을 나란히 둔다. 측정 고정비($304.73)는 이 추정 중 유휴 시 거의 0이 되는 사용량 항목과 pause로 내린 Service Bus를 반영한 하루치 실측이다.
+
+| 항목 | 월 비용(초기 추정) | 비고 |
+|---|---|---|
+| Service Bus Premium 1 MU | 약 $677 | 쓰지 않을 때 `ops pause`로 절감 |
+| AI Search Basic | 약 $74 | Foundry 벡터 저장소 |
+| ACR Premium | 약 $50 | Private Endpoint 필요 |
+| Private Endpoint 약 17개 | 약 $125 | 개당 약 $7.3 |
+| 모델·Functions·Container Apps·Cosmos serverless | 사용량 기반 | 유휴 시 거의 0 |
+| Application Gateway WAF v2 | 미구축(약 $365) | 운영 아키텍처 문서에만 기술 |
+
+## 물량별 단가
+
+`ops/reports/load-20261102110233/report.md` 2장의 표를 그대로 옮긴다. 수작업 처리 원가는 $3,500/건(Mills & McCarthy, HBS Working Paper 15-004의 소상공인 대출 1건 처리 원가 $3,000\~4,000 중간값), 대출 1건은 USD 6,000으로 가정한다(상수는 `src/opsmetrics/cost.py`의 `MANUAL_USD`·`TICKET_USD`).
+
+| 월 물량 | AI/건 | 고정비/건 | 합계/건 | 수작업 대비 | 대출 1건(USD 6,000) 대비 |
+|---|---|---|---|---|---|
+| 100 | $0.0423 | $3.0473 | $3.0896 | 0.1% | 0.1% |
+| 1,000 | $0.0423 | $0.3047 | $0.3470 | 0.0% | 0.0% |
+| 10,000 | $0.0423 | $0.0305 | $0.0728 | 0.0% | 0.0% |
+
+반올림 요약: 월 100건 $3.09/건, 1,000건 $0.35/건, 10,000건 $0.07/건 — 수작업 $3,500/건 대비 0.1% 이하다(`docs/runbook/deploy-history.md:578`).
+
+## 평가 비용
+
+- P6a 평가 1회 실행(`job-eval-9imbutm`) 비용은 **$1.93**(단가 확인분, 예산 $5, `partial=False`, 모델 호출 341회)이다(`eval/reports/job-eval-9imbutm/report.md`, `docs/runbook/deploy-history.md:490`).
+- 평가 비용은 운영 건당 비용과 별개다. 품질·안전·비용을 측정할 때만 들고, 데모·운영 흐름에는 포함되지 않는다.
+
+## 절감 레버
+
+- **일시 정지(`ops pause`)**: 쓰지 않을 때 Service Bus Premium을 내려 고정비의 가장 큰 항목을 없앤다(초기 추정 약 $677). pause 5.8분·resume 4.7분(`docs/runbook/deploy-history.md:55`). pause 중에도 남는 비용 항목은 AI Search·ACR·Private Endpoint 등 상주 리소스다.
+- **배포 창 운영**: public 접근을 배포 창에만 잠깐 열고 닫아, 상시 노출 없이 운영한다(비용보다 공격 표면 관리 목적이나 상주 게이트웨이를 두지 않아 비용에도 유리).
+- **모델 등급**: 규칙으로 못 푼 적요만 LLM에 보내고, 저가 등급(`gpt-5.4-mini`)과 선택형 분류 모델(`decision-1`)을 우선 쓴 뒤 확신이 낮을 때만 상위 모델로 올린다([ADR-005](adr/ADR-005-classification-model.md)).
+- **분류 캐시**: 분류 결과를 Cosmos에 캐시해 같은 적요의 재호출을 줄인다(토큰이 든 적요·이체 적요는 캐시 제외).
+- **PTU 손익분기**: 물량이 충분히 크면 Global Standard 종량제 대신 PTU(프로비저닝) 전환이 유리해지는 지점이 생긴다. 다만 데모 표본으로는 손익분기를 산출할 근거가 없어 정성적 과제로만 남긴다(새 수치를 만들지 않는다. [ADR-002](adr/ADR-002-model-deployment.md)).
+- **App Gateway 미구축**: 운영 전환 시 Application Gateway(WAF v2)를 두면 월 약 $365가 더 든다(상위 Spec §2.2, `docs/runbook/deploy-history.md:71`). 데모는 비용 때문에 구축하지 않고 문서로만 기술한다.
+
+---
+
+관련 문서: [아키텍처](architecture.md) · [한계와 운영 전환](limitations.md) · [증거 색인](evidence.md) · [운영 실행 기록](runbook/deploy-history.md)
