@@ -1,12 +1,42 @@
 {% extends "base.html" %}
 {% set nav = "home" %}
+{% import "_charts.html" as ch %}
 {% block main %}
-<h1>신청 목록</h1>
-{% if user.can_decide %}<p><a class="button" href="/applications/new">새 신청</a></p>{% endif %}
-<table>
-  <thead><tr><th>신청 ID</th><th>신청인</th><th>상태</th><th>신청 금액</th><th>에이전트 권고</th><th>갱신 시각</th></tr></thead>
-  <tbody hx-get="/applications/rows" hx-trigger="every 15s" hx-swap="innerHTML">
+<div class="page-head">
+  <div>
+    <p class="crumb">홈 › 신청</p>
+    <h1>신청 대시보드</h1>
+  </div>
+  <div class="actions">{% if user.can_decide %}<a class="button" href="/applications/new">새 신청</a>{% endif %}</div>
+</div>
+<p class="note">최근 {{ limit }}건 기준 집계입니다. 전체 신청 통계가 아닙니다.</p>
+<div class="grid-4">
+  {{ ch.kpi("최근 신청", ui.total ~ "건", "최근 " ~ limit ~ "건 기준", "blue") }}
+  {{ ch.kpi("심사역 대기", ui.awaiting ~ "건", "SLA 초과 " ~ ui.escalated ~ "건", "amber" if ui.awaiting else "neutral") }}
+  {{ ch.kpi("진행 중", ui.in_progress ~ "건", "에이전트 파이프라인", "blue") }}
+  {{ ch.kpi("승인율", "-" if ui.approval_rate is none else "%.0f%%"|format(ui.approval_rate * 100),
+            "승인 " ~ ui.approved ~ " · 거절 " ~ ui.declined, "green") }}
+</div>
+<div class="grid-2">
+  <section class="card">
+    <h2>상태 분포</h2>
+    <div class="chart-row">
+      {{ ch.donut(ui.donut, "상태 분포") }}
+      {{ ch.legend(ui.groups) }}
+    </div>
+  </section>
+  <section class="card">
+    <h2>에이전트 권고</h2>
+    {{ ch.hbars(ui.rec_bars, "에이전트 권고 분포") }}
+  </section>
+</div>
+<section class="card">
+  <h2>신청 목록</h2>
+  <table>
+    <thead><tr><th>신청 ID</th><th>신청인</th><th>상태</th><th>신청 금액</th><th>에이전트 권고</th><th>갱신 시각</th></tr></thead>
+    <tbody hx-get="/applications/rows" hx-trigger="every 15s" hx-swap="innerHTML">
 {% include "_rows.html" %}
-  </tbody>
-</table>
+    </tbody>
+  </table>
+</section>
 {% endblock %}

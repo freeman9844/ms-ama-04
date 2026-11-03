@@ -22,6 +22,7 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
+from console.dashboard import detail_summary, home_summary, loan_summary, loans_summary, ops_summary
 from console.monitoring import (
     ACTION_LABELS,
     MONITORING_LABELS,
@@ -211,7 +212,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         user = viewer(request)
-        return render("list.html", user, rows=deps.store.list_recent(LIST_LIMIT))
+        rows = deps.store.list_recent(LIST_LIMIT)
+        return render("list.html", user, rows=rows, ui=home_summary(rows), limit=LIST_LIMIT)
 
     @app.get("/applications/rows", response_class=HTMLResponse)
     def rows(request: Request) -> HTMLResponse:

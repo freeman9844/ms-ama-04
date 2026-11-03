@@ -52,3 +52,12 @@ def test_sidebar_marks_current_screen(client, path, item):
     html = page(client, path)
     assert '<aside class="sidebar">' in html and item in html
     assert html.count(" active\">") == 1
+
+
+def test_home_has_kpis_donut_and_scope_note(client):
+    html = page(client, "/")
+    assert html.count('class="card kpi ') == 4
+    assert 'class="chart donut"' in html and 'class="chart hbars"' in html
+    assert "최근 50건 기준" in html
+    assert ">새 신청<" in html
+    assert 'hx-get="/applications/rows"' in html
