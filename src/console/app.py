@@ -33,6 +33,7 @@ from console.monitoring import (
 )
 from console.ops import AXIS_LABELS, STEP_LABELS, OpsStore, default_run, ops_view, sorted_runs
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
+from console.statuses import STATUS_LABELS, TERMINAL
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
     KST,
@@ -65,23 +66,6 @@ CSP = (
     "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self'; "
     "img-src 'self' data:; frame-ancestors 'none'"
 )
-TERMINAL = frozenset({"approved", "conditionally_approved", "declined", "closed_no_decision", "withdrawn", "failed"})
-STATUS_LABELS = {
-    "received": "접수",
-    "consent_granted": "동의 완료",
-    "data_assembled": "데이터 수집",
-    "data_incomplete": "데이터 부족",
-    "underwritten": "심사 지표 산출",
-    "assessed": "에이전트 평가",
-    "awaiting_officer": "심사역 대기",
-    "escalated": "SLA 초과",
-    "approved": "승인",
-    "conditionally_approved": "조건부 승인",
-    "declined": "거절",
-    "closed_no_decision": "미결 종료",
-    "withdrawn": "철회 종료",
-    "failed": "실패",
-}
 DECISION_ERRORS = {
     "invalid_payload": "입력 형식이 올바르지 않습니다.",
     "reason_required": "사유를 입력해야 합니다.",
