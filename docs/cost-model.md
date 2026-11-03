@@ -32,7 +32,7 @@
 - 측정값: **월 $304.73**(`ops/reports/load-20261102110233/report.md` 2장). Cost Management 실측 2026-10-25\~10-31 중 데이터가 있는 하루(10-31) × 30으로 환산했고, Foundry Models 사용량은 제외했다(`docs/runbook/deploy-history.md:578`).
 - 한계: 리소스 그룹 비용 데이터가 있는 하루치만 평균했다. 일시 정지(`ops pause`)·배포 창 여닫기에 따라 크게 달라질 수 있다(`docs/runbook/deploy-history.md:604`).
 
-초기 설계 단계의 월 비용 추정(`docs/runbook/deploy-history.md:62`)을 나란히 둔다. 측정 고정비($304.73)는 이 추정 중 유휴 시 거의 0이 되는 사용량 항목과 pause로 내린 Service Bus를 반영한 하루치 실측이다.
+아래는 초기 설계 단계의 리소스별 월 비용 추정표(`docs/runbook/deploy-history.md:62`)다. 측정 고정비 $304.73은 Cost Management 하루치 실측을 30배로 환산한 값이고, 이 추정표는 설계 시점의 리소스별 대략값이라 **집계 방식·시점이 달라 측정값과 직접 비교 대상은 아니다**. 참고용으로 나란히 둔다.
 
 | 항목 | 월 비용(초기 추정) | 비고 |
 |---|---|---|
@@ -63,8 +63,8 @@
 ## 절감 레버
 
 - **일시 정지(`ops pause`)**: 쓰지 않을 때 Service Bus Premium을 내려 고정비의 가장 큰 항목을 없앤다(초기 추정 약 $677). pause 5.8분·resume 4.7분(`docs/runbook/deploy-history.md:55`). pause 중에도 남는 비용 항목은 AI Search·ACR·Private Endpoint 등 상주 리소스다.
-- **배포 창 운영**: public 접근을 배포 창에만 잠깐 열고 닫아, 상시 노출 없이 운영한다(비용보다 공격 표면 관리 목적이나 상주 게이트웨이를 두지 않아 비용에도 유리).
-- **모델 등급**: 규칙으로 못 푼 적요만 LLM에 보내고, 저가 등급(`gpt-5.4-mini`)과 선택형 분류 모델(`decision-1`)을 우선 쓴 뒤 확신이 낮을 때만 상위 모델로 올린다([ADR-005](adr/ADR-005-classification-model.md)).
+- **배포 창 운영**: public 접근을 배포 창에만 잠깐 열고 닫는다. 주 목적은 비용 절감이 아니라 공격 표면 관리이며(상주 게이트웨이를 두지 않는 운영 방식), 이 자체의 비용 효과는 측정하지 않았다.
+- **모델 등급(정성적 설계 선택)**: 규칙으로 못 푼 적요만 LLM에 보내고, 먼저 선택형 분류 모델(`decision-1`)에 물은 뒤 기권·낮은 확신(0.7 미만)만 `gpt-5.4-mini` 에이전트(`txn-classifier`)가 보완한다([ADR-005](adr/ADR-005-classification-model.md)). 비용을 염두에 둔 등급 선택이지만 `decision-1`은 공개 단가를 확인하지 못해 mini 단독 대비 **비용·호출 수 이점은 측정하지 못했다**. 평가에서 세 구성은 천장 효과로 품질이 같아 비용·지연으로만 비교한다(`eval/reports/job-eval-9imbutm/report.md`).
 - **분류 캐시**: 분류 결과를 Cosmos에 캐시해 같은 적요의 재호출을 줄인다(토큰이 든 적요·이체 적요는 캐시 제외).
 - **PTU 손익분기**: 물량이 충분히 크면 Global Standard 종량제 대신 PTU(프로비저닝) 전환이 유리해지는 지점이 생긴다. 다만 데모 표본으로는 손익분기를 산출할 근거가 없어 정성적 과제로만 남긴다(새 수치를 만들지 않는다. [ADR-002](adr/ADR-002-model-deployment.md)).
 - **App Gateway 미구축**: 운영 전환 시 Application Gateway(WAF v2)를 두면 월 약 $365가 더 든다(상위 Spec §2.2, `docs/runbook/deploy-history.md:71`). 데모는 비용 때문에 구축하지 않고 문서로만 기술한다.

@@ -76,7 +76,7 @@ flowchart TB
 | D1 | Denial of Service | Policy Engine 장애가 심사 전체로 전파 | 오케스트레이터 | 서킷 브레이커가 `circuit_open`을 올리고 fail-closed로 거절만 허용 | `src/orchestrator/journey/adapters.py:96`, `src/orchestrator/journey/orchestration.py:198-201`, `tests/orchestrator/test_circuit.py:73` | 검증 |
 | D2 | Denial of Service | 공개 진입점 폭주 | Functions·콘솔 | Functions 공개 접근은 배포 창에만, 그 외 Deny 기본값, 콘솔은 IP 허용목록 | `infra/modules/functions.bicep:43`, `infra/modules/functions.bicep:47-49`, `infra/modules/container-app.bicep:46-49` | 구현 |
 | E1 | Elevation of Privilege | 고정 역할로 권한 획득 | 콘솔 역할 | 운영은 Entra 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`), 데모는 IP 허용목록만으로 `CreditOfficer` 고정 | `src/console/adapters.py:226-229`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
-| E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 최소 권한: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). 광범위 읽기는 `id-smoke`에 한정 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
+| E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 역할별로 범위를 나눔: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). 전 경로 스모크용 `id-smoke`는 가장 넓어 엄밀한 최소 권한은 아니다 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
 | E3 | Elevation of Privilege | 에이전트가 허용 밖 도구 호출 | 에이전트 런타임 | 도구 allowlist(`unknown_tool` 반환), 추심은 스크립트 ID enum만 발송 | `src/agents/runtime.py:163`, `src/agents/collections.py:70`, `tests/agents/test_runtime.py:133` | 검증 |
 
 ## AI 위험

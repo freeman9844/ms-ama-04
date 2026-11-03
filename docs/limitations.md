@@ -41,7 +41,7 @@
 - 데모 데이터에서 규칙 미분류 적요는 공급업체 송금뿐이라 의미 분류가 특성을 바꾸지 않는다. (P4a)
 - 수치 근거 검사는 숫자 일치만 본다. 해석의 타당성은 검토 에이전트 판정에 의존한다. (P4a)
 - `demo-stress-003`은 고금리 대출이 감지되어도 정책상 eligible이고, 분석가는 이를 claim·counterfactual로 드러낸다. (P4a)
-- `agent_assessment_mismatch` 플래그가 측정 신청 24/24건(장애 신청 4/5건)에 붙었다. 데이터 조립 에이전트가 보고한 상태가 결정론 판정과 다르다는 뜻으로, 원인 분석은 후속 과제다(`ops/reports/load-20261102110233/report.md` 4장). 분류 모델 `decision-1`은 공개 단가를 확인하지 못해 비용에서 호출 수만 남고, 모델 처리 위치(Global Standard)는 [ADR-002](adr/ADR-002-model-deployment.md)에 정리했다. (P6b)
+- `agent_assessment_mismatch` 플래그가 측정 신청 24/24건(장애 신청 4/5건)에 붙었다. 데이터 조립 에이전트가 보고한 상태가 결정론 판정과 다르다는 뜻으로, 원인 분석은 후속 과제다(`docs/runbook/deploy-history.md:600`). 분류 모델 `decision-1`은 공개 단가를 확인하지 못해 비용에서 호출 수만 남고, 모델 처리 위치(Global Standard)는 [ADR-002](adr/ADR-002-model-deployment.md)에 정리했다. (P6b)
 - Foundry 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 에이전트 입력이 가명화된 값뿐이라는 원칙에 기댄다. (P6b)
 
 ## 동의·삭제·이의제기
@@ -87,7 +87,7 @@
 ## 배포 상태
 
 - Function 의존성은 운영자 PC에서 Linux wheel로 받아 zip에 넣는다(원격 빌드 미사용). (P3)
-- 리허설 전까지 P6b I1 Policy 수정이 아직 배포되지 않았다(리허설에서 배포하며, 이 항목은 Task 11에서 갱신한다).
+- P6b 검토에서 발견한 I1 수정(Policy 앱의 ASGI `http send`/`http receive` 스팬이 App Insights에서 제외되지 않던 문제 — 제외용 환경변수가 동작하지 않던 설정)은 코드에 반영됐으나 아직 Azure에 배포되지 않았다. (리허설 후 갱신)
 
 ## 상위 Spec 위험(§7)
 
@@ -105,7 +105,7 @@
 | Foundry caphost 삭제 후 서브넷 점유 | teardown 스크립트가 순서·대기 처리 |
 | Durable + 비공개 스토리지 조합 | 검증된 Durable 1.x Python + Azure Storage 백엔드로 배포 |
 | 합성 데이터의 현실성 한계 | 수치는 "합성 데이터 기준"으로 표기, 외적 타당성 제한을 위 절들에 명시 |
-| 4~6주 일정 | E2E 골격 우선 연결 후 깊이 추가, P6까지 완료 |
+| 4~6주 일정 | E2E 골격 우선 연결 후 단계적으로 깊이 추가(P2\~P6b 단계 진행) |
 
 ## 운영 전환 체크리스트
 
