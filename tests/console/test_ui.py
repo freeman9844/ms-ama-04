@@ -92,3 +92,11 @@ def test_loan_has_chart_triggers_and_alert_steppers(client):
     assert 'class="stepper compact"' in html
     table = html.split("주간 흐름과 탐지기", 1)[1]
     assert "<details" not in table.split("</table>", 1)[0]
+
+
+def test_ops_has_gauges_stacked_and_fairness_columns(client):
+    html = page(client, "/ops")
+    assert html.count('class="chart gauge"') == 2
+    assert 'class="chart stacked-bar"' in html
+    assert html.count('class="chart columns"') >= 2
+    assert 'class="ops-alert"' in html

@@ -474,6 +474,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         selected = run or default_run(runs)
         summary = ops_view(store.by_run(selected)) if selected else None
         return render("ops.html", user, runs=runs, selected=selected, s=summary,
+                      ui=ops_summary(summary, STEP_LABELS) if summary else None,
                       AXIS_LABELS=AXIS_LABELS, STEP_LABELS=STEP_LABELS)
 
     def grievance_or_404(application_id: str, grievance_id: str) -> dict[str, Any]:
