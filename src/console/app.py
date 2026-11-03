@@ -298,12 +298,13 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw = load_monitoring_raw(deps.raw, loan)
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore)
         blocked = replay_in_progress(mon, deps.clock())
-        return render("loan.html", user, status_code, v=view, replay_blocked=blocked, **ctx)
+        return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked, **ctx)
 
     @app.get("/loans", response_class=HTMLResponse)
     def loans(request: Request) -> HTMLResponse:
         user = viewer(request)
-        return render("loans.html", user, rows=monitoring_store().list_loans(LIST_LIMIT))
+        rows = monitoring_store().list_loans(LIST_LIMIT)
+        return render("loans.html", user, rows=rows, ui=loans_summary(rows), limit=LIST_LIMIT)
 
     @app.get("/loans/{loan_id}", response_class=HTMLResponse)
     def loan_detail(loan_id: str, request: Request) -> HTMLResponse:

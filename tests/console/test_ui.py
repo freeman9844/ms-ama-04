@@ -75,3 +75,20 @@ def test_detail_has_timeline_stepper_and_charts(client):
 def test_withdrawn_detail_marks_failed_step(client):
     html = page(client, "/applications/app-20261103-p06")
     assert "step-failed" in html and "철회 종료" in html
+
+
+def test_loans_list_has_kpis(client):
+    html = page(client, "/loans")
+    assert html.count('class="card kpi ') == 4
+    assert "13주 완주" in html
+
+
+def test_loan_has_chart_triggers_and_alert_steppers(client):
+    html = page(client, "/loans/app-20261103-p03")
+    assert html.count('class="card kpi ') == 4
+    assert 'class="chart columns"' in html and 'class="line ' in html and 'class="trigger-mark"' in html
+    for text in ("주간 흐름과 탐지기", "경보 6주차", "경보 10주차", "사후 13주 재생", "결정 보내기"):
+        assert text in html, text
+    assert 'class="stepper compact"' in html
+    table = html.split("주간 흐름과 탐지기", 1)[1]
+    assert "<details" not in table.split("</table>", 1)[0]

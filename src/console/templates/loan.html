@@ -1,11 +1,34 @@
 {% extends "base.html" %}
 {% set nav = "loans" %}
+{% import "_charts.html" as ch %}
 {% set l = v.loan %}{% set m = v.monitoring %}
 {% block head %}{% if replay_blocked %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
-<p><a href="/loans">← 사후 모니터링</a> · <a href="/applications/{{ l.application_id|path }}">신청 상세</a></p>
-<h1>{{ l.id }} <span class="status m-{{ m.status or 'none' }}">{{ m.status|monitoring_label }}</span></h1>
+<div class="page-head">
+  <div>
+    <p class="crumb"><a href="/loans">홈 › 사후 모니터링</a> › {{ l.id }}</p>
+    <h1>{{ l.id }} <span class="status m-{{ m.status or 'none' }}">{{ m.status|monitoring_label }}</span></h1>
+  </div>
+  <div class="actions">
+    <a class="button secondary" href="/applications/{{ l.application_id|path }}">신청 상세</a>
+    {% if user.can_decide %}
+    <form method="post" action="/loans/{{ l.id|path }}/replay">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit"{% if replay_blocked %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+{% if replay_blocked %}<p class="note">재생이 진행 중입니다. 10초마다 새로 고칩니다.</p>{% endif %}
+<div class="grid-4">
+  {{ ch.kpi("대출", l.amount_krw|krw, l.tenor_months ~ "개월 · " ~ l.decision, "neutral") }}
+  {% call ch.kpi("재생 진행", ui.processed ~ "/" ~ ui.weeks_total ~ "주", m.mode or "재생 전", "blue") %}{{ ch.progress(ui.progress_pct, "재생 진행률") }}{% endcall %}
+  {{ ch.kpi("경보", ui.alerts ~ "건", "높음 " ~ ui.severity.high ~ " · 중간 " ~ ui.severity.medium ~ " · 낮음 " ~ ui.severity.low, "red" if ui.severity.high else ("amber" if ui.alerts else "neutral")) }}
+  {{ ch.kpi("최저 현금 버퍼", "-" if ui.min_buffer is none else ui.min_buffer ~ "일", ("" if ui.min_buffer_week is none else ui.min_buffer_week ~ "주차 · ") ~ "기준 " ~ ("-" if ui.baseline_buffer is none else ui.baseline_buffer ~ "일"), "purple") }}
+</div>
+<section class="card">
 <dl class="facts">
   <dt>신청인</dt><dd>{{ l.applicant_id }} · {{ l.industry }}</dd>
   <dt>대출</dt><dd>{{ l.amount_krw|krw }} / {{ l.tenor_months }}개월 · {{ l.decision }} · {{ l.approved_at }}</dd>
@@ -13,21 +36,21 @@
   {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}</dd>{% endif %}
   {% if m.error %}<dt>오류</dt><dd class="error">{{ m.error }}</dd>{% endif %}
 </dl>
-{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-{% if user.can_decide %}
-<form method="post" action="/loans/{{ l.id|path }}/replay">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <button type="submit"{% if replay_blocked %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
-  {% if replay_blocked %}<small>재생이 진행 중입니다.</small>{% endif %}
-</form>
-{% endif %}
+</section>
 {% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
 {% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
 {% else %}<p class="pii">가명 표시 중.</p>{% endif %}
 
 {% if v.weeks %}
-<section>
+<section class="card">
 <h2>주간 흐름과 탐지기</h2>
+{% if ui.chart %}
+{% call ch.columns(ui.chart, "주간 매출과 현금 버퍼") %}
+{{ ch.line_overlay(ui.line, "현금 버퍼(일)") }}
+{% for mk in ui.markers %}<text class="trigger-mark" x="{{ mk.x }}" y="{{ mk.y }}" text-anchor="middle">▲<title>{{ mk.tip }}</title></text>{% endfor %}
+{% endcall %}
+{{ ch.legend(ui.legend) }}
+{% endif %}
 <table>
   <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기준 대비</th><th>버퍼(일)</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
   <tbody>
@@ -46,8 +69,9 @@
 {% endif %}
 
 {% for a in v.alerts %}
-<section id="{{ a.alert_id }}">
+<section id="{{ a.alert_id }}" class="card alert-card alert-{{ a.severity }}">
 <h2>경보 {{ a.week }}주차 <span class="status sev-{{ a.severity }}">{{ a.severity|severity_label }}</span> <small>{{ a.recommended_action|action_label }} · {{ a.status }}</small></h2>
+{% if ui.alert_steps[a.alert_id] %}{{ ch.stepper(ui.alert_steps[a.alert_id], "경보 처리 단계", compact=true) }}{% endif %}
 <p class="summary">{{ a.summary }}</p>
 <ul class="claims">
 {% for s in a.signals %}
@@ -88,7 +112,7 @@
 {% endfor %}
 
 {% if v.transactions %}
-<section>
+<section class="card">
 <h2>근거 거래</h2>
 <table>
   <thead><tr><th>거래 ID</th><th>일자</th><th>금액</th><th>적요</th></tr></thead>
