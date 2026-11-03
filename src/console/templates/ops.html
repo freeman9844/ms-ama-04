@@ -31,9 +31,9 @@
 {% endfor %}
 
 <div class="grid-4">
-  {{ ch.gauge(ui.latency, "접수 → 심사역 대기 p95", s.latency.p95_min|num ~ "분", "목표 ≤ " ~ s.latency.target_min|num(0) ~ "분 · " ~ ("충족" if s.latency.met else "미충족"), ui.latency_tone) }}
+  {{ ch.gauge(ui.latency, "접수 → 심사역 대기 p95", s.latency.p95_min|num ~ ("분" if s.latency.p95_min is not none else ""), "목표 ≤ " ~ s.latency.target_min|num(0) ~ "분 · " ~ ("충족" if s.latency.met else "미충족"), ui.latency_tone) }}
   {{ ch.gauge(ui.success, "에이전트 단계 성공률", s.agent_success.rate|pct, "목표 " ~ s.agent_success.target|pct, ui.success_tone) }}
-  {{ ch.kpi("측정 표본", s.latency.n ~ "건", "표본 부족(20건 미만)" if s.latency.insufficient else "p50 " ~ s.latency.p50_min|num ~ "분", "neutral" if s.latency.insufficient else "blue") }}
+  {{ ch.kpi("측정 표본", s.latency.n ~ "건", "표본 부족(20건 미만)" if s.latency.insufficient else "p50 " ~ s.latency.p50_min|num ~ "분 · 최대 " ~ s.latency.max_min|num ~ "분", "neutral" if s.latency.insufficient else "blue") }}
   {{ ch.kpi("AI 비용(건당)", s.ai_cost.per_application_usd|usd, "캐시 할인 미반영", "purple") }}
 </div>
 

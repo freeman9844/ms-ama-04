@@ -342,7 +342,8 @@ def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[st
                 else:
                     sufficient.append(pct)
             groups.append((value, [[("approve_rate", pct, "grey" if r.get("insufficient") else "blue", tip)]]))
-        refs = [("최대", max(sufficient), "red"), ("최소", min(sufficient), "red")] if len(sufficient) >= 2 else []
+        tone = "red" if a.get("alert") else "neutral"
+        refs = [("최대", max(sufficient), tone), ("최소", min(sufficient), tone)] if len(sufficient) >= 2 else []
         fairness[axis] = (charts.columns(groups, height=200, refs=refs, vmax=100, tick_fmt=_pct_text)
                           if groups else None)
     return {

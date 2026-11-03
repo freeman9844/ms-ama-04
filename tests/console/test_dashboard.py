@@ -166,20 +166,24 @@ def test_loan_summary_before_replay():
 
 def test_ops_summary_gauges_steps_and_fairness():
     seg = {"assessed": 5, "insufficient": False}
+    industry_values = {
+        "카페": {**seg, "approve_rate": 1.0}, "한식": {**seg, "approve_rate": 0.0},
+        "편의점": {"assessed": 2, "insufficient": True, "approve_rate": 0.5},
+        "기타": {"assessed": 0, "insufficient": True, "approve_rate": None}}
     s = {
         "latency": {"p95_min": 8.0, "target_min": 10.0, "met": True},
         "agent_success": {"rate": 0.95, "met": False, "by_step": {"underwrite": {"ok": 3, "degraded": 1, "failed": 0},
                                                                   "assess": {"ok": 0, "degraded": 0, "failed": 0}}},
-        "fairness": {"axes": {"industry": {"values": {
-            "카페": {**seg, "approve_rate": 1.0}, "한식": {**seg, "approve_rate": 0.0},
-            "편의점": {"assessed": 2, "insufficient": True, "approve_rate": 0.5},
-            "기타": {"assessed": 0, "insufficient": True, "approve_rate": None}}}}},
+        "fairness": {"axes": {"industry": {"values": industry_values, "alert": False},
+                              "region": {"values": industry_values, "alert": True}}},
     }
     u = dashboard.ops_summary(s, STEP_LABELS)
     assert (u["latency"]["pct"], u["latency_tone"], u["success"]["pct"], u["success_tone"]) == (40.0, "green", 95.0, "red")
     assert [r["label"] for r in u["steps"]] == ["신용 평가", "심사 지표 산출"] and u["steps"][0]["empty"]
     chart = u["fairness"]["industry"]
     assert [r["text"] for r in chart["refs"]] == ["100%", "0%"] and chart["vmax"] == 100.0
+    assert [r["color"] for r in chart["refs"]] == ["neutral", "neutral"]
+    assert [r["color"] for r in u["fairness"]["region"]["refs"]] == ["red", "red"]
     parts = [g["bars"][0]["parts"][0] for g in chart["groups"]]
     assert [p["color"] for p in parts] == ["blue", "blue", "grey", "grey"]
     assert parts[2]["tip"].endswith("표본 부족") and parts[3]["tip"] == "기타 추천 없음"

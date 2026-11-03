@@ -58,6 +58,7 @@
 - 글꼴: `"Segoe UI", "Malgun Gothic", system-ui, sans-serif`, 숫자는 `font-variant-numeric: tabular-nums`.
 - 컴포넌트 클래스: `.card`, `.kpi`(+ 위쪽 색 띠 `.kpi-blue|amber|purple|green|red`), `.grid-2|3|4`, `.badge`, `.stepper`, `.chart`, `.legend`, `.page-head`, `.crumb`.
 - 기존 상태 클래스(`.status`, `.s-*`, `.m-*`, `.c-*`, `.g-*`, `.sev-*`, `.chip`, `.ops-alert`, `.demo-banner`, `.error`, `.ok`, `.pii`, `.note`, `.quote`, `.notice`)는 이름을 유지하고 새 색으로 다시 칠합니다. 테스트와 템플릿이 이 이름을 씁니다.
+- 구현 값: 글자 `#201f1e`, 선 `#e1dfdd`, 경고색 `#d29200`(글자는 `#8a5d00`)로 대비를 맞춰 조정했고, 그려지기 애니메이션은 `stroke-dashoffset` 대신 `stroke-dasharray`로 구현했습니다.
 - 애니메이션: 막대는 아래에서 자라기(`transform: scaleY`), 도넛·게이지·선은 그려지기(`stroke-dashoffset`), 길이 600ms 이하. `@media (prefers-reduced-motion: reduce)`에서는 모두 끕니다. 신청 상세는 진행 중 10초마다 새로 고쳐지므로 애니메이션이 짧아야 합니다.
 
 ### 2.3 차트 공통 규칙
@@ -122,7 +123,7 @@ SVG 문자열을 만들지 않고 좌표·길이가 담긴 dict/list만 돌려�
 - 페이지 머리: 빵부스러기 `홈 › 신청`, 제목 `신청 대시보드`, 오른쪽 `새 신청` 버튼(권한 있을 때만, 지금과 같은 조건).
 - KPI 4장: 최근 신청 / 심사역 대기(보조 줄 "SLA 초과 N") / 진행 중 / 승인율(종결 건). 보조 줄에 "최근 50건 기준".
 - 차트 2개: 상태 분포 도넛(가운데 합계, 범례에 그룹별 수), 에이전트 권고 가로 막대.
-- 아래 신청 표: 열 그대로, 상태는 점이 붙은 배지. `hx-get="/applications/rows"` 15초 갱신은 표 본문에만 그대로 적용됩니다. KPI·차트는 페이지 로드 시점 값입니다.
+- 아래 신청 표: 열 그대로, 상태는 배지(배지의 점 표시는 보류하고 단색 알약 모양을 썼습니다). `hx-get="/applications/rows"` 15초 갱신은 표 본문에만 그대로 적용됩니다. KPI·차트는 페이지 로드 시점 값입니다.
 
 ### 4.2 신청 상세 `/applications/<id>` (`detail.html`)
 
