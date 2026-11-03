@@ -203,7 +203,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        return render("detail.html", user, status_code, v=view, in_progress=in_progress, consents=consents, **ctx)
+        return render("detail.html", user, status_code, v=view, ui=detail_summary(view), in_progress=in_progress,
+                      consents=consents, **ctx)
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:

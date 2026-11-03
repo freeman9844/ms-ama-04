@@ -61,3 +61,17 @@ def test_home_has_kpis_donut_and_scope_note(client):
     assert "최근 50건 기준" in html
     assert ">새 신청<" in html
     assert 'hx-get="/applications/rows"' in html
+
+
+def test_detail_has_timeline_stepper_and_charts(client):
+    html = page(client, "/applications/app-20261103-p01")
+    assert '<ol class="stepper"' in html and html.count('class="step step-') >= 7
+    assert 'class="chart columns"' in html and 'class="chart marker-bar"' in html
+    for text in ("타임라인", "정책 판정", "에이전트 평가", "주장과 근거", "제안 구조", "개선 조건(반사실)", "심사역 결정", "결정 보내기"):
+        assert text in html, text
+    assert "<details" in html and 'class="timeline"' in html
+
+
+def test_withdrawn_detail_marks_failed_step(client):
+    html = page(client, "/applications/app-20261103-p06")
+    assert "step-failed" in html and "철회 종료" in html

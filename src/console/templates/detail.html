@@ -1,11 +1,26 @@
 {% extends "base.html" %}
 {% set nav = "home" %}
+{% import "_charts.html" as ch %}
 {% set d = v.doc %}
 {% block head %}{% if in_progress %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block title %}{{ d.application_id }} · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
-<p><a href="/">← 목록</a>{% if d.monitoring %} · <a href="/loans/{{ d.application_id|path }}">사후 모니터링</a>{% endif %}</p>
-<h1>{{ d.application_id }} <span class="status s-{{ d.status }}">{{ d.status|status_label }}</span></h1>
+<div class="page-head">
+  <div>
+    <p class="crumb"><a href="/">홈 › 신청</a> › {{ d.application_id }}</p>
+    <h1>{{ d.application_id }} <span class="status s-{{ d.status }}">{{ d.status|status_label }}</span>
+      {% if d.sla %}<span class="badge {{ 'badge-red' if d.sla.escalated else 'badge-neutral' }}">SLA {{ "초과" if d.sla.escalated else "마감 " ~ d.sla.deadline }}</span>{% endif %}</h1>
+  </div>
+  <div class="actions">{% if d.monitoring %}<a class="button secondary" href="/loans/{{ d.application_id|path }}">사후 모니터링</a>{% endif %}</div>
+</div>
+<section class="card">
+<h2>타임라인</h2>
+{{ ch.stepper(ui.steps, "신청 진행 단계") }}
+<details><summary>상태 기록 {{ (d.timeline or [])|length }}건</summary>
+<ol class="timeline">{% for t in d.timeline %}<li><span class="status s-{{ t.status }}">{{ t.status|status_label }}</span> {{ t.at }}</li>{% endfor %}</ol>
+</details>
+</section>
+<section class="card">
 <dl class="facts">
   <dt>신청인</dt><dd>{{ d.applicant_id }}</dd>
   <dt>신청 금액</dt><dd>{{ d.requested_amount_krw|krw }} / {{ d.requested_tenor_months }}개월</dd>
@@ -15,39 +30,54 @@
   {% if d.withdrawal %}<dt>동의 철회</dt><dd>{{ d.withdrawal.consent_id }} · {{ d.withdrawal.requested_by }} · {{ d.withdrawal.at }}</dd>{% endif %}
   {% if d.error %}<dt>오류</dt><dd class="error">{{ d.error.stage }}: {{ d.error.message }}</dd>{% endif %}
 </dl>
+</section>
 {% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
 {% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
 {% else %}<p class="pii">가명 표시 중(감사자 권한은 실명을 볼 수 없습니다).</p>{% endif %}
 
 {% if consents is not none %}{% include "_consents.html" %}{% endif %}
 
-<section>
-<h2>타임라인</h2>
-<ol class="timeline">{% for t in d.timeline %}<li><span class="status s-{{ t.status }}">{{ t.status|status_label }}</span> {{ t.at }}</li>{% endfor %}</ol>
-</section>
-
-{% if v.features %}
-<section>
-<h2>현금흐름 지표</h2>
-<table class="kv">{% for k, val in v.features|dictsort %}<tr><th>M:{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
+{% if ui.monthly or v.policy %}
+<div class="grid-2">
+{% if ui.monthly %}
+<section class="card">
+<h2>월별 현금흐름</h2>
+{{ ch.columns(ui.monthly, "월별 매출과 지출") }}
+{{ ch.legend(ui.monthly_legend) }}
 </section>
 {% endif %}
-
 {% if v.policy %}
-<section>
+<section class="card">
 <h2>정책 판정 <small>{{ v.policy.rules_version }}</small></h2>
 <p>판정 <strong>{{ v.policy.decision }}</strong> · 한도 {{ v.policy.max_amount_krw|krw }} · 금리 구간 {{ v.policy.rate_band or "-" }}</p>
+{% for m in ui.markers %}
+<div class="marker-row">
+  <span class="marker-code">{{ m.code }}</span>
+  {{ ch.marker_bar(m.bar, m.code ~ " 관측 " ~ m.observed ~ " / 기준 " ~ m.threshold) }}
+  <span class="marker-values">{{ m.observed }} / {{ m.threshold }}</span>
+</div>
+{% endfor %}
 <table>
   <thead><tr><th>코드</th><th>내용</th><th>관측값</th><th>기준</th></tr></thead>
   <tbody>{% for r in v.policy.reason_codes %}<tr><td>{{ r.code }}</td><td>{{ r.message }}</td><td>{{ r.observed }}</td><td>{{ r.threshold }}</td></tr>{% endfor %}</tbody>
 </table>
 </section>
 {% endif %}
+</div>
+{% endif %}
+
+{% if v.features %}
+<section class="card">
+<h2>현금흐름 지표</h2>
+<table class="kv">{% for k, val in v.features|dictsort %}<tr><th>M:{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
+</section>
+{% endif %}
 
 {% if v.assessment %}
 {% set a = v.assessment %}
-<section>
+<section class="card">
 <h2>에이전트 평가 <small>권고: {{ a.recommendation }}</small></h2>
+{% if ui.review %}{{ ch.stepper(ui.review, "에이전트 검토 단계", compact=true) }}{% endif %}
 <p class="summary">{{ a.summary }}</p>
 <h3>주장과 근거</h3>
 <ul class="claims">
@@ -65,14 +95,15 @@
 {% endif %}
 {% if a.counterfactuals %}
 <h3>개선 조건(반사실)</h3>
-<ul>{% for cf in a.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation }}</li>{% endfor %}</ul>
+<ul class="counterfactuals">{% for cf in ui.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation }}
+  {% if cf.bar %}{{ ch.hbars(cf.bar, cf.metric_id ~ " 현재와 목표", "") }}{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 {% if a.review %}<p class="review">검토 에이전트: {{ "통과" if a.review.passed else "미통과" }} ({{ a.review.rounds }}회){% for i in a.review.issues %} · {{ i }}{% endfor %}</p>{% endif %}
 </section>
 {% endif %}
 
 {% if v.transactions %}
-<section>
+<section class="card">
 <h2>근거 거래</h2>
 <table>
   <thead><tr><th>거래 ID</th><th>일자</th><th>금액</th><th>적요</th></tr></thead>
@@ -81,7 +112,7 @@
 </section>
 {% endif %}
 
-<section>
+<section class="card">
 <h2>심사역 결정</h2>
 {% if d.officer_decision %}
 <p>{{ d.officer_decision.decision }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
