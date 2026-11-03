@@ -10,7 +10,7 @@
     {% for a in demo_applicants %}<option value="{{ a }}"{% if form and form.applicant_id == a %} selected{% endif %}>{{ a }}</option>{% endfor %}
     </select>
   </label>
-  <label>신청 금액(원) <input name="requested_amount_krw" inputmode="numeric" required value="{{ form.requested_amount_krw if form else '30000000' }}"></label>
+  <label>신청 금액(원) <input name="requested_amount_krw" inputmode="numeric" required value="{{ form.requested_amount_krw if form else '5000000' }}"></label>
   <label>기간(개월, 1~60) <input name="requested_tenor_months" inputmode="numeric" required value="{{ form.requested_tenor_months if form else '12' }}"></label>
   <button type="submit">제출</button>
 </form>

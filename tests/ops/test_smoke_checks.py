@@ -68,12 +68,12 @@ class FakeHttp:
         return [c for c in self.calls if c["method"] == method and part in c["url"]]
 
 
-ELIGIBLE = {"decision": "eligible", "max_amount_krw": 15_000_000}
+ELIGIBLE = {"decision": "eligible", "max_amount_krw": 2_500_000}
 ASSESSMENT = {"recommendation": "conditional", "review": {"passed": True, "rounds": 2, "issues": []}}
 
 
 MONITORING = {"loan_id": "smoke-e2e-test", "registered_at": "2026-11-02T09:00:00+09:00"}
-LOAN = {"id": "smoke-e2e-test", "industry": "카페", "baseline": {"avg_weekly_revenue": 9_000_000}, "monitoring": None}
+LOAN = {"id": "smoke-e2e-test", "industry": "패션의류", "baseline": {"avg_weekly_revenue": 1_500_000}, "monitoring": None}
 CONSENT = {"consent_id": "c-smoke", "scopes": ["account", "tax", "pg"]}
 PROOF = {"id": "c-smoke", "complete": True, "reason": "expired",
          "items": [{"kind": "raw_container", "verified": True}, {"kind": "consent_registry", "verified": True},
@@ -214,16 +214,16 @@ def test_journey_starts_application_and_approves_within_policy_limit():
                          app_doc("awaiting_officer", policy=ELIGIBLE, assessment=ASSESSMENT),
                          app_doc("approved", monitoring=MONITORING)])
     detail = sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test")
-    assert detail == ("smoke-e2e-test approved 15,000,000 KRW (3 steps); "
-                      "assessment conditional, review passed in 2 rounds; monitoring registered (카페)")
+    assert detail == ("smoke-e2e-test approved 2,500,000 KRW (3 steps); "
+                      "assessment conditional, review passed in 2 rounds; monitoring registered (패션의류)")
     [start] = http.find("POST", "/applications-start/messages")
     assert start["url"] == "https://stfnx.queue.core.windows.net/applications-start/messages"
     assert start["headers"]["x-ms-version"] == "2023-11-03"
     assert queue_text(start) == {"application_id": "smoke-e2e-test", "applicant_id": "demo-healthy-001",
-                                 "requested_amount_krw": 20_000_000, "requested_tenor_months": 12}
+                                 "requested_amount_krw": 3_300_000, "requested_tenor_months": 12}
     [decision] = http.find("POST", "/officer-decisions/messages")
     assert queue_text(decision) == {"application_id": "smoke-e2e-test", "decision": {
-        "decision": "approve", "officer_id": "smoke", "amount_krw": 15_000_000, "reason": "smoke e2e"}}
+        "decision": "approve", "officer_id": "smoke", "amount_krw": 2_500_000, "reason": "smoke e2e"}}
     read = http.find("GET", "/colls/applications/docs/")[0]
     assert read["url"] == "https://cosmos-x.documents.azure.com/dbs/lending/colls/applications/docs/smoke-e2e-test"
     assert read["headers"]["x-ms-documentdb-partitionkey"] == '["smoke-e2e-test"]'
@@ -241,7 +241,7 @@ def approved_then(*later):
 def test_journey_waits_for_monitoring_registration_after_approval():
     sleeps = []
     http = journey_http(approved_then(app_doc("approved"), app_doc("approved", monitoring=MONITORING)))
-    assert sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test").endswith("registered (카페)")
+    assert sc.check_journey(CFG, http, token_for(http), sleeps.append, "smoke-e2e-test").endswith("registered (패션의류)")
     assert sleeps == [10.0, 10.0]
 
 

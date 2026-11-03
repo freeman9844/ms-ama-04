@@ -71,7 +71,7 @@ def run_with(tmp_path, store_kw=None, **kw):
 
 def test_message_shape():
     m = message("load-1", 3, "load-healthy-01", T0, "load")
-    assert m == {"application_id": "load-1-03", "applicant_id": "load-healthy-01", "requested_amount_krw": 10_000_000,
+    assert m == {"application_id": "load-1-03", "applicant_id": "load-healthy-01", "requested_amount_krw": 1_700_000,
                  "requested_tenor_months": 12, "submitted_at": T0.isoformat(), "source": "load", "run_id": "load-1"}
 
 

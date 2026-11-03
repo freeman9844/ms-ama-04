@@ -16,7 +16,7 @@ from opsmetrics.cost import ai_cost
 from opsmetrics.projection import project
 from shared.segments import LOAD_GRID
 
-AMOUNT_KRW = 10_000_000
+AMOUNT_KRW = 1_700_000
 TENOR_MONTHS = 12
 MAX_COUNT = len(LOAD_GRID)
 GUARD_SAMPLE = 3

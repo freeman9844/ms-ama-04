@@ -110,7 +110,7 @@ class FakeAzure:
             "recommendation": rec,
             "summary": "정책 판정과 현금흐름 지표를 근거로 작성한 초안이다.",
             "claims": [{"text": "핵심 현금흐름 지표를 확인했다.", "metric_ids": cited, "txn_ids": []}],
-            "proposed_structure": {"amount_krw": 10_000_000 if lend else 0, "tenor_months": 12, "schedule": "level",
+            "proposed_structure": {"amount_krw": 1_700_000 if lend else 0, "tenor_months": 12, "schedule": "level",
                                    "reduced_payment_months": [], "rationale": "가짜 모드 기본 구조"},
             "counterfactuals": [],
         }
