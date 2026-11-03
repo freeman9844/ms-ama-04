@@ -1,0 +1,119 @@
+{# P7 차트·KPI·스테퍼 매크로. 계산은 console/charts.py·dashboard.py가 하고 여기서는 그리기만 한다.
+   CSP(style-src 'self') 때문에 style 속성을 쓰지 않고 색은 fill-*/stroke-*/bg-* 클래스로 준다. #}
+
+{% macro kpi(label, value, sub="", tone="blue") -%}
+<div class="card kpi kpi-{{ tone }}">
+  <div class="kpi-label">{{ label }}</div>
+  <div class="kpi-value">{{ value }}</div>
+  {% if sub %}<div class="kpi-sub">{{ sub }}</div>{% endif %}
+  {% if caller is defined %}{{ caller() }}{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro legend(items) -%}
+<ul class="legend">
+{% for item in items %}<li><span class="swatch bg-{{ item[1] }}"></span>{{ item[0] }}{% if item|length > 2 %} <b>{{ item[2] }}</b>{% endif %}</li>{% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro empty() -%}<p class="note">표시할 데이터가 없습니다.</p>{%- endmacro %}
+
+{% macro donut(d, label, caption="건") -%}
+{% if d.arcs %}
+<svg class="chart donut" viewBox="0 0 120 120" role="img" aria-label="{{ label }}">
+  <circle class="donut-track" cx="60" cy="60" r="{{ d.r }}"></circle>
+  {% for a in d.arcs %}<circle class="arc stroke-{{ a.color }}" cx="60" cy="60" r="{{ d.r }}" stroke-dasharray="{{ a.dash }} {{ a.gap }}" stroke-dashoffset="{{ a.offset }}" transform="rotate(-90 60 60)"><title>{{ a.label }} {{ a.value }}{{ caption }} ({{ a.pct }}%)</title></circle>{% endfor %}
+  <text class="donut-total" x="60" y="62" text-anchor="middle">{{ d.total }}</text>
+  <text class="donut-caption" x="60" y="78" text-anchor="middle">{{ caption }}</text>
+</svg>
+{% else %}{{ empty() }}{% endif %}
+{%- endmacro %}
+
+{% macro hbars(h, label, unit="건") -%}
+{% if h.bars %}
+<svg class="chart hbars" viewBox="0 0 {{ h.width }} {{ h.height }}" role="img" aria-label="{{ label }}">
+{% for b in h.bars %}
+  <text class="axis-label" x="{{ b.x - 8 }}" y="{{ b.ty }}" text-anchor="end">{{ b.label }}</text>
+  <rect class="track" x="{{ b.x }}" y="{{ b.y }}" width="{{ h.width - b.x - 48 }}" height="{{ b.h }}" rx="3"></rect>
+  <rect class="bar-h fill-{{ b.color }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"><title>{{ b.label }} {{ b.value }}{{ unit }}</title></rect>
+  <text class="value-label" x="{{ b.vx }}" y="{{ b.ty }}">{{ b.value }}{{ unit }}</text>
+{% endfor %}
+</svg>
+{% else %}{{ empty() }}{% endif %}
+{%- endmacro %}
+
+{% macro columns(c, label) -%}
+<svg class="chart columns" viewBox="0 0 {{ c.width }} {{ c.height }}" role="img" aria-label="{{ label }}">
+  {% for t in c.ticks %}<line class="gridline" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"></line><text class="axis-label" x="{{ c.x0 - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.text }}</text>{% endfor %}
+  {% for g in c.groups %}
+  {% for b in g.bars %}{% for p in b.parts %}<rect class="bar-v fill-{{ p.color }}" x="{{ b.x }}" y="{{ p.y }}" width="{{ b.w }}" height="{{ p.h }}"><title>{{ p.tip }}</title></rect>{% endfor %}{% endfor %}
+  <text class="axis-label" x="{{ g.cx }}" y="{{ c.label_y }}" text-anchor="middle">{{ g.label }}</text>
+  {% endfor %}
+  {% for r in c.refs %}<line class="ref stroke-{{ r.color }}" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ r.y }}" y2="{{ r.y }}"><title>{{ r.label }} {{ r.text }}</title></line><text class="ref-label" x="{{ c.x1 if loop.index is odd else c.x0 + 4 }}" y="{{ r.y - 4 }}" text-anchor="{{ 'end' if loop.index is odd else 'start' }}">{{ r.label }} {{ r.text }}</text>{% endfor %}
+  {% if caller is defined %}{{ caller() }}{% endif %}
+</svg>
+{%- endmacro %}
+
+{% macro line_overlay(l, label) -%}
+{% for d in l.segments %}<path class="line stroke-purple" d="{{ d }}" pathLength="100"></path>{% endfor %}
+{% for p in l.points %}<circle class="dot fill-purple" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {{ p.value }}</title></circle>{% endfor %}
+{% for t in l.ticks %}<text class="axis-label" x="{{ l.x + 6 }}" y="{{ t.y + 4 }}">{{ t.text }}</text>{% endfor %}
+{%- endmacro %}
+
+{% macro gauge(g, label, value_text, sub="", tone="blue") -%}
+<div class="card kpi gauge-card kpi-{{ tone }}">
+  <div class="kpi-label">{{ label }}</div>
+  <svg class="chart gauge" viewBox="0 0 120 74" role="img" aria-label="{{ label }} {{ value_text }}">
+    <path class="gauge-track" d="{{ g.d }}" pathLength="100"></path>
+    {% if g.frac is not none %}<path class="gauge-fill stroke-{{ tone }}" d="{{ g.d }}" pathLength="100" stroke-dasharray="{{ g.pct }} 100"><title>{{ label }} {{ value_text }}</title></path>{% endif %}
+    <text class="gauge-value" x="60" y="60" text-anchor="middle">{{ value_text }}</text>
+  </svg>
+  {% if sub %}<div class="kpi-sub">{{ sub }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro marker_bar(m, label) -%}
+<svg class="chart marker-bar" viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
+  <rect class="track" x="0" y="3" width="100" height="8"></rect>
+  <rect class="bar-h fill-blue" x="0" y="3" width="{{ m.fill }}" height="8"><title>{{ label }}</title></rect>
+  <line class="mark" x1="{{ m.mark }}" x2="{{ m.mark }}" y1="0" y2="14" vector-effect="non-scaling-stroke"></line>
+</svg>
+{%- endmacro %}
+
+{% macro stacked(rows, label) -%}
+{% if rows %}
+<div class="stacked" aria-label="{{ label }}">
+{% for r in rows %}
+  <div class="stacked-row">
+    <span class="stacked-label">{{ r.label }}</span>
+    <svg class="chart stacked-bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ r.label }}">
+      {% if r.empty %}<rect class="track" x="0" y="0" width="100" height="10"></rect>{% endif %}
+      {% for p in r.parts %}<rect class="bar-h fill-{{ p.color }}" x="{{ p.x }}" y="0" width="{{ p.w }}" height="10"><title>{{ r.label }} {{ p.part }} {{ p.value }}건 ({{ p.pct }}%)</title></rect>{% endfor %}
+    </svg>
+    <span class="stacked-total">{{ r.total|int }}건</span>
+  </div>
+{% endfor %}
+</div>
+{% else %}{{ empty() }}{% endif %}
+{%- endmacro %}
+
+{% macro stepper(steps, label, compact=false) -%}
+<ol class="stepper{% if compact %} compact{% endif %}" aria-label="{{ label }}">
+{% for s in steps %}
+  <li class="step step-{{ s.state }}">
+    <span class="step-dot">{% if s.state == "done" %}✓{% elif s.state == "failed" %}✕{% elif s.state == "warn" %}!{% else %}{{ loop.index }}{% endif %}</span>
+    <span class="step-label">{{ s.label }}</span>
+    {% if s.time %}<span class="step-time">{{ s.time }}</span>{% endif %}
+    {% if s.elapsed %}<span class="step-elapsed">{{ s.elapsed }}</span>{% endif %}
+    {% if s.note %}<span class="step-note">{{ s.note }}</span>{% endif %}
+  </li>
+{% endfor %}
+</ol>
+{%- endmacro %}
+
+{% macro progress(pct, label) -%}
+<svg class="chart progress" viewBox="0 0 100 6" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
+  <rect class="track" x="0" y="0" width="100" height="6"></rect>
+  <rect class="bar-h fill-blue" x="0" y="0" width="{{ pct }}" height="6"></rect>
+</svg>
+{%- endmacro %}

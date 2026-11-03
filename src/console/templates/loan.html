@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set nav = "loans" %}
 {% set l = v.loan %}{% set m = v.monitoring %}
 {% block head %}{% if replay_blocked %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}

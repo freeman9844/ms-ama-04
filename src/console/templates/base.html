@@ -10,15 +10,30 @@
 <script src="{{ htmx_src }}" integrity="{{ htmx_sri }}" crossorigin="anonymous"></script>
 </head>
 <body>
-<header>
-  <a class="brand" href="/">AMA Lending 심사 콘솔</a>
-  <nav><a href="/">신청</a> · <a href="/loans">사후 모니터링</a> · <a href="/grievances">이의제기</a> · <a href="/borrower">차주 시뮬레이터</a> · <a href="/ops">운영 지표</a></nav>
-  <span class="who">{{ user.name }} · {{ user.roles|sort|join(", ") }}</span>
-  {% if not demo %}<a href="/.auth/logout">로그아웃</a>{% endif %}
-</header>
+<div class="shell">
+<aside class="sidebar">
+  <a class="brand" href="/">AMA Lending <small>심사 콘솔</small></a>
+  <nav aria-label="주 메뉴">
+    <ul>
+      <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="/">신청</a></li>
+      <li class="n-loans{% if nav == 'loans' %} active{% endif %}"><a href="/loans">사후 모니터링</a></li>
+      <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="/grievances">이의제기</a></li>
+      <li class="n-borrower{% if nav == 'borrower' %} active{% endif %}"><a href="/borrower">차주 시뮬레이터</a></li>
+      <li class="n-ops{% if nav == 'ops' %} active{% endif %}"><a href="/ops">운영 지표</a></li>
+    </ul>
+  </nav>
+  <div class="who">
+    <span class="who-name">{{ user.name }}</span>
+    <span class="who-roles">{{ user.roles|sort|join(", ") }}</span>
+    {% if not demo %}<a href="/.auth/logout">로그아웃</a>{% endif %}
+  </div>
+</aside>
+<div class="content">
 {% if demo %}<p class="demo-banner">데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.</p>{% endif %}
 <main>
 {% block main %}{% endblock %}
 </main>
+</div>
+</div>
 </body>
 </html>
