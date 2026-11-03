@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import pytest
 
 from evals.transport import chunks
 from ops.azcli import OpsError
-from ops.opsrun import load, metrics, new_run_id
+from ops.opsrun import JOB_TIMEOUT_S, load, metrics, new_run_id
 
 T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 ENV = {"AZURE_SUBSCRIPTION_ID": "sub", "AZURE_RESOURCE_GROUP": "rg", "OPS_JOB_NAME": "job-ops",
@@ -155,3 +156,24 @@ def test_load_rejects_schedule_beyond_job_timeout(fake_runner, tmp_path):
     with pytest.raises(OpsError, match="5400"):
         load(runner, count=48, interval_s=60, out_root=tmp_path)
     assert runner.commands("az") == []
+
+
+def test_run_job_default_poll_budget_covers_job_timeout(fake_runner, tmp_path):
+    run_id = "load-20261102010000"
+    # JOB_TIMEOUT_S(5400초, job-ops replicaTimeout)만큼은 "Running"이 나와도 포기하면 안 된다.
+    # 구 기본값(poll_wait=15 × poll_limit=250=3750초)은 여기서 시간 초과로 깨진다.
+    poll_wait = 15
+    running_calls = math.ceil(JOB_TIMEOUT_S / poll_wait) + 1
+    files = {"docs.json": b'{"runs": {}}', "summary.json": json.dumps({"unreached": []}).encode()}
+    runner = (fake_runner(ENV)
+              .on("az", "containerapp", "job", "show", results=[json.dumps(TEMPLATE)])
+              .on("az", "rest", results=['{"name": "job-ops-x1"}'])
+              .on("az", "containerapp", "job", "execution", "show",
+                  results=["Running\n"] * running_calls + ["Succeeded\n"])
+              .on("az", "monitor", "log-analytics", "query", results=[_rows(run_id, files)]))
+
+    result = load(runner, count=48, interval_s=15, now=T0, out_root=tmp_path, sleep=lambda s: None)
+
+    assert result.execution == "job-ops-x1"
+    show_calls = runner.commands("az", "containerapp", "job", "execution", "show")
+    assert len(show_calls) >= math.ceil(JOB_TIMEOUT_S / poll_wait)

@@ -22,7 +22,7 @@
   {% endif %}
 </div>
 {% if not selected %}
-<p>측정 실행이 없습니다. 운영자 PC에서 <code>python -m ops load --count 24</code>로 합성 신청을 제출하면 여기에 표시됩니다.</p>
+<p>측정 실행이 없습니다. 운영자 PC에서 <code>python -m ops load</code>(기본 48건=균형 격자 전체)로 합성 신청을 제출하면 여기에 표시됩니다.</p>
 {% else %}
 <p class="note">실행 <code>{{ selected }}</code> · 신청 {{ s.applications }}건 · {{ s.basis }}. 고정비·건당 총비용은 <code>ops/reports/{{ selected }}/report.md</code>를 봅니다.</p>
 

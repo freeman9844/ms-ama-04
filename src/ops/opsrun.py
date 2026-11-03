@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -59,9 +60,12 @@ def update_meta(out_dir: Path, extra: dict[str, Any]) -> None:
 
 
 def run_job(runner: Runner, run_id: str, overrides: dict[str, str], *, out_root: Path | None = None,
-            sleep: Callable[[float], None] | None = None, poll_wait: float = 15, poll_limit: int = 250,
+            sleep: Callable[[float], None] | None = None, poll_wait: float = 15, poll_limit: int | None = None,
             log_wait: float = 30, log_limit: int = 20, progress: Callable[[str], None] | None = None) -> JobRun:
     sleep = sleep or time.sleep
+    # poll ≥ Job 제한 + 여유: job-ops의 replicaTimeout(JOB_TIMEOUT_S)보다 먼저 포기하면 안 된다.
+    if poll_limit is None:
+        poll_limit = math.ceil(JOB_TIMEOUT_S / poll_wait) + 10
     env = get_env(runner)
     group, job = env["AZURE_RESOURCE_GROUP"], env.get("OPS_JOB_NAME")
     if not job:

@@ -68,14 +68,14 @@ python -m ops eval --collect <실행 이름>            # 회수만 다시(로�
 ## 운영 지표·장애 주입
 
 ```powershell
-python -m ops load --count 24                                   # 측정 배치 → ops/reports/load-<시각>/
+python -m ops load                                              # 측정 배치(기본 48건=균형 격자 전체) → ops/reports/load-<시각>/
 python -m ops fault run source-flaky                            # 장애 ① → ops/reports/fault-<시각>/
 python -m ops fault run policy-down                             # 장애 ②
 python -m ops fault status                                      # 장애 토글 상태
 python -m ops metrics --run load-<시각> --fault-runs fault-<…> fault-<…>   # report.md·metrics.json
 ```
 
-- `ops load`의 `--count`는 1~24, `--interval`은 제출 간격(초, 기본 15)입니다. 결과는 `ops/reports/load-<시각>/`에 저장되며, 측정 실행 하나는 `ops/reports/load-20261102110233/report.md`입니다.
+- `ops load`의 `--count`는 1~48(기본값은 균형 격자 크기 `len(LOAD_GRID)`), `--interval`은 제출 간격(초, 기본 15)입니다. 결과는 `ops/reports/load-<시각>/`에 저장되며, 측정 실행 하나는 `ops/reports/load-20261102110233/report.md`입니다.
 - `ops fault run <시나리오>`는 장애를 켜고 신청을 제출한 뒤 `finally`에서 원복합니다. 시나리오는 `source-flaky`, `policy-down`입니다.
 - 장애를 수동으로 켜고 끄는 명령(`src/ops/cli.py`): `python -m ops fault source flaky|off`, `python -m ops fault policy on|off`.
 - **장애 토글 확인**: `python -m ops fault status`는 `source: off|flaky`, `policy: off|unavailable`을 한 줄씩 출력합니다. 시연이나 측정 전에 둘 다 `off`인지 확인합니다. 켜진 채 남았으면 `python -m ops fault source off` / `policy off`(또는 `azd provision`)로 원복합니다.
