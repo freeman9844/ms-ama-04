@@ -100,7 +100,7 @@ az containerapp ingress access-restriction remove -g <resource-group> -n <consol
 회사 NAT처럼 출구 IP가 하루에 여러 번 바뀌면(2026-11-03 리허설에서 4개 관측) 임시 규칙이 하나로는 부족합니다.
 
 - IP가 바뀔 때마다 규칙 이름을 `operator-alt2`, `operator-alt3`처럼 늘려 `/32` 규칙을 하나씩 더합니다. console ingress와 Functions 양쪽에 모두 넣고, Functions 우선순위는 110부터 하나씩 올립니다(111, 112 …).
-- `window open`·`window close`·`ops deploy`(이미지 대상) 같은 프로비저닝은 Functions의 임시 규칙을 지웁니다(2026-11-03 실측). 프로비저닝을 다시 했다면 현재 IP의 규칙을 다시 추가합니다.
+- `window open`(프로비저닝)은 Functions의 임시 규칙을 지웁니다(2026-11-03 실측). `window close`·`ops deploy`(이미지 대상) 같은 다른 프로비저닝도 Bicep 선언상 같게 동작할 것으로 예상하지만 실측하지 않았습니다. 프로비저닝을 다시 했다면 현재 IP의 규칙을 다시 추가합니다.
 - 정리 때는 쓴 이름을 전부 지웁니다. 이미 없으면 not found 오류는 무시합니다.
 
 ```powershell
