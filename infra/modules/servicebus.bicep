@@ -56,14 +56,25 @@ resource subscriptionResources 'Microsoft.ServiceBus/namespaces/topics/subscript
   dependsOn: [ topicResources ]
 }]
 
-// 기본 규칙($Default, 전체 수신)을 상관 필터로 바꿉니다.
-resource subscriptionRules 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = [for (s, i) in subscriptions: {
+// $Default PUT은 구독 생성 시 자동 생기는 1=1(전체 수신) 규칙을 없애는 용도입니다(실측: 200이지만 규칙은 남지 않음).
+// 실제 필터는 이름이 다른 subject-label 규칙이며, 그것만 남아 subject(label) 없는 메시지(스모크)는 받지 않습니다.
+resource defaultRules 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = [for (s, i) in subscriptions: {
   parent: subscriptionResources[i]
   name: '$Default'
   properties: {
     filterType: 'CorrelationFilter'
     correlationFilter: { label: s.topic }
   }
+}]
+
+resource subscriptionRules 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2024-01-01' = [for (s, i) in subscriptions: {
+  parent: subscriptionResources[i]
+  name: 'subject-label'
+  properties: {
+    filterType: 'CorrelationFilter'
+    correlationFilter: { label: s.topic }
+  }
+  dependsOn: [ defaultRules ]
 }]
 
 module pe 'pe.bicep' = {

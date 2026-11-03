@@ -36,9 +36,21 @@ def test_monitoring_subscriptions_are_session_ordered_and_filtered(closed):
         props = sub["properties"]
         assert props["requiresSession"] is True and props["lockDuration"] == "PT5M"
         assert props["maxDeliveryCount"] == 5 and props["deadLetteringOnMessageExpiration"] is True
-    rules = {r["name"].split("/")[-2]: r["properties"] for r in closed.of_type(f"{SB}/topics/subscriptions/rules")}
-    assert set(rules) == {"early-warning", "collections"}
-    # 스모크 메시지(subject 없음)는 구독에 들어가지 않는다.
-    assert rules["early-warning"] == {"filterType": "CorrelationFilter", "correlationFilter": {"label": "flow.updated"}}
-    assert rules["collections"] == {"filterType": "CorrelationFilter", "correlationFilter": {"label": "alert.raised"}}
-    assert all(r["name"].endswith("/$Default") for r in closed.of_type(f"{SB}/topics/subscriptions/rules"))
+    all_rules = closed.of_type(f"{SB}/topics/subscriptions/rules")
+    # 구독마다 $Default(자동 생성된 1=1 제거용)와 subject-label(실제 필터) 두 규칙을 둔다.
+    by_name = {"/".join(r["name"].split("/")[-3:]): r["properties"] for r in all_rules}
+    assert set(by_name) == {
+        f"{sub}/{rule}"
+        for sub in ("flow.updated/early-warning", "alert.raised/collections")
+        for rule in ("$Default", "subject-label")
+    }
+    assert len(all_rules) == 4
+    # 스모크 메시지(subject 없음)는 구독에 들어가지 않는다: 실제로 남는 규칙은 subject-label 상관 필터뿐이다.
+    assert by_name["flow.updated/early-warning/subject-label"] == {
+        "filterType": "CorrelationFilter",
+        "correlationFilter": {"label": "flow.updated"},
+    }
+    assert by_name["alert.raised/collections/subject-label"] == {
+        "filterType": "CorrelationFilter",
+        "correlationFilter": {"label": "alert.raised"},
+    }
