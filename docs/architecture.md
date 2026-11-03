@@ -22,7 +22,7 @@ flowchart LR
   end
   borrower -->|신청 제출| orch
   officer -->|로그인 / 승인·조건부·거절| console
-  operator -->|상시: 운영자 IP 허용(데모: Easy Auth 꺼짐)| console
+  operator -->|상시: 운영자 IP 허용, 데모는 Easy Auth 꺼짐| console
   operator -.->|배포 창: 데이터 평면 작업| orch
   console --> orch
   orch <--> foundry
@@ -107,7 +107,7 @@ flowchart TB
   end
   operator["운영자 IP"]
   pe -->|Private DNS| data["Foundry·Cosmos·Storage·Search·KV·Service Bus·ACR·Functions"]
-  operator -->|상시: 운영자 IP 허용(데모: Easy Auth 꺼짐)| appsweb
+  operator -->|상시: 운영자 IP 허용, 데모는 Easy Auth 꺼짐| appsweb
   operator -.->|배포 창: public 허용| fn
   appsweb --> appsint
   fn --> appsint
