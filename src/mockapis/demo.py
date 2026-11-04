@@ -61,6 +61,7 @@ POSTLOAN_SEED_OFFSET = 1000
 
 def build_postloan_flows(cases: Mapping[str, SyntheticCase], as_of: date) -> dict[str, PostLoanFlow]:
     seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
+    seeds.update({a.applicant_id: a.seed for a in LOAD_GRID})
     return {
         applicant_id: generate_postloan(
             case,

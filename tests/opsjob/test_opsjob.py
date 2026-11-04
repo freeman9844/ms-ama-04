@@ -3,7 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from opsjob.run import BUDGET_GUARD_USD, Config, done, message, run
+from opsjob.run import BUDGET_GUARD_USD, DEFAULT_AMOUNT_KRW, Config, done, message, run
+from shared.segments import LOAD_GRID
 
 T0 = datetime(2026, 11, 2, 1, 0, tzinfo=UTC)
 
@@ -71,8 +72,15 @@ def run_with(tmp_path, store_kw=None, **kw):
 
 def test_message_shape():
     m = message("load-1", 3, "load-healthy-01", T0, "load")
-    assert m == {"application_id": "load-1-03", "applicant_id": "load-healthy-01", "requested_amount_krw": 1_700_000,
+    assert m == {"application_id": "load-1-03", "applicant_id": "load-healthy-01",
+                 "requested_amount_krw": LOAD_GRID[0].requested_amount_krw,
                  "requested_tenor_months": 12, "submitted_at": T0.isoformat(), "source": "load", "run_id": "load-1"}
+
+
+def test_message_amount_follows_load_grid_and_defaults_otherwise():
+    amounts = {message("r", 1, a.applicant_id, T0, "load")["requested_amount_krw"] for a in LOAD_GRID}
+    assert amounts == {a.requested_amount_krw for a in LOAD_GRID} and len(amounts) > 1
+    assert message("r", 1, "seller-dailylook-01", T0, "fault")["requested_amount_krw"] == DEFAULT_AMOUNT_KRW
 
 
 def test_application_id_matches_entry_pattern():

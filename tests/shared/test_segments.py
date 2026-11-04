@@ -46,6 +46,25 @@ def test_load_grid_is_balanced_and_interleaved():
     assert len({a.seed for a in LOAD_GRID}) == 48
 
 
+def test_load_amounts_vary_within_product_limit():
+    from policy.rules import load_rules
+
+    product = load_rules().product
+    amounts = [a.requested_amount_krw for a in LOAD_GRID]
+    assert all(product.min_amount_krw <= x <= product.max_amount_krw for x in amounts)
+    assert max(amounts) == 10_000_000 and len(set(amounts)) >= 10
+    for arch in ("healthy", "mismatch", "stress", "thin"):
+        assert len({a.requested_amount_krw for a in LOAD_GRID if a.archetype == arch}) == LOAD_PER_ARCHETYPE
+
+
+def test_load_amounts_do_not_skew_industry_comparison():
+    """업종 공정성 격차가 신청 금액 차이로 생기지 않도록 업종마다 신청액 합이 같다."""
+    totals = Counter()
+    for a in LOAD_GRID:
+        totals[a.industry] += a.requested_amount_krw
+    assert len(set(totals.values())) == 1
+
+
 def test_load_grid_uses_seller_industries():
     assert len(SELLER_INDUSTRIES) == 10 and set(LOAD_INDUSTRIES) <= set(SELLER_INDUSTRIES)
     assert set(Counter(a.industry for a in LOAD_GRID).values()) == {8}

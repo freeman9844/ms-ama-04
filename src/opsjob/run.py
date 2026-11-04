@@ -16,7 +16,9 @@ from opsmetrics.cost import ai_cost
 from opsmetrics.projection import project
 from shared.segments import LOAD_GRID
 
-AMOUNT_KRW = 1_700_000
+# 부하 격자 밖 신청자(submit 모드)의 신청 금액. 격자 신청자는 격자 금액을 쓴다.
+DEFAULT_AMOUNT_KRW = 1_700_000
+_LOAD_AMOUNTS = {a.applicant_id: a.requested_amount_krw for a in LOAD_GRID}
 TENOR_MONTHS = 12
 MAX_COUNT = len(LOAD_GRID)
 GUARD_SAMPLE = 3
@@ -91,7 +93,7 @@ def message(run_id: str, i: int, applicant_id: str, now: datetime, source: str) 
     return {
         "application_id": f"{run_id.lower()}-{i:02d}",
         "applicant_id": applicant_id,
-        "requested_amount_krw": AMOUNT_KRW,
+        "requested_amount_krw": _LOAD_AMOUNTS.get(applicant_id, DEFAULT_AMOUNT_KRW),
         "requested_tenor_months": TENOR_MONTHS,
         "submitted_at": now.isoformat(),
         "source": source,

@@ -91,6 +91,20 @@ def test_postloan_flows_cast_the_healthy_seller_as_the_stacking_hero():
     assert all(f.start == as_of for f in flows.values())
 
 
+
+def test_main_serves_flow_for_load_applicant(monkeypatch):
+    """부하 신청을 심사역이 승인해도 사후 재생이 no_flow로 끊기지 않는다."""
+    monkeypatch.setenv("MOCK_CONSENT_SECRET", "x" * 32)
+    monkeypatch.setenv("MOCK_AS_OF", "2026-10-01")
+    sys.modules.pop("mockapis.main", None)
+    client = TestClient(importlib.import_module("mockapis.main").app)
+    r = client.post("/consents", json={"applicant_id": "load-healthy-12", "scopes": ["account"],
+                                       "purpose": "loan-application", "ttl_days": 90})
+    token = r.json()["token"]
+    flow = client.get("/mydata/flow", headers={"Authorization": f"Bearer {token}"})
+    assert flow.status_code == 200 and flow.json()
+
+
 def test_demo_cases_unchanged():
     cases = build_demo_cases(date(2026, 10, 1))
     assert {k: _digest(v) for k, v in cases.items()} == DIGESTS

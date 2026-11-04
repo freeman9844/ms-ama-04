@@ -58,3 +58,12 @@ def test_load_seller_decisions_unchanged(load_cases):
         if a.business_age_months < 12:
             expected = _with_young_business(expected)
         assert _decision(load_cases[a.applicant_id], LOAD_AMOUNT_KRW) == expected, a.applicant_id
+
+
+def test_load_grid_amounts_keep_decision_and_reasons(load_cases):
+    """부하 신청 금액(50만~1,000만)이 달라도 판정·사유는 원형대로다. 금리 구간만 금액에 따라 내려갈 수 있다."""
+    for a in LOAD_GRID:
+        expected = LOAD_EXPECTED[a.archetype]
+        if a.business_age_months < 12:
+            expected = _with_young_business(expected)
+        assert _decision(load_cases[a.applicant_id], a.requested_amount_krw)[:2] == expected[:2], a.applicant_id

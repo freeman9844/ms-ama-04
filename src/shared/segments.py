@@ -35,6 +35,10 @@ LOAD_REGIONS = ("서울 성동구", "부산 해운대구", "경기 성남시")
 LOAD_AGES = (8, 24, 38)
 LOAD_PER_ARCHETYPE = 12
 LOAD_SEED_BASE = 5000
+# 상품 한도(policy v2: 50만~1,000만 원) 안의 신청 금액. 짝(j, j+6)의 합이 1,050만 원으로 같아서,
+# 업종마다 신청액 합이 같다(업종 공정성 격차가 금액 차이로 생기지 않는다).
+_AMOUNTS_LOW = (3_000_000, 1_000_000, 5_000_000, 500_000, 4_000_000, 2_000_000)
+LOAD_AMOUNTS = _AMOUNTS_LOW + tuple(10_500_000 - x for x in _AMOUNTS_LOW)
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,7 @@ class LoadApplicant:
     industry: str
     region: str
     business_age_months: int
+    requested_amount_krw: int
 
 
 def _grid() -> tuple[LoadApplicant, ...]:
@@ -59,6 +64,7 @@ def _grid() -> tuple[LoadApplicant, ...]:
                     industry=LOAD_INDUSTRIES[(j + a) % len(LOAD_INDUSTRIES)],
                     region=LOAD_REGIONS[(j + j // 3 + a) % 3],
                     business_age_months=LOAD_AGES[(j + 2 * (j // 3) + a) % 3],
+                    requested_amount_krw=LOAD_AMOUNTS[j],
                 )
             )
     return tuple(rows)

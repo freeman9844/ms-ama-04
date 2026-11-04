@@ -13,6 +13,6 @@ app = create_app(
     _cases,
     load_secret(),
     lambda: datetime.now(KST),
-    flows=build_postloan_flows(_demo, _as_of),  # 사후 흐름은 데모 신청자만
+    flows=build_postloan_flows(_cases, _as_of),  # 부하 신청도 승인되면 사후 재생할 수 있다
     fault=os.environ.get("FAULT_MODE", "none"),
 )
