@@ -651,7 +651,7 @@ P7(콘솔 화면 개편: 차트·단계 표시)과 P8(500만 원 이하 소액 �
 - **분류 기준 수정**: `src/agents/txn_classify.py`의 `CRITERIA`에서 supplier를 "원재료·상품·식자재·포장재 등 거래처 대금, 택배·물류 배송비"로,
   rent를 "점포·사무실·창고 등 사업장 임대료"로 넓혔습니다(온라인 셀러는 점포가 없고 배송비가 주요 거래처 비용). 실제 심사 분류에도 같은 영향이 있어
   Functions와 평가 이미지(`eval:20261104053042`)를 다시 배포했습니다. 심사·조기경보는 규칙 분류 카테고리만 써서 다시 측정하지 않았습니다.
-- **Functions zip 배포가 `ConnectionResetError(10054)`로 두 번 실패**(모바일 회선, 공인 IP <운영자 IP>): `az functionapp deployment source config-zip`가
+- **Functions zip 배포가 `ConnectionResetError(10054)`로 두 번 실패**(모바일 회선, 공인 IP <모바일 대역>): `az functionapp deployment source config-zip`가
   업로드 도중 끊겼고 서버에는 배포 기록이 없었습니다. 같은 zip(`ops.deploy.package_function`으로 생성, 29MB)을 `curl`로 Kudu 게시 API에 올리자 11초에 끝났습니다.
 
 ```powershell
@@ -703,7 +703,7 @@ curl.exe -X POST --data-binary "@orchestrator.zip" -H "Authorization: Bearer $to
 | 조기경보 | precision·recall 둘 다 1.000(gpt-5.4-mini 6경로, 평균 리드 42.7일 / gpt-5.4 5경로(1경로 호출 오류), 73.0일). 유입 감소 기준을 3주 합 0.75로 넓혀 mini의 첫 경보가 늦어짐(P8 74일) |
 | 분류·안전성 | 분류 정확도 97.8~100%, 주입 저항 100%, 반사실 일관성 100%, PII 0회 |
 
-- **IP 변경**: 모바일 회선 공인 IP가 작업 중 <운영자 IP> → <운영자 IP>로 바뀌어 콘솔이 403. 콘솔 ingress에 `operator-alt`를 잠시 넣어 `/ops` 확인 뒤 지웠습니다.
+- **IP 변경**: 모바일 회선 공인 IP가 작업 중 대역 A → 대역 B로 바뀌어 콘솔이 403. 콘솔 ingress에 `operator-alt`를 잠시 넣어 `/ops` 확인 뒤 지웠습니다.
   창을 닫은 뒤 콘솔 허용 목록은 `allow-0` = <운영자 IP>/32 하나이므로, 데모 때는 [deploy](deploy.md#운영자-ip가-바뀔-때) 절차로 현재 IP를 허용합니다.
 
 미룬 항목(P9 최종 리뷰의 사소한 지적, 데모 영향 없음):

@@ -4467,7 +4467,7 @@ az functionapp config access-restriction add -g $rg -n $fn --rule-name operator-
 az functionapp config access-restriction add -g $rg -n $fn --rule-name operator-alt --priority 110 --ip-address <다른 IP>/32 --action Allow --scm-site true
 ```
 
-`<다른 IP>`는 `<회사망 IP>`·`<회사망 IP>` 중 `ops window status`에 표시되지 않은 쪽이다.
+`<다른 IP>`는 `<회사망 IP 1>`·`<회사망 IP 2>` 중 `ops window status`에 표시되지 않은 쪽이다.
 
 - [ ] **Step 4: 배포와 smoke**
 

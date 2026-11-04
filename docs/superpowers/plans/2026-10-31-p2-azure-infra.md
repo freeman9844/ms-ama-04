@@ -4280,7 +4280,7 @@ az provider register -n Microsoft.CognitiveServices --wait
 $env:RUN_INFRA_TESTS = '1'; .\.venv\Scripts\python -m pytest -q
 ```
 
-Expected: 구독 <구독 ID 앞 8자리>…, 모든 테스트 PASS.
+Expected: 구독 <구독 ID>, 모든 테스트 PASS.
 
 - [ ] **Step 2: azd 환경 만들기**
 
