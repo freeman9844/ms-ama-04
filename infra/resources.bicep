@@ -661,7 +661,7 @@ module smokeJob 'modules/smoke-job.bicep' = {
       cosmos_database: cosmos.outputs.databaseName
       policy_url: policyUrl
       mockapi_url: mockapiUrl
-      e2e_applicant: 'demo-healthy-001'
+      e2e_applicant: 'seller-dailylook-01'
       ai_account_endpoint: 'https://${names.ais}.services.ai.azure.com'
       decision_deployment: 'decision-1'
     }

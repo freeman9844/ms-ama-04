@@ -48,7 +48,7 @@ def test_project_keeps_only_allowed_fields():
 
 def test_archetype_of():
     assert archetype_of("load-stress-03") == "stress"
-    assert archetype_of("demo-healthy-001") is None
+    assert archetype_of("seller-dailylook-01") is None
 
 
 def test_nearest_rank():

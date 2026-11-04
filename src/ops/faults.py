@@ -24,9 +24,9 @@ class Scenario:
 
 
 SCENARIOS = {
-    "source-flaky": Scenario("source-flaky", "source", ("demo-healthy-001", "demo-mismatch-002"), 5),
+    "source-flaky": Scenario("source-flaky", "source", ("seller-dailylook-01", "seller-mangwon-02"), 5),
     # 첫 신청이 Durable 재시도(5초 간격 3회)로 서킷을 연 뒤 다음 신청이 Policy 단계에 닿도록 간격을 둔다.
-    "policy-down": Scenario("policy-down", "policy", ("demo-healthy-001", "demo-stress-003", "demo-thin-004"), 90),
+    "policy-down": Scenario("policy-down", "policy", ("seller-dailylook-01", "seller-glowlab-03", "seller-knitroom-04"), 90),
 }
 
 

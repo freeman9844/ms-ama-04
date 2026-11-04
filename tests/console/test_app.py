@@ -255,10 +255,10 @@ def test_form_must_be_urlencoded_and_small(env):
 def test_new_application_is_enqueued_and_redirects(env):
     client, queue = env
     form_page = client.get("/applications/new", headers=OFFICER).text
-    assert "demo-healthy-001" in form_page and "demo-injection-005" in form_page
+    assert "seller-dailylook-01" in form_page and "seller-candle-05" in form_page
     token = csrf(client, OFFICER, "/applications/new")
     resp = client.post("/applications", headers=OFFICER, data={
-        "csrf": token, "applicant_id": "demo-healthy-001", "requested_amount_krw": "10,000,000",
+        "csrf": token, "applicant_id": "seller-dailylook-01", "requested_amount_krw": "10,000,000",
         "requested_tenor_months": "12"})
     assert resp.status_code == 303
     assert resp.headers["location"] == "/applications/app-20261101-abc123"
@@ -266,7 +266,7 @@ def test_new_application_is_enqueued_and_redirects(env):
     submitted_at = sent.pop("submitted_at")
     assert datetime.fromisoformat(submitted_at).tzinfo is not None
     assert (queue_name, sent) == ("applications-start", {
-        "application_id": "app-20261101-abc123", "applicant_id": "demo-healthy-001",
+        "application_id": "app-20261101-abc123", "applicant_id": "seller-dailylook-01",
         "requested_amount_krw": 10_000_000, "requested_tenor_months": 12, "sla_hours": 24.0,
         "source": "console"})
 
@@ -276,7 +276,7 @@ def test_new_application_is_enqueued_and_redirects(env):
 def test_new_application_validation(env, fields):
     client, queue = env
     token = csrf(client, OFFICER, "/applications/new")
-    form = {"csrf": token, "applicant_id": "demo-healthy-001",     "requested_amount_krw": "10000000",
+    form = {"csrf": token, "applicant_id": "seller-dailylook-01",     "requested_amount_krw": "10000000",
             "requested_tenor_months": "12"} | fields
     assert client.post("/applications", headers=OFFICER, data=form).status_code == 422
     assert client.post("/applications", headers=OFFICER, data=form | {"csrf": ""}).status_code == 403
@@ -323,7 +323,7 @@ def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
     assert "데모 모드" in page.text and "/.auth/logout" not in page.text
     assert "빈스카페(대표 김대표)는 계절성이 있다" in client.get("/applications/app-1").text
     token = csrf(client, {}, "/applications/new")
-    resp = client.post("/applications", data={"csrf": token, "applicant_id": "demo-healthy-001",
+    resp = client.post("/applications", data={"csrf": token, "applicant_id": "seller-dailylook-01",
                                               "requested_amount_krw": "5,000,000", "requested_tenor_months": "12"})
     assert resp.status_code == 303
     assert queue.sent[0][1]["application_id"] == "app-20261101-demo01"

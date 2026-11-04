@@ -14,7 +14,7 @@ from journey.orchestration import EVENT_OFFICER_DECISION, ORCHESTRATOR
 ROOT = Path(__file__).resolve().parents[2] / "src" / "orchestrator"
 START = {
     "application_id": "app-1",
-    "applicant_id": "demo-healthy-001",
+    "applicant_id": "seller-dailylook-01",
     "requested_amount_krw": 10_000_000,
     "requested_tenor_months": 12,
 }

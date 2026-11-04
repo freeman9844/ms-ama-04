@@ -12,7 +12,7 @@ from journey.orchestration import (
 
 START = {
     "application_id": "app-1",
-    "applicant_id": "demo-healthy-001",
+    "applicant_id": "seller-dailylook-01",
     "requested_amount_krw": 10_000_000,
     "requested_tenor_months": 12,
 }
@@ -235,7 +235,7 @@ def test_approval_registers_monitoring(run_journey):
     assert call.retry == "RETRY"
     assert call.input == {
         "application_id": "app-1",
-        "applicant_id": "demo-healthy-001",
+        "applicant_id": "seller-dailylook-01",
         "consent_id": "c-1",
         "decision": "approve",
         "amount_krw": 15_000_000,
@@ -257,7 +257,7 @@ def test_decline_does_not_register_monitoring(run_journey):
     assert result["status"] == "declined" and ctx.called("register_monitoring") == []
 
 
-WITHDRAW = {"consent_id": "c-1", "requested_by": "borrower:demo-healthy-001"}
+WITHDRAW = {"consent_id": "c-1", "requested_by": "borrower:seller-dailylook-01"}
 
 
 def test_withdrawal_while_awaiting_officer_ends_journey(run_journey):

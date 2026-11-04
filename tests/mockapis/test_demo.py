@@ -7,16 +7,17 @@ from datetime import date, datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from mockapis.demo import LOAD_ARCHETYPE, build_demo_cases, build_load_cases, load_secret, resolve_as_of
+from mockapis.demo import DEMO_APPLICANTS, LOAD_ARCHETYPE, build_demo_cases, build_load_cases, load_secret, resolve_as_of
 from mockapis.synth import INJECTION_TEXT, Archetype
 from shared.segments import LOAD_GRID, SELLER_INDUSTRIES
+from shared.sellers import DEMO_SELLERS, seller_label
 
 DIGESTS = {
-    "demo-healthy-001": "bc36a6a25567372b",
-    "demo-mismatch-002": "c614b183ee69de7d",
-    "demo-stress-003": "954a8dd87af17a60",
-    "demo-thin-004": "a7544bf6732ffaf9",
-    "demo-injection-005": "fce0813f72ff22e6",
+    "seller-dailylook-01": "674342fd4a9c3e35",
+    "seller-mangwon-02": "0b36cc2ecde34156",
+    "seller-glowlab-03": "5d3da3d65933eb55",
+    "seller-knitroom-04": "a845d3fd8de4771f",
+    "seller-candle-05": "e61982e7a8228404",
 }
 
 
@@ -33,14 +34,20 @@ def _digest(case) -> str:
 def test_build_demo_cases():
     cases = build_demo_cases(date(2026, 10, 1))
     assert {k: v.archetype for k, v in cases.items()} == {
-        "demo-healthy-001": Archetype.HEALTHY_SEASONAL,
-        "demo-mismatch-002": Archetype.TAX_MISMATCH,
-        "demo-stress-003": Archetype.STRESSED,
-        "demo-thin-004": Archetype.THIN_FILE,
-        "demo-injection-005": Archetype.HEALTHY_SEASONAL,
+        "seller-dailylook-01": Archetype.HEALTHY_SEASONAL,
+        "seller-mangwon-02": Archetype.TAX_MISMATCH,
+        "seller-glowlab-03": Archetype.STRESSED,
+        "seller-knitroom-04": Archetype.THIN_FILE,
+        "seller-candle-05": Archetype.HEALTHY_SEASONAL,
     }
     injected = [cid for cid, c in cases.items() if any(t.description == INJECTION_TEXT for t in c.transactions)]
-    assert injected == ["demo-injection-005"]
+    assert injected == ["seller-candle-05"]
+
+
+def test_demo_applicants_follow_seller_catalog():
+    assert [a for a, *_ in DEMO_APPLICANTS] == [s.applicant_id for s in DEMO_SELLERS]
+    assert seller_label("seller-dailylook-01") == "성수데일리룩 · 스마트스토어·쿠팡·자사몰 · 패션의류"
+    assert seller_label("load-healthy-01") == "load-healthy-01"
 
 
 def test_load_secret_requires_32_chars():
@@ -75,11 +82,11 @@ def test_postloan_flows_cast_the_healthy_seller_as_the_stacking_hero():
     as_of = date(2026, 11, 2)
     flows = build_postloan_flows(build_demo_cases(as_of), as_of)
     assert {k: f.scenario for k, f in flows.items()} == {
-        "demo-healthy-001": FlowScenario.STACKING,
-        "demo-mismatch-002": FlowScenario.STABLE,
-        "demo-stress-003": FlowScenario.STABLE,
-        "demo-thin-004": FlowScenario.STABLE,
-        "demo-injection-005": FlowScenario.STABLE,
+        "seller-dailylook-01": FlowScenario.STACKING,
+        "seller-mangwon-02": FlowScenario.STABLE,
+        "seller-glowlab-03": FlowScenario.STABLE,
+        "seller-knitroom-04": FlowScenario.STABLE,
+        "seller-candle-05": FlowScenario.STABLE,
     }
     assert all(f.start == as_of for f in flows.values())
 

@@ -64,7 +64,7 @@ def cases():
     return build_demo_cases(AS_OF)
 
 
-def context(cases, applicant_id="demo-healthy-001") -> UnderwritingContext:
+def context(cases, applicant_id="seller-dailylook-01") -> UnderwritingContext:
     case = cases[applicant_id]
     uw = compute_underwriting(
         f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
@@ -189,7 +189,7 @@ ALL_TOOLS = [
 ]
 
 
-@pytest.mark.parametrize("applicant_id", ["demo-healthy-001", "demo-stress-003", "demo-injection-005"])
+@pytest.mark.parametrize("applicant_id", ["seller-dailylook-01", "seller-glowlab-03", "seller-candle-05"])
 def test_agents_never_see_pii(cases, applicant_id):
     case = cases[applicant_id]
     leaky = copy.deepcopy(GOOD)
@@ -268,7 +268,7 @@ def test_counterfactual_must_use_catalog_values(cases):
 
 
 def test_recommendation_must_respect_policy(cases):
-    thin = context(cases, "demo-thin-004")
+    thin = context(cases, "seller-knitroom-04")
     issues = check_grounding(draft(), thin)
     assert any("ineligible" in i for i in issues)
     over = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 4_000_000})

@@ -55,6 +55,7 @@ from journey.models import (
     replay_in_progress,
 )
 from journey.validation import validate_officer_decision
+from shared.sellers import DEMO_SELLERS, seller_label
 
 HERE = Path(__file__).parent
 START_QUEUE = "applications-start"
@@ -66,7 +67,7 @@ GRIEVANCE_QUEUE = "grievances"
 GRIEVANCE_DECISION_QUEUE = "grievance-decisions"
 MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
-DEMO_APPLICANTS = ("demo-healthy-001", "demo-mismatch-002", "demo-stress-003", "demo-thin-004", "demo-injection-005")
+DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 # form-action은 넣지 않는다: Easy Auth 세션 만료 시 로그인 리디렉션(login.microsoftonline.com)을 막는다.
@@ -132,6 +133,7 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
     env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
+    env.filters["seller_label"] = seller_label
     env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
     for name, labels in LABEL_FILTERS.items():
         env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")

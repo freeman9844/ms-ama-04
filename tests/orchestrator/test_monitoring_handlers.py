@@ -150,7 +150,7 @@ def make_deps(mock_app, events=None, agents=None):
     )
 
 
-def approved_loan(deps, applicant_id="demo-healthy-001"):
+def approved_loan(deps, applicant_id="seller-dailylook-01"):
     consent = request_consent(deps, {"application_id": LOAN, "applicant_id": applicant_id})
     assemble_data(
         deps,

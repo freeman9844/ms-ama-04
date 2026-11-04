@@ -4,5 +4,5 @@
 {% block main %}
 <h1>차주 시뮬레이터</h1>
 <p>차주(소상공인) 화면을 흉내 낸 데모입니다. 동의를 확인·철회하고, 결정에 이의를 제기하고, 안내문과 회신을 봅니다.</p>
-<ul>{% for a in demo_applicants %}<li><a href="/borrower/{{ a|path }}">{{ a }}</a></li>{% endfor %}</ul>
+<ul>{% for a in demo_applicants %}<li><a href="/borrower/{{ a|path }}">{{ a|seller_label }}</a></li>{% endfor %}</ul>
 {% endblock %}

@@ -77,20 +77,20 @@ def test_monitoring_store_reads_loans_and_partitioned_alerts():
 def test_privacy_store_reads_consents_proofs_and_grievances():
     consents, proofs, grievances = FakeContainer([{"id": "c-1"}]), FakeContainer(), FakeContainer([{"id": "grv-1"}])
     store = CosmosPrivacy(consents, proofs, grievances)
-    assert store.consents_for_applicant("demo-healthy-001") == [{"id": "c-1"}]
+    assert store.consents_for_applicant("seller-dailylook-01") == [{"id": "c-1"}]
     assert store.consents_for_application("app-1") == [{"id": "c-1"}]
     assert consents.calls == [
-        ("query", CONSENTS_BY_APPLICANT, [{"name": "@applicant", "value": "demo-healthy-001"}], True),
+        ("query", CONSENTS_BY_APPLICANT, [{"name": "@applicant", "value": "seller-dailylook-01"}], True),
         ("query", CONSENTS_BY_APPLICATION, [{"name": "@application", "value": "app-1"}], True),
     ]
     assert store.get_consent("c-1") == {"id": "c-1"} and consents.calls[-1] == ("read", "c-1", "c-1")
     assert store.get_proof("c-1") == {"id": "c-1"} and proofs.calls[-1] == ("read", "c-1", "c-1")
     assert CosmosPrivacy(FakeContainer(missing=True), FakeContainer(missing=True), grievances).get_proof("c-x") is None
     assert store.list_grievances(50) == [{"id": "grv-1"}]
-    assert store.grievances_for_applicant("demo-healthy-001") == [{"id": "grv-1"}]
+    assert store.grievances_for_applicant("seller-dailylook-01") == [{"id": "grv-1"}]
     assert grievances.calls == [
         ("query", GRIEVANCES_QUERY, [{"name": "@limit", "value": 50}], True),
-        ("query", GRIEVANCES_BY_APPLICANT, [{"name": "@applicant", "value": "demo-healthy-001"}], True),
+        ("query", GRIEVANCES_BY_APPLICANT, [{"name": "@applicant", "value": "seller-dailylook-01"}], True),
     ]
     # 이의제기는 신청 파티션(/application_id)에 있다.
     assert store.get_grievance("app-1", "grv-1") == {"id": "grv-1"}

@@ -10,13 +10,13 @@ from shared.segments import LOAD_GRID
 
 KST = timezone(timedelta(hours=9), "KST")
 
-# (applicant_id, archetype, seed, inject_prompt)
+# (applicant_id, archetype, seed, inject_prompt). ID 순서는 shared.sellers.DEMO_SELLERS와 같다.
 DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
-    ("demo-healthy-001", Archetype.HEALTHY_SEASONAL, 101, False),
-    ("demo-mismatch-002", Archetype.TAX_MISMATCH, 102, False),
-    ("demo-stress-003", Archetype.STRESSED, 103, False),
-    ("demo-thin-004", Archetype.THIN_FILE, 104, False),
-    ("demo-injection-005", Archetype.HEALTHY_SEASONAL, 105, True),
+    ("seller-dailylook-01", Archetype.HEALTHY_SEASONAL, 101, False),
+    ("seller-mangwon-02", Archetype.TAX_MISMATCH, 102, False),
+    ("seller-glowlab-03", Archetype.STRESSED, 103, False),
+    ("seller-knitroom-04", Archetype.THIN_FILE, 104, False),
+    ("seller-candle-05", Archetype.HEALTHY_SEASONAL, 105, True),
 )
 
 
@@ -50,7 +50,7 @@ def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
     }
 
 # 대출 실행 이후 흐름: 심사 때 건강했던 패션의류 셀러가 시즌 재고 선매입 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
-STACKING_APPLICANTS = frozenset({"demo-healthy-001"})
+STACKING_APPLICANTS = frozenset({"seller-dailylook-01"})
 POSTLOAN_SEED_OFFSET = 1000
 
 

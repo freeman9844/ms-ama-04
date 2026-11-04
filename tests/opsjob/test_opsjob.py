@@ -105,8 +105,8 @@ def test_budget_guard_stops_submission(tmp_path):
 
 def test_submit_mode_uses_given_applicants(tmp_path):
     summary, q, _ = run_with(tmp_path, mode="submit", run_id="fault-1", source="fault",
-                             applicants=("demo-healthy-001", "demo-stress-003"))
-    assert [m["applicant_id"] for m in q.sent] == ["demo-healthy-001", "demo-stress-003"]
+                             applicants=("seller-dailylook-01", "seller-glowlab-03"))
+    assert [m["applicant_id"] for m in q.sent] == ["seller-dailylook-01", "seller-glowlab-03"]
     assert {m["source"] for m in q.sent} == {"fault"}
 
 
