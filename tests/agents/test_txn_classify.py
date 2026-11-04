@@ -121,6 +121,7 @@ def test_only_unique_unclassified_descriptions_reach_decision_model(cafe):
     assert result.overrides == {}  # 공급처는 이미 영업비용이라 특성에 반영할 것이 없다
     assert {i["label"] for i in result.items} == {"supplier"}
     assert sum(i["count"] for i in result.items) == len(supplier_txns)
+    assert result.labels == {t.txn_id: "supplier" for t in supplier_txns}
 
 
 def test_debt_labels_override_outflows_only():
@@ -128,6 +129,7 @@ def test_debt_labels_override_outflows_only():
     result = run(txns, FakeDecider(default=("high_cost_lender", 0.93)))
     assert result.overrides == {"t-001": Category.HIGH_COST_LENDER, "t-002": Category.HIGH_COST_LENDER}
     assert result.metrics["override_txns"] == 2
+    assert result.labels == {"t-001": "high_cost_lender", "t-002": "high_cost_lender"}  # 입금은 지출 라벨이 없다
 
 
 def test_owner_transfer_by_model_is_signal_only():

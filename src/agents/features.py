@@ -4,6 +4,7 @@
 - DSCR = max(월평균 영업순현금, 0) / (월평균 기존 부채상환 + 신규 대출 월상환액 추정).
 - 현금 완충일수 = 최근 30일 거래 후 잔액 평균 / 일평균 영업 지출.
 - 세금 일치율 = min(신고 매출, 통장 매출) / max(...), 신고 기간 안의 통장 매출만 합산.
+- 지출 구성: 완결 월 평균 출금을 8개 그룹으로 나눈다. 규칙 분류가 먼저이고, 규칙 미분류 출금은 의미 라벨을 쓴다.
 - 의미 분류 override(P4a)는 규칙 미분류 출금에만 적용한다. DSCR·완충일수는 규칙만/의미 반영 중
   작은 값을 쓴다(모델 판단이 정책 지표를 좋게 만들 수 없다). 위험 신호·플래그는 의미 반영 결과를 쓴다.
 """
@@ -11,7 +12,7 @@
 import statistics
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from agents.classify import RULES_VERSION, Category, classify
@@ -29,6 +30,35 @@ OPERATING_OUT = (
 )
 DEBT_SERVICE = (Category.LOAN_REPAYMENT, Category.HIGH_COST_LENDER)
 FLAG_HIGH_COST_LENDER = "high_cost_lender_detected"
+EXPENSE_GROUPS: tuple[tuple[str, str], ...] = (
+    ("supplier", "거래처·물류"),
+    ("rent", "임대료"),
+    ("payroll", "인건비"),
+    ("tax_insurance", "세금·4대보험"),
+    ("other_operating", "기타 운영비"),
+    ("debt_service", "기존 상환"),
+    ("owner_draw", "대표자 인출"),
+    ("unclassified", "미분류"),
+)
+_RULE_GROUP = {
+    Category.RENT: "rent",
+    Category.PAYROLL: "payroll",
+    Category.TAX: "tax_insurance",
+    Category.SOCIAL_INSURANCE: "tax_insurance",
+    Category.LOAN_REPAYMENT: "debt_service",
+    Category.HIGH_COST_LENDER: "debt_service",
+    Category.OWNER_TRANSFER: "owner_draw",
+}
+_LABEL_GROUP = {
+    "supplier": "supplier",
+    "rent": "rent",
+    "payroll": "payroll",
+    "tax_or_insurance": "tax_insurance",
+    "other_operating": "other_operating",
+    "loan_repayment": "debt_service",
+    "high_cost_lender": "debt_service",
+    "owner_transfer": "owner_draw",
+}
 
 
 @dataclass(frozen=True)
@@ -38,6 +68,8 @@ class Underwriting:
     flags: list[str]
     monthly: list[dict[str, int | str]]
     categories: dict[str, Category]
+    expense_breakdown: list[dict[str, int | str]] = field(default_factory=list)
+
 
 def monthly_installment(principal: int, tenor_months: int, annual_rate: float = ANNUAL_RATE) -> float:
     r = annual_rate / 12
@@ -156,6 +188,7 @@ def compute_underwriting(
     requested_amount_krw: int,
     requested_tenor_months: int,
     overrides: Mapping[str, Category] | None = None,
+    semantic_labels: Mapping[str, str] | None = None,
 ) -> Underwriting:
     rules = {t.txn_id: classify(t) for t in transactions}
     args = (application_id, profile, transactions, tax_filings)
@@ -180,7 +213,26 @@ def compute_underwriting(
         flags=adjusted.flags,
         monthly=adjusted.monthly,
         categories=adjusted.categories,
+        expense_breakdown=expense_breakdown(transactions, adjusted.categories, semantic_labels or {}, as_of),
     )
+
+
+def expense_breakdown(
+    transactions: Sequence[Transaction],
+    categories: Mapping[str, Category],
+    labels: Mapping[str, str],
+    as_of: date,
+) -> list[dict[str, int | str]]:
+    """완결 월 평균 출금(양수 원)을 EXPENSE_GROUPS 순서로 낸다."""
+    current = _month(as_of)
+    n = len({_month(t.booked_on) for t in transactions if _month(t.booked_on) < current})
+    sums = dict.fromkeys((g for g, _ in EXPENSE_GROUPS), 0)
+    for t in transactions:
+        if t.amount_krw >= 0 or _month(t.booked_on) >= current:
+            continue
+        group = _RULE_GROUP.get(categories[t.txn_id]) or _LABEL_GROUP.get(labels.get(t.txn_id, ""), "unclassified")
+        sums[group] -= t.amount_krw
+    return [{"group": g, "label": label, "monthly_avg_krw": round(sums[g] / n) if n else 0} for g, label in EXPENSE_GROUPS]
 
 
 def _conservative(base: CashFlowFeatures, adjusted: CashFlowFeatures) -> CashFlowFeatures:

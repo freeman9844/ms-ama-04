@@ -288,7 +288,7 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     start = date.fromisoformat(mon["flow_start"])
     lo, hi = week_window(start, week)
     visible = [t for t in txns if t.booked_on <= hi]
-    classification, overrides = _semantic(
+    classification, overrides, _ = _semantic(
         deps, profile, [t for t in visible if t.booked_on >= lo], mon["consent_id"]
     )
     mon["overrides"].update({k: v.value for k, v in overrides.items()})

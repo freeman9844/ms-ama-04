@@ -220,6 +220,7 @@ class SemanticClassification:
     overrides: dict[str, Category]
     items: list[dict[str, Any]]
     metrics: dict[str, Any]
+    labels: dict[str, str] = field(default_factory=dict)  # 출금 거래별 의미 라벨(지출 구성용)
 
     def record(self) -> dict[str, Any]:
         return {"metrics": self.metrics, "items": self.items}
@@ -328,6 +329,7 @@ def classify_unresolved(
                 m["fallback_resolved"] += 1
 
     overrides: dict[str, Category] = {}
+    labels: dict[str, str] = {}
     for g in groups:
         if g.label is None:
             m["unresolved"] += 1
@@ -340,6 +342,8 @@ def classify_unresolved(
                 cache.put(g.key, entry)
             except Exception:  # noqa: BLE001
                 m["cache_errors"] += 1
+        if g.direction == "outflow":
+            labels.update(dict.fromkeys(g.txn_ids, g.label))
         if g.direction == "outflow" and g.label in DEBT_CATEGORIES:
             overrides.update(dict.fromkeys(g.txn_ids, DEBT_CATEGORIES[g.label]))
         if g.direction == "outflow" and g.label == "owner_transfer":
@@ -359,4 +363,4 @@ def classify_unresolved(
         }
         for g in groups
     ]
-    return SemanticClassification(overrides=overrides, items=items, metrics=m)
+    return SemanticClassification(overrides=overrides, items=items, metrics=m, labels=labels)

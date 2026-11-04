@@ -217,6 +217,7 @@ def test_underwrite_and_policy_on_real_apps(deps):
     assert result["features"]["months_of_history"] == 12
     assert result["signals"]["classification_rules"]
     assert {c["payer"] for c in result["settlement_profile"]["channels"]} >= {"네이버파이낸셜", "토스페이먼츠"}
+    assert [e["group"] for e in result["expense_breakdown"]][0] == "supplier" and len(result["expense_breakdown"]) == 8
     decision = evaluate_policy(deps, result["features"])
     assert decision["decision"] == "eligible"
     assert decision["max_amount_krw"] == 3_300_000
@@ -342,6 +343,8 @@ def test_underwrite_classifies_unresolved_without_caching_transfers(deps):
     m = first["classification"]["metrics"]
     assert m["decision_calls"] == m["unique_descriptions"] > 0 and m["cache_hits"] == 0
     assert first["category_overrides"] == {}
+    expenses = {e["group"]: e["monthly_avg_krw"] for e in first["expense_breakdown"]}
+    assert expenses["unclassified"] == 0 and expenses["supplier"] > 0  # 의미 라벨이 지출 구성으로 간다
     assert {s["business_industry"] for s in decider.states} == {"패션의류"}
     # 자동이체 적요(연금·솔루션·카드대금)만 공유 캐시에 남고, 이체(공급처 송금·광고 충전)는 남지 않는다.
     cached = [k for c, k in deps.store.docs if c == "classifications"]

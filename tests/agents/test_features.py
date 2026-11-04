@@ -3,7 +3,8 @@ from datetime import date
 import pytest
 
 from agents.classify import Category, classify
-from agents.features import FLAG_HIGH_COST_LENDER, compute_underwriting, monthly_installment
+from agents.features import EXPENSE_GROUPS, FLAG_HIGH_COST_LENDER, compute_underwriting, monthly_installment
+from evals.datasets import TRUTH_LABEL
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
@@ -159,3 +160,33 @@ def test_overrides_only_apply_to_unclassified_transactions(cases):
     uw = _with_overrides(cases, "seller-dailylook-01", {revenue_id: Category.LOAN_REPAYMENT, "unknown": Category.LOAN_REPAYMENT})
     assert uw.signals["semantic_overrides"] == 0
     assert uw.features == _underwrite(cases, "seller-dailylook-01").features
+
+
+def _expenses(uw):
+    return {e["group"]: e["monthly_avg_krw"] for e in uw.expense_breakdown}
+
+
+def test_expense_breakdown_groups_sum_to_average_outflow(cases):
+    case = cases["seller-dailylook-01"]
+    uw = _underwrite(cases, "seller-dailylook-01")
+    assert [(e["group"], e["label"]) for e in uw.expense_breakdown] == list(EXPENSE_GROUPS)
+    complete = [t for t in case.transactions if (t.booked_on.year, t.booked_on.month) < (AS_OF.year, AS_OF.month)]
+    outflow = -sum(t.amount_krw for t in complete if t.amount_krw < 0) / uw.features.months_of_history
+    assert abs(sum(_expenses(uw).values()) - outflow) <= len(EXPENSE_GROUPS)
+
+
+def test_semantic_labels_move_unclassified_into_groups(cases):
+    case = cases["seller-dailylook-01"]
+    rules_only = _expenses(_underwrite(cases, "seller-dailylook-01"))
+    assert rules_only["unclassified"] > 0 and rules_only["supplier"] == rules_only["other_operating"] == 0
+    labels = {t: label for t, c in case.labels.items() if (label := TRUTH_LABEL[c])}
+    labels |= {t.txn_id: "supplier" for t in case.transactions if classify(t) is Category.RENT}  # 규칙이 우선
+    labelled = _expenses(compute_underwriting(
+        "app", case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
+        requested_amount_krw=AMOUNT, requested_tenor_months=TENOR, semantic_labels=labels,
+    ))
+    assert labelled["unclassified"] == 0
+    assert labelled["supplier"] > labelled["other_operating"] > 0
+    assert labelled["tax_insurance"] > rules_only["tax_insurance"]  # 국민연금·고용산재
+    assert labelled["rent"] == rules_only["rent"] > 0
+    assert sum(labelled.values()) == pytest.approx(sum(rules_only.values()), abs=len(EXPENSE_GROUPS))
