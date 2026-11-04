@@ -33,9 +33,9 @@ DEFAULT_WORKERS = 8
 SYSTEMONE_PATH = "/providers/microsoft/v1/systemone"
 FALLBACK_AGENT = "txn-classifier"
 CRITERIA: dict[str, str] = {
-    "supplier": "원재료·상품·식자재 등 거래처(공급업체) 대금 지급",
+    "supplier": "원재료·상품·식자재·포장재 등 거래처(공급업체) 대금, 택배·물류 배송비 지급",
     "payroll": "직원 급여 지급",
-    "rent": "점포 임대료",
+    "rent": "점포·사무실·창고 등 사업장 임대료(월세·월차임)",
     "owner_transfer": "대표자 본인 또는 가족 개인 계좌로의 이체",
     "loan_repayment": "은행 등 제도권 금융기관 대출 상환",
     "high_cost_lender": "대부업체·캐피탈·P2P 등 고금리 대출 상환",
