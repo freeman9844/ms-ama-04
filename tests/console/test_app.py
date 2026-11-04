@@ -129,7 +129,8 @@ def test_officer_decision_is_sent_with_principal_as_officer(env):
     assert queue.sent == [(
         "officer-decisions",
         {"application_id": "app-1", "decision": {"decision": "approve", "officer_id": "oid-officer",
-                                                  "amount_krw": 15_000_000, "conditions": [], "reason": ""}},
+                                                  "amount_krw": 15_000_000, "conditions": [], "reason": "",
+                                                  "policy_override": False}},
     )]
 
 
@@ -174,6 +175,50 @@ def test_invalid_decisions_are_rejected(env, fields):
     client, queue = env
     assert decide(client, OFFICER, csrf(client, OFFICER), **fields).status_code == 422
     assert queue.sent == []
+
+
+def test_decision_form_defaults_amount_to_requested(env):
+    client, _ = env
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert 'name="amount_krw" inputmode="numeric" value="30000000"' in page
+    assert "data-policy-blocked" not in page
+
+
+@pytest.fixture
+def blocked(env, make_doc):
+    client, queue = env
+    doc = make_doc()
+    doc["policy"] = {**doc["policy"], "decision": "ineligible", "max_amount_krw": 0}
+    client.app.state.deps.store.docs["app-1"] = doc
+    return client, queue
+
+
+def test_policy_blocked_form_carries_confirm_hook(blocked):
+    client, _ = blocked
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert "data-policy-blocked" in page and 'name="policy_override"' in page
+    assert '<script src="/static/decision.js" defer></script>' in page
+    assert client.get("/static/decision.js").status_code == 200
+
+
+def test_policy_blocked_approval_needs_override_confirmation(blocked):
+    client, queue = blocked
+    token = csrf(client, OFFICER)
+    resp = decide(client, OFFICER, token, amount_krw="5000000", reason="매출 소명")
+    assert resp.status_code == 422 and "override_required" in resp.text
+    assert queue.sent == []
+    resp = decide(client, OFFICER, token, amount_krw="5000000", reason="매출 소명", policy_override="1")
+    assert resp.status_code == 202 and "정책 예외 승인" in resp.text
+    assert queue.sent[-1][1]["decision"]["policy_override"] is True
+
+
+def test_override_decision_is_labelled_on_detail(env, make_doc):
+    client, _ = env
+    doc = make_doc(status="approved")
+    doc["officer_decision"] = {"decision": "approve", "officer_id": "oid-officer", "amount_krw": 5_000_000,
+                               "conditions": [], "reason": "매출 소명", "policy_override": True, "at": "x"}
+    client.app.state.deps.store.docs["app-1"] = doc
+    assert "정책 예외 승인" in client.get("/applications/app-1", headers=OFFICER).text
 
 
 def test_decision_only_while_awaiting_officer(env):

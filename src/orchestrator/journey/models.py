@@ -93,6 +93,8 @@ class OfficerDecision(BaseModel):
     amount_krw: int | None = Field(default=None, gt=0)
     conditions: list[str] = Field(default_factory=list)
     reason: str = ""
+    # 정책 판정이 거절이거나 결과가 없는 건을 심사역이 확인 후 승인할 때만 True(감사 기록용).
+    policy_override: bool = False
 
 
 class OfficerMessage(BaseModel):

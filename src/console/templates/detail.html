@@ -115,7 +115,7 @@
 <section class="card">
 <h2>심사역 결정</h2>
 {% if d.officer_decision %}
-<p>{{ d.officer_decision.decision }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
+<p>{% if d.officer_decision.policy_override %}<span class="badge badge-red">정책 예외 승인</span> {% endif %}{{ d.officer_decision.decision }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
 {% if d.officer_decision.conditions %}<ul>{% for c in d.officer_decision.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
 {% if d.officer_decision.reason %}<p>{{ d.officer_decision.reason }}</p>{% endif %}
 {% endif %}
@@ -125,8 +125,13 @@
 {% endif %}
 {% if v.decidable and user.can_decide %}
 {% if error %}<p class="error" role="alert">{{ error }}{% if error_code %} ({{ error_code }}){% endif %}</p>{% endif %}
-<form method="post" action="/applications/{{ d.application_id|path }}/decision" class="decision">
+<form method="post" action="/applications/{{ d.application_id|path }}/decision" class="decision"{% if v.policy_blocked %} data-policy-blocked{% endif %}>
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if v.policy_blocked %}
+  <script src="/static/decision.js" defer></script>
+  <input type="hidden" name="policy_override" value="">
+  <p class="warn">정책 결과상 거절입니다. 승인하면 정책 예외 승인으로 기록되며 사유가 필요합니다(상품 최대 500만 원).</p>
+  {% endif %}
   <fieldset>
     <legend>결정</legend>
     {% set chosen = form.decision if form else "approve" %}
@@ -135,7 +140,7 @@
     {% endfor %}
   </fieldset>
   <label>승인 금액(원, 한도 {{ v.max_amount_krw|krw }})
-    <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else ((v.assessment.proposed_structure.amount_krw if v.assessment and v.assessment.proposed_structure) or v.max_amount_krw or '') }}"></label>
+    <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else d.requested_amount_krw }}"></label>
   <label>조건(한 줄에 하나) <textarea name="conditions" rows="3">{{ form.conditions if form else "" }}</textarea></label>
   <label>사유 <textarea name="reason" rows="3">{{ form.reason if form else "" }}</textarea></label>
   <button type="submit">결정 보내기</button>

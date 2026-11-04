@@ -110,7 +110,7 @@ def test_missing_or_bad_meter_falls_back_to_result(run_journey):
 
 
 def test_failed_activity_is_recorded_as_failed_step(run_journey):
-    # 정책 실패는 거절만 허용(fail-closed)하므로 승인 시도 뒤 거절로 끝낸다.
+    # 정책 실패 건은 예외 승인 확인 없이는 승인할 수 없으므로 승인 시도 뒤 거절로 끝낸다.
     _, ctx = run_journey(START, acts(evaluate_policy=boom), [("event", APPROVE), ("event", DECLINE)])
     policy = [s for s in ctx.saved[-1]["steps"] if s["step"] == "policy"][0]
     assert policy["outcome"] == "failed" and policy["detail"] == "RuntimeError"

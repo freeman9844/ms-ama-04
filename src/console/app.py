@@ -70,9 +70,10 @@ CSP = (
 DECISION_ERRORS = {
     "invalid_payload": "입력 형식이 올바르지 않습니다.",
     "reason_required": "사유를 입력해야 합니다.",
-    "decline_only": "정책 결과상 거절만 할 수 있습니다.",
+    "override_required": "정책 결과상 거절입니다. 승인하려면 예외 승인 확인이 필요합니다.",
     "amount_required": "승인 금액을 입력해야 합니다.",
     "amount_exceeds_policy": "승인 금액이 정책 한도를 넘습니다.",
+    "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(500만 원)를 넘습니다.",
     "conditions_required": "조건부 승인에는 조건이 한 줄 이상 필요합니다.",
 }
 
@@ -270,6 +271,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             "amount_krw": amount,
             "conditions": [c.strip() for c in form.get("conditions", "").splitlines() if c.strip()],
             "reason": form.get("reason", "").strip(),
+            "policy_override": form.get("policy_override", "") == "1",
         }
         if amount is None and amount_text and kind != "decline":
             decision, error = None, "invalid_payload"

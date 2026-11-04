@@ -113,12 +113,22 @@ def test_invalid_decision_is_recorded_and_wait_continues(run_journey):
     assert ctx.timers[0].cancelled
 
 
-def test_ineligible_allows_decline_only(run_journey):
+def test_ineligible_requires_override_to_approve(run_journey):
     result, ctx = run_journey(
         START, acts(evaluate_policy=lambda _: INELIGIBLE), [("event", APPROVE), ("event", DECLINE)]
     )
     assert result["status"] == "declined"
-    assert [a["error"] for a in ctx.saved[-1]["decision_attempts"]] == ["decline_only"]
+    assert [a["error"] for a in ctx.saved[-1]["decision_attempts"]] == ["override_required"]
+
+
+def test_officer_override_approves_ineligible_and_registers_monitoring(run_journey):
+    override = {**APPROVE, "amount_krw": 5_000_000, "policy_override": True, "reason": "주거래처 계약서로 매출 소명"}
+    result, ctx = run_journey(START, acts(evaluate_policy=lambda _: INELIGIBLE), [("event", override)])
+    doc = ctx.saved[-1]
+    assert result["status"] == "approved"
+    assert doc["officer_decision"]["policy_override"] is True
+    assert doc["officer_decision"]["amount_krw"] == 5_000_000
+    assert ctx.called("register_monitoring")
 
 
 def test_policy_unavailable_fails_closed(run_journey):
@@ -126,7 +136,7 @@ def test_policy_unavailable_fails_closed(run_journey):
     doc = ctx.saved[-1]
     assert result["status"] == "declined"
     assert doc["policy"] is None and FLAG_POLICY_UNAVAILABLE in doc["flags"]
-    assert [a["error"] for a in doc["decision_attempts"]] == ["decline_only"]
+    assert [a["error"] for a in doc["decision_attempts"]] == ["override_required"]
     assert not ctx.called("assess_credit") and FLAG_ASSESSMENT_UNAVAILABLE in doc["flags"]
 
 
@@ -162,7 +172,7 @@ def test_assessment_failure_does_not_block_officer(run_journey, assess):
     assert doc["flags"].count(FLAG_ASSESSMENT_UNAVAILABLE) == 1
 
 
-def test_incomplete_data_skips_underwriting_and_allows_decline_only(run_journey):
+def test_incomplete_data_skips_underwriting_and_waits_for_officer(run_journey):
     incomplete = {**COMPLETE, "status": "incomplete", "missing_sources": ["transactions"], "flags": ["agent_fallback"]}
     result, ctx = run_journey(
         START, acts(assemble_data=lambda _: incomplete), [("event", APPROVE), ("event", DECLINE)]

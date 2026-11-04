@@ -195,7 +195,7 @@ def journey(ctx: Any, retry: Any) -> Steps:
             result = yield ctx.call_activity_with_retry(
                 "evaluate_policy", retry, _tagged(underwriting["features"], tags)
             )
-        except Exception as e:  # noqa: BLE001 - 정책 결과 없음 = 거절만 허용(fail-closed)
+        except Exception as e:  # noqa: BLE001 - 정책 결과 없음 = 자동 승인 없음, 심사역 예외 승인만 가능(fail-closed)
             doc["steps"].append(failed_record("policy", started, _now(ctx), e))
             doc["flags"].append(FLAG_POLICY_UNAVAILABLE)
             doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)

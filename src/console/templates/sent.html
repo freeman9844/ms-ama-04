@@ -2,6 +2,6 @@
 {% set nav = "home" %}
 {% block main %}
 <h1>{{ application_id }}</h1>
-<p class="ok">결정({{ decision.decision }})을 큐에 보냈습니다. 오케스트레이터가 정책 한도를 다시 검증한 뒤 상태를 바꿉니다.</p>
+<p class="ok">{% if decision.policy_override %}<span class="badge badge-red">정책 예외 승인</span> {% endif %}결정({{ decision.decision }})을 큐에 보냈습니다. 오케스트레이터가 정책 한도를 다시 검증한 뒤 상태를 바꿉니다.</p>
 <p><a href="/applications/{{ application_id|path }}">신청 상세로</a> · <a href="/">목록으로</a></p>
 {% endblock %}

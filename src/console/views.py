@@ -113,4 +113,5 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "policy": policy,
         "decidable": doc.get("status") in DECIDABLE,
         "max_amount_krw": (policy or {}).get("max_amount_krw"),
+        "policy_blocked": (policy or {}).get("decision") not in ("eligible", "refer"),
     }

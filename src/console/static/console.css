@@ -106,6 +106,7 @@ details summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
 .pii { padding: .4rem .7rem; border-left: 3px solid var(--line); color: var(--muted); background: var(--card); }
 .pii.restored { border-color: var(--c-amber); }
 .error { color: var(--bad); font-weight: 500; }
+.decision .warn { background: #fff4ce; border-left: 4px solid var(--c-amber); padding: .5rem .75rem; color: var(--warn); }
 .ok { color: var(--good); font-weight: 500; }
 .timeline { padding-left: 1.2rem; }
 .note { color: var(--muted); }
