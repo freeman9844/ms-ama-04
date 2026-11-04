@@ -84,6 +84,7 @@ var dnsZoneNames = [
 ]
 
 // 기본 제공 역할 정의 GUID (az role definition list로 확인, 2026-10-31)
+// kvValueReader = Key Vault Secrets User, kvValueAdmin = Key Vault Secrets Officer
 var role = {
   blobOwner: 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
   blobContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
