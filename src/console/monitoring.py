@@ -18,7 +18,14 @@ ACTION_LABELS = {
     "hardship_review": "상환 곤란 검토",
     "officer_review": "심사역 확인",
 }
-MONITORING_LABELS = {"replaying": "재생 중", "completed": "재생 완료", "failed": "재생 실패"}
+MONITORING_LABELS = {
+    "replaying": "재생 중",
+    "paused": "재조정 대기",
+    "awaiting_resume": "재개 확인 대기",
+    "stopped": "재생 종료",
+    "completed": "재생 완료",
+    "failed": "재생 실패",
+}
 TRIGGER_LABELS = {
     "inflow_drop": "매출 급감",
     "buffer_drop": "현금 버퍼 감소",

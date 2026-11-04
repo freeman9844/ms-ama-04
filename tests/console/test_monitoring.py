@@ -220,3 +220,63 @@ def test_restructure_decision_needs_pending_request_of_current_replay(setup, mas
     assert other.post(path, data={"csrf": csrf(other), "decision": "approve", "reason": "x"},
                       headers=OFFICER).status_code == 404
     assert queue.sent == queue2.sent == []
+
+
+def held_loan(status, paused_week=2):
+    loan = make_loan(status=status)
+    loan["monitoring"].update(processed_week=paused_week, paused_week=paused_week, pause_alert_id="ew-rp-1-w01",
+                              resumed_at=[], stopped_at=None)
+    return loan
+
+
+def test_paused_replay_blocks_new_replay_and_opens_restructure_form(setup):
+    client, queue, *_ = setup(loan=held_loan("paused"))
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "재조정 대기" in page and "재조정 요청으로 재생을 멈췄습니다" in page and "남은 11주" in page
+    assert 'http-equiv="refresh"' not in page  # 사유 입력이 지워지지 않게 새로 고치지 않는다
+    assert "/restructure" in page and "/replay/resume" not in page
+    assert re.search(r'<button type="submit" disabled>사후 13주 재생\(다시\)</button>', page)
+    r = client.post("/loans/app-1/replay", data={"csrf": csrf(client)}, headers=OFFICER)
+    assert r.status_code == 409 and "재개 확인이 끝나야" in r.text
+    form = {"csrf": csrf(client), "decision": "decline", "reason": "상환 여력 없음"}
+    sent = client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER)
+    assert sent.status_code == 202 and "재생을 이어갈지 선택하세요" in sent.text
+    assert [q for q, _ in queue.sent] == [RESTRUCTURE_QUEUE]
+
+
+@pytest.mark.parametrize(("action", "text"), [("resume", "남은 11주 재생을 이어서"), ("stop", "종료하도록")])
+def test_awaiting_resume_offers_resume_and_stop(setup, mask, action, text):
+    client, queue, *_ = setup(loan=held_loan("awaiting_resume"), alerts=[make_alert(mask, "approved")])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "재개 확인 대기" in page and "남은 11주 재생을 이어갈까요?" in page
+    assert 'action="/loans/app-1/replay/resume"' in page and 'action="/loans/app-1/replay/stop"' in page
+    r = client.post(f"/loans/app-1/replay/{action}", data={"csrf": csrf(client)}, headers=OFFICER)
+    assert r.status_code == 202 and text in r.text
+    assert queue.sent == [(REPLAY_QUEUE, {"loan_id": "app-1", "action": action, "replay_id": "rp-1"})]
+
+
+@pytest.mark.parametrize("status", ["replaying", "paused", "completed", "stopped"])
+def test_resume_and_stop_need_awaiting_resume(setup, status):
+    client, queue, *_ = setup(loan=held_loan(status))
+    for action in ("resume", "stop"):
+        r = client.post(f"/loans/app-1/replay/{action}", data={"csrf": csrf(client)}, headers=OFFICER)
+        assert r.status_code == 409 and "재개 확인을 기다리는 재생이 없습니다" in r.text
+    assert queue.sent == []
+
+
+def test_resume_stop_require_decider_csrf_and_known_action(setup):
+    client, queue, *_ = setup(loan=held_loan("awaiting_resume"))
+    page = client.get("/loans/app-1", headers=AUDITOR_H).text
+    assert "남은 11주 재생을 이어갈까요?" in page and "/replay/resume" not in page
+    assert client.post("/loans/app-1/replay/resume", data={"csrf": "0" * 64}, headers=OFFICER).status_code == 403
+    assert client.post("/loans/app-1/replay/resume", data={"csrf": "0" * 64}, headers=AUDITOR_H).status_code == 403
+    assert client.post("/loans/app-1/replay/pause", data={"csrf": csrf(client)}, headers=OFFICER).status_code == 404
+    assert queue.sent == []
+
+
+def test_stopped_replay_can_start_again(setup):
+    client, queue, *_ = setup(loan=held_loan("stopped"))
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "재생 종료" in page
+    assert client.post("/loans/app-1/replay", data={"csrf": csrf(client)}, headers=OFFICER).status_code == 202
+    assert queue.sent == [(REPLAY_QUEUE, {"loan_id": "app-1"})]

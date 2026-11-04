@@ -89,6 +89,10 @@ details summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
 .sev-medium, .m-replaying { background: #fff4ce; color: var(--warn); }
 .sev-low { background: #deecf9; color: var(--accent-dark); }
 .m-completed { background: #dff6dd; color: var(--good); }
+.m-paused, .m-awaiting_resume { background: #efe6f8; color: #5c2e91; }
+.m-stopped { background: #edebe9; color: var(--muted); }
+.resume-card { border-left: 4px solid #8764b8; }
+.resume-card .actions { display: flex; gap: .5rem; }
 .badge-neutral { background: #edebe9; color: var(--muted); }
 .badge-blue { background: #deecf9; color: var(--accent-dark); }
 .rec-approve { background: #dff6dd; color: var(--good); }

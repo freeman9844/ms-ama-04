@@ -15,13 +15,36 @@
     {% if user.can_decide %}
     <form method="post" action="/loans/{{ l.id|path }}/replay">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit"{% if replay_blocked %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
+      <button type="submit"{% if replay_blocked or replay_held %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
     </form>
     {% endif %}
   </div>
 </div>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if replay_blocked %}<p class="note">재생이 진행 중입니다. 10초마다 새로 고칩니다.</p>{% endif %}
+{% if m.status == "paused" %}
+<section class="card resume-card" aria-label="재생 일시정지">
+  <h2>재조정 요청으로 재생을 멈췄습니다</h2>
+  <p>{{ m.paused_week }}주차 경보에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 경보에서 재조정을 승인하거나 거절하면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
+</section>
+{% elif m.status == "awaiting_resume" %}
+<section class="card resume-card" aria-label="재생 재개 확인">
+  <h2>재생을 이어갈까요?</h2>
+  <p>재조정 결정(승인/거절)이 기록되었습니다. 남은 {{ weeks_left }}주 재생을 이어갈까요?</p>
+  {% if user.can_decide %}
+  <div class="actions">
+    <form method="post" action="/loans/{{ l.id|path }}/replay/resume">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">이어서 재생</button>
+    </form>
+    <form method="post" action="/loans/{{ l.id|path }}/replay/stop">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="button secondary">여기서 종료</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
 <div class="grid-4">
   {{ ch.kpi("대출", l.amount_krw|krw, l.tenor_months ~ "개월 · " ~ l.decision, "neutral") }}
   {% call ch.kpi("재생 진행", ui.processed ~ "/" ~ ui.weeks_total ~ "주", m.mode or "재생 전", "blue") %}{{ ch.progress(ui.progress_pct, "재생 진행률") }}{% endcall %}
@@ -33,7 +56,7 @@
   <dt>신청인</dt><dd>{{ l.applicant_id }} · {{ l.industry }}</dd>
   <dt>대출</dt><dd>{{ l.amount_krw|krw }} / {{ l.tenor_months }}개월 · {{ l.decision }} · {{ l.approved_at }}</dd>
   <dt>기준선</dt><dd>주 평균 매출 {{ l.baseline.avg_weekly_revenue|krw }} · 현금 버퍼 {{ l.baseline.cash_buffer_days }}일</dd>
-  {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}</dd>{% endif %}
+  {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}{% if m.resumed_at %} · 재개 {{ m.resumed_at|length }}회{% endif %}{% if m.stopped_at %} · 종료 {{ m.stopped_at }}{% endif %}</dd>{% endif %}
   {% if m.error %}<dt>오류</dt><dd class="error">{{ m.error }}</dd>{% endif %}
 </dl>
 </section>

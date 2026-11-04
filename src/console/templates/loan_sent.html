@@ -3,5 +3,6 @@
 {% block main %}
 <h1>{{ loan_id }}</h1>
 <p class="ok">{{ message }}</p>
+{% if note %}<p class="note">{{ note }}</p>{% endif %}
 <p><a href="/loans/{{ loan_id|path }}">사후 모니터링으로</a></p>
 {% endblock %}

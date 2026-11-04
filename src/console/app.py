@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
+from agents.monitoring import WEEKS
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply
 from console.dashboard import (
@@ -56,6 +57,7 @@ from journey.models import (
     ReplayRequest,
     RestructureDecision,
     StartRequest,
+    replay_held,
     replay_in_progress,
 )
 from journey.validation import validate_officer_decision
@@ -356,7 +358,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw = load_monitoring_raw(deps.raw, loan)
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore)
         blocked = replay_in_progress(mon, deps.clock())
-        return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked, **ctx)
+        return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked,
+                      replay_held=replay_held(mon), weeks_left=WEEKS - (mon.get("paused_week") or 0), **ctx)
 
     @app.get("/loans", response_class=HTMLResponse)
     def loans(request: Request) -> HTMLResponse:
@@ -376,12 +379,30 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         loan = loan_or_404(loan_id)
         if replay_in_progress(loan.get("monitoring"), deps.clock()):
             return loan_page(user, loan, 409, error="이미 재생이 진행 중입니다.")
+        if replay_held(loan.get("monitoring")):
+            return loan_page(user, loan, 409, error="재조정 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다.")
         # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
         deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
         return render(
             "loan_sent.html", user, 202, loan_id=loan["id"],
             message="사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.",
         )
+
+    @app.post("/loans/{loan_id}/replay/{action}", response_class=HTMLResponse)
+    async def replay_resume_or_stop(loan_id: str, action: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        await checked_form(request, user)
+        if action not in ("resume", "stop"):
+            raise HTTPException(404, "unknown replay action")
+        loan = loan_or_404(loan_id)
+        mon = loan.get("monitoring") or {}
+        if mon.get("status") != "awaiting_resume":
+            return loan_page(user, loan, 409, error="재개 확인을 기다리는 재생이 없습니다.")
+        message = ReplayRequest(loan_id=loan["id"], action=action, replay_id=mon["replay_id"])
+        deps.queue.send(REPLAY_QUEUE, message.model_dump(mode="json"))
+        weeks_left = WEEKS - (mon.get("paused_week") or 0)
+        text = f"남은 {weeks_left}주 재생을 이어서 요청했습니다." if action == "resume" else "남은 재생을 종료하도록 요청했습니다."
+        return render("loan_sent.html", user, 202, loan_id=loan["id"], message=text)
 
     @app.post("/loans/{loan_id}/alerts/{alert_id}/restructure", response_class=HTMLResponse)
     async def restructure(loan_id: str, alert_id: str, request: Request) -> HTMLResponse:
@@ -410,6 +431,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return render(
             "loan_sent.html", user, 202, loan_id=loan["id"],
             message=f"재조정 결정({message.decision})을 큐에 보냈습니다.",
+            note="결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요." if replay_held(loan.get("monitoring")) else None,
         )
 
     # ── 동의 수명주기·이의제기(P5b) ──
