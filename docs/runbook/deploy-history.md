@@ -661,3 +661,13 @@ curl.exe -X POST --data-binary "@orchestrator.zip" -H "Authorization: Bearer $to
 ```
 
 - 같은 회선에서 `ops smoke`의 콘솔 관문 확인이 한 번 403, `ops eval`이 az CLI 응답 JSON 오류로 한 번 실패했고, 둘 다 바로 다시 하면 통과했습니다(허용 IP는 일치).
+
+## 2026-11-04 심사역 정책 예외 승인 배포 (`6fa885c`)
+
+- **변경**: 정책 거절·정책 결과 없음 건도 심사역(CreditOfficer·CreditManager)이 승인할 수 있습니다. 브라우저 확인 팝업
+  "정책 결과상 거절이지만 승인하겠습니까?"를 거쳐 `policy_override`와 사유가 함께 있어야 하고, 상한은 상품 최대 500만 원입니다.
+  적격·조건부 건은 여전히 정책 한도를 넘을 수 없습니다(`amount_exceeds_policy`). 승인 금액 기본값은 신청 금액입니다. 근거: ADR-003.
+- **배포**: 콘솔 `console:20261104074252`, Functions(오케스트레이터 재검증) 게시 `81adc9c1`(status 4). `ops smoke` 성공 `job-smoke-5b7q2s9`.
+- **회사망에서 Functions 403**: 공인 IP <회사망 IP>로 Container Apps 콘솔은 200이었지만, Functions 기본·SCM 사이트는 같은 IP 허용 규칙에서도
+  403을 돌려줬습니다. App Service로 가는 트래픽은 다른 출구 IP를 쓰는 것으로 보입니다. 임시로 `<회사망 /16 대역>`을 허용(`corp-temp`)해 위의 `curl` 게시로
+  배포하고 바로 규칙을 지운 뒤 배포 창을 닫았습니다. 창을 닫은 뒤 콘솔 허용 목록은 `allow-0` = <회사망 IP>/32 하나입니다.
