@@ -10,6 +10,7 @@ from agents.monitoring import (
     categorize,
     detect,
     evidence_catalog,
+    settlement_for,
     week_window,
     weekly_series,
 )
@@ -33,7 +34,11 @@ def baseline(cafe):
         as_of=AS_OF, requested_amount_krw=50_000_000, requested_tenor_months=12,
     )
     return Baseline.from_underwriting(
-        {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly}
+        {
+            "features": uw.features.model_dump(mode="json"),
+            "monthly": uw.monthly,
+            "settlement_profile": settlement_for(cafe.transactions, {}, AS_OF, cafe.profile.industry),
+        }
     )
 
 
@@ -48,6 +53,7 @@ def test_baseline_from_underwriting(baseline):
     assert set(baseline.seasonal_index) == set(range(1, 13))
     # 패션: 설 연휴가 낀 2월이 가장 약하고, 연말 겨울 아우터가 가장 강하다.
     assert baseline.seasonal_index[2] < 0.85 < 1.1 < baseline.seasonal_index[12]
+    assert baseline.settlement and baseline.settlement["channels"]
     assert Baseline.from_dict(baseline.to_dict()) == baseline
 
 
@@ -81,14 +87,24 @@ def test_detector_trips_on_buffer_then_new_debt(cafe, baseline):
     assert "new_debt" in detect(rows, baseline)
 
 
-@pytest.mark.skip(reason="T9: 사후 흐름을 셀러 데이터 엔진으로 다시 만든 뒤 계절 예측과 함께 다시 쓴다")
-def test_detector_is_naive_about_season(cafe, baseline):
+def test_expected_revenue_absorbs_season_and_settlement_timing(cafe, baseline):
+    # 단순 평균 대비로는 정산이 몰리지 않은 주가 0.85 아래로 떨어지지만, 기대 입금 대비로는 정상 셀러에 경보가 없다.
     _, rows = _rows(cafe, FlowScenario.STABLE, baseline, 13)
-    november = [detect(rows[: w], baseline) for w in range(1, 4)]
-    assert november == [[], [], []]
-    january = [detect(rows[: w], baseline) for w, r in enumerate(rows, 1) if r["start"].startswith("2027-01")]
-    assert january and all("inflow_drop" in t for t in january[1:])
-    assert not any("new_debt" in detect(rows[:w], baseline) for w in range(1, 14))
+    assert any(r["revenue_ratio"] < 0.85 for r in rows)
+    assert all(r["revenue_vs_expected"] >= 0.85 for r in rows)
+    assert [detect(rows[:w], baseline) for w in range(1, 14)] == [[]] * 13
+
+
+def test_without_profile_expected_falls_back_to_average(cafe, baseline):
+    plain = Baseline.from_dict({**baseline.to_dict(), "settlement": None})
+    _, rows = _rows(cafe, FlowScenario.STABLE, plain, 2)
+    assert rows[0]["expected_revenue"] == plain.avg_weekly_revenue
+    assert [r["revenue_vs_expected"] for r in rows] == [r["revenue_ratio"] for r in rows]
+
+
+def test_stacking_inflow_drop_shows_up_within_two_months(cafe, baseline):
+    _, rows = _rows(cafe, FlowScenario.STACKING, baseline, 8)
+    assert "inflow_drop" in detect(rows, baseline)
 
 
 def test_catalog_ids_are_evidence_ids(cafe, baseline):

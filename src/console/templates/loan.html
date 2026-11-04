@@ -75,11 +75,11 @@
 {{ ch.legend(ui.legend) }}
 {% endif %}
 <table>
-  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기준 대비</th><th>버퍼(일)</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
+  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기대 입금</th><th>기대 대비(2주)</th><th>버퍼(일)</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
   <tbody>
 {% for w in v.weeks %}{% set r = w.row %}
 <tr>
-  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.revenue_ratio }}</td>
+  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
   <td>{{ r.buffer_days }}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
   <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}</td>

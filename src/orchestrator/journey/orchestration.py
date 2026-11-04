@@ -306,7 +306,11 @@ def _register_monitoring(ctx: Any, retry: Any, doc: dict[str, Any]) -> Steps:
                 "amount_krw": decision.get("amount_krw") or doc["requested_amount_krw"],
                 "tenor_months": doc["requested_tenor_months"],
                 "decided_at": decision["at"],
-                "underwriting": {k: doc["underwriting"][k] for k in ("features", "monthly")},
+                "underwriting": {
+                    k: doc["underwriting"][k]
+                    for k in ("features", "monthly", "settlement_profile")
+                    if k in doc["underwriting"]
+                },
             },
         )
         doc["monitoring"] = {"loan_id": result["loan_id"], "registered_at": _now(ctx).isoformat()}

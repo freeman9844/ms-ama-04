@@ -13,7 +13,7 @@ from pydantic import TypeAdapter
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
 from agents.features import compute_underwriting
-from agents.monitoring import Baseline
+from agents.monitoring import Baseline, settlement_for
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
@@ -340,11 +340,13 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         requested_tenor_months=payload["requested_tenor_months"],
         overrides=overrides,
     )
+    as_of = date.fromisoformat(payload["as_of"])
     return {
         "features": result.features.model_dump(mode="json"),
         "signals": result.signals,
         "flags": result.flags,
         "monthly": result.monthly,
+        "settlement_profile": settlement_for(txns, overrides, as_of, profile.industry),
         "classification": classification,
         "category_overrides": {k: v.value for k, v in overrides.items()},
     }
