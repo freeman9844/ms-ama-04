@@ -38,7 +38,8 @@ def baseline(cafe):
             "features": uw.features.model_dump(mode="json"),
             "monthly": uw.monthly,
             "settlement_profile": settlement_for(cafe.transactions, {}, AS_OF, cafe.profile.industry),
-        }
+        },
+        installment_krw=287_000,
     )
 
 
@@ -107,6 +108,29 @@ def test_stacking_inflow_drop_shows_up_within_two_months(cafe, baseline):
     assert "inflow_drop" in detect(rows, baseline)
 
 
+def test_stable_projection_never_runs_short(cafe, baseline):
+    _, rows = _rows(cafe, FlowScenario.STABLE, baseline, 13)
+    assert all(r["shortfall_date"] is None and r["projected_min_balance"] > 0 for r in rows)
+
+
+def test_stacking_projected_shortfall_comes_before_default(cafe, baseline):
+    flow, rows = _rows(cafe, FlowScenario.STACKING, baseline, 13)
+    first = next(r for r in rows if "projected_shortfall" in detect(rows[: r["week"]], baseline))
+    assert first["shortfall_date"] and date.fromisoformat(first["shortfall_date"]) <= flow.default_on
+    assert date.fromisoformat(first["end"]) < flow.default_on
+    assert first["projected_min_balance"] < 0
+
+
+def test_without_schedule_no_projection(cafe, baseline):
+    plain = Baseline.from_dict({**baseline.to_dict(), "settlement": {**baseline.settlement, "outflows": None}})
+    _, rows = _rows(cafe, FlowScenario.STACKING, plain, 13)
+    assert all("projected_min_balance" not in r for r in rows)
+    assert not any("projected_shortfall" in detect(rows[:w], plain) for w in range(1, 14))
+    # 설치 원리금이 없던 이전 기준선 문서도 읽는다.
+    old = {k: v for k, v in baseline.to_dict().items() if k != "installment_krw"}
+    assert Baseline.from_dict(old).installment_krw == 0
+
+
 def test_catalog_ids_are_evidence_ids(cafe, baseline):
     import re
 
@@ -117,6 +141,9 @@ def test_catalog_ids_are_evidence_ids(cafe, baseline):
     assert catalog["B:cohort:index:01"] == PEER_COHORTS["패션의류"]["index"][1]
     assert all(re.fullmatch(EVIDENCE_ID_PATTERN, k) for k in catalog)
     assert not any(k.startswith("W:5:") for k in catalog)
+    assert catalog["F:4:projected_min_balance"] == rows[3]["projected_min_balance"]
+    assert catalog["F:4:projected_min_date"] == rows[3]["projected_min_date"]
+    assert "F:4:shortfall_date" not in catalog  # 부족 예상일이 없으면 근거도 없다
 
 
 def test_peer_cohorts_cover_every_seller_industry():

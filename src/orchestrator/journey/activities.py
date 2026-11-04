@@ -12,7 +12,7 @@ from pydantic import TypeAdapter
 
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
-from agents.features import compute_underwriting
+from agents.features import compute_underwriting, monthly_installment
 from agents.monitoring import Baseline, settlement_for
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
@@ -406,7 +406,10 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
             "amount_krw": payload["amount_krw"],
             "tenor_months": payload["tenor_months"],
             "approved_at": payload["decided_at"],
-            "baseline": Baseline.from_underwriting(payload["underwriting"]).to_dict(),
+            "baseline": Baseline.from_underwriting(
+                payload["underwriting"],
+                installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
+            ).to_dict(),
             "monitoring": existing.get("monitoring"),
             "updated_at": deps.clock().isoformat(),
         },

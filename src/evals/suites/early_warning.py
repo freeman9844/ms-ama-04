@@ -10,7 +10,7 @@ from typing import Any
 
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
-from agents.features import compute_underwriting
+from agents.features import compute_underwriting, monthly_installment
 from agents.monitoring import WEEKS, Baseline, categorize, detect, settlement_for, week_window, weekly_series
 from evals.datasets import AS_OF, REQUESTED_AMOUNT_KRW, REQUESTED_TENOR_MONTHS, EwPath
 from evals.metering import Meter
@@ -27,11 +27,14 @@ def baseline_for(p: EwPath) -> Baseline:
         p.path_id, case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
         requested_amount_krw=REQUESTED_AMOUNT_KRW, requested_tenor_months=REQUESTED_TENOR_MONTHS,
     )
-    return Baseline.from_underwriting({
-        "features": uw.features.model_dump(mode="json"),
-        "monthly": uw.monthly,
-        "settlement_profile": settlement_for(case.transactions, {}, AS_OF, case.profile.industry),
-    })
+    return Baseline.from_underwriting(
+        {
+            "features": uw.features.model_dump(mode="json"),
+            "monthly": uw.monthly,
+            "settlement_profile": settlement_for(case.transactions, {}, AS_OF, case.profile.industry),
+        },
+        installment_krw=round(monthly_installment(REQUESTED_AMOUNT_KRW, REQUESTED_TENOR_MONTHS)),
+    )
 
 
 def replay(p: EwPath, model: str, *, meter: Meter, runner: EvalRunner, pseudonym_key: bytes) -> dict[str, Any]:

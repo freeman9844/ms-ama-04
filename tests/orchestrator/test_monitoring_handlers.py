@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from agents.collections import COLLECTIONS_AGENT
 from agents.early_warning import EW_AGENT
+from agents.features import monthly_installment
 from agents.monitoring import WEEKS
 from agents.runtime import AgentRun
 from journey.activities import Deps, assemble_data, register_monitoring, request_consent, underwrite
@@ -176,7 +177,7 @@ def approved_loan(deps, applicant_id="seller-dailylook-01"):
             "amount_krw": 3_300_000,
             "tenor_months": 12,
             "decided_at": NOW.isoformat(),
-            "underwriting": {"features": uw["features"], "monthly": uw["monthly"]},
+            "underwriting": {k: uw[k] for k in ("features", "monthly", "settlement_profile")},
         },
     )
     return consent
@@ -231,6 +232,8 @@ def test_register_monitoring_builds_baseline_and_keeps_replay_state(mock_app):
     doc = loan(deps)
     assert doc["industry"] == "패션의류" and doc["monitoring"] is None
     assert doc["baseline"]["avg_weekly_revenue"] > 0 and set(doc["baseline"]["seasonal_index"]) == {f"{m:02d}" for m in range(1, 13)}
+    assert doc["baseline"]["installment_krw"] == round(monthly_installment(3_300_000, 12))
+    assert doc["baseline"]["settlement"]["outflows"]["items"]
     replay(deps)
     approved_loan(deps)
     assert loan(deps)["monitoring"]["status"] == "completed"
@@ -256,6 +259,11 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     new = [t for w in mon["weeks"] for t in w["new_triggers"]]
     assert len(new) == len(set(new))
     assert all(bool(w["investigation"]) == bool(w["new_triggers"]) for w in mon["weeks"])
+    # 주차마다 4주 잔고 전망을 남긴다. 주인공은 부도(잔고 0 미만) 전에 전망 부족이 먼저 걸린다.
+    assert all(len(w["projection"]["path"]) == 28 for w in mon["weeks"])
+    short = next(w["week"] for w in mon["weeks"] if "projected_shortfall" in w["new_triggers"])
+    broke = next(w["week"] for w in mon["weeks"] if w["row"]["end_balance"] < 0)
+    assert short < broke
 
 
 def test_servicebus_replay_publishes_ordered_session_messages(mock_app):

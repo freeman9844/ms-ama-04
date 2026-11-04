@@ -11,7 +11,7 @@ from agents.early_warning import (
     investigate,
 )
 from agents.features import compute_underwriting
-from agents.monitoring import Baseline, categorize, detect, weekly_series
+from agents.monitoring import Baseline, categorize, detect, settlement_for, weekly_series
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
 from mockapis.postloan import FlowScenario, generate_postloan
@@ -185,6 +185,38 @@ def test_error_after_accepted_alert_keeps_it(ctx):
     runner = FakeRunner(script=[("raise_alert", stacking_alert(ctx))], error=AgentError("timeout", "conv-y"))
     result = investigate(ctx, runner=runner, model=MODEL)
     assert result.decision == "alert" and result.alert.severity == "high"
+
+
+@pytest.fixture(scope="module")
+def shortfall_ctx(cafe, baseline):
+    """4주 잔고 전망이 처음 0원 아래로 내려간 주차의 맥락."""
+    fb = Baseline.from_dict(
+        {**baseline.to_dict(), "installment_krw": 287_000,
+         "settlement": settlement_for(cafe.transactions, {}, AS_OF, cafe.profile.industry)}
+    )
+    for week in range(1, 14):
+        ctx = make_ctx(cafe, fb, week)
+        if "projected_shortfall" in ctx.triggers:
+            return ctx
+    raise AssertionError("STACKING 13주 안에 잔고 부족 전망이 없다")
+
+
+def test_alert_can_cite_projected_balance(shortfall_ctx):
+    ctx, w = shortfall_ctx, shortfall_ctx.week
+    low = int(ctx.catalog[f"F:{w}:projected_min_balance"])
+    assert low < 0 and ctx.catalog[f"F:{w}:shortfall_date"] == ctx.rows[-1]["shortfall_date"]
+    signal = {"kind": "projected_shortfall", "metric_ids": [f"F:{w}:projected_min_balance"], "txn_ids": []}
+    ok = {**stacking_alert(ctx), "signals": [{**signal, "text": f"4주 안에 잔고가 {low:,}원까지 내려간다."}]}
+    bad = {**stacking_alert(ctx), "signals": [{**signal, "text": "4주 안에 잔고가 -123,456,789원까지 내려간다."}]}
+    assert ctx.raise_alert(bad)["accepted"] is False
+    assert ctx.raise_alert(ok)["accepted"] is True
+    ctx.accepted = None
+
+
+def test_fallback_cites_projected_balance(shortfall_ctx):
+    alert = investigate(shortfall_ctx, runner=None, model=MODEL).alert
+    signal = next(s for s in alert.signals if s.kind == "projected_shortfall")
+    assert signal.metric_ids == (f"F:{shortfall_ctx.week}:projected_min_balance",)
 
 
 def test_runner_none_uses_fallback(ctx):

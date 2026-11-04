@@ -31,6 +31,7 @@ TRIGGER_LABELS = {
     "buffer_drop": "현금 버퍼 감소",
     "volatility_spike": "변동성 급증",
     "new_debt": "신규 차입",
+    "projected_shortfall": "잔고 부족 전망",
 }
 _SHOWN_FIELDS = ("summary", "signals", "collections", "restructure")
 

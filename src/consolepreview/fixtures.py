@@ -4,8 +4,10 @@
 원천 데이터(RawStore)는 비워 두어 상세 화면은 가명 토큰 복원 불가 상태로 보인다.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+
+from agents.forecast import summarize
 
 from console.app import ConsoleDeps
 from console.auth import CREDIT_OFFICER, Principal
@@ -132,19 +134,52 @@ BASELINE = {
 WEEK_REVENUE = (1_630_000, 1_570_000, 1_680_000, 1_500_000, 1_450_000, 1_020_000, 1_230_000,
                 1_370_000, 1_170_000, 800_000, 930_000, 1_150_000, 1_300_000)
 WEEK_BUFFER = (31.0, 30.2, 31.5, 29.0, 27.4, 21.0, 22.3, 23.9, 19.5, 12.8, 11.2, 13.6, 15.9)
-TRIGGERS = {6: ["inflow_drop"], 7: ["inflow_drop"], 10: ["inflow_drop", "new_debt"], 11: ["new_debt"]}
+WEEK_EXPECTED = (1_600_000, 1_610_000, 1_640_000, 1_580_000, 1_560_000, 1_590_000, 1_620_000,
+                 1_650_000, 1_700_000, 1_720_000, 1_690_000, 1_640_000, 1_380_000)  # 13주차는 연말 휴일
+TRIGGERS = {6: ["inflow_drop"], 7: ["inflow_drop"], 8: ["inflow_drop"], 9: ["inflow_drop"],
+            **{w: ["inflow_drop", "new_debt", "projected_shortfall"] for w in range(10, 14)}}
+SCHEDULE = (("rent", 5, 560_000), ("payroll", 10, 900_000), ("social_insurance", 10, 160_000),
+            ("installment", 15, 440_000), ("loan_repayment", 25, 167_000), ("owner_transfer", 28, 380_000))
+VARIABLE_RATIO = 0.55
+
+
+def _projection(week: int, end: date, end_balance: int) -> dict[str, Any]:
+    """미리보기용 4주 잔고 전망(합성). 실제 계산은 agents.forecast.project가 한다."""
+    expected = WEEK_EXPECTED[week - 1]
+    attainment = round(min(sum(WEEK_REVENUE[max(week - 4, 0):week]) / sum(WEEK_EXPECTED[max(week - 4, 0):week]), 1.0), 3)
+    daily_in = round(expected / 7 * attainment)
+    totals = dict.fromkeys(["inflow", *(k for k, _, _ in SCHEDULE), "high_cost_lender", "variable"], 0)
+    path, bal = [], end_balance
+    for i in range(1, 29):
+        day = end + timedelta(days=i)
+        moves = {"inflow": daily_in if day.weekday() < 5 else 0, "variable": -round(daily_in * VARIABLE_RATIO)}
+        moves |= {k: -amt for k, d, amt in SCHEDULE if day.day == d}
+        if week >= 10 and day.weekday() == 4:
+            moves["high_cost_lender"] = -250_000
+        for k, v in moves.items():
+            totals[k] += v
+        bal += sum(moves.values())
+        path.append({"date": day.isoformat(), "balance": bal})
+    return {"start_balance": end_balance, "attainment": attainment, "path": path,
+            "totals": {k: v for k, v in totals.items() if v}}
 
 
 def _row(week: int) -> dict[str, Any]:
     start = datetime(2026, 11, 2) + timedelta(weeks=week - 1)
     revenue = WEEK_REVENUE[week - 1]
+    end = (start + timedelta(days=6)).date()
+    end_balance = 3_300_000 - week * 100_000 - (700_000 if week >= 10 else 0)
+    two = slice(max(week - 2, 0), week)
     return {
-        "week": week, "start": start.date().isoformat(), "end": (start + timedelta(days=6)).date().isoformat(),
+        "week": week, "start": start.date().isoformat(), "end": end.isoformat(),
         "revenue": revenue, "revenue_ratio": round(revenue / BASELINE["avg_weekly_revenue"], 3),
+        "expected_revenue": WEEK_EXPECTED[week - 1],
+        "revenue_vs_expected": round(sum(WEEK_REVENUE[two]) / sum(WEEK_EXPECTED[two]), 3),
         "operating_out": round(revenue * 0.6), "debt_service": 167_000,
         "high_cost_lender": 250_000 if week >= 10 else 0, "high_cost_count": 1 if week >= 10 else 0,
-        "loan_proceeds": 0, "unclassified_in": 0, "end_balance": 3_300_000 - week * 100_000,
+        "loan_proceeds": 0, "unclassified_in": 0, "end_balance": end_balance,
         "buffer_days": WEEK_BUFFER[week - 1],
+        **summarize(_projection(week, end, end_balance)),
     }
 
 
@@ -155,8 +190,10 @@ def _weeks(replay_id: str, count: int) -> list[dict[str, Any]]:
         new = [t for t in triggers if t not in seen]
         seen.update(triggers)
         alert_id = f"ew-{replay_id}-w{week:02d}" if new else None
-        out.append({"week": week, "row": _row(week), "triggers": triggers, "new_triggers": new,
+        row = _row(week)
+        out.append({"week": week, "row": row, "triggers": triggers, "new_triggers": new,
                     "classification": None,
+                    "projection": _projection(week, date.fromisoformat(row["end"]), row["end_balance"]),
                     "investigation": {"decision": "alert", "reason": "합성 예시", "record": {}} if new else None,
                     "alert_id": alert_id})
     return out

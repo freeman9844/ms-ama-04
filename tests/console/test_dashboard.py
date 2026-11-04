@@ -162,6 +162,34 @@ def test_loan_summary_progress_severity_buffer_and_chart():
 def test_loan_summary_before_replay():
     s = dashboard.loan_summary({"loan": {"baseline": {}}, "monitoring": {}, "weeks": [], "alerts": []})
     assert s["chart"] is None and s["line"] is None and s["min_buffer"] is None and s["progress_pct"] == 0.0
+    assert s["expected_chart"] is None and s["forecast"] is None
+
+
+def test_loan_summary_expected_and_forecast_charts():
+    w1, w2, w3 = week(1, 20.0), week(2, 15.0), week(3, 9.0, ["projected_shortfall"])
+    w1["row"]["expected_revenue"], w2["row"]["expected_revenue"] = 8_000_000, 12_000_000
+    path = [{"date": f"2026-09-{d:02d}", "balance": 1_000_000 - d * 100_000} for d in range(10, 38 - 10)]
+    w3["row"].update(projected_min_balance=-700_000, projected_min_date="2026-09-27", shortfall_date="2026-09-21")
+    w3["projection"] = {"start_balance": 1_000_000, "attainment": 0.62, "path": path,
+                        "totals": {"inflow": 5_000_000, "rent": -1_000_000, "variable": -2_000_000, "installment": -287_000}}
+    view = {"loan": {"baseline": {}}, "monitoring": {"processed_week": 3}, "weeks": [w1, w2, w3], "alerts": []}
+    s = dashboard.loan_summary(view)
+    e, line = s["expected_chart"], s["expected_line"]
+    assert e["vmax"] == 12_000_000 and line["vmax"] == e["vmax"]
+    assert [g["bars"][0]["parts"][0]["color"] for g in e["groups"]] == ["blue", "amber", "blue"]  # 기대의 85% 미만
+    assert [p["i"] for p in line["points"]] == [0, 1] and line["points"][1]["x"] == e["groups"][1]["cx"]
+    f = s["forecast"]
+    assert (f["week"], f["attainment_pct"], f["shortfall_date"], f["min_balance"]) == (3, 62.0, "2026-09-21", -700_000)
+    assert f["chart"]["points"][0]["label"] == "09-10" and f["chart"]["low"]["value"] == path[-1]["balance"]
+    assert f["totals"] == [("기대 입금", 5_000_000), ("임대료", -1_000_000), ("이번 대출 원리금", -287_000),
+                           ("매출 비례 운영비", -2_000_000)]
+
+
+def test_loan_summary_forecast_uses_latest_projection():
+    w1, w2 = week(1, 20.0), week(2, 15.0)
+    w1["projection"] = {"start_balance": 1, "attainment": 1.0, "path": [{"date": "2026-09-08", "balance": 5}], "totals": {}}
+    s = dashboard.loan_summary({"loan": {"baseline": {}}, "monitoring": {}, "weeks": [w1, w2], "alerts": []})
+    assert s["forecast"]["week"] == 1 and s["expected_chart"] is None
 
 
 def test_ops_summary_gauges_steps_and_fairness():

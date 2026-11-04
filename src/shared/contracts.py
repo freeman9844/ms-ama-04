@@ -164,7 +164,7 @@ class Recommendation(StrEnum):
 
 # M: 계산 지표, S: 월별 계열, P: 정책 판정 값, W: 사후 주간 계열, B: 사후 모니터링 기준선·업종 집단.
 # 예) M:dscr, S:2026-07:revenue, P:R101:threshold, W:3:revenue, B:index:01
-EVIDENCE_ID_PATTERN = r"^[MSPWB]:[A-Za-z0-9_.:-]+$"
+EVIDENCE_ID_PATTERN = r"^[MSPWBF]:[A-Za-z0-9_.:-]+$"
 EvidenceId = Annotated[str, Field(pattern=EVIDENCE_ID_PATTERN)]
 
 
@@ -246,6 +246,7 @@ class SignalKind(StrEnum):
     INFLOW_DROP = "inflow_drop"
     BUFFER_DROP = "buffer_drop"
     VOLATILITY_SPIKE = "volatility_spike"
+    PROJECTED_SHORTFALL = "projected_shortfall"
     PAYROLL_DELAY = "payroll_delay"
     SUPPLIER_LOSS = "supplier_loss"
     TAX_ARREARS = "tax_arrears"

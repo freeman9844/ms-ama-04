@@ -4,8 +4,10 @@
 - 주차 n은 흐름 시작일부터 7일 단위다(n=1이 첫 7일).
 - 매출 판단은 정산 프로필의 기대 입금 대비 실제(revenue_vs_expected, 최근 2주 합)로 한다. 정산일이 영업일로 밀려
   주 경계를 넘나드는 잡음을 2주 합으로 줄인다. 프로필이 없는 과거 대출은 기준선 주평균(revenue_ratio)으로 폴백한다.
+- 정산 프로필에 예정 출금 일정(forecast.outflow_schedule)이 있으면 주차마다 4주 잔고 전망을 계산해
+  projected_min_balance·projected_min_date·shortfall_date를 주차 행에 넣는다(스펙 §12.2). 최저 잔고가 0 아래면 projected_shortfall.
 - 탐지기는 결정적 규칙이다. 남는 오탐(명절 이동 등)을 거르는 일은 Early-Warning 에이전트의 몫이다(스펙 §3.3).
-- 근거 ID: W:{주차}:{필드}, B:{기준선 이름}, B:index:{MM}, B:cohort:{이름}.
+- 근거 ID: W:{주차}:{필드}, F:{주차}:{전망 필드}, B:{기준선 이름}, B:index:{MM}, B:cohort:{이름}.
 """
 
 import statistics
@@ -16,6 +18,7 @@ from typing import Any
 
 from agents.classify import Category, classify
 from agents.features import DAYS_PER_MONTH, OPERATING_OUT
+from agents.forecast import outflow_schedule, project, summarize
 from agents.settlement import expected_revenue, settlement_profile
 from shared.contracts import Transaction
 
@@ -24,7 +27,7 @@ INFLOW_DROP_RATIO = 0.85
 BUFFER_DROP_RATIO = 0.5
 VOLATILITY_WEEKS = 4
 VOLATILITY_COV = 0.15
-TRIGGERS = ("inflow_drop", "buffer_drop", "volatility_spike", "new_debt")
+TRIGGERS = ("inflow_drop", "buffer_drop", "volatility_spike", "new_debt", "projected_shortfall")
 WEEK_FIELDS = (
     "revenue",
     "revenue_ratio",
@@ -39,6 +42,7 @@ WEEK_FIELDS = (
     "end_balance",
     "buffer_days",
 )
+FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date")
 _UNCLASSIFIED = (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
 
 # 합성 업종 집단 통계(데모용 고정 표). 실제 운영에서는 집단 통계 저장소에서 읽는다.
@@ -87,9 +91,10 @@ class Baseline:
     tax_bank_match_ratio: float
     seasonal_index: dict[int, float]
     settlement: dict[str, Any] | None = None
+    installment_krw: int = 0  # 이번 대출 월 원리금(4주 전망용). 이전 문서에는 없다
 
     @classmethod
-    def from_underwriting(cls, underwriting: Mapping[str, Any]) -> "Baseline":
+    def from_underwriting(cls, underwriting: Mapping[str, Any], installment_krw: int = 0) -> "Baseline":
         f, monthly = underwriting["features"], underwriting["monthly"]
         mean_rev = statistics.fmean(r["revenue"] for r in monthly) if monthly else 0.0
         index = {m: 1.0 for m in range(1, 13)}
@@ -105,6 +110,7 @@ class Baseline:
             tax_bank_match_ratio=float(f["tax_bank_match_ratio"]),
             seasonal_index=index,
             settlement=underwriting.get("settlement_profile"),
+            installment_krw=installment_krw,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -139,8 +145,28 @@ def categorize(transactions: Sequence[Transaction], overrides: Mapping[str, str 
 def settlement_for(
     transactions: Sequence[Transaction], overrides: Mapping[str, str | Category], as_of: date, industry: str
 ) -> dict[str, Any] | None:
-    """심사 시점 거래로 만든 정산 프로필(doc["underwriting"]["settlement_profile"]). 이력에 없는 달은 업종 코호트 지수."""
-    return settlement_profile(transactions, categorize(transactions, overrides), as_of, cohort(industry)["index"])
+    """심사 시점 거래로 만든 정산 프로필(doc["underwriting"]["settlement_profile"]). 이력에 없는 달은 업종 코호트 지수.
+    예정 출금 일정(outflows)을 함께 넣는다."""
+    cats = categorize(transactions, overrides)
+    profile = settlement_profile(transactions, cats, as_of, cohort(industry)["index"])
+    if profile is not None:
+        profile["outflows"] = outflow_schedule(transactions, cats, as_of)
+    return profile
+
+
+def projection(
+    rows: Sequence[Mapping[str, Any]],
+    transactions: Sequence[Transaction],
+    categories: Mapping[str, Category],
+    baseline: Baseline,
+) -> dict[str, Any] | None:
+    """마지막 주차 행 다음 4주 잔고 전망. 그 주 고금리 상환은 매주 같은 요일에 이어진다고 본다."""
+    if not rows:
+        return None
+    lo, hi = date.fromisoformat(rows[-1]["start"]), date.fromisoformat(rows[-1]["end"])
+    high_cost = [t for t in transactions
+                 if lo <= t.booked_on <= hi and categories[t.txn_id] is Category.HIGH_COST_LENDER]
+    return project(baseline.settlement, rows, high_cost, baseline.installment_krw)
 
 
 def weekly_series(
@@ -193,6 +219,7 @@ def weekly_series(
                 else 0.0,
             }
         )
+        rows[-1].update(summarize(projection(rows, txns, categories, baseline)))
     return rows
 
 
@@ -213,15 +240,23 @@ def detect(rows: Sequence[Mapping[str, Any]], baseline: Baseline) -> list[str]:
             out.append("volatility_spike")
     if row["high_cost_count"] > 0 or row["loan_proceeds"] > 0:
         out.append("new_debt")
+    if (low := row.get("projected_min_balance")) is not None and low < 0:
+        out.append("projected_shortfall")
     return out
 
 
-def evidence_catalog(rows: Sequence[Mapping[str, Any]], baseline: Baseline, industry: str) -> dict[str, int | float]:
-    catalog: dict[str, int | float] = {}
+def evidence_catalog(
+    rows: Sequence[Mapping[str, Any]], baseline: Baseline, industry: str
+) -> dict[str, int | float | str]:
+    """근거 ID → 값. 전망 날짜(F:n:projected_min_date·shortfall_date)만 ISO 날짜 문자열이고 나머지는 수치다."""
+    catalog: dict[str, int | float | str] = {}
     for row in rows:
         for name in WEEK_FIELDS:
             if name in row:  # 기대 입금 이전에 저장된 주차 행에는 없다
                 catalog[f"W:{row['week']}:{name}"] = row[name]
+        for name in FORECAST_FIELDS:
+            if row.get(name) is not None:
+                catalog[f"F:{row['week']}:{name}"] = row[name]
     for name in ("avg_weekly_revenue", "revenue_volatility", "cash_buffer_days", "operating_daily_krw", "tax_bank_match_ratio"):
         catalog[f"B:{name}"] = getattr(baseline, name)
     for m, v in baseline.seasonal_index.items():

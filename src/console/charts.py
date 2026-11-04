@@ -123,6 +123,38 @@ def line(values: Sequence[Any], width: int = 640, height: int = 240, vmax: Any =
             "ticks": _ticks(top, base, plot_h, tick_fmt)}
 
 
+def signed_line(points: Sequence[tuple[str, Any]], width: int = 640, height: int = 240,
+                tick_fmt: Callable[[float], str] = _plain, label_every: int = 7) -> dict[str, Any]:
+    """음수를 자르지 않는 꺾은선(왼쪽 축)과 0 기준선. `points`는 `(x 라벨, 값)`이고 결측 값에서 선을 끊는다."""
+    x0, x1, top_y, base = PAD_L, width - PAD_R, PAD_T, height - PAD_B
+    plot_h = base - top_y
+    vals = [float(v) for _, v in points if is_num(v)]
+    hi, lo = max([*vals, 0.0]), min([*vals, 0.0])
+    span = (hi - lo) or 1.0
+
+    def y(v: float) -> float:
+        return _r(base - plot_h * (v - lo) / span)
+
+    slot = (x1 - x0) / len(points) if points else 0.0
+    runs: list[list[tuple[float, float]]] = [[]]
+    out = []
+    for i, (label, v) in enumerate(points):
+        if not is_num(v):
+            runs.append([])
+            continue
+        x = _r(x0 + slot * (i + 0.5))
+        out.append({"i": i, "label": label, "x": x, "y": y(v), "value": v, "negative": v < 0})
+        runs[-1].append((x, y(v)))
+    return {
+        "width": width, "height": height, "x0": x0, "x1": x1, "zero_y": y(0.0), "label_y": base + 16,
+        "segments": ["M " + " L ".join(f"{px} {py}" for px, py in run) for run in runs if run],
+        "points": out,
+        "ticks": [{"y": y(t), "value": t, "text": tick_fmt(t)} for t in sorted({lo, 0.0, hi})],
+        "labels": [{"x": p["x"], "text": p["label"]} for p in out if p["i"] % label_every == 0],
+        "low": min(out, key=lambda p: p["value"], default=None),
+    }
+
+
 def gauge(value: Any, vmax: Any) -> dict[str, Any]:
     """반원 게이지. 채움 비율은 0..1로 자르고, 값이나 최댓값이 없으면 `frac`이 None이다."""
     if not is_num(value) or not is_num(vmax) or vmax <= 0:

@@ -75,12 +75,12 @@
 {{ ch.legend(ui.legend) }}
 {% endif %}
 <table>
-  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기대 입금</th><th>기대 대비(2주)</th><th>버퍼(일)</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
+  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기대 입금</th><th>기대 대비(2주)</th><th>버퍼(일)</th><th>전망 최저 잔고</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
   <tbody>
 {% for w in v.weeks %}{% set r = w.row %}
 <tr>
   <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
-  <td>{{ r.buffer_days }}</td><td>{{ r.high_cost_count }}</td>
+  <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ r.shortfall_date }} 부족)</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
   <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}</td>
 </tr>
@@ -89,6 +89,32 @@
 </table>
 <p><small>노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.</small></p>
 </section>
+{% if ui.expected_chart %}
+<section class="card">
+<h2>기대 입금 대비 실제</h2>
+<p class="note">정산 채널별 주기·영업일·계절 지수로 만든 주차별 기대 입금(선)과 실제 정산 입금(막대)입니다. 기대의 85% 아래인 주는 주황색입니다.</p>
+{% call ch.columns(ui.expected_chart, "주차별 기대 입금 대비 실제 입금") %}{{ ch.line_overlay(ui.expected_line, "기대 입금", "teal", false) }}{% endcall %}
+{{ ch.legend([("실제 입금", "blue"), ("기대의 85% 미만", "amber"), ("기대 입금", "teal")]) }}
+</section>
+{% endif %}
+{% if ui.forecast %}{% set f = ui.forecast %}
+<section class="card">
+<h2>4주 잔고 전망 <small>{{ f.week }}주차 말 기준</small></h2>
+<div class="grid-4">
+  {{ ch.kpi("시작 잔고", f.start_balance|krw, f.week ~ "주차 마지막 날", "neutral") }}
+  {{ ch.kpi("최근 4주 달성률", f.attainment_pct ~ "%", "기대 입금 대비 실제(전망 입금에 반영)", "blue") }}
+  {{ ch.kpi("전망 최저 잔고", f.min_balance|krw if f.min_balance is not none else "-", f.min_date or "", "red" if f.shortfall_date else "green") }}
+  {{ ch.kpi("부족 예상일", f.shortfall_date or "없음", "잔고가 처음 0원 아래로 내려가는 날" if f.shortfall_date else "28일 안에 0원 아래로 내려가지 않음", "red" if f.shortfall_date else "green") }}
+</div>
+{{ ch.signed_line(f.chart, "다음 28일 일별 잔고 전망") }}
+{{ ch.legend([("전망 잔고", "purple"), ("0원 아래", "red")]) }}
+{% if f.totals %}<table>
+  <thead><tr><th>28일 합계</th><th>금액</th></tr></thead>
+  <tbody>{% for label, value in f.totals %}<tr><td>{{ label }}</td><td>{{ value|krw }}</td></tr>{% endfor %}</tbody>
+</table>{% endif %}
+<p><small>예정 출금 일정은 심사 시점 거래의 반복 패턴에서 뽑았습니다. 고금리 상환은 그 주 금액이 매주 반복된다고 가정합니다. 전망 최저 잔고가 0원 아래면 <span class="chip">잔고 부족 전망</span> 트리거가 걸립니다.</small></p>
+</section>
+{% endif %}
 {% endif %}
 
 {% for a in v.alerts %}

@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from agents.forecast import OUTFLOW_LABELS
 from console import charts
 from console.monitoring import SEVERITY_LABELS, TRIGGER_LABELS
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
@@ -62,6 +63,8 @@ EXPENSES = (("operating_out", "운영비", "amber"), ("debt_service", "상환", 
 RESTRUCTURE_NOTES = {"pending_officer": "심사역 대기", "approved": "승인", "declined": "거절"}
 REPLAY_WEEKS = 13
 LOAN_CHART = {"width": 960, "height": 300}  # 13주 막대와 버퍼 선이 같은 칸을 쓰도록 크기를 맞춘다.
+FORECAST_CHART = {"width": 960, "height": 260}
+SHORT_OF_EXPECTED = 0.85  # inflow_drop 탐지 기준과 같은 값(주 단위 색 표시용)
 
 
 def _dt(iso: Any) -> datetime | None:
@@ -314,6 +317,45 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "markers": markers,
         "legend": [("매출", "blue"), ("트리거 주", "red"), ("기준 주매출", "neutral"), ("현금 버퍼(일, 오른쪽 축)", "purple")],
         "alert_steps": {a.get("alert_id"): alert_steps(a) for a in alerts},
+        **_expected_vs_actual(weeks),
+        "forecast": _forecast(weeks),
+    }
+
+
+def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """주차별 실제 입금 막대와 기대 입금 선(같은 축)."""
+    rows = [w.get("row") or {} for w in weeks]
+    expected = [r.get("expected_revenue") for r in rows]
+    if not any(charts.is_num(v) for v in expected):
+        return {"expected_chart": None, "expected_line": None}
+    groups = []
+    for w, r, exp in zip(weeks, rows, expected, strict=True):
+        rev = r.get("revenue")
+        short = charts.is_num(exp) and charts.is_num(rev) and rev < exp * SHORT_OF_EXPECTED
+        tip = f"{w.get('week')}주차 실제 {krw_text(rev)} · 기대 {krw_text(exp)}"
+        groups.append((f"{w.get('week')}주", [[("revenue", rev, "amber" if short else "blue", tip)]]))
+    top = max([v for v in expected + [r.get("revenue") for r in rows] if charts.is_num(v)], default=0)
+    chart = charts.columns(groups, vmax=top or None, tick_fmt=man, **LOAN_CHART)
+    return {"expected_chart": chart, "expected_line": charts.line(expected, vmax=chart["vmax"], **LOAN_CHART)}
+
+
+def _forecast(weeks: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """가장 최근 주차의 4주 잔고 전망. 전망이 없는(정산 프로필이 없던) 대출은 None."""
+    latest = next((w for w in reversed(weeks) if w.get("projection")), None)
+    if latest is None:
+        return None
+    p, r = latest["projection"], latest.get("row") or {}
+    totals = p.get("totals") or {}
+    return {
+        "week": latest.get("week"),
+        "start_balance": p.get("start_balance"),
+        "attainment_pct": round(float(p.get("attainment") or 0) * 100, 1),
+        "min_balance": r.get("projected_min_balance"),
+        "min_date": r.get("projected_min_date"),
+        "shortfall_date": r.get("shortfall_date"),
+        "chart": charts.signed_line([(d["date"][5:], d["balance"]) for d in p.get("path") or []],
+                                    tick_fmt=man, **FORECAST_CHART),
+        "totals": [(label, totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items() if k in totals],
     }
 
 

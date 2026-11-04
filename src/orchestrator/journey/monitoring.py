@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from agents.collections import CollectionsContext, act
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
-from agents.monitoring import WEEKS, Baseline, categorize, detect, week_window, weekly_series
+from agents.monitoring import WEEKS, Baseline, categorize, detect, projection, week_window, weekly_series
 from journey.activities import (
     _TRANSACTIONS,
     ENDED_CONSENT,
@@ -303,6 +303,7 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         "triggers": triggers,
         "new_triggers": new,
         "classification": (classification or {}).get("metrics") or (classification or {}).get("error"),
+        "projection": projection(rows, visible, cats, baseline),
         "investigation": None,
         "alert_id": None,
     }
