@@ -1,0 +1,11 @@
+{
+  "run_id": "fault-20261104043615",
+  "execution": "job-ops-18j7ecu",
+  "mode": "submit",
+  "fault": {
+    "scenario": "policy-down",
+    "app": "ca-policy",
+    "mode": "unavailable",
+    "reverted": true
+  }
+}

@@ -623,4 +623,41 @@ P7(콘솔 화면 개편: 차트·단계 표시)과 P8(500만 원 이하 소액 �
 
 - 사후 흐름에 고금리 대출 누적 시나리오가 있는 신청인은 `demo-healthy-001`뿐입니다(`src/mockapis/demo.py`의 `STACKING_APPLICANTS`).
   `demo-stress-003`으로 만든 대출 `app-20261104-4798ea`는 13주 재생을 마쳤지만 경보가 0건이라 데모에 쓰지 않습니다.
-- 48명 측정 배치(`ops load`)와 평가(`ops eval`) 재측정은 아직 하지 않았습니다. 위 P6b 실측값은 P8 이전 24명 격자 기준입니다.
+
+재측정(P8, 2026-11-04):
+
+| 단계 | 실측 |
+|---|---|
+| `ops load`(기본 48건) | `load-20261104041554`, Job `job-ops-fdv8rww` 14.5분, 제출 48·도달 48·미도달 0 |
+| `ops fault run source-flaky` | `fault-20261104043236`, 3.7분, 도달 2/2, 원복 확인 |
+| `ops fault run policy-down` | `fault-20261104043615`, 6.1분, 도달 3/3, 원복 확인(`fault status`: source off·policy off) |
+| `ops metrics` | `ops/reports/load-20261104041554/report.md`. 콘솔 `/ops`가 이 실행을 기본으로 보여 줌 |
+| `ops eval --suite all` | `job-eval-ltu3cek`, 31.6분, $1.93(예산 $5, `partial=False`), 실패 32건(분류 오답 28건) |
+| 분류 기준 수정 뒤 `ops eval --suite classify` | `job-eval-f3muw8r`, $0.06, 실패 2건 |
+
+주요 실측값(합성 데이터 기준):
+
+| 영역 | 결과 |
+|---|---|
+| SLO1 접수 → 심사역 대기 | p95 1.2분(p50 0.7, 최대 1.3, n=48) — 충족 |
+| SLO2 에이전트 단계 성공률 | 100.0%(ok 144/144) — 충족 |
+| 건당 AI 비용 | $0.0484(gpt-5.4 158회 $2.047, gpt-5.4-mini 202회 $0.277, 합 $2.324 / 48건, 캐시 할인 미반영 상한). 고정비 월 $283.66(Cost Management 일평균 3일 × 30) |
+| 공정성 | **업종 25.0%p 경보**(디지털·반려동물·뷰티 37.5% vs 리빙 12.5%), 지역 18.8%p(이내), 업력 50%p(R104, 경보 대상 아님). 업종 격차는 격자에서 업력 8개월 칸이 업종마다 다르게 배치된 탓으로 볼 수 있습니다(8개월 칸이 가장 많은 업종은 패션의류·리빙 4/8로, 두 업종이 25.0%·12.5%로 하위권, `docs/limitations.md` P8 항목) |
+| 장애 ①·② | P6b와 같은 동작: source-flaky는 원천별 재시도로 회복, policy-down은 서킷 open → fail-closed로 3건 모두 `awaiting_officer` |
+| 거래 분류(수정 전) | 세 구성 모두 정확도 87.5~90%, supplier recall 0.667. 오답은 P8 페르소나의 택배사 거래처(`CJ대한통운 택배` 등, 정답 supplier) → 모든 모델이 other_operating으로 분류 |
+| 거래 분류(수정 후) | gpt-5.4·gpt-5.4-mini 100%, decision-1+gpt-5.4-mini 97.5%(남은 오답은 일부러 모호한 `대표 개인 신용카드대금` 1종) |
+| 심사·조기경보·안전성 | 심사 최종 근거 통과 gpt-5.4 100%·mini 87.5%, 조기경보 precision·recall 둘 다 1.000(평균 리드 mini 74일·gpt-5.4 67일), 주입 저항 100%, 반사실 일관성 100%, PII 0회 |
+
+- **분류 기준 수정**: `src/agents/txn_classify.py`의 `CRITERIA`에서 supplier를 "원재료·상품·식자재·포장재 등 거래처 대금, 택배·물류 배송비"로,
+  rent를 "점포·사무실·창고 등 사업장 임대료"로 넓혔습니다(온라인 셀러는 점포가 없고 배송비가 주요 거래처 비용). 실제 심사 분류에도 같은 영향이 있어
+  Functions와 평가 이미지(`eval:20261104053042`)를 다시 배포했습니다. 심사·조기경보는 규칙 분류 카테고리만 써서 다시 측정하지 않았습니다.
+- **Functions zip 배포가 `ConnectionResetError(10054)`로 두 번 실패**(모바일 회선, 공인 IP <운영자 IP>): `az functionapp deployment source config-zip`가
+  업로드 도중 끊겼고 서버에는 배포 기록이 없었습니다. 같은 zip(`ops.deploy.package_function`으로 생성, 29MB)을 `curl`로 Kudu 게시 API에 올리자 11초에 끝났습니다.
+
+```powershell
+$tok = az account get-access-token --query accessToken -o tsv
+curl.exe -X POST --data-binary "@orchestrator.zip" -H "Authorization: Bearer $tok" -H "Content-Type: application/zip" `
+  "https://<function-app>.scm.azurewebsites.net/api/publish?RemoteBuild=false&Deployer=az_cli"   # 202 → /api/deployments에서 status 4 확인
+```
+
+- 같은 회선에서 `ops smoke`의 콘솔 관문 확인이 한 번 403, `ops eval`이 az CLI 응답 JSON 오류로 한 번 실패했고, 둘 다 바로 다시 하면 통과했습니다(허용 IP는 일치).

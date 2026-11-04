@@ -1,0 +1,812 @@
+{
+  "run_id": "load-20261104041554",
+  "generated_at": "2026-11-04T04:42:53.369010+00:00",
+  "load": {
+    "run_id": "load-20261104041554",
+    "mode": "load",
+    "submitted": 48,
+    "reached": 48,
+    "unreached": [],
+    "aborted": false,
+    "guard": {
+      "sample": 3,
+      "per_application_usd": 0.028483500000000005,
+      "projected_usd": 1.3672080000000002,
+      "limit_usd": 8.0,
+      "unpriced_calls": 6
+    }
+  },
+  "summary": {
+    "basis": "합성 데이터 기준",
+    "applications": 48,
+    "latency": {
+      "n": 48,
+      "p50_min": 0.7379748500000001,
+      "p95_min": 1.1864098666666665,
+      "max_min": 1.2801851,
+      "target_min": 10.0,
+      "met": true,
+      "insufficient": false,
+      "unreached": 0,
+      "received_only": 0
+    },
+    "agent_success": {
+      "total": 144,
+      "ok": 144,
+      "degraded": 0,
+      "failed": 0,
+      "rate": 1.0,
+      "degraded_rate": 0.0,
+      "target": 0.99,
+      "met": true,
+      "by_step": {
+        "assemble": {
+          "ok": 48,
+          "degraded": 0,
+          "failed": 0
+        },
+        "classify": {
+          "ok": 48,
+          "degraded": 0,
+          "failed": 0
+        },
+        "assess": {
+          "ok": 48,
+          "degraded": 0,
+          "failed": 0
+        }
+      }
+    },
+    "ai_cost": {
+      "by_model": {
+        "gpt-5.4-mini": {
+          "input_tokens": 144743,
+          "output_tokens": 37365,
+          "calls": 202,
+          "cost_usd": 0.27669975
+        },
+        "decision-1": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 96,
+          "cost_usd": null
+        },
+        "gpt-5.4": {
+          "input_tokens": 436014,
+          "output_tokens": 63797,
+          "calls": 158,
+          "cost_usd": 2.04699
+        }
+      },
+      "total_usd": 2.32368975,
+      "applications": 48,
+      "per_application_usd": 0.048410203125,
+      "unpriced_calls": 96
+    },
+    "fixed": {
+      "monthly_usd": 283.66,
+      "source": "Cost Management 실측 2026-10-27~2026-11-02 일평균(3일) × 30, Foundry Models 제외"
+    },
+    "unit_economics": [
+      {
+        "volume": 100,
+        "ai_usd": 0.048410203125,
+        "fixed_usd": 2.8366000000000002,
+        "total_usd": 2.88501,
+        "vs_manual": 0.0008242885714285714,
+        "vs_ticket": 0.000480835
+      },
+      {
+        "volume": 1000,
+        "ai_usd": 0.048410203125,
+        "fixed_usd": 0.28366,
+        "total_usd": 0.33207,
+        "vs_manual": 9.487714285714286e-05,
+        "vs_ticket": 5.534499999999999e-05
+      },
+      {
+        "volume": 10000,
+        "ai_usd": 0.048410203125,
+        "fixed_usd": 0.028366000000000002,
+        "total_usd": 0.076776,
+        "vs_manual": 2.1935999999999998e-05,
+        "vs_ticket": 1.2795999999999999e-05
+      }
+    ],
+    "fairness": {
+      "threshold_pp": 20.0,
+      "min_samples": 5,
+      "axes": {
+        "industry": {
+          "values": {
+            "디지털": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.375,
+              "recommendations": {
+                "approve": 3,
+                "conditional": 0,
+                "refer": 3,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "리빙": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.125,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 1,
+                "conditional": 1,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "반려동물": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 3,
+                "conditional": 1,
+                "refer": 2,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "뷰티": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.375,
+              "recommendations": {
+                "approve": 3,
+                "conditional": 0,
+                "refer": 3,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "식품": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.25,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "패션의류": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.25,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 25.0,
+          "eligible_gap_pp": 25.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 50.0,
+              "mismatch": 0.0,
+              "stress": 100.0,
+              "thin": 0.0
+            },
+            "max_pp": 100.0
+          },
+          "policy_explained": false,
+          "alert": true
+        },
+        "region": {
+          "values": {
+            "경기": {
+              "n": 16,
+              "assessed": 16,
+              "approve_rate": 0.3125,
+              "eligible_rate": 0.375,
+              "recommendations": {
+                "approve": 5,
+                "conditional": 1,
+                "refer": 6,
+                "decline": 4
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "부산": {
+              "n": 16,
+              "assessed": 16,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.375,
+              "recommendations": {
+                "approve": 6,
+                "conditional": 0,
+                "refer": 6,
+                "decline": 4
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "서울": {
+              "n": 16,
+              "assessed": 16,
+              "approve_rate": 0.1875,
+              "eligible_rate": 0.25,
+              "recommendations": {
+                "approve": 3,
+                "conditional": 1,
+                "refer": 8,
+                "decline": 4
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 18.8,
+          "eligible_gap_pp": 12.5,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 25.0,
+              "mismatch": 0.0,
+              "stress": 50.0,
+              "thin": 0.0
+            },
+            "max_pp": 50.0
+          },
+          "policy_explained": false,
+          "alert": false
+        },
+        "business_age_band": {
+          "values": {
+            "1~3년": {
+              "n": 16,
+              "assessed": 16,
+              "approve_rate": 0.375,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 6,
+                "conditional": 2,
+                "refer": 4,
+                "decline": 4
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "3년+": {
+              "n": 16,
+              "assessed": 16,
+              "approve_rate": 0.5,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 8,
+                "conditional": 0,
+                "refer": 4,
+                "decline": 4
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "<1년": {
+              "n": 16,
+              "assessed": 16,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 12,
+                "decline": 4
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 50.0,
+          "eligible_gap_pp": 50.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 100.0,
+              "mismatch": 0.0,
+              "stress": 100.0,
+              "thin": 0.0
+            },
+            "max_pp": 100.0
+          },
+          "policy_explained": true,
+          "alert": false
+        }
+      },
+      "alerts": [
+        "industry"
+      ]
+    }
+  },
+  "faults": [
+    {
+      "run_id": "fault-20261104043236",
+      "scenario": "source-flaky",
+      "reverted": true,
+      "applications": [
+        {
+          "application_id": "fault-20261104043236-01",
+          "applicant_id": "demo-healthy-001",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "ok"
+            },
+            {
+              "step": "assess",
+              "outcome": "ok"
+            }
+          ]
+        },
+        {
+          "application_id": "fault-20261104043236-02",
+          "applicant_id": "demo-mismatch-002",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "ok"
+            },
+            {
+              "step": "assess",
+              "outcome": "ok"
+            }
+          ]
+        }
+      ],
+      "dependencies": {
+        "fault-20261104043236-01": [
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "mockapi",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 2
+          },
+          {
+            "target": "foundry",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "storage-queue",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          }
+        ],
+        "fault-20261104043236-02": [
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "storage-blob",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "mockapi",
+            "role": "orchestrator",
+            "total": 8,
+            "failed": 3
+          },
+          {
+            "target": "foundry",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "storage-queue",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          }
+        ]
+      },
+      "dependencies_error": null
+    },
+    {
+      "run_id": "fault-20261104043615",
+      "scenario": "policy-down",
+      "reverted": true,
+      "applications": [
+        {
+          "application_id": "fault-20261104043615-01",
+          "applicant_id": "demo-healthy-001",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch",
+            "policy_unavailable",
+            "assessment_unavailable"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "failed"
+            }
+          ]
+        },
+        {
+          "application_id": "fault-20261104043615-02",
+          "applicant_id": "demo-stress-003",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch",
+            "high_cost_lender_detected",
+            "policy_unavailable",
+            "assessment_unavailable"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "failed"
+            }
+          ]
+        },
+        {
+          "application_id": "fault-20261104043615-03",
+          "applicant_id": "demo-thin-004",
+          "status": "awaiting_officer",
+          "flags": [
+            "agent_assessment_mismatch",
+            "policy_unavailable",
+            "assessment_unavailable"
+          ],
+          "steps": [
+            {
+              "step": "consent",
+              "outcome": "ok"
+            },
+            {
+              "step": "assemble",
+              "outcome": "ok"
+            },
+            {
+              "step": "underwrite",
+              "outcome": "ok"
+            },
+            {
+              "step": "classify",
+              "outcome": "ok"
+            },
+            {
+              "step": "policy",
+              "outcome": "failed"
+            }
+          ]
+        }
+      ],
+      "dependencies": {
+        "fault-20261104043615-01": [
+          {
+            "target": "policy",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 2
+          },
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "storage-queue",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "mockapi",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 1
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "storage-blob",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "foundry",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 4,
+            "failed": 0
+          }
+        ],
+        "fault-20261104043615-02": [
+          {
+            "target": "policy",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 3
+          }
+        ],
+        "fault-20261104043615-03": [
+          {
+            "target": "QueueClient.send_message",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "storage-queue",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.upsert_item",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "cosmos",
+            "role": "orchestrator",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "mockapi",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.read_item",
+            "role": "orchestrator",
+            "total": 3,
+            "failed": 0
+          },
+          {
+            "target": "ContainerProxy.replace_item",
+            "role": "orchestrator",
+            "total": 2,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.upload_blob",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 0
+          },
+          {
+            "target": "storage-blob",
+            "role": "orchestrator",
+            "total": 8,
+            "failed": 0
+          },
+          {
+            "target": "ContainerClient.create_container",
+            "role": "orchestrator",
+            "total": 4,
+            "failed": 3
+          },
+          {
+            "target": "invoke_agent data-assembly",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "foundry",
+            "role": "orchestrator",
+            "total": 5,
+            "failed": 0
+          },
+          {
+            "target": "unknown",
+            "role": "responsesapi",
+            "total": 6,
+            "failed": 0
+          },
+          {
+            "target": "invoke_agent txn-classifier",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          },
+          {
+            "target": "BlobClient.download_blob",
+            "role": "orchestrator",
+            "total": 1,
+            "failed": 0
+          }
+        ]
+      },
+      "dependencies_error": null
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "run_id": "fault-20261104043236",
+  "execution": "job-ops-9lqzic4",
+  "mode": "submit",
+  "fault": {
+    "scenario": "source-flaky",
+    "app": "ca-mockapi",
+    "mode": "flaky",
+    "reverted": true
+  }
+}

@@ -1,0 +1,1000 @@
+{
+  "run_id": "job-eval-f3muw8r",
+  "mode": "azure",
+  "started_at": "2026-11-04T06:13:38+00:00",
+  "finished_at": "2026-11-04T06:15:00+00:00",
+  "disclaimer": "합성 데이터 기준 결과다. 실제 고객·실제 성능을 나타내지 않으며, 수치는 같은 시드에서도 LLM 응답 변동이 있다.",
+  "budget_usd": 5.0,
+  "spent_usd": 0.058809,
+  "partial": false,
+  "dataset": {
+    "as_of": "2026-11-01",
+    "seeds": {
+      "classify": [
+        101,
+        102
+      ],
+      "underwriting": 201,
+      "early_warning": 301
+    },
+    "classify": {
+      "apps": 8,
+      "hard_bank": 32,
+      "labelled_txns": 1336,
+      "labels": {
+        "high_cost_lender": 34,
+        "loan_repayment": 96,
+        "other_operating": 16,
+        "owner_transfer": 96,
+        "payroll": 176,
+        "rent": 96,
+        "supplier": 712,
+        "tax_or_insurance": 110
+      }
+    },
+    "underwriting": {
+      "cases": 8,
+      "injected": 4,
+      "counterfactual_pairs": 2
+    },
+    "early_warning": {
+      "paths": [
+        {
+          "path_id": "ev-ehealk",
+          "archetype": "healthy_seasonal",
+          "scenario": "stacking",
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "default_on": null
+        },
+        {
+          "path_id": "ev-etax_k",
+          "archetype": "tax_mismatch",
+          "scenario": "stacking",
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estrek",
+          "archetype": "stressed",
+          "scenario": "stacking",
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-estreb",
+          "archetype": "stressed",
+          "scenario": "stable",
+          "default_on": null
+        }
+      ]
+    }
+  },
+  "models": {
+    "full": "gpt-5.4",
+    "mini": "gpt-5.4-mini",
+    "decision": "decision-1",
+    "reviewer": "gpt-5.4-mini",
+    "judge": "gpt-5.4"
+  },
+  "prices_source": "Azure OpenAI Global Standard 단가(USD/1M 토큰), azurespeed.com 집계·Azure 가격 페이지 기준 2026-11 확인. 캐시 입력 할인은 반영하지 않아 상한 추정이다. Decision-1은 공개 단가를 확인하지 못해 비용 집계에서 '단가 미확인' 호출 수로만 남긴다.",
+  "suites": {
+    "classify": {
+      "partial": false,
+      "skipped": 0,
+      "configs": {
+        "decision-1+gpt-5.4-mini": {
+          "apps": 8,
+          "groups": 80,
+          "macro_f1": 0.9683,
+          "accuracy": 0.975,
+          "txn_accuracy": 0.9951,
+          "per_label": {
+            "high_cost_lender": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "loan_repayment": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "other_operating": {
+              "precision": 0.8,
+              "recall": 1.0,
+              "f1": 0.8889,
+              "support": 8
+            },
+            "owner_transfer": {
+              "precision": 1.0,
+              "recall": 0.75,
+              "f1": 0.8571,
+              "support": 8
+            },
+            "payroll": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "rent": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "supplier": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 24
+            },
+            "tax_or_insurance": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            }
+          },
+          "sources": {
+            "fallback": 12,
+            "decision": 48,
+            "cache": 20
+          },
+          "unresolved_rate": 0.0,
+          "cache_hit_rate": 0.25,
+          "fallback_rate": 0.2,
+          "model_calls_per_app": 8.5,
+          "model_calls": 68,
+          "cost_usd": 0.004546,
+          "unpriced_calls": 60,
+          "cost_per_group_usd": 5.7e-05,
+          "threshold_curve": [
+            {
+              "threshold": 0.5,
+              "accepted": 36,
+              "accuracy": 1.0,
+              "fallback_rate": 0.1
+            },
+            {
+              "threshold": 0.6,
+              "accepted": 34,
+              "accuracy": 1.0,
+              "fallback_rate": 0.15
+            },
+            {
+              "threshold": 0.7,
+              "accepted": 33,
+              "accuracy": 1.0,
+              "fallback_rate": 0.175
+            },
+            {
+              "threshold": 0.8,
+              "accepted": 32,
+              "accuracy": 1.0,
+              "fallback_rate": 0.2
+            },
+            {
+              "threshold": 0.9,
+              "accepted": 31,
+              "accuracy": 1.0,
+              "fallback_rate": 0.225
+            }
+          ]
+        },
+        "gpt-5.4-mini": {
+          "apps": 8,
+          "groups": 80,
+          "macro_f1": 1.0,
+          "accuracy": 1.0,
+          "txn_accuracy": 1.0,
+          "per_label": {
+            "high_cost_lender": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "loan_repayment": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "other_operating": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "owner_transfer": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "payroll": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "rent": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "supplier": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 24
+            },
+            "tax_or_insurance": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            }
+          },
+          "sources": {
+            "fallback": 60,
+            "cache": 20
+          },
+          "unresolved_rate": 0.0,
+          "cache_hit_rate": 0.25,
+          "fallback_rate": 1.0,
+          "model_calls_per_app": 1.0,
+          "model_calls": 8,
+          "cost_usd": 0.012522,
+          "unpriced_calls": 0,
+          "cost_per_group_usd": 0.000157,
+          "threshold_curve": null
+        },
+        "gpt-5.4": {
+          "apps": 8,
+          "groups": 80,
+          "macro_f1": 1.0,
+          "accuracy": 1.0,
+          "txn_accuracy": 1.0,
+          "per_label": {
+            "high_cost_lender": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "loan_repayment": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "other_operating": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "owner_transfer": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "payroll": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "rent": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "supplier": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 24
+            },
+            "tax_or_insurance": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            }
+          },
+          "sources": {
+            "fallback": 60,
+            "cache": 20
+          },
+          "unresolved_rate": 0.0,
+          "cache_hit_rate": 0.25,
+          "fallback_rate": 1.0,
+          "model_calls_per_app": 1.0,
+          "model_calls": 8,
+          "cost_usd": 0.041741,
+          "unpriced_calls": 0,
+          "cost_per_group_usd": 0.000522,
+          "threshold_curve": null
+        }
+      },
+      "cases": [
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1010",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 1,
+            "low_confidence": 1,
+            "fallback_items": 2,
+            "fallback_resolved": 2,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1011",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 1,
+            "fallback_items": 1,
+            "fallback_resolved": 1,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1012",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 2,
+            "low_confidence": 0,
+            "fallback_items": 2,
+            "fallback_resolved": 2,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1013",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 52,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 1,
+            "low_confidence": 1,
+            "fallback_items": 2,
+            "fallback_resolved": 2,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 10,
+          "correct": 9
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1020",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 4,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 1,
+            "fallback_items": 1,
+            "fallback_resolved": 1,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1021",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 5,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 1,
+            "fallback_items": 1,
+            "fallback_resolved": 1,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1022",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 4,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 2,
+            "low_confidence": 0,
+            "fallback_items": 2,
+            "fallback_resolved": 2,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1023",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 52,
+            "unique_descriptions": 10,
+            "cache_hits": 7,
+            "cache_errors": 0,
+            "decision_calls": 3,
+            "decision_errors": 0,
+            "abstained": 1,
+            "low_confidence": 0,
+            "fallback_items": 1,
+            "fallback_resolved": 1,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 10,
+          "correct": 9
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1010",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1011",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1012",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1013",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 52,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1020",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 4,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1021",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 5,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 0,
+            "abstained": 5,
+            "low_confidence": 0,
+            "fallback_items": 5,
+            "fallback_resolved": 5,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1022",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 4,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-c1023",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 52,
+            "unique_descriptions": 10,
+            "cache_hits": 7,
+            "cache_errors": 0,
+            "decision_calls": 3,
+            "decision_errors": 0,
+            "abstained": 3,
+            "low_confidence": 0,
+            "fallback_items": 3,
+            "fallback_resolved": 3,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1010",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1011",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1012",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1013",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 52,
+            "unique_descriptions": 10,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 10,
+            "decision_errors": 0,
+            "abstained": 10,
+            "low_confidence": 0,
+            "fallback_items": 10,
+            "fallback_resolved": 10,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1020",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 4,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1021",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 5,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 0,
+            "abstained": 5,
+            "low_confidence": 0,
+            "fallback_items": 5,
+            "fallback_resolved": 5,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1022",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 120,
+            "unique_descriptions": 10,
+            "cache_hits": 4,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-c1023",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 52,
+            "unique_descriptions": 10,
+            "cache_hits": 7,
+            "cache_errors": 0,
+            "decision_calls": 3,
+            "decision_errors": 0,
+            "abstained": 3,
+            "low_confidence": 0,
+            "fallback_items": 3,
+            "fallback_resolved": 3,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 10,
+          "correct": 10
+        }
+      ],
+      "failures": [
+        {
+          "type": "classification_wrong",
+          "suite": "classify",
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1013",
+          "detail": "'대표 개인 신용카드대금' 정답 owner_transfer, 예측 other_operating(fallback)"
+        },
+        {
+          "type": "classification_wrong",
+          "suite": "classify",
+          "config": "decision-1+gpt-5.4-mini",
+          "case": "ev-c1023",
+          "detail": "'대표 개인 신용카드대금' 정답 owner_transfer, 예측 other_operating(cache)"
+        }
+      ],
+      "total_txns": 4128,
+      "rule_resolved_ratio": 0.8004
+    }
+  },
+  "by_model": {
+    "decision-1": {
+      "calls": 60,
+      "errors": 0,
+      "retries": 0,
+      "p50_ms": 352,
+      "p95_ms": 603,
+      "input_tokens": 16207,
+      "output_tokens": 60,
+      "cost_usd": null
+    },
+    "gpt-5.4": {
+      "calls": 8,
+      "errors": 0,
+      "retries": 0,
+      "p50_ms": 3144,
+      "p95_ms": 7129,
+      "input_tokens": 6562,
+      "output_tokens": 1689,
+      "cost_usd": 0.041741
+    },
+    "gpt-5.4-mini": {
+      "calls": 16,
+      "errors": 0,
+      "retries": 0,
+      "p50_ms": 2319,
+      "p95_ms": 3436,
+      "input_tokens": 10187,
+      "output_tokens": 2095,
+      "cost_usd": 0.017068
+    }
+  },
+  "failure_counts": {
+    "classification_wrong": 2
+  },
+  "cleanup": {
+    "deleted": 24,
+    "absent": 0,
+    "failed": 0
+  },
+  "errors": []
+}
