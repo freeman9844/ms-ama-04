@@ -103,6 +103,15 @@ def test_auditor_sees_pseudonyms_and_no_decision_form(env):
     assert "김대표" not in page and "빈스카페" not in page
     assert "[[PERSON_" in page
     assert "/decision" not in page and 'name="csrf"' not in page
+    assert 'data-default-tab="tab-summary"' in page
+
+
+def test_decision_tab_opens_for_officer_and_on_error_rerender(env):
+    client, _ = env
+    assert 'data-default-tab="tab-decision"' in client.get("/applications/app-1", headers=OFFICER).text
+    assert 'data-default-tab="tab-summary"' in client.get("/applications/app-2", headers=OFFICER).text
+    resp = decide(client, OFFICER, csrf(client, OFFICER), amount_krw="25000000")
+    assert resp.status_code == 422 and 'data-default-tab="tab-decision"' in resp.text
 
 
 def test_model_text_is_html_escaped(env, make_doc):

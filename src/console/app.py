@@ -23,6 +23,7 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
 from agents.monitoring import WEEKS
+from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply
 from console.dashboard import (
@@ -220,7 +221,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        return render("detail.html", user, status_code, v=view, ui=detail_summary(view), in_progress=in_progress,
+        return render("detail.html", user, status_code, v=view, ui=detail_summary(view), panels=assessment_panels(view),
+                      in_progress=in_progress,
                       consents=consents, **ctx)
 
     @app.get("/healthz")

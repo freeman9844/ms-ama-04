@@ -72,6 +72,26 @@ def test_detail_has_timeline_stepper_and_charts(client):
     assert "<details" in html and 'class="timeline"' in html
 
 
+def test_detail_tabs_and_assessment_panels(client):
+    html = page(client, "/applications/app-20261103-p01")
+    labels = re.findall(r'role="tab" aria-controls="tab-(\w+)"[^>]*>([^<]+)<', html)
+    assert labels == [("summary", "요약"), ("cashflow", "현금흐름"), ("policy", "정책 판정"), ("opinion", "에이전트 의견"),
+                      ("evidence", "근거 거래"), ("consent", "동의·데이터"), ("decision", "심사역 결정")]
+    assert html.count('role="tabpanel"') == 7 and '<script src="/static/tabs.js" defer></script>' in html
+    assert 'data-default-tab="tab-decision"' in html
+    assert 'class="chart gauge"' in html and 'class="chart donut"' in html and 'class="signals"' in html
+    assert "한도 산정" in html and "상환 여력" in html and "지출 구성" in html and "남는 돈" in html
+    assert 'class="claim-mark ok"' in html and 'class="claim-mark missing"' in html
+    assert client.get("/static/tabs.js").status_code == 200
+
+
+def test_detail_tabs_show_notices_when_empty(client):
+    html = page(client, "/applications/app-20261103-p06")
+    assert 'data-default-tab="tab-summary"' in html
+    for text in ("정책 판정 결과가 아직 없습니다.", "에이전트 평가가 아직 없습니다.", "에이전트 주장이 참조한 거래가 없습니다."):
+        assert text in html, text
+
+
 def test_withdrawn_detail_marks_failed_step(client):
     html = page(client, "/applications/app-20261103-p06")
     assert "step-failed" in html and "철회 종료" in html

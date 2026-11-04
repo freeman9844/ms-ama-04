@@ -72,10 +72,10 @@
 </div>
 {%- endmacro %}
 
-{% macro marker_bar(m, label) -%}
+{% macro marker_bar(m, label, tone="blue") -%}
 <svg class="chart marker-bar" viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
   <rect class="track" x="0" y="3" width="100" height="8"></rect>
-  <rect class="bar-h fill-blue" x="0" y="3" width="{{ m.fill }}" height="8"><title>{{ label }}</title></rect>
+  <rect class="bar-h fill-{{ tone }}" x="0" y="3" width="{{ m.fill }}" height="8"><title>{{ label }}</title></rect>
   <line class="mark" x1="{{ m.mark }}" x2="{{ m.mark }}" y1="0" y2="14" vector-effect="non-scaling-stroke"></line>
 </svg>
 {%- endmacro %}

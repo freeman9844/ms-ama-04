@@ -257,3 +257,31 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
 .apply-status.s-good { color: var(--good); }
 .apply-status.s-bad { color: var(--bad); }
 .apply-status.s-pending { color: var(--accent-dark); }
+/* P9 신청 상세 탭·평가 패널 */
+.fill-teal { fill: var(--c-teal); } .stroke-teal { stroke: var(--c-teal); } .bg-teal { background: var(--c-teal); }
+.fill-orange { fill: var(--c-orange); } .stroke-orange { stroke: var(--c-orange); } .bg-orange { background: var(--c-orange); }
+.fill-pink { fill: var(--c-pink); } .stroke-pink { stroke: var(--c-pink); } .bg-pink { background: var(--c-pink); }
+:root { --c-teal: #038387; --c-orange: #ca5010; --c-pink: #e3008c; }
+.tab-list { list-style: none; display: flex; flex-wrap: wrap; gap: .25rem; margin: 0 0 1rem; padding: 0; border-bottom: 2px solid var(--line); }
+.tab-list a { display: block; padding: .5rem 1rem; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; margin-bottom: -2px; font-weight: 600; }
+.tab-list a:hover { color: var(--fg); }
+.tabs-on .tab-list a[aria-selected="true"] { color: var(--accent-dark); border-bottom-color: var(--accent); }
+.tab-panel { margin-bottom: 1.5rem; }
+.tabs-on .tab-panel { margin-bottom: 0; }
+.tabs-on .tab-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.tab-panel[hidden] { display: none; }
+.signals { list-style: none; margin: 0; padding: 0; }
+.signal { display: grid; grid-template-columns: 14px 11rem minmax(6rem, 14rem) 1fr; align-items: center; gap: .3rem .8rem; padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.signal:last-child { border-bottom: 0; }
+.signal-name { font-weight: 600; }
+.signal-name small { display: block; font-weight: 400; color: var(--muted); }
+.signal-red .signal-name small { color: var(--bad); }
+.signal-amber .signal-name small { color: var(--warn); }
+.signal-text { font-size: .9rem; }
+.pros li::marker { content: "▲ "; color: var(--c-green); }
+.cons li::marker { content: "▼ "; color: var(--c-red); }
+.claim-mark { display: inline-block; width: 1.3rem; font-weight: 700; }
+.claim-mark.ok { color: var(--good); }
+.claim-mark.missing { color: var(--warn); }
+p.warn { background: #fff4ce; border-left: 4px solid var(--c-amber); padding: .5rem .75rem; color: var(--warn); }
+@media (max-width: 900px) { .signal { grid-template-columns: 14px 1fr; } .signal .chart, .signal-text { grid-column: 2; } }
