@@ -604,3 +604,23 @@ console `/ops`의 SLO·비용·공정성 표와 경보 배너가 `report.md`와 
 - 고정비는 리소스 그룹 비용 데이터가 있는 날만 평균합니다. 이번 측정은 하루치라 일시 정지·배포 창 여닫기에 따라 크게 달라질 수 있습니다.
 - `source-flaky`가 켜진 동안에는 mockapi가 첫 요청마다 503을 주므로 console 차주 시뮬레이터(`/mydata/flow`) 재생이 실패합니다. 측정 중에는 쓰지 않습니다.
 - Foundry 트레이스(`genAIContent`)에는 프롬프트·응답이 남습니다. 에이전트 입력이 가명화된 값뿐이라는 원칙에 기댑니다.
+
+## 콘솔 UI·온라인 셀러 소액 대출(P7·P8)
+
+P7(콘솔 화면 개편: 차트·단계 표시)과 P8(500만 원 이하 소액 대출, 온라인 셀러 10개 업종 합성 데이터, 측정 격자 48명)을
+한 번에 배포했습니다(스펙 `2026-11-03-p8-small-loan-sellers-design.md`). Service Bus는 일시 정지 상태 그대로라 오케스트레이터와
+사후 재생은 인라인 모드로 돌았습니다.
+
+실제 실행 기록(P7·P8, 2026-11-04, koreacentral):
+
+| 단계 | 실측 |
+|---|---|
+| `ops window open --ip <운영자 IP> --acr` | 5.5분 |
+| `ops deploy all` | 13.4분. 이미지 4개(`policy`·`mockapi`·`console`·`eval`) 태그 `20261104011410` + Functions zip 배포. `job-ops` `replicaTimeout` 5400초 확인 |
+| `ops window close` | 4.2분 |
+| `ops smoke` | 성공(`job-smoke-eyag27u`, 3.1분, 신청인 `demo-healthy-001`), 콘솔 관문: 데모 모드(운영자 IP 허용 목록만) |
+| 사전 건 다시 만들기 | A `app-20261104-5eb963`(승인), B `app-20261104-f58e82`(인라인 재생 약 140초, 13줄, 경보 2건 — 2주차 높음·8주차 중간), C 동의 `8c77903da5c64deba47e26d8447c90ab`(삭제 증명 완료, 검증 8항목 확인). 상세는 [fallback](../demo/fallback.md) |
+
+- 사후 흐름에 고금리 대출 누적 시나리오가 있는 신청인은 `demo-healthy-001`뿐입니다(`src/mockapis/demo.py`의 `STACKING_APPLICANTS`).
+  `demo-stress-003`으로 만든 대출 `app-20261104-4798ea`는 13주 재생을 마쳤지만 경보가 0건이라 데모에 쓰지 않습니다.
+- 48명 측정 배치(`ops load`)와 평가(`ops eval`) 재측정은 아직 하지 않았습니다. 위 P6b 실측값은 P8 이전 24명 격자 기준입니다.
