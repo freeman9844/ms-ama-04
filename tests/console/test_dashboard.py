@@ -194,6 +194,39 @@ def test_ops_summary_without_samples_is_neutral():
                                "agent_success": {"rate": None, "met": False, "by_step": {}},
                                "fairness": {"axes": {}}}, STEP_LABELS)
     assert (u["latency_tone"], u["success_tone"], u["steps"], u["fairness"]) == ("neutral", "neutral", [], {})
+    assert all(r["empty"] for r in u["funnel"]) and u["step_latency"] is None and u["throughput"] is None
+    assert (u["model_cost"]["arcs"], u["step_cost"]["bars"], u["reasons"]["bars"], u["flags"]["bars"]) == ([], [], [], [])
+
+
+def test_ops_insights_funnel_latency_cost_reasons_flags_throughput():
+    s = {
+        "funnel": {"policy": {"eligible": 3, "refer": 1, "none": 1}, "recommendation": {"approve": 2, "odd": 1},
+                   "officer": {"approve": 1, "none": 4}},
+        "step_latency": {"assess": {"n": 4, "p50_ms": 2_340, "p95_ms": 12_000}},
+        "ai_cost": {"by_model": {"gpt-5.4": {"cost_usd": 0.0123456}, "decision-1": {"cost_usd": None},
+                                 "gpt-5.4-mini": {"cost_usd": 0.001}},
+                    "by_step": {"assess": {"cost_usd": 0.0133456}}},
+        "reason_codes": [{"key": "R101", "count": 3}, {"key": "R002", "count": 1}],
+        "flags": [{"key": "agent_fallback", "count": 2}, {"key": "new_flag", "count": 1}],
+        "throughput": {"buckets": [{"start": f"2026-11-04T01:{m:02d}:00+00:00", "received": m // 10, "reached": 1}
+                                   for m in (0, 10)]},
+    }
+    u = dashboard.ops_insights(s, STEP_LABELS)
+    assert [r["label"] for r in u["funnel"]] == ["정책 판정", "에이전트 권고", "심사역 결정"]
+    assert [(p["part"], p["color"]) for p in u["funnel"][0]["parts"]] == [
+        ("적격", "green"), ("심사역 회부", "amber"), ("판정 없음", "neutral")]
+    assert [(p["part"], p["color"]) for p in u["funnel"][1]["parts"]] == [("승인", "green"), ("odd", "grey")]
+    assert [p["part"] for p in u["funnel"][2]["parts"]] == ["승인", "미결정"]
+    group = u["step_latency"]["groups"][0]
+    assert group["label"] == "신용 평가" and [b["parts"][0]["value"] for b in group["bars"]] == [2.3, 12.0]
+    assert u["step_latency"]["ticks"][-1]["text"] == "12초"
+    assert [(a["label"], a["value"]) for a in u["model_cost"]["arcs"]] == [("gpt-5.4", 0.0123), ("gpt-5.4-mini", 0.001)]
+    assert u["model_cost"]["total"] == 0.0133 and u["model_colors"][0] == ("gpt-5.4", "blue", "$0.0123")
+    assert [(b["label"], b["value"]) for b in u["step_cost"]["bars"]] == [("신용 평가", 0.0133)]
+    assert [(b["label"], b["color"]) for b in u["reasons"]["bars"]] == [("R101", "amber"), ("R002", "red")]
+    assert [b["label"] for b in u["flags"]["bars"]] == ["에이전트 대체 경로 사용", "new_flag"]
+    assert [g["label"] for g in u["throughput"]["groups"]] == ["10:00", ""]
+    assert u["throughput"]["groups"][1]["bars"][1]["parts"][0]["tip"] == "10:10 심사역 대기 도달 1건"
 
 
 def test_formatters():

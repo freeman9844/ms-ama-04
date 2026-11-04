@@ -327,6 +327,10 @@ class MemoryOps:
     def by_run(self, run_id: str) -> list[dict[str, Any]]:
         return self.data[run_id]
 
+    def recent(self, limit: int) -> list[dict[str, Any]]:
+        docs = [d for run in self.data.values() for d in run]
+        return sorted(docs, key=lambda d: d.get("received_at") or "", reverse=True)[:limit]
+
 
 def build_deps() -> ConsoleDeps:
     loan_docs, alerts = loans()

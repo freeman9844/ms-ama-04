@@ -40,9 +40,21 @@ def step(name, outcome="ok", usage=None, agent=True):
 def test_project_keeps_only_allowed_fields():
     p = project(doc(officer="approve"))
     assert set(p) == {"application_id", "applicant_id", "status", "submitted_at", "received_at", "source", "run_id",
-                      "segment", "steps", "timeline", "flags", "policy", "assessment", "officer_decision"}
+                      "segment", "steps", "timeline", "flags", "policy", "assessment", "officer_decision",
+                      "policy_override", "requested_amount_krw", "sla_escalated"}
     assert p["policy"] == {"decision": "eligible", "reason_codes": ["R104"]}
     assert p["assessment"] == {"recommendation": "approve"} and p["officer_decision"] == "approve"
+    assert (p["policy_override"], p["requested_amount_krw"], p["sla_escalated"]) == (False, None, False)
+
+
+def test_project_reads_override_amount_sla_and_trims_reason_codes():
+    d = doc(officer="approve")
+    d["officer_decision"]["policy_override"] = True
+    d["requested_amount_krw"], d["sla"] = 7_000_000, {"hours": 24, "escalated": True}
+    d["policy"]["reason_codes"] = [{"code": "R101", "message": "매출 대사율 미달", "observed": 0.6, "threshold": 0.7}]
+    p = project(d)
+    assert (p["policy_override"], p["requested_amount_krw"], p["sla_escalated"]) == (True, 7_000_000, True)
+    assert p["policy"]["reason_codes"] == [{"code": "R101", "message": "매출 대사율 미달"}]
     assert "원문" not in json.dumps(p, ensure_ascii=False)
 
 
@@ -93,6 +105,19 @@ def test_ai_cost_sums_priced_and_counts_unpriced():
     assert r["by_model"]["decision-1"]["cost_usd"] is None
     assert r["total_usd"] == pytest.approx(2.0) and r["per_application_usd"] == pytest.approx(1.0)
     assert r["unpriced_calls"] == 3 and r["applications"] == 2
+
+
+def test_ai_cost_breaks_down_by_step():
+    a = [{"model": "m", "input_tokens": 1_000_000, "output_tokens": 0, "calls": 1}]
+    b = [{"model": "m", "input_tokens": 0, "output_tokens": 100_000, "calls": 1},
+         {"model": "decision-1", "input_tokens": 10, "output_tokens": 10, "calls": 2}]
+    r = ai_cost([project(doc(1, steps=[step("classify", usage=a), step("assess", usage=b)])),
+                 project(doc(2, steps=[step("assess", usage=b)]))], PRICES)
+    assert r["by_step"]["classify"] == {"input_tokens": 1_000_000, "output_tokens": 0, "calls": 1,
+                                        "cost_usd": pytest.approx(1.0), "unpriced_calls": 0}
+    assert r["by_step"]["assess"]["cost_usd"] == pytest.approx(2.0)
+    assert r["by_step"]["assess"]["unpriced_calls"] == 4 and r["by_step"]["assess"]["calls"] == 6
+    assert sum(s["cost_usd"] for s in r["by_step"].values()) == pytest.approx(r["total_usd"])
 
 
 def test_ai_cost_treats_usage_without_model_as_unpriced():
@@ -157,7 +182,8 @@ def test_controlled_gap_is_per_archetype():
 def test_summary_has_basis_and_sections():
     s = summarize([project(doc())], PRICES, fixed_monthly_usd=None, fixed_source="측정 불가(권한)")
     assert s["basis"] == "합성 데이터 기준"
-    assert {"latency", "agent_success", "ai_cost", "unit_economics", "fairness", "fixed"} <= set(s)
+    assert {"latency", "agent_success", "ai_cost", "unit_economics", "fairness", "fixed", "funnel", "step_latency",
+            "reason_codes", "flags", "throughput", "sla"} <= set(s)
 
 
 def test_load_prices_skips_meta():

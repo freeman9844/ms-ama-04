@@ -7,7 +7,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from console import charts
-from console.dashboard import EXPENSES, RECOMMENDATION_LABELS, krw_text, man
+from console.dashboard import EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, krw_text, man
+from console.statuses import FLAG_LABELS
 
 PRODUCT_MAX_KRW = 10_000_000
 INFLOW_MULTIPLIER = 1.5
@@ -38,23 +39,12 @@ SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
 )
 SIGNAL_TONES = {"pass": "green", "refer": "amber", "knockout": "red", "unknown": "grey"}
 SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "knockout": "위반(거절 기준)", "unknown": "값 없음"}
-POLICY_DECISIONS = {"eligible": ("적격", "green"), "refer": ("심사역 회부", "amber"), "ineligible": ("부적격", "red")}
 RECOMMENDATION_TONES = {"approve": "green", "conditional": "blue", "refer": "purple", "decline": "red"}
 EXPENSE_COLORS = {
     "supplier": "blue", "rent": "purple", "payroll": "amber", "tax_insurance": "teal", "other_operating": "orange",
     "debt_service": "red", "owner_draw": "pink", "unclassified": "grey",
 }
 LEFTOVER = ("leftover", "남는 돈", "green")
-FLAG_LABELS = {
-    "high_cost_lender_detected": "고금리 대부 거래 감지",
-    "data_incomplete": "데이터 부족",
-    "policy_unavailable": "정책 엔진 응답 없음",
-    "assessment_unavailable": "에이전트 평가 없음",
-    "review_not_passed": "검토 에이전트 미통과",
-    "agent_fallback": "에이전트 대체 경로 사용",
-    "agent_assessment_mismatch": "에이전트 권고와 정책 판정 불일치",
-    "monitoring_unavailable": "사후 모니터링 시작 실패",
-}
 
 
 def _num_text(v: float) -> str:

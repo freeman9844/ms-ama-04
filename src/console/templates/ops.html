@@ -8,23 +8,28 @@
     <p class="crumb">홈 › 운영 지표</p>
     <h1>운영 지표 <small>합성 데이터 기준</small></h1>
   </div>
-  {% if selected %}
   <div class="actions">
     <form method="get" action="/ops">
-      <label>측정 실행
+      <label>보기 범위
         <select name="run">
-        {% for r in runs %}<option value="{{ r }}"{% if r == selected %} selected{% endif %}>{{ r }}</option>{% endfor %}
+        {% for value, text in options %}<option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ text }}</option>{% endfor %}
         </select>
       </label>
       <button type="submit">보기</button>
     </form>
   </div>
-  {% endif %}
 </div>
-{% if not selected %}
+{% if not s %}
+{% if not runs %}
 <p>측정 실행이 없습니다. 운영자 PC에서 <code>python -m ops load</code>(기본 48건=균형 격자 전체)로 합성 신청을 제출하면 여기에 표시됩니다.</p>
+{% endif %}
+<p class="note">선택한 범위에 신청이 없습니다.</p>
+{% else %}
+{% if recent %}
+<p class="note">최근 신청 {{ s.applications }}건(고객 신청·데모·부하 측정 등 전체 채널, 접수 시각 최신순) · {{ s.basis }}.</p>
 {% else %}
 <p class="note">실행 <code>{{ selected }}</code> · 신청 {{ s.applications }}건 · {{ s.basis }}. 고정비·건당 총비용은 <code>ops/reports/{{ selected }}/report.md</code>를 봅니다.</p>
+{% endif %}
 
 {% for axis in s.fairness.alerts %}
 <p class="ops-alert">공정성 경보: {{ AXIS_LABELS.get(axis, axis) }} 추천 approve율 격차 {{ s.fairness.axes[axis].gap_pp|num }}%p &gt; 임계값 {{ s.fairness.threshold_pp|num }}%p. 원형 통제 최대 격차 {{ s.fairness.axes[axis].controlled.max_pp|num }}%p를 함께 확인하세요.</p>
@@ -35,6 +40,99 @@
   {{ ch.gauge(ui.success, "에이전트 단계 성공률", s.agent_success.rate|pct, "목표 " ~ s.agent_success.target|pct, ui.success_tone) }}
   {{ ch.kpi("측정 표본", s.latency.n ~ "건", "표본 부족(20건 미만)" if s.latency.insufficient else "p50 " ~ s.latency.p50_min|num ~ "분 · 최대 " ~ s.latency.max_min|num ~ "분", "neutral" if s.latency.insufficient else "blue") }}
   {{ ch.kpi("AI 비용(건당)", s.ai_cost.per_application_usd|usd, "캐시 할인 미반영", "purple") }}
+</div>
+
+<div class="grid-4">
+  {{ ch.kpi("심사역 대기 중", s.sla.awaiting ~ "건", "SLA 초과 상태 포함", "amber" if s.sla.awaiting else "neutral") }}
+  {{ ch.kpi("SLA 초과(누적)", s.sla.escalated ~ "건", "결정 기한을 넘긴 적이 있는 신청", "red" if s.sla.escalated else "green") }}
+  {{ ch.kpi("권고·결정 일치율", s.funnel.agreement.rate|pct, ("비교 " ~ s.funnel.agreement.compared ~ "건 중 일치 " ~ s.funnel.agreement.agreed ~ "건(회부 권고 제외)") if s.funnel.agreement.compared else "아직 심사역 결정이 없습니다", "blue") }}
+  {{ ch.kpi("정책 예외 승인", s.funnel.overrides.count ~ "건", ("심사역 승인 " ~ s.funnel.overrides.approved ~ "건 중 " ~ s.funnel.overrides.rate|pct) if s.funnel.overrides.approved else "심사역 승인 없음", "purple" if s.funnel.overrides.count else "neutral") }}
+</div>
+
+<section class="card">
+<h2>결정 퍼널</h2>
+<p class="note">같은 신청들이 정책 판정 → 에이전트 권고 → 심사역 결정을 거치며 어떻게 갈리는지 봅니다. 막대에 마우스를 올리면 건수가 보입니다.</p>
+{{ ch.stacked(ui.funnel, "결정 퍼널") }}
+{{ ch.legend([("적격·승인", "green"), ("정책 회부", "amber"), ("에이전트 회부", "purple"), ("조건 제안", "blue"), ("부적격·거절", "red"), ("없음·미결정", "neutral")]) }}
+<details><summary>퍼널 표</summary>
+<table>
+  <thead><tr><th>단계</th><th>분포</th></tr></thead>
+  <tbody>
+  {% for row in ui.funnel %}<tr><td>{{ row.label }}</td><td>{% for p in row.parts %}{{ p.part }} {{ p.value }}건{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</details>
+</section>
+
+<div class="grid-2">
+<section class="card">
+<h2>단계별 처리 시간</h2>
+{% if ui.step_latency %}
+{{ ch.columns(ui.step_latency, "단계별 처리 시간 p50·p95") }}
+{{ ch.legend([("p50(중앙값)", "blue"), ("p95", "purple")]) }}
+<details><summary>단계별 표</summary>
+<table>
+  <thead><tr><th>단계</th><th>횟수</th><th>p50(초)</th><th>p95(초)</th></tr></thead>
+  <tbody>
+  {% for name, r in s.step_latency.items() %}<tr><td>{{ STEP_LABELS.get(name, name) }}</td><td>{{ r.n }}</td><td>{{ (r.p50_ms / 1000)|num }}</td><td>{{ (r.p95_ms / 1000)|num }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</details>
+{% else %}{{ ch.empty() }}{% endif %}
+</section>
+
+<section class="card">
+<h2>시간대별 처리량 <small>10분 단위 · KST</small></h2>
+{% if ui.throughput %}
+{{ ch.columns(ui.throughput, "10분 단위 접수와 심사역 대기 도달") }}
+{{ ch.legend([("접수", "blue"), ("심사역 대기 도달", "green")]) }}
+{% if s.throughput.earlier.received or s.throughput.earlier.reached %}<p class="note">최근 6시간 이전 접수 {{ s.throughput.earlier.received }}건 · 도달 {{ s.throughput.earlier.reached }}건은 그래프에서 뺐습니다.</p>{% endif %}
+{% else %}{{ ch.empty() }}{% endif %}
+</section>
+</div>
+
+<div class="grid-2">
+<section class="card">
+<h2>AI 비용 <small>모델별·단계별, 캐시 할인 미반영</small></h2>
+<h3>모델별</h3>
+<div class="chart-row">
+{{ ch.donut(ui.model_cost, "모델별 AI 비용", "USD") }}
+{{ ch.legend(ui.model_colors) }}
+</div>
+<h3>단계별</h3>
+{{ ch.hbars(ui.step_cost, "단계별 AI 비용", " USD") }}
+<details><summary>모델·단계별 토큰</summary>
+<table>
+  <thead><tr><th>모델</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th><th>비용</th></tr></thead>
+  <tbody>
+  {% for name, m in s.ai_cost.by_model|dictsort %}<tr><td>{{ name }}</td><td>{{ m.calls }}</td><td>{{ "{:,}".format(m.input_tokens) }}</td><td>{{ "{:,}".format(m.output_tokens) }}</td><td>{{ m.cost_usd|usd if m.cost_usd is not none else "단가 미확인" }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+<table>
+  <thead><tr><th>단계</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th><th>비용</th></tr></thead>
+  <tbody>
+  {% for name, m in s.ai_cost.by_step.items() %}<tr><td>{{ STEP_LABELS.get(name, name) }}</td><td>{{ m.calls }}</td><td>{{ "{:,}".format(m.input_tokens) }}</td><td>{{ "{:,}".format(m.output_tokens) }}</td><td>{{ m.cost_usd|usd }}{% if m.unpriced_calls %} · 단가 미확인 {{ m.unpriced_calls }}회{% endif %}</td></tr>{% endfor %}
+  </tbody>
+</table>
+</details>
+</section>
+
+<section class="card">
+<h2>정책 사유 코드 빈도</h2>
+<p class="note">사유 코드가 붙은 신청 수입니다. 주황은 심사역 회부 기준, 빨강은 거절 기준입니다.</p>
+{{ ch.hbars(ui.reasons, "정책 사유 코드 빈도") }}
+{% if s.reason_codes %}
+<details><summary>사유 코드 설명</summary>
+<table>
+  <thead><tr><th>코드</th><th>설명</th><th>신청</th></tr></thead>
+  <tbody>{% for r in s.reason_codes %}<tr><td>{{ r.key }}</td><td>{{ r.message or "-" }}</td><td>{{ r.count }}</td></tr>{% endfor %}</tbody>
+</table>
+</details>
+{% endif %}
+<h3>처리 플래그 빈도</h3>
+<p class="note">에이전트 대체 경로, 검토 미통과, 데이터 부족처럼 사람이 한 번 더 볼 이유가 생긴 신청 수입니다.</p>
+{{ ch.hbars(ui.flags, "처리 플래그 빈도") }}
+</section>
 </div>
 
 <section class="card">

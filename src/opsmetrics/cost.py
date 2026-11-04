@@ -10,12 +10,26 @@ UNKNOWN_MODEL = "(unknown)"  # 모델명 없는 usage는 단가 미상으로 집
 
 def ai_cost(docs: list[dict[str, Any]], prices: dict[str, dict[str, Any]]) -> dict[str, Any]:
     by_model: dict[str, dict[str, Any]] = {}
+    by_step: dict[str, dict[str, Any]] = {}
     for p in docs:
         for s in p.get("steps") or []:
             for u in s.get("usage") or []:
-                m = by_model.setdefault(u.get("model") or UNKNOWN_MODEL, {"input_tokens": 0, "output_tokens": 0, "calls": 0})
-                for k in ("input_tokens", "output_tokens", "calls"):
-                    m[k] += int(u.get(k) or 0)
+                model = u.get("model") or UNKNOWN_MODEL
+                m = by_model.setdefault(model, {"input_tokens": 0, "output_tokens": 0, "calls": 0})
+                st = by_step.setdefault(s.get("step") or UNKNOWN_MODEL,
+                                        {"input_tokens": 0, "output_tokens": 0, "calls": 0, "cost_usd": 0.0,
+                                         "unpriced_calls": 0})
+                tin, tout, calls = (int(u.get(k) or 0) for k in ("input_tokens", "output_tokens", "calls"))
+                for target in (m, st):
+                    target["input_tokens"] += tin
+                    target["output_tokens"] += tout
+                    target["calls"] += calls
+                price = prices.get(model) or {}
+                pin, pout = price.get("input_per_1m"), price.get("output_per_1m")
+                if pin is None or pout is None:
+                    st["unpriced_calls"] += calls
+                else:
+                    st["cost_usd"] += tin / 1e6 * pin + tout / 1e6 * pout
     total, unpriced = 0.0, 0
     for model, m in by_model.items():
         price = prices.get(model) or {}
@@ -28,6 +42,7 @@ def ai_cost(docs: list[dict[str, Any]], prices: dict[str, dict[str, Any]]) -> di
     n = len(docs)
     return {
         "by_model": by_model,
+        "by_step": by_step,
         "total_usd": total,
         "applications": n,
         "per_application_usd": total / n if n else None,

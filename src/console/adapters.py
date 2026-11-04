@@ -142,10 +142,11 @@ class CosmosPrivacy:
 
 RUNS_QUERY = "SELECT DISTINCT VALUE c.run_id FROM c WHERE IS_STRING(c.run_id)"
 RUN_DOCS_QUERY = "SELECT * FROM c WHERE c.run_id = @run"
+RECENT_DOCS_QUERY = "SELECT TOP @limit * FROM c WHERE IS_STRING(c.received_at) ORDER BY c.received_at DESC"
 
 
 class CosmosOps:
-    """측정 실행별 신청 투영(applications 읽기 전용). 원문 필드는 project()가 버린다."""
+    """측정 실행별·최근 신청 투영(applications 읽기 전용). 원문 필드는 project()가 버린다."""
 
     def __init__(self, applications: Any) -> None:
         self._applications = applications
@@ -156,6 +157,12 @@ class CosmosOps:
     def by_run(self, run_id: str) -> list[dict[str, Any]]:
         items = self._applications.query_items(
             query=RUN_DOCS_QUERY, parameters=[{"name": "@run", "value": run_id}], enable_cross_partition_query=True
+        )
+        return [project(d) for d in items]
+
+    def recent(self, limit: int) -> list[dict[str, Any]]:
+        items = self._applications.query_items(
+            query=RECENT_DOCS_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
         )
         return [project(d) for d in items]
 

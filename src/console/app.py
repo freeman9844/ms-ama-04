@@ -43,7 +43,17 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
-from console.ops import AXIS_LABELS, STEP_LABELS, OpsStore, default_run, ops_view, sorted_runs
+from console.ops import (
+    AXIS_LABELS,
+    RECENT_RUN,
+    STEP_LABELS,
+    OpsStore,
+    default_run,
+    ops_view,
+    run_options,
+    scope_docs,
+    sorted_runs,
+)
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
@@ -552,11 +562,13 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         user = viewer(request)
         store = ops_store()
         runs = sorted_runs(store.runs())
-        if run is not None and run not in runs:
+        if run is not None and run != RECENT_RUN and run not in runs:
             raise HTTPException(404, "run not found")
-        selected = run or default_run(runs)
-        summary = ops_view(store.by_run(selected)) if selected else None
-        return render("ops.html", user, runs=runs, selected=selected, s=summary,
+        selected = run or default_run(runs) or RECENT_RUN
+        docs = scope_docs(store, selected)
+        summary = ops_view(docs) if docs else None
+        return render("ops.html", user, runs=runs, options=run_options(runs), selected=selected,
+                      recent=selected == RECENT_RUN, s=summary,
                       ui=ops_summary(summary, STEP_LABELS) if summary else None,
                       AXIS_LABELS=AXIS_LABELS, STEP_LABELS=STEP_LABELS)
 

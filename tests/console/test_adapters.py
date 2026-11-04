@@ -171,6 +171,9 @@ def test_cosmos_ops_lists_runs_and_projects_docs():
     assert docs[0]["application_id"] == "a" and "assembly" not in docs[0]
     assert docs[0]["policy"] == {"decision": "eligible", "reason_codes": []}
     assert c.queries[1][1] == [{"name": "@run", "value": "load-20261102010000"}]
+    recent = ops.recent(100)
+    assert recent[0]["application_id"] == "a" and "assembly" not in recent[0]
+    assert "ORDER BY c.received_at DESC" in c.queries[2][0] and c.queries[2][1] == [{"name": "@limit", "value": 100}]
     assert all(q[2] for q in c.queries)
 
 

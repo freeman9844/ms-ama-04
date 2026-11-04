@@ -1,15 +1,15 @@
-"""화면 집계(순수 함수, P7): 홈 KPI·분포, 신청 7단계 진행, 사후 모니터링 요약, 운영 지표 게이지.
+"""화면 집계(순수 함수, P7·P9): 홈 KPI·분포, 신청 7단계 진행, 사후 모니터링 요약, 운영 지표 게이지·패널.
 
 저장된 값만 쓴다. 홈 KPI는 목록 쿼리 결과(최근 LIST_LIMIT건)로만 계산한다.
 """
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from console import charts
 from console.monitoring import SEVERITY_LABELS, TRIGGER_LABELS
-from console.statuses import STATUS_LABELS, TERMINAL
+from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -30,6 +30,11 @@ RECOMMENDATIONS = (
     ("none", "권고 없음", "neutral"),
 )
 RECOMMENDATION_LABELS = {key: label for key, label, _ in RECOMMENDATIONS}
+POLICY_DECISIONS = {"eligible": ("적격", "green"), "refer": ("심사역 회부", "amber"), "ineligible": ("부적격", "red")}
+OFFICER_DECISIONS = {"approve": ("승인", "green"), "decline": ("거절", "red")}
+FUNNEL_NONE = {"policy": "판정 없음", "recommendation": "권고 없음", "officer": "미결정"}
+MODEL_COLORS = ("blue", "purple", "teal", "orange", "pink")
+KST_OFFSET = timezone(timedelta(hours=9))
 STEPS = (
     ("received", "접수"),
     ("consent", "동의 완료"),
@@ -316,6 +321,70 @@ def _pct_text(v: float) -> str:
     return f"{v:.0f}%"
 
 
+def _funnel_parts(kind: str, counts: Mapping[str, int]) -> list[tuple[str, Any, str]]:
+    labels = {"policy": POLICY_DECISIONS, "officer": OFFICER_DECISIONS,
+              "recommendation": {k: (label, color) for k, label, color in RECOMMENDATIONS}}[kind]
+    parts = []
+    for key, n in counts.items():
+        label, color = (FUNNEL_NONE[kind], "neutral") if key == "none" else labels.get(key, (key, "grey"))
+        parts.append((label, n, color))
+    return parts
+
+
+def _seconds(ms: Any) -> float | None:
+    return round(ms / 1000, 1) if charts.is_num(ms) else None
+
+
+def _sec_text(v: float) -> str:
+    return f"{v:,.0f}초" if v >= 10 else f"{v:,.1f}초"
+
+
+def _bucket_label(iso: str, index: int) -> str:
+    d = _dt(iso)
+    return d.astimezone(KST_OFFSET).strftime("%H:%M") if d and index % 6 == 0 else ""
+
+
+def ops_insights(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[str, Any]:
+    """P9 §8 운영 패널 기하: 결정 퍼널, 단계별 처리 시간, AI 비용, 사유 코드·플래그 빈도, 10분 처리량."""
+    funnel = s.get("funnel") or {}
+    funnel_rows = charts.stacked([(title, _funnel_parts(kind, funnel.get(kind) or {}))
+                                  for kind, title in (("policy", "정책 판정"), ("recommendation", "에이전트 권고"),
+                                                      ("officer", "심사역 결정"))])
+    lat_groups = []
+    for step, r in (s.get("step_latency") or {}).items():
+        name, p50, p95 = step_labels.get(step, step), _seconds(r.get("p50_ms")), _seconds(r.get("p95_ms"))
+        lat_groups.append((name, [[("p50", p50, "blue", f"{name} p50 {p50}초 · {r.get('n')}회")],
+                                  [("p95", p95, "purple", f"{name} p95 {p95}초 · {r.get('n')}회")]]))
+    cost = s.get("ai_cost") or {}
+    priced = [(m, round(v["cost_usd"], 4)) for m, v in (cost.get("by_model") or {}).items()
+              if charts.is_num(v.get("cost_usd"))]
+    model_donut = charts.donut([(m, c, MODEL_COLORS[i % len(MODEL_COLORS)]) for i, (m, c) in enumerate(priced)])
+    model_donut["total"] = round(model_donut["total"], 4)
+    step_cost = charts.hbars([(step_labels.get(k, k), round(v.get("cost_usd") or 0.0, 4), "purple")
+                              for k, v in (cost.get("by_step") or {}).items()], width=480, label_w=120)
+    reasons = charts.hbars([(r["key"], r["count"], "amber" if r["key"].startswith("R1") else "red")
+                            for r in s.get("reason_codes") or []], width=480, label_w=72)
+    flags = charts.hbars([(FLAG_LABELS.get(f["key"], f["key"]), f["count"], "orange") for f in s.get("flags") or []],
+                         width=560, label_w=232)
+    groups = []
+    for i, b in enumerate((s.get("throughput") or {}).get("buckets") or []):
+        at = _bucket_label(b["start"], 0)
+        groups.append((_bucket_label(b["start"], i), [[("접수", b["received"], "blue", f"{at} 접수 {b['received']}건")],
+                                                      [("심사역 대기 도달", b["reached"], "green",
+                                                        f"{at} 심사역 대기 도달 {b['reached']}건")]]))
+    throughput = charts.columns(groups, width=720, height=220) if groups else None
+    return {
+        "funnel": funnel_rows,
+        "step_latency": charts.columns(lat_groups, width=640, height=220, tick_fmt=_sec_text) if lat_groups else None,
+        "model_cost": model_donut,
+        "model_colors": [(m, MODEL_COLORS[i % len(MODEL_COLORS)], f"${c:,.4f}") for i, (m, c) in enumerate(priced)],
+        "step_cost": step_cost,
+        "reasons": reasons,
+        "flags": flags,
+        "throughput": throughput,
+    }
+
+
 def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[str, Any]:
     lat = s.get("latency") or {}
     target = lat.get("target_min")
@@ -354,4 +423,5 @@ def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[st
         "success_tone": "neutral" if success["frac"] is None else ("green" if success_src.get("met") else "red"),
         "steps": steps,
         "fairness": fairness,
+        **ops_insights(s, step_labels),
     }
