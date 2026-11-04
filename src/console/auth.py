@@ -33,7 +33,7 @@ class Principal:
 
     @property
     def can_decide(self) -> bool:
-        """승인·조건부·거절 결정과 신규 신청 제출."""
+        """승인·거절 결정과 신규 신청 제출."""
         return bool(self.roles & _DECIDERS)
 
     @property

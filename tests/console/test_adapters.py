@@ -51,6 +51,7 @@ def test_list_recent_queries_projection_across_partitions():
     assert (kind, query, cross) == ("query", LIST_QUERY, True)
     assert params == [{"name": "@limit", "value": 50}]
     assert "ORDER BY c.updated_at DESC" in query and "c.assessment.recommendation AS recommendation" in query
+    assert "c.source" in query
     assert "c.assessment " not in query.replace("c.assessment.recommendation", "")
 
 

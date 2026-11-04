@@ -76,7 +76,7 @@ class StartRequest(BaseModel):
     requested_tenor_months: int = Field(ge=1, le=12)
     sla_hours: float = Field(default=24, gt=0, le=720)
     submitted_at: datetime | None = None
-    source: Literal["console", "load", "fault"] | None = None
+    source: Literal["console", "customer", "load", "fault"] | None = None
     run_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
 
     @field_validator("submitted_at")

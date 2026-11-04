@@ -90,6 +90,7 @@ details summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
 .sev-low { background: #deecf9; color: var(--accent-dark); }
 .m-completed { background: #dff6dd; color: var(--good); }
 .badge-neutral { background: #edebe9; color: var(--muted); }
+.badge-blue { background: #deecf9; color: var(--accent-dark); }
 .rec-approve { background: #dff6dd; color: var(--good); }
 .rec-conditional { background: #deecf9; color: var(--accent-dark); }
 .rec-refer { background: #efe6f8; color: #5c2e91; }
@@ -241,3 +242,14 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
   .step { flex-direction: row; text-align: left; }
   .step::before { display: none; }
 }
+
+/* 고객 신청 페이지(심사 메뉴 없는 레이아웃) */
+.apply-top { background: var(--accent-dark); color: #fff; padding: .8rem 1.5rem; }
+.apply-top a { color: #fff; font-weight: 600; text-decoration: none; }
+.apply-main { max-width: 720px; margin: 0 auto; }
+.consent-item { display: block; padding: .6rem .8rem; margin: 0 0 .6rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.consent-item small { display: block; color: var(--muted); margin-left: 1.6rem; }
+.apply-status { font-size: 1.4rem; font-weight: 600; }
+.apply-status.s-good { color: var(--good); }
+.apply-status.s-bad { color: var(--bad); }
+.apply-status.s-pending { color: var(--accent-dark); }

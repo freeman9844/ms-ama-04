@@ -2,7 +2,8 @@
 
 인증은 Container Apps 기본 인증(Easy Auth)이 맡고, 앱은 X-MS-CLIENT-PRINCIPAL의 앱 역할로 권한을 정한다.
 결정·신규 신청·사후 재생·재조정 결정·동의 명령·이의제기는 큐 메시지로만 오케스트레이터에 전달한다
-(콘솔은 Cosmos 읽기 전용). /borrower는 차주 화면을 흉내 낸 데모 시뮬레이터다.
+(콘솔은 Cosmos 읽기 전용). /borrower는 차주 화면을 흉내 낸 데모 시뮬레이터이고,
+/apply는 콘솔 역할 없이 셀러가 직접 신청하는 고객 페이지다.
 """
 
 import hashlib
@@ -22,6 +23,7 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
+from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply
 from console.dashboard import (
     RECOMMENDATION_LABELS,
     detail_summary,
@@ -44,6 +46,8 @@ from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
+    CONSENT_PURPOSE,
+    CONSENT_TTL_DAYS,
     KST,
     ConsentCommand,
     GrievanceDecision,
@@ -253,6 +257,48 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return render("new.html", user, 422, error="신청 정보가 올바르지 않습니다.", form=form)
         deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
+
+    def customer(request: Request) -> Principal:
+        """고객 페이지는 콘솔 역할을 묻지 않는다. 로그인(또는 데모 주체)만 있으면 된다."""
+        user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
+        if user is None:
+            raise HTTPException(401, "login required")
+        return user
+
+    def apply_form(user: Principal, status_code: int = 200, **ctx: Any) -> HTMLResponse:
+        return render("apply.html", user, status_code, consent_items=CONSENT_ITEMS, purpose=CONSENT_PURPOSE,
+                      ttl_days=CONSENT_TTL_DAYS, **ctx)
+
+    @app.get("/apply", response_class=HTMLResponse)
+    def apply_page(request: Request) -> HTMLResponse:
+        return apply_form(customer(request))
+
+    @app.post("/apply")
+    async def apply_submit(request: Request):
+        user = customer(request)
+        form = await checked_form(request, user)
+        code = validate_apply(form, DEMO_APPLICANTS)
+        if code:
+            return apply_form(user, 422, error=APPLY_ERRORS[code], error_code=code, form=form)
+        req = StartRequest(
+            application_id=deps.new_application_id(),
+            applicant_id=form["applicant_id"].strip(),
+            requested_amount_krw=_int(form["requested_amount_krw"]),
+            requested_tenor_months=_int(form["requested_tenor_months"]),
+            submitted_at=deps.clock(),
+            source="customer",
+        )
+        deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
+        return RedirectResponse(f"/apply/{quote(req.application_id, safe='')}", status_code=303)
+
+    @app.get("/apply/{application_id}", response_class=HTMLResponse)
+    def apply_status(application_id: str, request: Request) -> HTMLResponse:
+        user = customer(request)
+        doc = deps.store.get(application_id)
+        if doc is not None and doc.get("source") != "customer":
+            raise HTTPException(404, "not a customer application")
+        return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
+                      seller=seller_label(doc["applicant_id"]) if doc else None)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
     def show(application_id: str, request: Request) -> HTMLResponse:

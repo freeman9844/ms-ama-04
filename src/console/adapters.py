@@ -25,7 +25,7 @@ PROOFS = "deletion_proofs"
 GRIEVANCES = "grievances"
 PSEUDONYM_SECRET = "pseudonym-key"
 LIST_QUERY = (
-    "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, "
+    "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, c.source, "
     "c.assessment.recommendation AS recommendation FROM c ORDER BY c.updated_at DESC"
 )
 
