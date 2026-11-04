@@ -5,7 +5,7 @@ from datetime import date
 import httpx
 import pytest
 
-from agents.classify import Category
+from agents.classify import Category, classify
 from agents.runtime import AgentError, AgentRun
 from agents.txn_classify import (
     ABSTAIN,
@@ -107,12 +107,17 @@ def test_only_unique_unclassified_descriptions_reach_decision_model(cafe):
     decider = FakeDecider()
     result = run(cafe.transactions, decider)
     sent = sorted(s["description"] for s in decider.states)
-    assert sent == ["(주)동대문패브릭", "CJ대한통운 택배"]
+    assert sent == [
+        "(주)동대문패브릭", "(주)박스왕포장", "CJ대한통운 택배비", "국민연금공단", "근로복지공단 고용산재",
+        "네이버 검색광고 충전", "사방넷 이용료", "신한카드 결제대금", "카페24 이용료",
+    ]
     assert {s["business_industry"] for s in decider.states} == {"카페"}
-    assert {(s["direction"], s["transaction_type"]) for s in decider.states} == {("outflow", "TRANSFER_OUT")}
+    assert {(s["direction"], s["transaction_type"]) for s in decider.states} == {
+        ("outflow", "TRANSFER_OUT"), ("outflow", "AUTO_DEBIT"),
+    }
     supplier_txns = [t for t in cafe.transactions if t.description in sent]
     m = result.metrics
-    assert (m["unclassified_txns"], m["unique_descriptions"], m["decision_calls"]) == (len(supplier_txns), 2, 2)
+    assert (m["unclassified_txns"], m["unique_descriptions"], m["decision_calls"]) == (len(supplier_txns), 9, 9)
     assert result.overrides == {}  # 공급처는 이미 영업비용이라 특성에 반영할 것이 없다
     assert {i["label"] for i in result.items} == {"supplier"}
     assert sum(i["count"] for i in result.items) == len(supplier_txns)
@@ -205,7 +210,7 @@ def test_cache_failure_degrades_to_model_calls():
 
 def test_rule_classified_transactions_are_untouched(cafe):
     decider = FakeDecider()
-    run([t for t in cafe.transactions if t.txn_type_code != "TRANSFER_OUT"], decider)
+    run([t for t in cafe.transactions if classify(t) is not Category.UNCLASSIFIED_OUT], decider)
     assert decider.states == []
 
 

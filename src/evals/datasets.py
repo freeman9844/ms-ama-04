@@ -35,6 +35,10 @@ TRUTH_LABEL: dict[TxnCategory, str | None] = {
     TxnCategory.HIGH_COST_LENDER: "high_cost_lender",
     TxnCategory.TAX: "tax_or_insurance",
     TxnCategory.SOCIAL_INSURANCE: "tax_or_insurance",
+    TxnCategory.SHIPPING: "supplier",
+    TxnCategory.ADVERTISING: "other_operating",
+    TxnCategory.CARD_PAYMENT: "other_operating",
+    TxnCategory.SOLUTION_FEE: "other_operating",
     TxnCategory.REVENUE: None,
     TxnCategory.LOAN_PROCEEDS: None,
 }

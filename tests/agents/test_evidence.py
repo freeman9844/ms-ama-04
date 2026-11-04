@@ -31,10 +31,10 @@ def catalogs():
 
 def test_catalog_exposes_features_signals_and_policy(catalogs):
     c = catalogs["seller-dailylook-01"]
-    assert c["M:dscr"] == 3.783
-    assert c["M:cash_buffer_days"] == 122.2
+    assert c["M:dscr"] == 4.106
+    assert c["M:cash_buffer_days"] == 22.7
     assert c["M:requested_amount_krw"] == 3_300_000
-    assert c["M:avg_monthly_noi_krw"] == 1_494_712
+    assert c["M:avg_monthly_noi_krw"] == 2_674_318
     assert c["M:new_installment_krw"] == 287_061
     assert c["P:max_amount_krw"] == 3_300_000
     assert "M:classification_rules" not in c

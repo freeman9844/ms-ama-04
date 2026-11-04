@@ -209,7 +209,7 @@ def test_transactions_summary_reports_coverage_gaps_and_types(cases):
     agent = ScriptedAgent(["transactions"])
     run_assembly(case, agent=agent)
     s = agent.tool_outputs[0]
-    assert (s["source"], s["count"], s["months_covered"], s["gap_months"]) == ("transactions", len(case.transactions), 5, [])
+    assert (s["source"], s["count"], s["months_covered"], s["gap_months"]) == ("transactions", len(case.transactions), 4, [])
     assert s["first_date"] == case.transactions[0].booked_on.isoformat()
     assert sum(s["type_counts"].values()) == len(case.transactions)
 

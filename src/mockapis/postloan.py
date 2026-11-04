@@ -13,23 +13,20 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 
-from mockapis.synth import (
-    _BANK_REPAYMENT_KRW,
-    _BASE_DAILY,
-    _CARD_PGS,
-    _HEALTH_INSURANCE_KRW,
-    _MARKETPLACES,
-    _OWNER_DRAW_KRW,
-    _PAYROLL_KRW,
-    _PERSONAS,
-    _PG_FEE_RATE,
-    _RENT_KRW,
-    _SEASONAL,
-    _VAT_KRW,
-    SyntheticCase,
-    TxnCategory,
-)
+from mockapis.synth import SyntheticCase, TxnCategory
 from shared.contracts import Transaction, TxnTypeCode
+
+_SEASONAL = {1: 0.8, 2: 0.8, 7: 1.4, 8: 1.4, 12: 1.2}
+_BASE_DAILY = 133_000
+_PG_FEE_RATE = 0.068
+_CARD_PGS = ("토스페이먼츠", "KG이니시스", "NHN KCP")
+_MARKETPLACES = ("스마트스토어", "쿠팡", "11번가")
+_RENT_KRW = 417_000
+_PAYROLL_KRW = (467_000, 433_000)
+_HEALTH_INSURANCE_KRW = 80_000
+_BANK_REPAYMENT_KRW = 108_000
+_VAT_KRW = 300_000
+_OWNER_DRAW_KRW = 250_000
 
 POSTLOAN_DAYS = 91
 STACKING_ONSET_DAY = 7
@@ -80,7 +77,7 @@ def generate_postloan(
     case: SyntheticCase, scenario: FlowScenario, start: date, seed: int, days: int = POSTLOAN_DAYS
 ) -> PostLoanFlow:
     rng = random.Random(seed)
-    persona = _PERSONAS[case.archetype]
+    persona = case.persona
     stacking = scenario is FlowScenario.STACKING
     onset = start + timedelta(days=STACKING_ONSET_DAY) if stacking else None
     opening = case.transactions[-1].balance_after_krw if case.transactions else 0

@@ -297,7 +297,7 @@ class FakeDecider:
 ANALYST_DRAFT = {
     "recommendation": "approve",
     "summary": "상환 여력이 충분하다.",
-    "claims": [{"text": "DSCR은 3.802다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
+    "claims": [{"text": "DSCR은 4.106다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
     "proposed_structure": {
         "amount_krw": 3_300_000, "tenor_months": 12, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
     },
@@ -342,10 +342,11 @@ def test_underwrite_classifies_unresolved_without_caching_transfers(deps):
     assert m["decision_calls"] == m["unique_descriptions"] > 0 and m["cache_hits"] == 0
     assert first["category_overrides"] == {}
     assert {s["business_industry"] for s in decider.states} == {"패션의류"}
-    # 데모의 미분류 적요는 모두 이체(공급처 송금)라 공유 캐시에 남지 않는다.
-    assert not any(c == "classifications" for c, _ in deps.store.docs)
+    # 자동이체 적요(연금·솔루션·카드대금)만 공유 캐시에 남고, 이체(공급처 송금·광고 충전)는 남지 않는다.
+    cached = [k for c, k in deps.store.docs if c == "classifications"]
+    assert 0 < len(cached) < m["unique_descriptions"]
     second = underwrite(d, underwrite_input(consent["consent_id"]))["classification"]["metrics"]
-    assert (second["decision_calls"], second["cache_hits"]) == (m["unique_descriptions"], 0)
+    assert (second["decision_calls"], second["cache_hits"]) == (m["unique_descriptions"] - len(cached), len(cached))
 
 
 def test_underwrite_records_fallback_conversation_on_consent(deps):
