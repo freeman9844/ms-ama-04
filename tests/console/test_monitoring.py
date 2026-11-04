@@ -173,7 +173,7 @@ def test_replay_is_blocked_while_one_is_running(setup):
 
 
 def test_restructure_form_waits_for_replay_to_finish(setup):
-    # 재생 중에는 10초 자동 새로 고침이 입력 중인 사유를 지우므로 결정 폼을 숨긴다.
+    # 재생 중에는 3초 자동 새로 고침이 입력 중인 사유를 지우므로 결정 폼을 숨긴다.
     client, *_ = setup(loan=make_loan(status="replaying", started_at=NOW - timedelta(minutes=5)))
     page = client.get("/loans/app-1", headers=OFFICER).text
     assert 'http-equiv="refresh"' in page and "/restructure" not in page
@@ -280,3 +280,31 @@ def test_stopped_replay_can_start_again(setup):
     assert "재생 종료" in page
     assert client.post("/loans/app-1/replay", data={"csrf": csrf(client)}, headers=OFFICER).status_code == 202
     assert queue.sent == [(REPLAY_QUEUE, {"loan_id": "app-1"})]
+
+
+def test_replay_sent_page_forwards_to_loan_until_the_replay_starts(setup):
+    client, _, store, _ = setup()
+    r = client.post("/loans/app-1/replay", data={"csrf": csrf(client)}, headers=OFFICER)
+    m = re.search(r'http-equiv="refresh" content="1;url=(/loans/app-1\?since=[0-9a-f]{12})"', r.text)
+    assert m, r.text
+    waiting = client.get(m.group(1), headers=OFFICER).text
+    assert re.search(r'content="2;url=/loans/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
+    store.loans["app-1"] = make_loan(status="replaying", started_at=NOW - timedelta(minutes=1), replay_id="rp-2")
+    running = client.get(m.group(1), headers=OFFICER).text
+    assert '<meta http-equiv="refresh" content="3">' in running and "3초마다" in running
+
+
+def test_restructure_sent_page_watches_alert_changes(setup, mask):
+    client, _, store, _ = setup(loan=held_loan("paused"))
+    form = {"csrf": csrf(client), "decision": "approve", "reason": "3개월 유예"}
+    sent = client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER)
+    url = re.search(r'content="1;url=(/loans/app-1\?since=[0-9a-f]{12})"', sent.text).group(1)
+    assert "반영을 기다리는 중" in client.get(url, headers=OFFICER).text
+    store.alerts = [make_alert(mask, "approved")]
+    assert "반영을 기다리는 중" not in client.get(url, headers=OFFICER).text
+
+
+def test_loans_list_shows_business_name_to_deciders(setup):
+    client, *_ = setup()
+    assert "성수데일리룩" in client.get("/loans", headers=OFFICER).text
+    assert "성수데일리룩" not in client.get("/loans", headers=AUDITOR_H).text

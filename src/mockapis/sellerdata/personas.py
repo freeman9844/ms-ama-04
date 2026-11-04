@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 
 from shared.segments import SELLER_INDUSTRIES
-from shared.sellers import SELLER_BY_ID
+from shared.sellers import LOAD_BUSINESS_NAMES, LOAD_NAMES_PER_INDUSTRY, SELLER_BY_ID
 
 BRN_WEIGHTS = (1, 3, 7, 1, 3, 7, 1, 3, 5)
 
@@ -65,15 +65,6 @@ DEMO_PERSONAS: dict[str, Persona] = {
                               (0.65, 0.35), 18_000_000),
 }
 
-# 업종별 부하 셀러 상호(업종당 8개: 부하 격자 48건 / 업종 6개).
-_LOAD_NAMES: dict[str, tuple[str, ...]] = {
-    "패션의류": ("오늘의핏", "모노데일리", "린넨앤코", "스트릿무드", "어반클로젯", "데님하우스", "소프트니트", "위켄드룩"),
-    "뷰티": ("글로우랩", "수분공방", "퓨어스킨샵", "데일리코스", "블룸뷰티", "클린앤글로우", "로즈마리랩", "에센셜바이미"),
-    "식품": ("산지곳간", "제주감귤농장", "할매반찬", "바다식탁", "곡물상회", "따뜻한도시락", "청정한우몰", "햇살과일가게"),
-    "리빙": ("살림공간", "우드앤홈", "모던키친", "포근침구", "정리의기술", "그린플랜트", "라탄하우스", "세라믹데이"),
-    "디지털": ("픽셀기어", "테크박스", "모바일플러스", "케이블마켓", "스마트액세서리", "게이밍존", "오디오랩", "충전공방"),
-    "반려동물": ("멍냥상점", "펫밀키친", "꼬리살랑", "냥이식탁", "산책하개", "펫케어랩", "도그앤캣", "털복숭이마켓"),
-}
 _SURNAMES = "김이박최정강조윤장임한오서신권황안송류전홍고문양손배백허유남"
 _GIVEN = ("도윤", "서하", "지호", "하은", "민준", "아름", "다인", "우진", "세린", "민혁", "소율", "준서", "예린", "태윤",
           "유진", "서진", "도하", "가은", "도현", "정민", "시우", "지안", "건우", "수아", "현우", "채윤", "은우", "지유",
@@ -89,7 +80,6 @@ _LOAD_CHANNELS: dict[str, tuple[tuple[str, float], ...]] = {
 _LOAD_SUPPLIERS = {"패션의류": "(주)신상패브릭", "뷰티": "(주)코스메디 OEM", "식품": "(주)들녘농산",
                    "리빙": "(주)리빙메이트 제조", "디지털": "(주)테크원 유통", "반려동물": "(주)펫푸드코리아"}
 _COURIERS = ("CJ대한통운", "한진택배", "롯데글로벌로지스", "우체국택배")
-LOAD_NAMES_PER_INDUSTRY = 8
 
 
 def person_name(slot: int) -> str:
@@ -102,7 +92,7 @@ def load_persona(industry: str, region: str, index: int) -> Persona:
     """부하 셀러 페르소나. index는 같은 업종 안의 순번(0~7)이라 상호·사람 이름이 겹치지 않는다."""
     slot = SELLER_INDUSTRIES.index(industry) * LOAD_NAMES_PER_INDUSTRY + index
     return Persona(
-        business_name=_LOAD_NAMES[industry][index % LOAD_NAMES_PER_INDUSTRY],
+        business_name=LOAD_BUSINESS_NAMES[industry][index % LOAD_NAMES_PER_INDUSTRY],
         representative=person_name(3 * slot),
         employees=(person_name(3 * slot + 1), person_name(3 * slot + 2)),
         suppliers=(_LOAD_SUPPLIERS[industry], "(주)박스왕포장"),

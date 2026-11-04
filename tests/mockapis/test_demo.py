@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from mockapis.demo import DEMO_APPLICANTS, LOAD_ARCHETYPE, build_demo_cases, build_load_cases, load_secret, resolve_as_of
 from mockapis.synth import INJECTION_TEXT, Archetype
 from shared.segments import LOAD_GRID, SELLER_INDUSTRIES
-from shared.sellers import DEMO_SELLERS, seller_label
+from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
 DIGESTS = {
     "seller-dailylook-01": "9ba75badfa58b748",
@@ -130,3 +130,9 @@ def test_every_applicant_is_an_online_seller():
     as_of = date(2026, 10, 1)
     cases = {**build_demo_cases(as_of), **build_load_cases(as_of)}
     assert {c.profile.industry for c in cases.values()} <= set(SELLER_INDUSTRIES)
+
+def test_seller_name_matches_generated_business_names():
+    as_of = date(2026, 10, 1)
+    cases = {**build_demo_cases(as_of), **build_load_cases(as_of)}
+    assert {k: seller_name(k) for k in cases} == {k: c.persona.business_name for k, c in cases.items()}
+    assert seller_name("someone-else") is None

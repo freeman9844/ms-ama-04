@@ -122,7 +122,7 @@ def test_status_before_document_exists_is_pending_with_refresh(env):
     client, _, _ = env
     html = client.get("/apply/app-20261104-c0ffee", headers=CUSTOMER).text
     assert "접수 대기" in html
-    assert '<meta http-equiv="refresh" content="10">' in html
+    assert '<meta http-equiv="refresh" content="3">' in html
 
 
 @pytest.mark.parametrize(("status", "label", "refresh"), [

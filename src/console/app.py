@@ -8,6 +8,7 @@
 
 import hashlib
 import hmac
+import json
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -72,7 +73,7 @@ from journey.models import (
     replay_in_progress,
 )
 from journey.validation import validate_officer_decision
-from shared.sellers import DEMO_SELLERS, seller_label
+from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
 HERE = Path(__file__).parent
 START_QUEUE = "applications-start"
@@ -85,6 +86,9 @@ GRIEVANCE_DECISION_QUEUE = "grievance-decisions"
 MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
 DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
+# 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
+WATCH_SECONDS = 2
+WATCH_LIMIT = 30
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 # form-action은 넣지 않는다: Easy Auth 세션 만료 시 로그인 리디렉션(login.microsoftonline.com)을 막는다.
@@ -137,6 +141,24 @@ class ConsoleDeps:
     ops: OpsStore | None = None
 
 
+def state_tag(*docs: Any) -> str:
+    """문서 상태의 짧은 지문. 큐 처리 전후로 값이 바뀌었는지만 본다."""
+    body = json.dumps(docs, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha1(body.encode()).hexdigest()[:12]
+
+
+def watch_url(request: Request, path: str, tag: str) -> str | None:
+    """?since=<보낼 때 지문>이 지금 지문과 같으면 아직 반영 전이다. 다음 확인 URL을 돌려준다."""
+    since = request.query_params.get("since")
+    try:
+        n = int(request.query_params.get("n", "0"))
+    except ValueError:
+        n = WATCH_LIMIT
+    if not since or since != tag or n >= WATCH_LIMIT:
+        return None
+    return f"{path}?since={quote(since, safe='')}&n={n + 1}"
+
+
 def _krw(value: Any) -> str:
     return f"{value:,}원" if isinstance(value, int) and not isinstance(value, bool) else "-"
 
@@ -151,6 +173,7 @@ def _templates() -> Environment:
     env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
     env.filters["seller_label"] = seller_label
+    env.filters["seller_name"] = seller_name
     env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
     for name, labels in LABEL_FILTERS.items():
         env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
@@ -320,7 +343,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         doc = deps.store.get(application_id)
         if doc is None:
             return render("pending.html", user, 404, application_id=application_id)
-        return detail(user, doc)
+        path = f"/applications/{quote(application_id, safe='')}"
+        return detail(user, doc, watch_url=watch_url(request, path, state_tag(doc)))
 
     @app.post("/applications/{application_id}/decision", response_class=HTMLResponse)
     async def decide(application_id: str, request: Request) -> HTMLResponse:
@@ -351,7 +375,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return detail(user, doc, 422, error=DECISION_ERRORS.get(error, error), error_code=error, form=form)
         message = OfficerMessage(application_id=application_id, decision=decision.model_dump(mode="json"))
         deps.queue.send(DECISION_QUEUE, message.model_dump(mode="json"))
-        return render("sent.html", user, 202, application_id=application_id, decision=decision)
+        return render("sent.html", user, 202, application_id=application_id, decision=decision, since=state_tag(doc))
 
     def monitoring_store() -> MonitoringStore:
         if deps.monitoring is None:
@@ -364,9 +388,20 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "loan not found")
         return loan
 
-    def loan_page(user: Principal, loan: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
+    def loan_alerts(loan: dict[str, Any]) -> list[dict[str, Any]]:
+        replay_id = (loan.get("monitoring") or {}).get("replay_id")
+        return monitoring_store().list_alerts(loan["id"], replay_id) if replay_id else []
+
+    def loan_sent(user: Principal, loan: dict[str, Any], message: str, note: str | None = None) -> HTMLResponse:
+        return render("loan_sent.html", user, 202, loan_id=loan["id"], message=message, note=note,
+                      since=state_tag(loan, loan_alerts(loan)))
+
+    def loan_page(user: Principal, loan: dict[str, Any], status_code: int = 200,
+                  request: Request | None = None, **ctx: Any) -> HTMLResponse:
         mon = loan.get("monitoring") or {}
-        alerts = monitoring_store().list_alerts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else []
+        alerts = loan_alerts(loan)
+        if request is not None:
+            ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
         raw = load_monitoring_raw(deps.raw, loan)
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore)
         blocked = replay_in_progress(mon, deps.clock())
@@ -382,7 +417,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     @app.get("/loans/{loan_id}", response_class=HTMLResponse)
     def loan_detail(loan_id: str, request: Request) -> HTMLResponse:
         user = viewer(request)
-        return loan_page(user, loan_or_404(loan_id))
+        return loan_page(user, loan_or_404(loan_id), request=request)
 
     @app.post("/loans/{loan_id}/replay", response_class=HTMLResponse)
     async def replay(loan_id: str, request: Request) -> HTMLResponse:
@@ -395,10 +430,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return loan_page(user, loan, 409, error="재조정 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다.")
         # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
         deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
-        return render(
-            "loan_sent.html", user, 202, loan_id=loan["id"],
-            message="사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.",
-        )
+        return loan_sent(user, loan, "사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.")
 
     @app.post("/loans/{loan_id}/replay/{action}", response_class=HTMLResponse)
     async def replay_resume_or_stop(loan_id: str, action: str, request: Request) -> HTMLResponse:
@@ -414,15 +446,14 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         deps.queue.send(REPLAY_QUEUE, message.model_dump(mode="json"))
         weeks_left = WEEKS - (mon.get("paused_week") or 0)
         text = f"남은 {weeks_left}주 재생을 이어서 요청했습니다." if action == "resume" else "남은 재생을 종료하도록 요청했습니다."
-        return render("loan_sent.html", user, 202, loan_id=loan["id"], message=text)
+        return loan_sent(user, loan, text)
 
     @app.post("/loans/{loan_id}/alerts/{alert_id}/restructure", response_class=HTMLResponse)
     async def restructure(loan_id: str, alert_id: str, request: Request) -> HTMLResponse:
         user = decider(request)
         form = await checked_form(request, user)
         loan = loan_or_404(loan_id)
-        replay_id = (loan.get("monitoring") or {}).get("replay_id")
-        alerts = monitoring_store().list_alerts(loan["id"], replay_id) if replay_id else []
+        alerts = loan_alerts(loan)
         alert = next((a for a in alerts if a.get("alert_id") == alert_id), None)
         if alert is None:
             raise HTTPException(404, "alert not found")
@@ -440,9 +471,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if not reason:
             return loan_page(user, loan, 422, error="사유를 입력해야 합니다.")
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
-        return render(
-            "loan_sent.html", user, 202, loan_id=loan["id"],
-            message=f"재조정 결정({message.decision})을 큐에 보냈습니다.",
+        return loan_sent(
+            user, loan, f"재조정 결정({message.decision})을 큐에 보냈습니다.",
             note="결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요." if replay_held(loan.get("monitoring")) else None,
         )
 

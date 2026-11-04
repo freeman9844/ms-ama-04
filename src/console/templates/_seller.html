@@ -1,0 +1,2 @@
+{# 신청인 표시: 실명 복원 권한(심사역·관리자)에는 상호와 ID, 감사인에는 ID만. #}
+{% macro applicant(applicant_id, restore) %}{% set name = applicant_id|seller_name if restore else none %}{% if name %}{{ name }} <small class="applicant-id">{{ applicant_id }}</small>{% else %}{{ applicant_id }}{% endif %}{% endmacro %}

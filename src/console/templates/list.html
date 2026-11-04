@@ -34,7 +34,7 @@
   <h2>신청 목록</h2>
   <table>
     <thead><tr><th>신청 ID</th><th>신청인</th><th>상태</th><th>신청 금액</th><th>에이전트 권고</th><th>갱신 시각</th></tr></thead>
-    <tbody hx-get="/applications/rows" hx-trigger="every 15s" hx-swap="innerHTML">
+    <tbody hx-get="/applications/rows" hx-trigger="every 3s" hx-swap="innerHTML">
 {% include "_rows.html" %}
     </tbody>
   </table>

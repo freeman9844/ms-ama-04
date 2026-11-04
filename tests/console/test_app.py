@@ -348,3 +348,33 @@ def test_easy_auth_mode_has_no_demo_banner(env):
     client, _ = env
     page = client.get("/", headers=OFFICER).text
     assert "데모 모드" not in page and "/.auth/logout" in page
+
+
+def test_decision_sent_page_forwards_to_detail_until_the_decision_lands(env, make_doc):
+    client, _ = env
+    resp = decide(client, OFFICER, csrf(client, OFFICER))
+    m = re.search(r'http-equiv="refresh" content="1;url=(/applications/app-1\?since=[0-9a-f]{12})"', resp.text)
+    assert m, resp.text
+    waiting = client.get(m.group(1), headers=OFFICER).text
+    assert re.search(r'content="2;url=/applications/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
+    assert "반영을 기다리는 중" in waiting
+    assert 'http-equiv="refresh"' not in client.get(m.group(1) + "&n=30", headers=OFFICER).text
+    client.app.state.deps.store.docs["app-1"] = make_doc(status="approved")
+    landed = client.get(m.group(1), headers=OFFICER).text
+    assert 'http-equiv="refresh"' not in landed and "반영을 기다리는 중" not in landed
+
+
+def test_in_progress_pages_refresh_quickly(env, make_doc):
+    client, _ = env
+    client.app.state.deps.store.docs["app-1"] = make_doc(status="received")
+    assert '<meta http-equiv="refresh" content="3">' in client.get("/applications/app-1", headers=OFFICER).text
+    assert '<meta http-equiv="refresh" content="2">' in client.get("/applications/app-9", headers=OFFICER).text
+    assert 'hx-trigger="every 3s"' in client.get("/", headers=OFFICER).text
+
+
+def test_list_shows_business_name_to_deciders_and_id_to_auditors(env):
+    client, _ = env
+    rows = client.get("/applications/rows", headers=OFFICER).text
+    assert "성수데일리룩" in rows and "seller-dailylook-01" in rows
+    assert "성수데일리룩" not in client.get("/applications/rows", headers=AUDITOR_H).text
+    assert "성수데일리룩" in client.get("/applications/app-1", headers=OFFICER).text

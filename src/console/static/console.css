@@ -285,3 +285,4 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
 .claim-mark.missing { color: var(--warn); }
 p.warn { background: #fff4ce; border-left: 4px solid var(--c-amber); padding: .5rem .75rem; color: var(--warn); }
 @media (max-width: 900px) { .signal { grid-template-columns: 14px 1fr; } .signal .chart, .signal-text { grid-column: 2; } }
+.applicant-id { color: var(--muted); font-size: .8em; }

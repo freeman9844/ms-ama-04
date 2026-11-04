@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_seller.html" as sl %}
 {% set nav = "grievances" %}
 {% block title %}이의제기 · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
@@ -10,7 +11,7 @@
 <tr>
   <td><a href="/grievances/{{ r.application_id|path }}/{{ r.grievance_id|path }}">{{ r.grievance_id }}</a></td>
   <td>{{ r.application_id }}</td>
-  <td>{{ r.applicant_id }}</td>
+  <td>{{ sl.applicant(r.applicant_id, user.can_restore) }}</td>
   <td><span class="status g-{{ r.status }}">{{ r.status|grievance_status }}</span></td>
   <td>{{ r.submitted_at }}</td>
   <td>{{ r.resolved_at or "" }}</td>

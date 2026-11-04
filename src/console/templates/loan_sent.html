@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% set nav = "loans" %}
+{% block head %}<meta http-equiv="refresh" content="1;url=/loans/{{ loan_id|path }}?since={{ since }}">{% endblock %}
 {% block main %}
 <h1>{{ loan_id }}</h1>
 <p class="ok">{{ message }}</p>
 {% if note %}<p class="note">{{ note }}</p>{% endif %}
-<p><a href="/loans/{{ loan_id|path }}">사후 모니터링으로</a></p>
+<p class="note" role="status">잠시 후 사후 모니터링 화면으로 이동해 반영될 때까지 자동으로 확인합니다.</p>
+<p><a href="/loans/{{ loan_id|path }}?since={{ since }}">사후 모니터링으로</a></p>
 {% endblock %}
