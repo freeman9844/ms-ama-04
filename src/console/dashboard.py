@@ -64,7 +64,7 @@ RESTRUCTURE_NOTES = {"pending_officer": "심사역 대기", "approved": "승인"
 REPLAY_WEEKS = 13
 LOAN_CHART = {"width": 960, "height": 300}  # 13주 막대와 버퍼 선이 같은 칸을 쓰도록 크기를 맞춘다.
 FORECAST_CHART = {"width": 960, "height": 260}
-SHORT_OF_EXPECTED = 0.85  # inflow_drop 탐지 기준과 같은 값(주 단위 색 표시용)
+SHORT_OF_EXPECTED = 0.85  # 한 주 단위 주의 색. 탐지(inflow_drop)는 3주 합 0.75로 더 넓게 본다
 
 
 def _dt(iso: Any) -> datetime | None:

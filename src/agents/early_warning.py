@@ -38,7 +38,7 @@ CATEGORIES = [c.value for c in Category]
 _EVIDENCE_ID = re.compile(EVIDENCE_ID_PATTERN)
 # 트리거 → (신호 종류, 근거 ID 틀, 문장). 근거 ID 틀의 {week}는 이번 주차다.
 _TRIGGER_TEXT = {
-    "inflow_drop": ("inflow_drop", "W:{week}:revenue_vs_expected", "최근 2주 정산 입금이 기대 입금보다 낮다"),
+    "inflow_drop": ("inflow_drop", "W:{week}:revenue_vs_expected", "최근 3주 정산 입금이 기대 입금보다 낮다"),
     "buffer_drop": ("buffer_drop", "W:{week}:buffer_days", "잔고 완충일수가 기준선의 절반 아래다"),
     "volatility_spike": ("volatility_spike", "W:{week}:revenue_vs_expected", "최근 4주 기대 대비 입금 변동이 크다"),
     "new_debt": ("loan_stacking", "W:{week}:high_cost_lender", "고금리 상환 또는 대출금 입금이 있다"),
@@ -47,7 +47,7 @@ _TRIGGER_TEXT = {
 
 INSTRUCTIONS = """너는 한국 소상공인 운전자금 대출의 사후 조기경보 조사관이다. 통계 탐지기가 이번 주 계좌 흐름에서
 이상(triggers)을 잡았다. 탐지기는 정산 주기·영업일·월 계절 지수로 만든 기대 입금(W:n:expected_revenue)과 실제를
-비교하지만(W:n:revenue_vs_expected, 최근 2주 합) 명절 이동 같은 잡음은 남으므로 오탐을 거르는 것도 너의 일이다.
+비교하지만(W:n:revenue_vs_expected, 최근 3주 합) 명절 이동 같은 잡음은 남으므로 오탐을 거르는 것도 너의 일이다.
 주차 행의 4주 잔고 전망(F:n:projected_min_balance, F:n:projected_min_date, F:n:shortfall_date)은 주 마지막 날 잔고에
 다음 28일 기대 입금(최근 4주 달성률 반영)을 더하고 예정 출금(임대료·급여·4대보험·세금·기존·이번 대출 원리금·대표자 인출,
 그 주 고금리 상환의 매주 반복, 매출 비례 운영비)을 뺀 값이다. 전망 최저 잔고가 0원 아래면 projected_shortfall이 걸린다.

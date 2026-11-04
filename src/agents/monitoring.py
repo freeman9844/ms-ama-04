@@ -2,8 +2,10 @@
 
 - 기준선은 심사 시점 underwriting 결과(features·monthly)에서 만든다. 원천 거래는 다시 읽지 않는다.
 - 주차 n은 흐름 시작일부터 7일 단위다(n=1이 첫 7일).
-- 매출 판단은 정산 프로필의 기대 입금 대비 실제(revenue_vs_expected, 최근 2주 합)로 한다. 정산일이 영업일로 밀려
-  주 경계를 넘나드는 잡음을 2주 합으로 줄인다. 프로필이 없는 과거 대출은 기준선 주평균(revenue_ratio)으로 폴백한다.
+- 매출 판단은 정산 프로필의 기대 입금 대비 실제(revenue_vs_expected, 최근 3주 합)로 한다. 정산일이 영업일로 밀려
+  주 경계를 넘나드는 잡음과 주문 수의 우연한 흔들림을 3주 합으로 줄이고, 기대의 75% 아래(INFLOW_DROP_RATIO)에서만 트리거한다.
+  정상 셀러도 13주 동안 기대 대비 ±8% 수준으로 출렁이므로(합성 엔진 측정) 0.85 같은 좁은 기준은 날짜에 따라 오탐을 낸다.
+  프로필이 없는 과거 대출은 기준선 주평균(revenue_ratio)으로 폴백한다.
 - 정산 프로필에 예정 출금 일정(forecast.outflow_schedule)이 있으면 주차마다 4주 잔고 전망을 계산해
   projected_min_balance·projected_min_date·shortfall_date를 주차 행에 넣는다(스펙 §12.2). 최저 잔고가 0 아래면 projected_shortfall.
 - 탐지기는 결정적 규칙이다. 남는 오탐(명절 이동 등)을 거르는 일은 Early-Warning 에이전트의 몫이다(스펙 §3.3).
@@ -23,7 +25,8 @@ from agents.settlement import expected_revenue, settlement_profile
 from shared.contracts import Transaction
 
 WEEKS = 13
-INFLOW_DROP_RATIO = 0.85
+INFLOW_DROP_RATIO = 0.75
+EXPECTED_WEEKS = 3  # revenue_vs_expected를 재는 주 수(최근 n주 합)
 BUFFER_DROP_RATIO = 0.5
 VOLATILITY_WEEKS = 4
 VOLATILITY_COV = 0.15
@@ -178,7 +181,7 @@ def weekly_series(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     balance = None
-    prev_revenue = prev_expected = 0
+    window: list[tuple[int, int]] = []  # 최근 EXPECTED_WEEKS주의 (실제, 기대) 입금
     for week in range(1, upto_week + 1):
         lo, hi = week_window(start, week)
         txns = [t for t in transactions if lo <= t.booked_on <= hi]
@@ -193,11 +196,11 @@ def weekly_series(
         revenue_ratio = round(revenue / baseline.avg_weekly_revenue, 3) if baseline.avg_weekly_revenue else 0.0
         if baseline.settlement:
             expected = expected_revenue(baseline.settlement, lo, hi)
-            pair = expected + prev_expected
-            vs_expected = round((revenue + prev_revenue) / pair, 3) if pair else 0.0
+            window = [*window, (revenue, expected)][-EXPECTED_WEEKS:]
+            total_expected = sum(e for _, e in window)
+            vs_expected = round(sum(r for r, _ in window) / total_expected, 3) if total_expected else 0.0
         else:
             expected, vs_expected = baseline.avg_weekly_revenue, revenue_ratio
-        prev_revenue, prev_expected = revenue, expected
         rows.append(
             {
                 "week": week,
@@ -229,12 +232,15 @@ def detect(rows: Sequence[Mapping[str, Any]], baseline: Baseline) -> list[str]:
         return []
     row = rows[-1]
     out: list[str] = []
-    if row["revenue_vs_expected"] < INFLOW_DROP_RATIO:
+    # 첫 주는 한 주치만 있어 잡음이 크다(정산 시차로 대출 전 매출이 들어오는지에 좌우된다).
+    if row["revenue_vs_expected"] < INFLOW_DROP_RATIO and (len(rows) > 1 or not baseline.settlement):
         out.append("inflow_drop")
     if row["buffer_days"] < baseline.cash_buffer_days * BUFFER_DROP_RATIO:
         out.append("buffer_drop")
     # 기대 입금이 있으면 기대 대비 비율의 흔들림을 본다(계절·정산 주기로 생기는 흔들림은 빼고).
-    recent = [r["revenue_vs_expected"] if baseline.settlement else r["revenue"] for r in rows[-VOLATILITY_WEEKS:]]
+    # 기대 대비 비율은 EXPECTED_WEEKS주가 다 찬 값만 쓴다(앞 주차의 짧은 합은 흔들림이 커 보인다).
+    full = rows[EXPECTED_WEEKS - 1 :] if baseline.settlement else rows
+    recent = [r["revenue_vs_expected"] if baseline.settlement else r["revenue"] for r in full[-VOLATILITY_WEEKS:]]
     if len(recent) == VOLATILITY_WEEKS and (mean := statistics.fmean(recent)) > 0:
         if statistics.pstdev(recent) / mean > VOLATILITY_COV:
             out.append("volatility_spike")

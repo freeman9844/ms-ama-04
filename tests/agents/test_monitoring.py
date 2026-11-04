@@ -108,6 +108,28 @@ def test_stacking_inflow_drop_shows_up_within_two_months(cafe, baseline):
     assert "inflow_drop" in detect(rows, baseline)
 
 
+@pytest.mark.parametrize("as_of", [date(2026, 9, 14), date(2026, 12, 28), date(2027, 1, 25)])
+def test_stable_sellers_raise_no_revenue_triggers_around_festivals(as_of):
+    # 라이브 데모는 오늘 날짜로 흐름을 만든다: 추석·연말·설이 낀 13주에도 정상 셀러 5명 모두 매출 트리거가 없어야 한다.
+    for seller, case in build_demo_cases(as_of).items():
+        uw = compute_underwriting(
+            "app-1", case.profile, case.transactions, case.tax_filings,
+            as_of=as_of, requested_amount_krw=5_000_000, requested_tenor_months=6,
+        )
+        base = Baseline.from_underwriting(
+            {
+                "features": uw.features.model_dump(mode="json"),
+                "monthly": uw.monthly,
+                "settlement_profile": settlement_for(case.transactions, {}, as_of, case.profile.industry),
+            },
+            installment_krw=900_000,
+        )
+        flow = generate_postloan(case, FlowScenario.STABLE, as_of, 7)
+        rows = weekly_series(flow.transactions, categorize(flow.transactions, {}), flow.start, 13, base)
+        hits = {(w, t) for w in range(1, 14) for t in detect(rows[:w], base)}
+        assert not {h for h in hits if h[1] in ("inflow_drop", "volatility_spike")}, (seller, sorted(hits))
+
+
 def test_stable_projection_never_runs_short(cafe, baseline):
     _, rows = _rows(cafe, FlowScenario.STABLE, baseline, 13)
     assert all(r["shortfall_date"] is None and r["projected_min_balance"] > 0 for r in rows)
