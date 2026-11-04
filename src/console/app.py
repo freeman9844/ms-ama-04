@@ -376,7 +376,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         loan = loan_or_404(loan_id)
         if replay_in_progress(loan.get("monitoring"), deps.clock()):
             return loan_page(user, loan, 409, error="이미 재생이 진행 중입니다.")
-        deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json"))
+        # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
+        deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
         return render(
             "loan_sent.html", user, 202, loan_id=loan["id"],
             message="사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.",

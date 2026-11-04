@@ -39,6 +39,14 @@ def next_wake(now: datetime, target: datetime) -> datetime:
     return max(now, min(target, now + MAX_TIMER))
 
 
+# 재조정 요청으로 멈춘 재생. 새 재생(start)이 이 재생을 덮지 않게 막고, resume·stop만 받는다.
+REPLAY_HELD = frozenset({"paused", "awaiting_resume"})
+
+
+def replay_held(monitoring: Mapping[str, Any] | None) -> bool:
+    return bool(monitoring) and monitoring.get("status") in REPLAY_HELD  # type: ignore[union-attr]
+
+
 def replay_in_progress(monitoring: Mapping[str, Any] | None, now: datetime) -> bool:
     """같은 대출의 재생이 진행 중인가. 동시 재생은 대출 문서(monitoring)를 서로 덮어쓴다."""
     if not monitoring or monitoring.get("status") != "replaying":
@@ -107,11 +115,20 @@ class OfficerMessage(BaseModel):
 
 
 class ReplayRequest(BaseModel):
-    """monitoring-replay 큐 메시지. 승인된 대출의 사후 흐름 13주를 재생한다."""
+    """monitoring-replay 큐 메시지. start는 13주 재생을 새로 시작하고, resume·stop은 재조정 결정으로
+    멈춘(awaiting_resume) 재생을 이어 가거나 끝낸다. resume·stop은 멈춘 재생의 replay_id가 있어야 한다."""
 
     model_config = ConfigDict(extra="forbid")
 
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
+    action: Literal["start", "resume", "stop"] = "start"
+    replay_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _replay_id_for_paused(self) -> "ReplayRequest":
+        if self.action != "start" and self.replay_id is None:
+            raise ValueError("resume·stop에는 replay_id가 필요하다")
+        return self
 
 
 class FlowUpdated(BaseModel):

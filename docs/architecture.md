@@ -171,7 +171,7 @@ flowchart LR
   grv["grievances 큐"] --> reply["grievance-reply-agent"]
 ```
 
-조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 `alert.raised`로 Collections에 전달된다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
+조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 `alert.raised`로 Collections에 전달된다. 주차는 한 주씩 발행되고(앞 주차와 추심이 끝난 뒤 다음 주차), Collections가 재조정 요청을 만들면 재생이 멈췄다가 심사역 결정 뒤 재개·종료를 고른다(`_after_week`, `src/orchestrator/journey/monitoring.py`). 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
 
 ## 구성요소 계약
 
