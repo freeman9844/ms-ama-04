@@ -705,3 +705,10 @@ curl.exe -X POST --data-binary "@orchestrator.zip" -H "Authorization: Bearer $to
 
 - **IP 변경**: 모바일 회선 공인 IP가 작업 중 <운영자 IP> → <운영자 IP>로 바뀌어 콘솔이 403. 콘솔 ingress에 `operator-alt`를 잠시 넣어 `/ops` 확인 뒤 지웠습니다.
   창을 닫은 뒤 콘솔 허용 목록은 `allow-0` = <운영자 IP>/32 하나이므로, 데모 때는 [deploy](deploy.md#운영자-ip가-바뀔-때) 절차로 현재 IP를 허용합니다.
+
+미룬 항목(P9 최종 리뷰의 사소한 지적, 데모 영향 없음):
+
+- 재개 메시지 발행이 실패하면 재개 요청이 사라집니다(30분 가드가 지나면 다시 요청 가능). 재개·종료 메시지에 `pause_alert_id`가 없습니다.
+- 고객 신청(`/apply`)에 제출자 인증 주체가 없고 `/apply/{id}`에 ID 형식 검사가 없습니다(고객 인증은 데모 범위 밖, `docs/limitations.md`).
+- 콘솔 `_digits`가 `_int`와 겹치고 잘못된 위치의 쉼표도 받습니다. `PRODUCT_MAX_KRW`가 이전(v1) 문서에도 적용됩니다.
+- 사후 예측을 모든 주차 행에서 계산합니다(표시는 최근 행만). 배포 도중 진행 중이던 건은 기간 12개월 초과가 남을 수 있습니다.
