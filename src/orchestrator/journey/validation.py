@@ -12,8 +12,8 @@ from pydantic import ValidationError
 
 from journey.models import OfficerDecision
 
-# 상품 최대 한도(`src/policy/rulesets/v1.yaml`의 product.max_amount_krw). 테스트가 값 일치를 확인한다.
-OVERRIDE_MAX_AMOUNT_KRW = 5_000_000
+# 상품 최대 한도(`src/policy/rulesets/v2.yaml`의 product.max_amount_krw). 테스트가 값 일치를 확인한다.
+OVERRIDE_MAX_AMOUNT_KRW = 10_000_000
 
 
 def validate_officer_decision(

@@ -23,7 +23,7 @@ def d(**kw):
         (d(decision="approve", amount_krw=5_000_000), None, "override_required"),
         (d(decision="approve", amount_krw=5_000_000, policy_override=True), INELIGIBLE, "reason_required"),
         (d(decision="approve", policy_override=True, reason="소명"), None, "amount_required"),
-        (d(decision="approve", amount_krw=5_000_001, policy_override=True, reason="소명"), INELIGIBLE,
+        (d(decision="approve", amount_krw=10_000_001, policy_override=True, reason="소명"), INELIGIBLE,
          "amount_exceeds_product"),
         (d(decision="conditional", amount_krw=3_000_000, policy_override=True, reason="소명",
            conditions=["월별 매출 보고"]), INELIGIBLE, "conditional_retired"),

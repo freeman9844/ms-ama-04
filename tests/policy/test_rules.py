@@ -10,10 +10,19 @@ def _data():
 
 
 def test_default_rules_load(rules):
-    assert rules.version == "2026.11-v1"
+    assert rules.version == "2026.11-v2"
     assert [c.code for c in rules.knockouts] == ["R001", "R002"]
     assert [c.code for c in rules.refers] == ["R101", "R102", "R103", "R104"]
     assert [b.band for b in rules.rate_bands] == ["A", "B", "C", "D"]
+
+
+def test_v2_only_raises_product_max_over_v1():
+    v1 = load_rules(DEFAULT_RULES_PATH.with_name("v1.yaml"))
+    v2 = load_rules(DEFAULT_RULES_PATH)
+    assert (v1.product.max_amount_krw, v2.product.max_amount_krw) == (5_000_000, 10_000_000)
+    same = {"version", "product"}
+    assert v1.model_dump(exclude=same) == v2.model_dump(exclude=same)
+    assert v1.product.model_dump(exclude={"max_amount_krw"}) == v2.product.model_dump(exclude={"max_amount_krw"})
 
 
 def test_duplicate_codes_rejected():

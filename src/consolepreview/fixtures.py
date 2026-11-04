@@ -84,7 +84,7 @@ def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "approv
                 {"code": "R104", "message": "업력 기준 충족(개월)", "field": "business_age_months",
                  "observed": 48, "threshold": 36},
             ],
-            "rules_version": "2026.11-v1",
+            "rules_version": "2026.11-v2",
         }
     if rec is not None and doc["policy"] is not None:
         doc["assessment"] = _assessment(app_id, rec)

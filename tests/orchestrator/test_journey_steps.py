@@ -10,7 +10,7 @@ from journey.models import StartRequest
 START = {
     "application_id": "app-1",
     "applicant_id": "demo-healthy-001",
-    "requested_amount_krw": 20_000_000,
+    "requested_amount_krw": 10_000_000,
     "requested_tenor_months": 12,
 }
 CONSENT = {

@@ -13,7 +13,7 @@ from journey.orchestration import (
 START = {
     "application_id": "app-1",
     "applicant_id": "demo-healthy-001",
-    "requested_amount_krw": 20_000_000,
+    "requested_amount_krw": 10_000_000,
     "requested_tenor_months": 12,
 }
 CONSENT = {
@@ -71,7 +71,7 @@ def test_happy_path_reaches_approved(run_journey):
     assert all("secret-token" not in json.dumps(s, ensure_ascii=False) for s in ctx.saved)
     assert ctx.called("assemble_data")[0].input["token"] == "secret-token"
     uw = ctx.called("underwrite")[0].input
-    assert (uw["as_of"], uw["consent_id"], uw["requested_amount_krw"]) == ("2026-11-02", "c-1", 20_000_000)
+    assert (uw["as_of"], uw["consent_id"], uw["requested_amount_krw"]) == ("2026-11-02", "c-1", 10_000_000)
     assert ctx.called("evaluate_policy")[0].retry == "RETRY"
     assert ctx.timers[0].cancelled and ctx.custom_status == "approved"
 

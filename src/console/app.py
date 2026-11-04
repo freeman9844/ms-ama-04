@@ -80,7 +80,7 @@ DECISION_ERRORS = {
     "override_required": "정책 결과상 거절입니다. 승인하려면 예외 승인 확인이 필요합니다.",
     "amount_required": "승인 금액을 입력해야 합니다.",
     "amount_exceeds_policy": "승인 금액이 정책 한도를 넘습니다.",
-    "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(500만 원)를 넘습니다.",
+    "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(1,000만 원)를 넘습니다.",
     "conditional_retired": "조건부 승인은 더 이상 쓰지 않습니다. 승인 또는 거절을 고르세요.",
 }
 

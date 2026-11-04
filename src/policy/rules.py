@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RESERVED_CODES = frozenset({"R900", "R901"})
-DEFAULT_RULES_PATH = Path(__file__).parent / "rulesets" / "v1.yaml"
+DEFAULT_RULES_PATH = Path(__file__).parent / "rulesets" / "v2.yaml"
 
 FeatureName = Literal[
     "months_of_history",
