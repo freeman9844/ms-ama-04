@@ -47,6 +47,7 @@ Service Bus 이벤트까지 보려면 앞에 `python -m ops resume`을, 비용�
 
 - 오케스트레이터(`orchestrator`)를 배포하기 전에 실행 중인 신청 여정이 없는지 확인합니다. 원문(P5b): 배포 전에 실행 중인 신청 여정이 없는지 확인합니다(여정 코드가 바뀌어 실행 중 인스턴스는 replay가 어긋날 수 있음).
 - 배포 직후 `ops smoke`는 `journey`·`consent` 점검으로 새 코드가 실제 신청 여정을 끝까지 처리하는지 확인합니다. 점검 항목은 [operate](operate.md#smoke)에 있습니다.
+- 콘솔이 새 메시지 필드를 보내는 변경(P9의 고객 신청 `source="customer"`처럼)은 `ops deploy orchestrator`를 먼저 하고 `ops deploy all`을 합니다. `all`은 이미지·프로비저닝(콘솔 교체)을 먼저 하고 Functions를 마지막에 올리므로, 그 사이 새 콘솔의 메시지를 이전 오케스트레이터가 거절할 수 있습니다.
 
 ## 운영자 IP가 바뀔 때
 
