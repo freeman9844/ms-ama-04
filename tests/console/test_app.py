@@ -134,13 +134,14 @@ def test_officer_decision_is_sent_with_principal_as_officer(env):
     )]
 
 
-def test_conditional_decision_splits_conditions_and_decline_drops_amount(env):
+def test_conditional_decision_is_retired_and_decline_drops_amount(env):
     client, queue = env
     token = csrf(client, MANAGER)
-    assert decide(client, MANAGER, token, decision="conditional", conditions="월별 매출 보고\r\n\r\n 담보 설정 ").status_code == 202
-    assert queue.sent[-1][1]["decision"]["conditions"] == ["월별 매출 보고", "담보 설정"]
-    assert queue.sent[-1][1]["decision"]["officer_id"] == "oid-manager"
+    resp = decide(client, MANAGER, token, decision="conditional", conditions="월별 매출 보고")
+    assert resp.status_code == 422 and "조건부 승인은 더 이상 쓰지 않습니다" in resp.text
+    assert queue.sent == []
     assert decide(client, MANAGER, token, decision="decline", reason="상환 여력 부족").status_code == 202
+    assert queue.sent[-1][1]["decision"]["officer_id"] == "oid-manager"
     assert queue.sent[-1][1]["decision"]["amount_krw"] is None
 
 
@@ -182,6 +183,7 @@ def test_decision_form_defaults_amount_to_requested(env):
     page = client.get("/applications/app-1", headers=OFFICER).text
     assert 'name="amount_krw" inputmode="numeric" value="30000000"' in page
     assert "data-policy-blocked" not in page
+    assert 'value="conditional"' not in page and 'name="conditions"' not in page
 
 
 @pytest.fixture
@@ -219,6 +221,16 @@ def test_override_decision_is_labelled_on_detail(env, make_doc):
                                "conditions": [], "reason": "매출 소명", "policy_override": True, "at": "x"}
     client.app.state.deps.store.docs["app-1"] = doc
     assert "정책 예외 승인" in client.get("/applications/app-1", headers=OFFICER).text
+
+
+def test_past_conditional_decision_still_renders(env, make_doc):
+    client, _ = env
+    doc = make_doc(status="conditionally_approved")
+    doc["officer_decision"] = {"decision": "conditional", "officer_id": "oid-officer", "amount_krw": 5_000_000,
+                               "conditions": ["월별 매출 보고"], "reason": "", "policy_override": False, "at": "x"}
+    client.app.state.deps.store.docs["app-1"] = doc
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert "조건부 승인" in page and "월별 매출 보고" in page
 
 
 def test_decision_only_while_awaiting_officer(env):

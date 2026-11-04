@@ -92,13 +92,20 @@ def test_event_payload_as_json_string_is_parsed(run_journey):
 @pytest.mark.parametrize(
     ("payload", "status"),
     [
-        ({**APPROVE, "decision": "conditional", "conditions": ["월별 매출 보고"]}, "conditionally_approved"),
+        (APPROVE, "approved"),
         (DECLINE, "declined"),
     ],
 )
 def test_final_status_follows_officer_decision(run_journey, payload, status):
     result, _ = run_journey(START, acts(), [("event", payload)])
     assert result["status"] == status
+
+
+def test_retired_conditional_decision_is_rejected_and_wait_continues(run_journey):
+    conditional = {**APPROVE, "decision": "conditional", "conditions": ["월별 매출 보고"]}
+    result, ctx = run_journey(START, acts(), [("event", conditional), ("event", APPROVE)])
+    assert result["status"] == "approved"
+    assert [a["error"] for a in ctx.saved[-1]["decision_attempts"]] == ["conditional_retired"]
 
 
 def test_invalid_decision_is_recorded_and_wait_continues(run_journey):

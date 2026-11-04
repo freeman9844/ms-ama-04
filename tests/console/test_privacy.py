@@ -330,12 +330,15 @@ def test_rereview_is_validated_against_recorded_policy(env):
                 amount_krw="25,000,000", reason="재심사")
     assert over.status_code == 422 and "한도" in over.text
     assert queue.sent == []
-    ok = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="conditional",
-              amount_krw="18,000,000", conditions="월별 매출 보고\r\n", reason="재심사")
+    retired = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="conditional",
+                   amount_krw="18,000,000", conditions="월별 매출 보고\r\n", reason="재심사")
+    assert retired.status_code == 422 and queue.sent == []
+    ok = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="approve",
+              amount_krw="18,000,000", reason="재심사")
     assert ok.status_code == 202
     assert queue.sent[-1][1] == {
         "grievance_id": "grv-abc123", "application_id": "app-2", "outcome": "rereview", "officer_id": "oid-officer",
-        "reason": "재심사", "new_decision": "conditional", "amount_krw": 18_000_000, "conditions": ["월별 매출 보고"]}
+        "reason": "재심사", "new_decision": "approve", "amount_krw": 18_000_000, "conditions": []}
 
 
 @pytest.mark.parametrize("fields", [{"outcome": "uphold", "reason": ""}, {"outcome": "maybe", "reason": "x"},

@@ -22,7 +22,14 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
-from console.dashboard import detail_summary, home_summary, loan_summary, loans_summary, ops_summary
+from console.dashboard import (
+    RECOMMENDATION_LABELS,
+    detail_summary,
+    home_summary,
+    loan_summary,
+    loans_summary,
+    ops_summary,
+)
 from console.monitoring import (
     ACTION_LABELS,
     MONITORING_LABELS,
@@ -74,7 +81,7 @@ DECISION_ERRORS = {
     "amount_required": "승인 금액을 입력해야 합니다.",
     "amount_exceeds_policy": "승인 금액이 정책 한도를 넘습니다.",
     "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(500만 원)를 넘습니다.",
-    "conditions_required": "조건부 승인에는 조건이 한 줄 이상 필요합니다.",
+    "conditional_retired": "조건부 승인은 더 이상 쓰지 않습니다. 승인 또는 거절을 고르세요.",
 }
 
 
@@ -125,6 +132,7 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
     env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
+    env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
     for name, labels in LABEL_FILTERS.items():
         env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
     env.filters["pct"] = lambda v: f"{v * 100:.1f}%" if isinstance(v, int | float) else "-"

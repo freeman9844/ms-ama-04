@@ -76,7 +76,7 @@
 {% if v.assessment %}
 {% set a = v.assessment %}
 <section class="card">
-<h2>에이전트 평가 <small>권고: {{ a.recommendation }}</small></h2>
+<h2>에이전트 평가 <small>권고: {{ a.recommendation|recommendation_label }}</small></h2>
 {% if ui.review %}{{ ch.stepper(ui.review, "에이전트 검토 단계", compact=true) }}{% endif %}
 <p class="summary">{{ a.summary }}</p>
 <h3>주장과 근거</h3>
@@ -135,13 +135,12 @@
   <fieldset>
     <legend>결정</legend>
     {% set chosen = form.decision if form else "approve" %}
-    {% for value, label in (("approve", "승인"), ("conditional", "조건부 승인"), ("decline", "거절")) %}
+    {% for value, label in (("approve", "승인"), ("decline", "거절")) %}
     <label><input type="radio" name="decision" value="{{ value }}"{% if chosen == value %} checked{% endif %}> {{ label }}</label>
     {% endfor %}
   </fieldset>
   <label>승인 금액(원, 한도 {{ v.max_amount_krw|krw }})
     <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else d.requested_amount_krw }}"></label>
-  <label>조건(한 줄에 하나) <textarea name="conditions" rows="3">{{ form.conditions if form else "" }}</textarea></label>
   <label>사유 <textarea name="reason" rows="3">{{ form.reason if form else "" }}</textarea></label>
   <button type="submit">결정 보내기</button>
 </form>

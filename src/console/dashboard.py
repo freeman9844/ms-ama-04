@@ -24,11 +24,12 @@ GROUPS = (
 )
 RECOMMENDATIONS = (
     ("approve", "승인", "green"),
-    ("conditional", "조건부", "blue"),
+    ("conditional", "승인 권고(조건 제안)", "blue"),
     ("refer", "심사역 회부", "purple"),
     ("decline", "거절", "red"),
     ("none", "권고 없음", "neutral"),
 )
+RECOMMENDATION_LABELS = {key: label for key, label, _ in RECOMMENDATIONS}
 STEPS = (
     ("received", "접수"),
     ("consent", "동의 완료"),

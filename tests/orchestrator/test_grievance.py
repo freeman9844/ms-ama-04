@@ -196,7 +196,7 @@ def test_rereview_within_policy_resolves(deps):
     ("fields", "error"),
     [
         ({"new_decision": "approve", "amount_krw": 30_000_000}, "amount_exceeds_policy"),
-        ({"new_decision": "conditional", "amount_krw": 10_000_000}, "conditions_required"),
+        ({"new_decision": "conditional", "amount_krw": 10_000_000, "conditions": ["월별 매출 보고"]}, "conditional_retired"),
     ],
 )
 def test_rereview_outside_policy_is_rejected_and_stays_pending(deps, fields, error):

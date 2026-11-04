@@ -21,7 +21,7 @@ def test_home_summary_counts_groups_and_recommendations():
     assert (s["total"], s["awaiting"], s["escalated"], s["in_progress"], s["approved"], s["declined"]) == (8, 2, 1, 2, 2, 1)
     assert s["approval_rate"] == 2 / 3
     assert [n for _, _, n in s["groups"]] == [2, 2, 1, 1, 2]
-    assert s["recommendations"] == [("승인", 2, "green"), ("조건부", 1, "blue"), ("심사역 회부", 1, "purple"),
+    assert s["recommendations"] == [("승인", 2, "green"), ("승인 권고(조건 제안)", 1, "blue"), ("심사역 회부", 1, "purple"),
                                     ("거절", 1, "red"), ("권고 없음", 3, "neutral")]
     assert s["donut"]["total"] == 8 and len(s["rec_bars"]["bars"]) == 5
 
