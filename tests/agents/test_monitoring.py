@@ -30,7 +30,7 @@ def cafe():
 def baseline(cafe):
     uw = compute_underwriting(
         "app-1", cafe.profile, cafe.transactions, cafe.tax_filings,
-        as_of=AS_OF, requested_amount_krw=50_000_000, requested_tenor_months=36,
+        as_of=AS_OF, requested_amount_krw=50_000_000, requested_tenor_months=12,
     )
     return Baseline.from_underwriting(
         {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly}

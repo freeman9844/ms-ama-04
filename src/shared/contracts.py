@@ -113,7 +113,7 @@ class CashFlowFeatures(Contract):
     revenue_volatility: NonNegFloat
     tax_bank_match_ratio: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
     requested_amount_krw: int = Field(gt=0)
-    requested_tenor_months: int = Field(ge=1, le=60)
+    requested_tenor_months: int = Field(ge=1, le=12)
     industry: str
     region: str
     business_age_months: int = Field(ge=0)
@@ -184,7 +184,7 @@ class Claim(Contract):
 
 class ProposedStructure(Contract):
     amount_krw: int = Field(gt=0)
-    tenor_months: int = Field(ge=1, le=60)
+    tenor_months: int = Field(ge=1, le=12)
     schedule: Literal["level", "seasonal"]
     reduced_payment_months: tuple[Annotated[int, Field(ge=1, le=12)], ...] = ()
     rationale: str

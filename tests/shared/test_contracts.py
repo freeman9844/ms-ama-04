@@ -50,7 +50,7 @@ def _features(**kw):
         revenue_volatility=0.2,
         tax_bank_match_ratio=0.95,
         requested_amount_krw=20_000_000,
-        requested_tenor_months=24,
+        requested_tenor_months=12,
         industry="카페",
         region="서울 성동구",
         business_age_months=38,
@@ -146,7 +146,7 @@ def test_features_reject_nan_inf_and_ranges():
     with pytest.raises(ValidationError):
         _features(requested_amount_krw=0)
     with pytest.raises(ValidationError):
-        _features(requested_tenor_months=61)
+        _features(requested_tenor_months=13)
 
 
 def test_policy_decision_invariants():

@@ -45,7 +45,7 @@ def _assessment(app_id: str, rec: str) -> dict[str, Any]:
             {"text": "DSCR 1.8로 정책 기준 1.25를 넘는다", "metric_ids": ["M:dscr", "P:R101:threshold"], "txn_ids": []},
             {"text": "대표자 인출 비율 18%로 기준 35% 안에 있다", "metric_ids": ["S:owner_draw_ratio"], "txn_ids": []},
         ],
-        "proposed_structure": {"amount_krw": 5_000_000, "tenor_months": 24, "schedule": "level",
+        "proposed_structure": {"amount_krw": 5_000_000, "tenor_months": 12, "schedule": "level",
                                "reduced_payment_months": ["02"], "rationale": "비수기 2월 상환액을 줄인다."},
         "counterfactuals": [
             {"metric_id": "M:dscr", "current": 1.8, "target": 2.2, "explanation": "DSCR이 2.2 이상이면 금리 구간 A"},
@@ -62,7 +62,7 @@ def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "approv
     app_id = f"app-20261103-p{n:02d}"
     doc: dict[str, Any] = {
         "id": app_id, "application_id": app_id, "applicant_id": f"preview-{n:02d}",
-        "requested_amount_krw": amount, "requested_tenor_months": 24, "status": status,
+        "requested_amount_krw": amount, "requested_tenor_months": 12, "status": status,
         "received_at": timeline[0]["at"], "updated_at": timeline[-1]["at"], "timeline": timeline,
         "underwriting": None, "policy": None, "assessment": None, "flags": [],
         "sla": {"hours": 24, "deadline": (datetime.fromisoformat(timeline[0]["at"]) + timedelta(hours=24)).isoformat(),
@@ -165,7 +165,7 @@ def _weeks(replay_id: str, count: int) -> list[dict[str, Any]]:
 def _loan(app_id: str, applicant: str, industry: str, amount: int, monitoring: dict | None) -> dict[str, Any]:
     return {
         "id": app_id, "loan_id": app_id, "application_id": app_id, "applicant_id": applicant, "industry": industry,
-        "underwriting_consent_id": None, "decision": "approve", "amount_krw": amount, "tenor_months": 24,
+        "underwriting_consent_id": None, "decision": "approve", "amount_krw": amount, "tenor_months": 12,
         "approved_at": (NOW - timedelta(days=1)).isoformat(), "baseline": BASELINE, "monitoring": monitoring,
         "updated_at": NOW.isoformat(),
     }

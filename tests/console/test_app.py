@@ -259,7 +259,7 @@ def test_new_application_is_enqueued_and_redirects(env):
         "source": "console"})
 
 
-@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_tenor_months": "61"},
+@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_tenor_months": "13"},
                                     {"applicant_id": ""}, {"requested_amount_krw": "lots"}])
 def test_new_application_validation(env, fields):
     client, queue = env

@@ -73,7 +73,7 @@ class StartRequest(BaseModel):
     application_id: str = Field(pattern=APPLICATION_ID_PATTERN)
     applicant_id: str = Field(min_length=1, max_length=64)
     requested_amount_krw: int = Field(gt=0)
-    requested_tenor_months: int = Field(ge=1, le=60)
+    requested_tenor_months: int = Field(ge=1, le=12)
     sla_hours: float = Field(default=24, gt=0, le=720)
     submitted_at: datetime | None = None
     source: Literal["console", "load", "fault"] | None = None

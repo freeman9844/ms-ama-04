@@ -75,7 +75,7 @@ def test_override_cap_matches_product_max():
     [
         {"application_id": "A1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 12},
         {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 0, "requested_tenor_months": 12},
-        {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 61},
+        {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 13},
         {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 12, "x": 1},
         {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 12, "sla_hours": 0},
     ],

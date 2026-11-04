@@ -273,6 +273,11 @@ def test_recommendation_must_respect_policy(cases):
     assert any("ineligible" in i for i in issues)
     over = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 4_000_000})
     assert any("한도" in i for i in check_grounding(over, context(cases)))
+
+
+def test_structure_tenor_is_capped_at_12_months(cases):
+    long = draft(proposed_structure={**GOOD["proposed_structure"], "tenor_months": 13})
+    assert any("1~12" in i for i in check_grounding(long, context(cases)))
     missing = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 0})
     assert any("proposed_structure" in i for i in check_grounding(missing, context(cases)))
     seasonal = draft(proposed_structure={**GOOD["proposed_structure"], "schedule": "seasonal"})

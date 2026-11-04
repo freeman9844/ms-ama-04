@@ -16,7 +16,7 @@ def make_features():
             revenue_volatility=0.2,
             tax_bank_match_ratio=0.95,
             requested_amount_krw=3_000_000,
-            requested_tenor_months=24,
+            requested_tenor_months=12,
             industry="패션의류",
             region="서울 성동구",
             business_age_months=38,
