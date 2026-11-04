@@ -3,7 +3,8 @@ from datetime import date
 import pytest
 
 from agents.classify import Category, classify
-from agents.features import FLAG_HIGH_COST_LENDER, compute_underwriting, monthly_installment
+from agents.features import EXPENSE_GROUPS, FLAG_HIGH_COST_LENDER, compute_underwriting, monthly_installment
+from evals.datasets import TRUTH_LABEL
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
@@ -34,11 +35,11 @@ def _underwrite(cases, applicant_id, transactions=None):
 @pytest.mark.parametrize(
     ("applicant_id", "months", "inflow", "dscr", "buffer", "vol", "match"),
     [
-        ("demo-healthy-001", 12, 5_360_727, 3.783, 122.2, 0.196, 0.971),
-        ("demo-mismatch-002", 12, 5_448_246, 4.003, 129.8, 0.199, 0.6),
-        ("demo-stress-003", 12, 5_089_967, 3.016, 126.4, 0.271, 0.977),
-        ("demo-thin-004", 4, 6_070_672, 4.357, 51.9, 0.206, 0.0),
-        ("demo-injection-005", 12, 5_420_065, 3.89, 125.7, 0.191, 0.984),
+        ("seller-dailylook-01", 12, 27_925_932, 4.106, 22.7, 0.121, 0.972),
+        ("seller-mangwon-02", 12, 24_736_976, 4.22, 31.9, 0.066, 0.6),
+        ("seller-glowlab-03", 12, 25_062_551, 2.983, 37.6, 0.181, 0.972),
+        ("seller-knitroom-04", 4, 10_070_066, 3.267, 27.4, 0.068, 0.0),
+        ("seller-candle-05", 12, 16_400_357, 4.704, 47.9, 0.116, 0.976),
     ],
 )
 def test_features_match_calibration(cases, applicant_id, months, inflow, dscr, buffer, vol, match):
@@ -53,11 +54,11 @@ def test_features_match_calibration(cases, applicant_id, months, inflow, dscr, b
 @pytest.mark.parametrize(
     ("applicant_id", "decision", "codes"),
     [
-        ("demo-healthy-001", "eligible", []),
-        ("demo-mismatch-002", "refer", ["R101"]),
-        ("demo-stress-003", "eligible", []),
-        ("demo-thin-004", "ineligible", ["R001", "R101", "R104"]),
-        ("demo-injection-005", "eligible", []),
+        ("seller-dailylook-01", "eligible", []),
+        ("seller-mangwon-02", "refer", ["R101"]),
+        ("seller-glowlab-03", "eligible", []),
+        ("seller-knitroom-04", "ineligible", ["R001", "R101", "R104"]),
+        ("seller-candle-05", "eligible", []),
     ],
 )
 def test_policy_outcomes_for_demo_applicants(cases, applicant_id, decision, codes):
@@ -69,21 +70,21 @@ def test_policy_outcomes_for_demo_applicants(cases, applicant_id, decision, code
 
 
 def test_signals_explain_dscr(cases):
-    s = _underwrite(cases, "demo-healthy-001").signals
-    assert s["avg_monthly_noi_krw"] == 1_494_712
-    assert s["avg_monthly_debt_service_krw"] == 108_000
+    s = _underwrite(cases, "seller-dailylook-01").signals
+    assert s["avg_monthly_noi_krw"] == 2_674_318
+    assert s["avg_monthly_debt_service_krw"] == 364_204
     assert s["new_installment_krw"] == 287_061
-    assert s["avg_monthly_owner_draw_krw"] == 250_000
+    assert s["avg_monthly_owner_draw_krw"] == 1_900_000
     assert s["classification_rules"] == "classify-v1"
 
 
 def test_high_cost_lender_flag_only_for_stressed_case(cases):
-    assert FLAG_HIGH_COST_LENDER in _underwrite(cases, "demo-stress-003").flags
-    assert _underwrite(cases, "demo-healthy-001").flags == []
+    assert FLAG_HIGH_COST_LENDER in _underwrite(cases, "seller-glowlab-03").flags
+    assert _underwrite(cases, "seller-dailylook-01").flags == []
 
 
 def test_empty_history_yields_zero_features_and_knockout(cases):
-    uw = _underwrite(cases, "demo-healthy-001", transactions=())
+    uw = _underwrite(cases, "seller-dailylook-01", transactions=())
     f = uw.features
     assert (f.months_of_history, f.avg_monthly_inflow_krw) == (0, 0)
     assert (f.dscr, f.cash_buffer_days, f.revenue_volatility, f.tax_bank_match_ratio) == (0.0, 0.0, 0.0, 0.0)
@@ -114,26 +115,26 @@ def _with_overrides(cases, applicant_id, overrides):
 
 
 def test_no_overrides_keeps_calibration_and_reports_zero(cases):
-    uw = _with_overrides(cases, "demo-healthy-001", {})
-    assert uw.features == _underwrite(cases, "demo-healthy-001").features
+    uw = _with_overrides(cases, "seller-dailylook-01", {})
+    assert uw.features == _underwrite(cases, "seller-dailylook-01").features
     assert uw.signals["semantic_overrides"] == 0
     assert uw.signals["dscr_rules_only"] == uw.features.dscr
 
 
 def test_monthly_series_matches_features(cases):
-    uw = _underwrite(cases, "demo-healthy-001")
+    uw = _underwrite(cases, "seller-dailylook-01")
     assert len(uw.monthly) == 12
     assert [r["month"] for r in uw.monthly] == sorted(r["month"] for r in uw.monthly)
     assert uw.monthly[0]["month"] == "2025-11" and uw.monthly[-1]["month"] == "2026-10"
     assert int(sum(r["revenue"] for r in uw.monthly) / 12) == uw.features.avg_monthly_inflow_krw
-    assert sum(r["debt_service"] for r in uw.monthly) / 12 == uw.signals["avg_monthly_debt_service_krw"]
+    assert int(sum(r["debt_service"] for r in uw.monthly) / 12) == uw.signals["avg_monthly_debt_service_krw"]
     assert all(r["operating_out"] > 0 and r["owner_draw"] >= 0 for r in uw.monthly)
 
 
 def test_debt_overrides_never_improve_dscr_or_buffer(cases):
-    base = _underwrite(cases, "demo-healthy-001")
-    ids = _unclassified_out(cases, "demo-healthy-001")
-    uw = _with_overrides(cases, "demo-healthy-001", dict.fromkeys(ids, Category.LOAN_REPAYMENT))
+    base = _underwrite(cases, "seller-dailylook-01")
+    ids = _unclassified_out(cases, "seller-dailylook-01")
+    uw = _with_overrides(cases, "seller-dailylook-01", dict.fromkeys(ids, Category.LOAN_REPAYMENT))
     assert uw.signals["semantic_overrides"] == len(ids) > 0
     assert uw.signals["avg_monthly_debt_service_krw"] > base.signals["avg_monthly_debt_service_krw"]
     assert uw.features.dscr <= base.features.dscr
@@ -146,16 +147,46 @@ def test_debt_overrides_never_improve_dscr_or_buffer(cases):
 
 
 def test_high_cost_override_raises_flag(cases):
-    ids = _unclassified_out(cases, "demo-healthy-001")[:1]
-    uw = _with_overrides(cases, "demo-healthy-001", dict.fromkeys(ids, Category.HIGH_COST_LENDER))
+    ids = _unclassified_out(cases, "seller-dailylook-01")[:1]
+    uw = _with_overrides(cases, "seller-dailylook-01", dict.fromkeys(ids, Category.HIGH_COST_LENDER))
     assert FLAG_HIGH_COST_LENDER in uw.flags
     assert uw.signals["high_cost_lender_count"] == 1
 
 
 def test_overrides_only_apply_to_unclassified_transactions(cases):
     revenue_id = next(
-        t.txn_id for t in cases["demo-healthy-001"].transactions if classify(t) is Category.REVENUE
+        t.txn_id for t in cases["seller-dailylook-01"].transactions if classify(t) is Category.REVENUE
     )
-    uw = _with_overrides(cases, "demo-healthy-001", {revenue_id: Category.LOAN_REPAYMENT, "unknown": Category.LOAN_REPAYMENT})
+    uw = _with_overrides(cases, "seller-dailylook-01", {revenue_id: Category.LOAN_REPAYMENT, "unknown": Category.LOAN_REPAYMENT})
     assert uw.signals["semantic_overrides"] == 0
-    assert uw.features == _underwrite(cases, "demo-healthy-001").features
+    assert uw.features == _underwrite(cases, "seller-dailylook-01").features
+
+
+def _expenses(uw):
+    return {e["group"]: e["monthly_avg_krw"] for e in uw.expense_breakdown}
+
+
+def test_expense_breakdown_groups_sum_to_average_outflow(cases):
+    case = cases["seller-dailylook-01"]
+    uw = _underwrite(cases, "seller-dailylook-01")
+    assert [(e["group"], e["label"]) for e in uw.expense_breakdown] == list(EXPENSE_GROUPS)
+    complete = [t for t in case.transactions if (t.booked_on.year, t.booked_on.month) < (AS_OF.year, AS_OF.month)]
+    outflow = -sum(t.amount_krw for t in complete if t.amount_krw < 0) / uw.features.months_of_history
+    assert abs(sum(_expenses(uw).values()) - outflow) <= len(EXPENSE_GROUPS)
+
+
+def test_semantic_labels_move_unclassified_into_groups(cases):
+    case = cases["seller-dailylook-01"]
+    rules_only = _expenses(_underwrite(cases, "seller-dailylook-01"))
+    assert rules_only["unclassified"] > 0 and rules_only["supplier"] == rules_only["other_operating"] == 0
+    labels = {t: label for t, c in case.labels.items() if (label := TRUTH_LABEL[c])}
+    labels |= {t.txn_id: "supplier" for t in case.transactions if classify(t) is Category.RENT}  # 규칙이 우선
+    labelled = _expenses(compute_underwriting(
+        "app", case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
+        requested_amount_krw=AMOUNT, requested_tenor_months=TENOR, semantic_labels=labels,
+    ))
+    assert labelled["unclassified"] == 0
+    assert labelled["supplier"] > labelled["other_operating"] > 0
+    assert labelled["tax_insurance"] > rules_only["tax_insurance"]  # 국민연금·고용산재
+    assert labelled["rent"] == rules_only["rent"] > 0
+    assert sum(labelled.values()) == pytest.approx(sum(rules_only.values()), abs=len(EXPENSE_GROUPS))

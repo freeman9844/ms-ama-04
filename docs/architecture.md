@@ -10,6 +10,7 @@
 
 ```mermaid
 flowchart LR
+  customer["고객(마켓플레이스 셀러)"]
   borrower["차주 시뮬레이터"]
   officer["심사역 / 심사 관리자 / 감사자"]
   operator["운영자"]
@@ -20,8 +21,9 @@ flowchart LR
     policy["Policy Engine"]
     mock["Mock MyData/세무/PG API"]
   end
-  borrower -->|신청 제출| orch
-  officer -->|로그인 / 승인·조건부·거절| console
+  customer -->|/apply: 데이터 3종 동의·금액·기간| console
+  borrower -->|동의 철회·이의제기| console
+  officer -->|로그인 / 승인·거절| console
   operator -->|상시: 운영자 IP 허용, 데모는 Easy Auth 꺼짐| console
   operator -.->|배포 창: 데이터 평면 작업| orch
   console --> orch
@@ -30,7 +32,7 @@ flowchart LR
   orch <--> mock
 ```
 
-차주는 접수 경로로, 심사역·운영자는 콘솔로 들어온다. 콘솔은 상시 external이지만 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막는다(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
+고객(마켓플레이스 셀러)은 콘솔의 고객 신청 페이지(`/apply`)에서 은행·세무·PG 데이터 3종에 모두 동의하고 금액(50만~1,000만 원)·기간(1~12개월)을 넣어 신청한다(`src/console/customer.py`). 이 신청은 심사역 콘솔과 같은 접수 큐로 들어가 같은 흐름을 탄다. 심사역·운영자는 콘솔로 들어온다. 콘솔은 상시 external이지만 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막는다(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
 
 ## 컨테이너
 
@@ -78,10 +80,10 @@ flowchart TB
 
 | 구성요소 | 호스팅 | 책임 | 데이터 | 인증 | 코드 경로 |
 |---|---|---|---|---|---|
-| Officer Console | Container Apps external `cae-web` | 신청 목록·근거 열람, 승인/조건부/거절, 조기경보·공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra) + 운영자 IP 허용. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
+| Officer Console | Container Apps external `cae-web` | 고객 신청 페이지(`/apply`), 신청 목록·탭형 상세 근거 열람, 승인/거절, 사후 재생(재조정 대기 시 정지·재개)·4주 잔고 전망, 공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra) + 운영자 IP 허용. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
-| Mock API | Container Apps internal `cae-int` | 합성 원천 데이터 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | 합성 데이터(프로세스 내 생성) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
+| Mock API | Container Apps internal `cae-int` | 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정) 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | 합성 데이터(프로세스 내 생성) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
 | Container Registry | Azure Container Registry + PE | 콘솔·Policy·Mock·Job 컨테이너 이미지 | 이미지 | MI `AcrPull`, 배포 창에 운영자 push | `infra/modules/acr.bicep` |
@@ -136,7 +138,7 @@ sequenceDiagram
   participant P as Policy Engine
   participant C as Cosmos
   participant U as 심사역
-  Q->>O: 신청 접수
+  Q->>O: 신청 접수 (콘솔 새 신청 또는 고객 /apply)
   O->>M: 동의 요청·토큰 발급 (동의)
   O->>A: 데이터 수집 (data-assembly, L3)
   A->>M: fetch_source (동의 범위 한정)
@@ -145,7 +147,7 @@ sequenceDiagram
   O->>A: 신용 평가 (analyst ↔ reviewer, 최대 3회)
   O->>C: 단계별 스냅샷 저장
   O->>U: 심사역 대기 (wait_for_external_event, SLA 타이머)
-  U->>O: 승인 / 조건부 / 거절
+  U->>O: 승인 / 거절
   O->>C: 모니터링 등록 (거절 아니면)
 ```
 
@@ -171,7 +173,7 @@ flowchart LR
   grv["grievances 큐"] --> reply["grievance-reply-agent"]
 ```
 
-조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 `alert.raised`로 Collections에 전달된다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
+조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 `alert.raised`로 Collections에 전달된다. 주차는 한 주씩 발행되고(앞 주차와 추심이 끝난 뒤 다음 주차), Collections가 재조정 요청을 만들면 재생이 멈췄다가 심사역 결정 뒤 재개·종료를 고른다(`_after_week`, `src/orchestrator/journey/monitoring.py`). 매주 `agents.forecast`가 심사 시점 정산 프로필(채널별 정산 지연·수수료)과 최근 3개월 고정 지출 일정(임대료·급여·4대보험·원천세·부가세·대표자 인출·기존/이번 대출 원리금, 매출 비례 운영비)으로 다음 28일 잔고를 전망하고(`project`), 0원 아래로 내려가면 `projected_shortfall` 트리거를 건다. 경보 근거는 `F:<주차>:projected_min_balance`처럼 전망 지표를 인용할 수 있다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
 
 ## 구성요소 계약
 

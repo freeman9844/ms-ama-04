@@ -4,6 +4,7 @@ from typing import Any
 
 from opsmetrics.cost import ai_cost, unit_economics
 from opsmetrics.fairness import DEFAULT_GAP_PP, fairness
+from opsmetrics.insights import decision_funnel, flag_counts, reason_code_counts, sla_status, step_latency, throughput
 from opsmetrics.slo import agent_success, latency
 
 BASIS = "합성 데이터 기준"
@@ -26,4 +27,10 @@ def summarize(
         "fixed": {"monthly_usd": fixed_monthly_usd, "source": fixed_source},
         "unit_economics": unit_economics(cost["per_application_usd"], fixed_monthly_usd),
         "fairness": fairness(docs, gap_pp=gap_pp),
+        "funnel": decision_funnel(docs),
+        "step_latency": step_latency(docs),
+        "reason_codes": reason_code_counts(docs),
+        "flags": flag_counts(docs),
+        "throughput": throughput(docs),
+        "sla": sla_status(docs),
     }

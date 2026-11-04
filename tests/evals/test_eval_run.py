@@ -84,7 +84,8 @@ def test_fake_run_writes_all_suites_and_cleans_up(tmp_path):
     decision = summary["suites"]["classify"]["configs"]["decision-1+gpt-5.4-mini"]
     assert decision["unpriced_calls"] > 0 and decision["threshold_curve"]
     ew = summary["suites"]["early_warning"]
-    assert ew["detector_only"]["fp"] > 0  # 계절 변동 경로에도 탐지기는 울린다(에이전트 비교 기준)
+    # 기대 입금 탐지기(P9)는 계절 변동 경로에 울리지 않고 돌려막기 경로는 잡는다.
+    assert ew["detector_only"]["tp"] > 0 and ew["detector_only"]["fp"] == 0
     calls = [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()]
     model_calls = [c for c in calls if c["kind"] in ("agent", "decision", "judge")]
     assert len(model_calls) == sum(m["calls"] for m in summary["by_model"].values())

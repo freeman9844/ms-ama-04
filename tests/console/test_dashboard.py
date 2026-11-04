@@ -21,7 +21,7 @@ def test_home_summary_counts_groups_and_recommendations():
     assert (s["total"], s["awaiting"], s["escalated"], s["in_progress"], s["approved"], s["declined"]) == (8, 2, 1, 2, 2, 1)
     assert s["approval_rate"] == 2 / 3
     assert [n for _, _, n in s["groups"]] == [2, 2, 1, 1, 2]
-    assert s["recommendations"] == [("승인", 2, "green"), ("조건부", 1, "blue"), ("심사역 회부", 1, "purple"),
+    assert s["recommendations"] == [("승인", 2, "green"), ("승인 권고(조건 제안)", 1, "blue"), ("심사역 회부", 1, "purple"),
                                     ("거절", 1, "red"), ("권고 없음", 3, "neutral")]
     assert s["donut"]["total"] == 8 and len(s["rec_bars"]["bars"]) == 5
 
@@ -162,6 +162,34 @@ def test_loan_summary_progress_severity_buffer_and_chart():
 def test_loan_summary_before_replay():
     s = dashboard.loan_summary({"loan": {"baseline": {}}, "monitoring": {}, "weeks": [], "alerts": []})
     assert s["chart"] is None and s["line"] is None and s["min_buffer"] is None and s["progress_pct"] == 0.0
+    assert s["expected_chart"] is None and s["forecast"] is None
+
+
+def test_loan_summary_expected_and_forecast_charts():
+    w1, w2, w3 = week(1, 20.0), week(2, 15.0), week(3, 9.0, ["projected_shortfall"])
+    w1["row"]["expected_revenue"], w2["row"]["expected_revenue"] = 8_000_000, 12_000_000
+    path = [{"date": f"2026-09-{d:02d}", "balance": 1_000_000 - d * 100_000} for d in range(10, 38 - 10)]
+    w3["row"].update(projected_min_balance=-700_000, projected_min_date="2026-09-27", shortfall_date="2026-09-21")
+    w3["projection"] = {"start_balance": 1_000_000, "attainment": 0.62, "path": path,
+                        "totals": {"inflow": 5_000_000, "rent": -1_000_000, "variable": -2_000_000, "installment": -287_000}}
+    view = {"loan": {"baseline": {}}, "monitoring": {"processed_week": 3}, "weeks": [w1, w2, w3], "alerts": []}
+    s = dashboard.loan_summary(view)
+    e, line = s["expected_chart"], s["expected_line"]
+    assert e["vmax"] == 12_000_000 and line["vmax"] == e["vmax"]
+    assert [g["bars"][0]["parts"][0]["color"] for g in e["groups"]] == ["blue", "amber", "blue"]  # 기대의 85% 미만
+    assert [p["i"] for p in line["points"]] == [0, 1] and line["points"][1]["x"] == e["groups"][1]["cx"]
+    f = s["forecast"]
+    assert (f["week"], f["attainment_pct"], f["shortfall_date"], f["min_balance"]) == (3, 62.0, "2026-09-21", -700_000)
+    assert f["chart"]["points"][0]["label"] == "09-10" and f["chart"]["low"]["value"] == path[-1]["balance"]
+    assert f["totals"] == [("기대 입금", 5_000_000), ("임대료", -1_000_000), ("이번 대출 원리금", -287_000),
+                           ("매출 비례 운영비", -2_000_000)]
+
+
+def test_loan_summary_forecast_uses_latest_projection():
+    w1, w2 = week(1, 20.0), week(2, 15.0)
+    w1["projection"] = {"start_balance": 1, "attainment": 1.0, "path": [{"date": "2026-09-08", "balance": 5}], "totals": {}}
+    s = dashboard.loan_summary({"loan": {"baseline": {}}, "monitoring": {}, "weeks": [w1, w2], "alerts": []})
+    assert s["forecast"]["week"] == 1 and s["expected_chart"] is None
 
 
 def test_ops_summary_gauges_steps_and_fairness():
@@ -194,6 +222,39 @@ def test_ops_summary_without_samples_is_neutral():
                                "agent_success": {"rate": None, "met": False, "by_step": {}},
                                "fairness": {"axes": {}}}, STEP_LABELS)
     assert (u["latency_tone"], u["success_tone"], u["steps"], u["fairness"]) == ("neutral", "neutral", [], {})
+    assert all(r["empty"] for r in u["funnel"]) and u["step_latency"] is None and u["throughput"] is None
+    assert (u["model_cost"]["arcs"], u["step_cost"]["bars"], u["reasons"]["bars"], u["flags"]["bars"]) == ([], [], [], [])
+
+
+def test_ops_insights_funnel_latency_cost_reasons_flags_throughput():
+    s = {
+        "funnel": {"policy": {"eligible": 3, "refer": 1, "none": 1}, "recommendation": {"approve": 2, "odd": 1},
+                   "officer": {"approve": 1, "none": 4}},
+        "step_latency": {"assess": {"n": 4, "p50_ms": 2_340, "p95_ms": 12_000}},
+        "ai_cost": {"by_model": {"gpt-5.4": {"cost_usd": 0.0123456}, "decision-1": {"cost_usd": None},
+                                 "gpt-5.4-mini": {"cost_usd": 0.001}},
+                    "by_step": {"assess": {"cost_usd": 0.0133456}}},
+        "reason_codes": [{"key": "R101", "count": 3}, {"key": "R002", "count": 1}],
+        "flags": [{"key": "agent_fallback", "count": 2}, {"key": "new_flag", "count": 1}],
+        "throughput": {"buckets": [{"start": f"2026-11-04T01:{m:02d}:00+00:00", "received": m // 10, "reached": 1}
+                                   for m in (0, 10)]},
+    }
+    u = dashboard.ops_insights(s, STEP_LABELS)
+    assert [r["label"] for r in u["funnel"]] == ["정책 판정", "에이전트 권고", "심사역 결정"]
+    assert [(p["part"], p["color"]) for p in u["funnel"][0]["parts"]] == [
+        ("적격", "green"), ("심사역 회부", "amber"), ("판정 없음", "neutral")]
+    assert [(p["part"], p["color"]) for p in u["funnel"][1]["parts"]] == [("승인", "green"), ("odd", "grey")]
+    assert [p["part"] for p in u["funnel"][2]["parts"]] == ["승인", "미결정"]
+    group = u["step_latency"]["groups"][0]
+    assert group["label"] == "신용 평가" and [b["parts"][0]["value"] for b in group["bars"]] == [2.3, 12.0]
+    assert u["step_latency"]["ticks"][-1]["text"] == "12초"
+    assert [(a["label"], a["value"]) for a in u["model_cost"]["arcs"]] == [("gpt-5.4", 0.0123), ("gpt-5.4-mini", 0.001)]
+    assert u["model_cost"]["total"] == 0.0133 and u["model_colors"][0] == ("gpt-5.4", "blue", "$0.0123")
+    assert [(b["label"], b["value"]) for b in u["step_cost"]["bars"]] == [("신용 평가", 0.0133)]
+    assert [(b["label"], b["color"]) for b in u["reasons"]["bars"]] == [("R101", "amber"), ("R002", "red")]
+    assert [b["label"] for b in u["flags"]["bars"]] == ["에이전트 대체 경로 사용", "new_flag"]
+    assert [g["label"] for g in u["throughput"]["groups"]] == ["10:00", ""]
+    assert u["throughput"]["groups"][1]["bars"][1]["parts"][0]["tip"] == "10:10 심사역 대기 도달 1건"
 
 
 def test_formatters():

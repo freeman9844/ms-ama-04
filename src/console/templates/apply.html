@@ -1,0 +1,32 @@
+{% extends "apply_base.html" %}
+{% block main %}
+<h1>운전자금 대출 신청</h1>
+<p class="note">마켓플레이스 정산 데이터로 심사합니다. 서류 제출 없이 데이터 이용에 동의하면 바로 신청됩니다.</p>
+{% if error %}<p class="error" role="alert" data-code="{{ error_code }}">{{ error }}</p>{% endif %}
+<form method="post" action="/apply" id="apply-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <section class="card">
+    <h2>신청 사업자</h2>
+    <label>사업자(데모)
+      <select name="applicant_id">
+      {% for a in demo_applicants %}<option value="{{ a }}"{% if form and form.applicant_id == a %} selected{% endif %}>{{ a|seller_label }}</option>{% endfor %}
+      </select>
+    </label>
+  </section>
+  <section class="card">
+    <h2>데이터 이용 동의</h2>
+    <p class="note">목적: {{ purpose }} · 보유기간: {{ ttl_days }}일. 3종 모두 동의해야 신청할 수 있습니다.</p>
+    {% for name, title, desc in consent_items %}
+    <label class="consent-item"><input type="checkbox" name="{{ name }}" class="consent"{% if form and form.get(name) == 'on' %} checked{% endif %}> {{ title }} 이용 동의
+      <small>받는 데이터: {{ desc }}</small></label>
+    {% endfor %}
+  </section>
+  <section class="card">
+    <h2>대출 조건</h2>
+    <label>신청 금액(원, 50만~1,000만) <input name="requested_amount_krw" inputmode="numeric" required value="{{ form.requested_amount_krw if form else '5,000,000' }}"></label>
+    <label>대출 기간(개월, 1~12) <input name="requested_tenor_months" inputmode="numeric" required value="{{ form.requested_tenor_months if form else '12' }}"></label>
+  </section>
+  <button type="submit" id="apply-submit">신청하기</button>
+</form>
+{% endblock %}
+{% block scripts %}<script src="/static/apply.js"></script>{% endblock %}

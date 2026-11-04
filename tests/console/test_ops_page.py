@@ -48,6 +48,10 @@ class FakeOps:
         self.asked.append(run_id)
         return self.data[run_id]
 
+    def recent(self, limit):
+        self.asked.append(("recent", limit))
+        return [d for run in self.data.values() for d in run][:limit]
+
 
 def skewed():
     # 카페 5건 전부 approve, 한식 5건 전부 decline → 업종 격차 100%p(경보). 업력 격차도 100%p지만 R104 설명 축.
@@ -103,8 +107,40 @@ def test_ops_page_selects_run_and_rejects_unknown():
 
 
 def test_ops_page_without_runs_explains_how_to_load():
-    html = client(FakeOps({})).get("/ops", headers=AUDITOR_H).text
-    assert "측정 실행이 없습니다" in html and "python -m ops load" in html
+    ops = FakeOps({})
+    html = client(ops).get("/ops", headers=AUDITOR_H).text
+    assert "측정 실행이 없습니다" in html and "python -m ops load" in html and "선택한 범위에 신청이 없습니다" in html
+    assert ops.asked == [("recent", 100)]
+
+
+def test_ops_page_offers_recent_first_and_reads_recent_scope():
+    ops = FakeOps({"load-20261102010000": skewed()})
+    c = client(ops)
+    html = c.get("/ops", headers=AUDITOR_H).text
+    options = re.findall(r'<option value="([^"]+)"', html)
+    assert options == ["recent", "load-20261102010000"] and ops.asked == ["load-20261102010000"]
+    html = c.get("/ops?run=recent", headers=AUDITOR_H).text
+    assert ops.asked[-1] == ("recent", 100)
+    assert '<option value="recent" selected>최근 신청 100건(전체 채널)</option>' in html
+    assert "최근 신청 10건(고객 신청·데모·부하 측정 등 전체 채널" in html and "report.md" not in html
+
+
+def test_ops_page_renders_insight_panels():
+    docs = skewed()
+    docs[0].update(officer_decision="approve", policy_override=True, status="approved")  # project() 결과 모양
+    docs[1].update(officer_decision="decline", status="declined")
+    docs[5]["policy"] = {"decision": "refer", "reason_codes": [{"code": "R101", "message": "매출 대사율 미달"}]}
+    docs[6].update(flags=["agent_fallback"], status="escalated", sla_escalated=True)
+    for d in docs:
+        d["steps"][0]["duration_ms"] = 4_200
+    html = client(FakeOps({"load-20261102010000": docs})).get("/ops", headers=AUDITOR_H).text
+    for text in ("결정 퍼널", "정책 판정", "에이전트 권고", "심사역 결정", "단계별 처리 시간", "시간대별 처리량",
+                 "모델별 AI 비용", "단계별 AI 비용", "정책 사유 코드 빈도", "R101", "매출 대사율 미달",
+                 "에이전트 대체 경로 사용", "심사역 대기 중", "SLA 초과(누적)"):
+        assert text in html, text
+    assert "비교 2건 중 일치 1건" in html  # 카페 approve→승인 일치, 카페 approve→거절 불일치
+    assert "심사역 승인 1건 중 100.0%" in html
+    assert re.search(r'kpi-label">심사역 대기 중</div>\s*<div class="kpi-value">8건', html)
 
 
 def test_ops_page_requires_role_and_configuration():

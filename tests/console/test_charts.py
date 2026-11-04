@@ -92,3 +92,20 @@ def test_stacked_percent_parts_and_empty_rows():
 def test_rounding_never_returns_negative_zero():
     assert str(charts._r(-0.001)) == "0.0"
     assert charts.is_num(1) and not charts.is_num(True) and not charts.is_num(math.nan) and not charts.is_num("1")
+
+
+def test_signed_line_keeps_negatives_and_draws_zero_line():
+    pts = [("11-09", 3_000_000), ("11-10", None), ("11-11", -1_000_000), ("11-12", 1_000_000)]
+    s = charts.signed_line(pts, width=400, height=200, label_every=2)
+    base, top = 200 - charts.PAD_B, charts.PAD_T
+    assert s["zero_y"] == round(base - (base - top) * 0.25, 2)  # 0원은 -1백만~3백만 사이 1/4 지점
+    assert [p["y"] for p in s["points"]] == [top, base, s["points"][2]["y"]] and len(s["segments"]) == 2
+    assert [p["negative"] for p in s["points"]] == [False, True, False]
+    assert s["low"]["label"] == "11-11" and [t["value"] for t in s["ticks"]] == [-1_000_000, 0.0, 3_000_000]
+    assert [lb["text"] for lb in s["labels"]] == ["11-09", "11-11"]
+
+
+def test_signed_line_all_positive_starts_axis_at_zero():
+    s = charts.signed_line([("a", 5), ("b", 10)])
+    assert s["zero_y"] == 240 - charts.PAD_B and [t["value"] for t in s["ticks"]] == [0.0, 10]
+    assert charts.signed_line([])["points"] == [] and charts.signed_line([])["low"] is None

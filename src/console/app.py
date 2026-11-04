@@ -2,7 +2,8 @@
 
 인증은 Container Apps 기본 인증(Easy Auth)이 맡고, 앱은 X-MS-CLIENT-PRINCIPAL의 앱 역할로 권한을 정한다.
 결정·신규 신청·사후 재생·재조정 결정·동의 명령·이의제기는 큐 메시지로만 오케스트레이터에 전달한다
-(콘솔은 Cosmos 읽기 전용). /borrower는 차주 화면을 흉내 낸 데모 시뮬레이터다.
+(콘솔은 Cosmos 읽기 전용). /borrower는 차주 화면을 흉내 낸 데모 시뮬레이터이고,
+/apply는 콘솔 역할 없이 셀러가 직접 신청하는 고객 페이지다.
 """
 
 import hashlib
@@ -21,8 +22,18 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 
+from agents.monitoring import WEEKS
+from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
-from console.dashboard import detail_summary, home_summary, loan_summary, loans_summary, ops_summary
+from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply
+from console.dashboard import (
+    RECOMMENDATION_LABELS,
+    detail_summary,
+    home_summary,
+    loan_summary,
+    loans_summary,
+    ops_summary,
+)
 from console.monitoring import (
     ACTION_LABELS,
     MONITORING_LABELS,
@@ -32,11 +43,23 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
-from console.ops import AXIS_LABELS, STEP_LABELS, OpsStore, default_run, ops_view, sorted_runs
+from console.ops import (
+    AXIS_LABELS,
+    RECENT_RUN,
+    STEP_LABELS,
+    OpsStore,
+    default_run,
+    ops_view,
+    run_options,
+    scope_docs,
+    sorted_runs,
+)
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
+    CONSENT_PURPOSE,
+    CONSENT_TTL_DAYS,
     KST,
     ConsentCommand,
     GrievanceDecision,
@@ -45,9 +68,11 @@ from journey.models import (
     ReplayRequest,
     RestructureDecision,
     StartRequest,
+    replay_held,
     replay_in_progress,
 )
 from journey.validation import validate_officer_decision
+from shared.sellers import DEMO_SELLERS, seller_label
 
 HERE = Path(__file__).parent
 START_QUEUE = "applications-start"
@@ -59,7 +84,7 @@ GRIEVANCE_QUEUE = "grievances"
 GRIEVANCE_DECISION_QUEUE = "grievance-decisions"
 MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
-DEMO_APPLICANTS = ("demo-healthy-001", "demo-mismatch-002", "demo-stress-003", "demo-thin-004", "demo-injection-005")
+DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 # form-action은 넣지 않는다: Easy Auth 세션 만료 시 로그인 리디렉션(login.microsoftonline.com)을 막는다.
@@ -73,8 +98,8 @@ DECISION_ERRORS = {
     "override_required": "정책 결과상 거절입니다. 승인하려면 예외 승인 확인이 필요합니다.",
     "amount_required": "승인 금액을 입력해야 합니다.",
     "amount_exceeds_policy": "승인 금액이 정책 한도를 넘습니다.",
-    "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(500만 원)를 넘습니다.",
-    "conditions_required": "조건부 승인에는 조건이 한 줄 이상 필요합니다.",
+    "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(1,000만 원)를 넘습니다.",
+    "conditional_retired": "조건부 승인은 더 이상 쓰지 않습니다. 승인 또는 거절을 고르세요.",
 }
 
 
@@ -125,6 +150,8 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
     env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
+    env.filters["seller_label"] = seller_label
+    env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
     for name, labels in LABEL_FILTERS.items():
         env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
     env.filters["pct"] = lambda v: f"{v * 100:.1f}%" if isinstance(v, int | float) else "-"
@@ -204,7 +231,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        return render("detail.html", user, status_code, v=view, ui=detail_summary(view), in_progress=in_progress,
+        return render("detail.html", user, status_code, v=view, ui=detail_summary(view), panels=assessment_panels(view),
+                      in_progress=in_progress,
                       consents=consents, **ctx)
 
     @app.get("/healthz")
@@ -243,6 +271,48 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return render("new.html", user, 422, error="신청 정보가 올바르지 않습니다.", form=form)
         deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
+
+    def customer(request: Request) -> Principal:
+        """고객 페이지는 콘솔 역할을 묻지 않는다. 로그인(또는 데모 주체)만 있으면 된다."""
+        user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
+        if user is None:
+            raise HTTPException(401, "login required")
+        return user
+
+    def apply_form(user: Principal, status_code: int = 200, **ctx: Any) -> HTMLResponse:
+        return render("apply.html", user, status_code, consent_items=CONSENT_ITEMS, purpose=CONSENT_PURPOSE,
+                      ttl_days=CONSENT_TTL_DAYS, **ctx)
+
+    @app.get("/apply", response_class=HTMLResponse)
+    def apply_page(request: Request) -> HTMLResponse:
+        return apply_form(customer(request))
+
+    @app.post("/apply")
+    async def apply_submit(request: Request):
+        user = customer(request)
+        form = await checked_form(request, user)
+        code = validate_apply(form, DEMO_APPLICANTS)
+        if code:
+            return apply_form(user, 422, error=APPLY_ERRORS[code], error_code=code, form=form)
+        req = StartRequest(
+            application_id=deps.new_application_id(),
+            applicant_id=form["applicant_id"].strip(),
+            requested_amount_krw=_int(form["requested_amount_krw"]),
+            requested_tenor_months=_int(form["requested_tenor_months"]),
+            submitted_at=deps.clock(),
+            source="customer",
+        )
+        deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
+        return RedirectResponse(f"/apply/{quote(req.application_id, safe='')}", status_code=303)
+
+    @app.get("/apply/{application_id}", response_class=HTMLResponse)
+    def apply_status(application_id: str, request: Request) -> HTMLResponse:
+        user = customer(request)
+        doc = deps.store.get(application_id)
+        if doc is not None and doc.get("source") != "customer":
+            raise HTTPException(404, "not a customer application")
+        return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
+                      seller=seller_label(doc["applicant_id"]) if doc else None)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
     def show(application_id: str, request: Request) -> HTMLResponse:
@@ -300,7 +370,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw = load_monitoring_raw(deps.raw, loan)
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore)
         blocked = replay_in_progress(mon, deps.clock())
-        return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked, **ctx)
+        return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked,
+                      replay_held=replay_held(mon), weeks_left=WEEKS - (mon.get("paused_week") or 0), **ctx)
 
     @app.get("/loans", response_class=HTMLResponse)
     def loans(request: Request) -> HTMLResponse:
@@ -320,11 +391,30 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         loan = loan_or_404(loan_id)
         if replay_in_progress(loan.get("monitoring"), deps.clock()):
             return loan_page(user, loan, 409, error="이미 재생이 진행 중입니다.")
-        deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json"))
+        if replay_held(loan.get("monitoring")):
+            return loan_page(user, loan, 409, error="재조정 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다.")
+        # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
+        deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
         return render(
             "loan_sent.html", user, 202, loan_id=loan["id"],
             message="사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.",
         )
+
+    @app.post("/loans/{loan_id}/replay/{action}", response_class=HTMLResponse)
+    async def replay_resume_or_stop(loan_id: str, action: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        await checked_form(request, user)
+        if action not in ("resume", "stop"):
+            raise HTTPException(404, "unknown replay action")
+        loan = loan_or_404(loan_id)
+        mon = loan.get("monitoring") or {}
+        if mon.get("status") != "awaiting_resume":
+            return loan_page(user, loan, 409, error="재개 확인을 기다리는 재생이 없습니다.")
+        message = ReplayRequest(loan_id=loan["id"], action=action, replay_id=mon["replay_id"])
+        deps.queue.send(REPLAY_QUEUE, message.model_dump(mode="json"))
+        weeks_left = WEEKS - (mon.get("paused_week") or 0)
+        text = f"남은 {weeks_left}주 재생을 이어서 요청했습니다." if action == "resume" else "남은 재생을 종료하도록 요청했습니다."
+        return render("loan_sent.html", user, 202, loan_id=loan["id"], message=text)
 
     @app.post("/loans/{loan_id}/alerts/{alert_id}/restructure", response_class=HTMLResponse)
     async def restructure(loan_id: str, alert_id: str, request: Request) -> HTMLResponse:
@@ -353,6 +443,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return render(
             "loan_sent.html", user, 202, loan_id=loan["id"],
             message=f"재조정 결정({message.decision})을 큐에 보냈습니다.",
+            note="결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요." if replay_held(loan.get("monitoring")) else None,
         )
 
     # ── 동의 수명주기·이의제기(P5b) ──
@@ -471,11 +562,13 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         user = viewer(request)
         store = ops_store()
         runs = sorted_runs(store.runs())
-        if run is not None and run not in runs:
+        if run is not None and run != RECENT_RUN and run not in runs:
             raise HTTPException(404, "run not found")
-        selected = run or default_run(runs)
-        summary = ops_view(store.by_run(selected)) if selected else None
-        return render("ops.html", user, runs=runs, selected=selected, s=summary,
+        selected = run or default_run(runs) or RECENT_RUN
+        docs = scope_docs(store, selected)
+        summary = ops_view(docs) if docs else None
+        return render("ops.html", user, runs=runs, options=run_options(runs), selected=selected,
+                      recent=selected == RECENT_RUN, s=summary,
                       ui=ops_summary(summary, STEP_LABELS) if summary else None,
                       AXIS_LABELS=AXIS_LABELS, STEP_LABELS=STEP_LABELS)
 

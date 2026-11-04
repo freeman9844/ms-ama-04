@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% block head %}{% endblock %}
+<title>{% block title %}AMA 셀러 운전자금 대출 신청{% endblock %}</title>
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body>
+<header class="apply-top"><a href="/apply">AMA 셀러 운전자금 대출</a></header>
+{% if demo %}<p class="demo-banner" role="note">데모 환경입니다. 실제 대출이 실행되지 않으며 데이터는 모두 가상입니다.</p>{% endif %}
+<main class="apply-main">
+{% block main %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

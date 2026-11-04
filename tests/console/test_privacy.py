@@ -73,14 +73,14 @@ class FakePrivacy:
 def consent(consent_id, application_id, status="granted", **extra):
     return {
         "id": consent_id, "consent_id": consent_id, "application_id": application_id,
-        "applicant_id": "demo-healthy-001", "scopes": ["account", "tax", "pg"], "purpose": "운전자금 대출 심사",
+        "applicant_id": "seller-dailylook-01", "scopes": ["account", "tax", "pg"], "purpose": "운전자금 대출 심사",
         "granted_at": "2026-11-01T09:00:00+09:00", "expires_at": "2027-01-30T09:00:00+09:00",
         "status": status, "notices": [], **extra,
     }
 
 
 PROOF = {
-    "id": "c-0", "consent_id": "c-0", "application_id": "app-2", "applicant_id": "demo-healthy-001",
+    "id": "c-0", "consent_id": "c-0", "application_id": "app-2", "applicant_id": "seller-dailylook-01",
     "reason": "expired", "trigger": "expire_now", "requested_by": "oid-officer",
     "deleted_at": "2026-11-02T10:00:00+09:00",
     "items": [
@@ -100,7 +100,7 @@ PROOF = {
 def grievance(grievance_id="grv-abc123", status="pending_officer", **extra):
     return {
         "id": grievance_id, "grievance_id": grievance_id, "application_id": "app-2",
-        "applicant_id": "demo-healthy-001", "text": "<b>한도</b>가 너무 낮습니다", "submitted_at": "2026-11-02T11:00:00+09:00",
+        "applicant_id": "seller-dailylook-01", "text": "<b>한도</b>가 너무 낮습니다", "submitted_at": "2026-11-02T11:00:00+09:00",
         "status": status,
         "record": {
             "status": "approved",
@@ -120,7 +120,7 @@ def env(make_doc, raw, key):
     decided = make_doc(id="app-2", application_id="app-2", status="approved",
                        officer_decision={"decision": "approve", "officer_id": "oid-officer",
                                          "amount_krw": 15_000_000, "conditions": [], "reason": ""})
-    other = make_doc(id="app-9", application_id="app-9", applicant_id="demo-thin-004", status="declined",
+    other = make_doc(id="app-9", application_id="app-9", applicant_id="seller-knitroom-04", status="declined",
                      officer_decision={"decision": "decline", "officer_id": "oid-officer", "amount_krw": None,
                                        "conditions": [], "reason": "부족"})
     privacy = FakePrivacy(
@@ -132,7 +132,7 @@ def env(make_doc, raw, key):
                     deletion_proof_id="c-0", deletion_complete=True,
                     notices=[{"kind": "deletion", "at": "2026-11-02T10:00:01+09:00", "title": "원천 데이터 삭제 완료",
                               "body": "삭제 증명 번호 c-0", "source": "template", "issues": ["x"]}]),
-            consent("c-9", "app-9") | {"applicant_id": "demo-thin-004"},
+            consent("c-9", "app-9") | {"applicant_id": "seller-knitroom-04"},
         ],
         [PROOF],
         [grievance(), grievance("grv-done01", status="resolved_upheld",
@@ -168,19 +168,19 @@ def test_nav_links_borrower_and_grievances(env):
 def test_borrower_index_lists_demo_applicants(env):
     client, _, _ = env
     page = client.get("/borrower", headers=OFFICER).text
-    assert 'href="/borrower/demo-healthy-001"' in page and 'href="/borrower/demo-injection-005"' in page
+    assert 'href="/borrower/seller-dailylook-01"' in page and 'href="/borrower/seller-candle-05"' in page
 
 
 def test_borrower_page_shows_own_consents_notices_and_grievances(env):
     client, _, _ = env
-    page = client.get("/borrower/demo-healthy-001", headers=OFFICER).text
+    page = client.get("/borrower/seller-dailylook-01", headers=OFFICER).text
     assert "c-1" in page and "c-0" in page and "c-9" not in page
     assert "계좌 거래내역" in page and "운전자금 대출 심사" in page
     assert "유효" in page and "만료" in page
     assert "동의 만료 예정 안내" in page and "2027년 1월 30일에 만료됩니다." in page
     assert 'href="/consents/c-0/proof"' in page
     # 철회는 유효한 동의에만 있다.
-    assert 'action="/borrower/demo-healthy-001/consents/c-1/revoke"' in page
+    assert 'action="/borrower/seller-dailylook-01/consents/c-1/revoke"' in page
     assert "/consents/c-0/revoke" not in page
     # 이의제기는 결정이 난 자기 신청에만 낼 수 있다.
     assert re.search(r'<option value="app-2"', page) and not re.search(r'<option value="app-1"', page)
@@ -190,30 +190,30 @@ def test_borrower_page_shows_own_consents_notices_and_grievances(env):
 
 def test_auditor_sees_borrower_page_without_forms(env):
     client, _, _ = env
-    page = client.get("/borrower/demo-healthy-001", headers=AUDITOR_H).text
+    page = client.get("/borrower/seller-dailylook-01", headers=AUDITOR_H).text
     assert "c-1" in page and "/revoke" not in page and 'name="csrf"' not in page
 
 
 def test_revoke_sends_consent_command_as_borrower(env):
     client, queue, _ = env
-    path = "/borrower/demo-healthy-001"
+    path = "/borrower/seller-dailylook-01"
     resp = post(client, OFFICER, f"{path}/consents/c-1/revoke", path)
     assert resp.status_code == 202
     assert queue.sent == [("consent-commands", {"consent_id": "c-1", "action": "revoke",
-                                                "requested_by": "borrower:demo-healthy-001", "application_id": "app-1"})]
+                                                "requested_by": "borrower:seller-dailylook-01", "application_id": "app-1"})]
 
 
 @pytest.mark.parametrize("consent_id, status", [("c-9", 404), ("c-x", 404), ("c-0", 409)])
 def test_revoke_only_own_granted_consent(env, consent_id, status):
     client, queue, _ = env
-    path = "/borrower/demo-healthy-001"
+    path = "/borrower/seller-dailylook-01"
     assert post(client, OFFICER, f"{path}/consents/{consent_id}/revoke", path).status_code == status
     assert queue.sent == []
 
 
 def test_borrower_posts_need_csrf_and_decider_role(env):
     client, queue, _ = env
-    path = "/borrower/demo-healthy-001"
+    path = "/borrower/seller-dailylook-01"
     token = csrf(client, OFFICER, path)
     assert client.post(f"{path}/consents/c-1/revoke", headers=OFFICER, data={"csrf": ""}).status_code == 403
     assert client.post(f"{path}/consents/c-1/revoke", headers=AUDITOR_H, data={"csrf": token}).status_code == 403
@@ -224,11 +224,11 @@ def test_borrower_posts_need_csrf_and_decider_role(env):
 
 def test_grievance_submission_is_enqueued(env):
     client, queue, _ = env
-    path = "/borrower/demo-healthy-001"
+    path = "/borrower/seller-dailylook-01"
     resp = post(client, OFFICER, f"{path}/grievances", path, application_id="app-2", text="  한도가 낮습니다  ")
     assert resp.status_code == 202
     assert queue.sent == [("grievances", {"grievance_id": "grv-new001", "application_id": "app-2",
-                                          "applicant_id": "demo-healthy-001", "text": "한도가 낮습니다"})]
+                                          "applicant_id": "seller-dailylook-01", "text": "한도가 낮습니다"})]
 
 
 @pytest.mark.parametrize("fields, status", [
@@ -240,7 +240,7 @@ def test_grievance_submission_is_enqueued(env):
 ])
 def test_grievance_submission_validation(env, fields, status):
     client, queue, _ = env
-    path = "/borrower/demo-healthy-001"
+    path = "/borrower/seller-dailylook-01"
     assert post(client, OFFICER, f"{path}/grievances", path, **fields).status_code == status
     assert queue.sent == []
 
@@ -330,12 +330,15 @@ def test_rereview_is_validated_against_recorded_policy(env):
                 amount_krw="25,000,000", reason="재심사")
     assert over.status_code == 422 and "한도" in over.text
     assert queue.sent == []
-    ok = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="conditional",
-              amount_krw="18,000,000", conditions="월별 매출 보고\r\n", reason="재심사")
+    retired = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="conditional",
+                   amount_krw="18,000,000", conditions="월별 매출 보고\r\n", reason="재심사")
+    assert retired.status_code == 422 and queue.sent == []
+    ok = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="approve",
+              amount_krw="18,000,000", reason="재심사")
     assert ok.status_code == 202
     assert queue.sent[-1][1] == {
         "grievance_id": "grv-abc123", "application_id": "app-2", "outcome": "rereview", "officer_id": "oid-officer",
-        "reason": "재심사", "new_decision": "conditional", "amount_krw": 18_000_000, "conditions": ["월별 매출 보고"]}
+        "reason": "재심사", "new_decision": "approve", "amount_krw": 18_000_000, "conditions": []}
 
 
 @pytest.mark.parametrize("fields", [{"outcome": "uphold", "reason": ""}, {"outcome": "maybe", "reason": "x"},
@@ -363,16 +366,16 @@ def test_grievance_decision_guards(env):
 def test_withdrawn_is_terminal_with_label(env, make_doc):
     client, _, _ = env
     client.app.state.deps.store.docs["app-1"] = make_doc(
-        status="withdrawn", withdrawal={"consent_id": "c-1", "requested_by": "borrower:demo-healthy-001",
+        status="withdrawn", withdrawal={"consent_id": "c-1", "requested_by": "borrower:seller-dailylook-01",
                                         "at": "2026-11-02T09:30:00+09:00"})
     page = client.get("/applications/app-1", headers=OFFICER).text
     assert "철회 종료" in page and 'http-equiv="refresh"' not in page
-    assert "borrower:demo-healthy-001" in page
+    assert "borrower:seller-dailylook-01" in page
 
 
 def test_privacy_pages_404_when_not_configured(make_doc, raw, key):
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key)
     client = TestClient(create_app(deps))
-    for path in ("/borrower/demo-healthy-001", "/grievances", "/consents/c-1/proof"):
+    for path in ("/borrower/seller-dailylook-01", "/grievances", "/consents/c-1/proof"):
         assert client.get(path, headers=OFFICER).status_code == 404
     assert client.get("/applications/app-1", headers=OFFICER).status_code == 200

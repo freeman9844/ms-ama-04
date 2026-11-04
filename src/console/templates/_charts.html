@@ -54,10 +54,20 @@
 </svg>
 {%- endmacro %}
 
-{% macro line_overlay(l, label) -%}
-{% for d in l.segments %}<path class="line stroke-purple" d="{{ d }}" pathLength="100"></path>{% endfor %}
-{% for p in l.points %}<circle class="dot fill-purple" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {{ p.value }}</title></circle>{% endfor %}
-{% for t in l.ticks %}<text class="axis-label" x="{{ l.x + 6 }}" y="{{ t.y + 4 }}">{{ t.text }}</text>{% endfor %}
+{% macro line_overlay(l, label, color="purple", axis=true) -%}
+{% for d in l.segments %}<path class="line stroke-{{ color }}" d="{{ d }}" pathLength="100"></path>{% endfor %}
+{% for p in l.points %}<circle class="dot fill-{{ color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {{ p.value }}</title></circle>{% endfor %}
+{% if axis %}{% for t in l.ticks %}<text class="axis-label" x="{{ l.x + 6 }}" y="{{ t.y + 4 }}">{{ t.text }}</text>{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro signed_line(s, label, unit="원") -%}
+<svg class="chart columns" viewBox="0 0 {{ s.width }} {{ s.height }}" role="img" aria-label="{{ label }}">
+  {% for t in s.ticks %}<line class="gridline" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"></line><text class="axis-label" x="{{ s.x0 - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.text }}</text>{% endfor %}
+  <line class="ref stroke-red" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ s.zero_y }}" y2="{{ s.zero_y }}"><title>0{{ unit }}</title></line>
+  {% for d in s.segments %}<path class="line stroke-purple" d="{{ d }}" pathLength="100"></path>{% endfor %}
+  {% for p in s.points %}<circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"><title>{{ p.label }} {{ "{:,.0f}".format(p.value) }}{{ unit }}</title></circle>{% endfor %}
+  {% for lb in s.labels %}<text class="axis-label" x="{{ lb.x }}" y="{{ s.label_y }}" text-anchor="middle">{{ lb.text }}</text>{% endfor %}
+</svg>
 {%- endmacro %}
 
 {% macro gauge(g, label, value_text, sub="", tone="blue") -%}
@@ -72,10 +82,10 @@
 </div>
 {%- endmacro %}
 
-{% macro marker_bar(m, label) -%}
+{% macro marker_bar(m, label, tone="blue") -%}
 <svg class="chart marker-bar" viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="{{ label }}">
   <rect class="track" x="0" y="3" width="100" height="8"></rect>
-  <rect class="bar-h fill-blue" x="0" y="3" width="{{ m.fill }}" height="8"><title>{{ label }}</title></rect>
+  <rect class="bar-h fill-{{ tone }}" x="0" y="3" width="{{ m.fill }}" height="8"><title>{{ label }}</title></rect>
   <line class="mark" x1="{{ m.mark }}" x2="{{ m.mark }}" y1="0" y2="14" vector-effect="non-scaling-stroke"></line>
 </svg>
 {%- endmacro %}

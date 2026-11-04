@@ -18,12 +18,20 @@ ACTION_LABELS = {
     "hardship_review": "상환 곤란 검토",
     "officer_review": "심사역 확인",
 }
-MONITORING_LABELS = {"replaying": "재생 중", "completed": "재생 완료", "failed": "재생 실패"}
+MONITORING_LABELS = {
+    "replaying": "재생 중",
+    "paused": "재조정 대기",
+    "awaiting_resume": "재개 확인 대기",
+    "stopped": "재생 종료",
+    "completed": "재생 완료",
+    "failed": "재생 실패",
+}
 TRIGGER_LABELS = {
     "inflow_drop": "매출 급감",
     "buffer_drop": "현금 버퍼 감소",
     "volatility_spike": "변동성 급증",
     "new_debt": "신규 차입",
+    "projected_shortfall": "잔고 부족 전망",
 }
 _SHOWN_FIELDS = ("summary", "signals", "collections", "restructure")
 

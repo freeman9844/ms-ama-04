@@ -9,8 +9,8 @@ from journey.models import StartRequest
 # test_journey.py와 같은 상수(importlib 모드라 테스트 모듈끼리 import할 수 없다).
 START = {
     "application_id": "app-1",
-    "applicant_id": "demo-healthy-001",
-    "requested_amount_krw": 20_000_000,
+    "applicant_id": "seller-dailylook-01",
+    "requested_amount_krw": 10_000_000,
     "requested_tenor_months": 12,
 }
 CONSENT = {

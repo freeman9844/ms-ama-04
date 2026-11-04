@@ -129,11 +129,11 @@ def deps(mock_client):
     )
 
 
-def consent_for(deps, applicant_id="demo-healthy-001", application_id="app-1"):
+def consent_for(deps, applicant_id="seller-dailylook-01", application_id="app-1"):
     return request_consent(deps, {"application_id": application_id, "applicant_id": applicant_id})
 
 
-def assembled(deps, applicant_id="demo-healthy-001"):
+def assembled(deps, applicant_id="seller-dailylook-01"):
     consent = consent_for(deps, applicant_id)
     report = assemble_data(
         deps,
@@ -216,13 +216,15 @@ def test_underwrite_and_policy_on_real_apps(deps):
     assert result["features"]["application_id"] == "app-1"
     assert result["features"]["months_of_history"] == 12
     assert result["signals"]["classification_rules"]
+    assert {c["payer"] for c in result["settlement_profile"]["channels"]} >= {"네이버파이낸셜", "토스페이먼츠"}
+    assert [e["group"] for e in result["expense_breakdown"]][0] == "supplier" and len(result["expense_breakdown"]) == 8
     decision = evaluate_policy(deps, result["features"])
     assert decision["decision"] == "eligible"
     assert decision["max_amount_krw"] == 3_300_000
 
 
 def test_underwrite_flags_high_cost_lender(deps):
-    consent, _ = assembled(deps, "demo-stress-003")
+    consent, _ = assembled(deps, "seller-glowlab-03")
     assert "high_cost_lender_detected" in underwrite(deps, underwrite_input(consent["consent_id"]))["flags"]
 
 
@@ -253,7 +255,7 @@ def journey_activities(deps):
 
 START = {
     "application_id": "app-1",
-    "applicant_id": "demo-healthy-001",
+    "applicant_id": "seller-dailylook-01",
     "requested_amount_krw": 3_300_000,
     "requested_tenor_months": 12,
 }
@@ -297,7 +299,7 @@ class FakeDecider:
 ANALYST_DRAFT = {
     "recommendation": "approve",
     "summary": "상환 여력이 충분하다.",
-    "claims": [{"text": "DSCR은 3.802다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
+    "claims": [{"text": "DSCR은 4.106다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
     "proposed_structure": {
         "amount_krw": 3_300_000, "tenor_months": 12, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
     },
@@ -341,11 +343,14 @@ def test_underwrite_classifies_unresolved_without_caching_transfers(deps):
     m = first["classification"]["metrics"]
     assert m["decision_calls"] == m["unique_descriptions"] > 0 and m["cache_hits"] == 0
     assert first["category_overrides"] == {}
+    expenses = {e["group"]: e["monthly_avg_krw"] for e in first["expense_breakdown"]}
+    assert expenses["unclassified"] == 0 and expenses["supplier"] > 0  # 의미 라벨이 지출 구성으로 간다
     assert {s["business_industry"] for s in decider.states} == {"패션의류"}
-    # 데모의 미분류 적요는 모두 이체(공급처 송금)라 공유 캐시에 남지 않는다.
-    assert not any(c == "classifications" for c, _ in deps.store.docs)
+    # 자동이체 적요(연금·솔루션·카드대금)만 공유 캐시에 남고, 이체(공급처 송금·광고 충전)는 남지 않는다.
+    cached = [k for c, k in deps.store.docs if c == "classifications"]
+    assert 0 < len(cached) < m["unique_descriptions"]
     second = underwrite(d, underwrite_input(consent["consent_id"]))["classification"]["metrics"]
-    assert (second["decision_calls"], second["cache_hits"]) == (m["unique_descriptions"], 0)
+    assert (second["decision_calls"], second["cache_hits"]) == (m["unique_descriptions"] - len(cached), len(cached))
 
 
 def test_underwrite_records_fallback_conversation_on_consent(deps):
@@ -377,7 +382,7 @@ def test_decider_outage_falls_back_to_rules(deps):
     assert result["features"] == base["features"]
 
 
-def assess_input(deps, applicant_id="demo-healthy-001"):
+def assess_input(deps, applicant_id="seller-dailylook-01"):
     consent, _ = assembled(deps, applicant_id)
     uw = underwrite(deps, underwrite_input(consent["consent_id"]))
     policy = evaluate_policy(deps, uw["features"])

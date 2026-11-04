@@ -12,6 +12,10 @@ def archetype_of(applicant_id: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def _reason(r: Any) -> Any:
+    return {k: r[k] for k in ("code", "message") if k in r} if isinstance(r, dict) else r
+
+
 def project(doc: dict[str, Any]) -> dict[str, Any]:
     policy, assessment, officer = doc.get("policy"), doc.get("assessment"), doc.get("officer_decision")
     return {
@@ -26,8 +30,11 @@ def project(doc: dict[str, Any]) -> dict[str, Any]:
         "steps": [{k: s[k] for k in _STEP_KEYS if k in s} for s in doc.get("steps") or []],
         "timeline": [{"status": t.get("status"), "at": t.get("at")} for t in doc.get("timeline") or []],
         "flags": list(doc.get("flags") or []),
-        "policy": {"decision": policy.get("decision"), "reason_codes": list(policy.get("reason_codes") or [])}
+        "policy": {"decision": policy.get("decision"), "reason_codes": [_reason(r) for r in policy.get("reason_codes") or []]}
         if isinstance(policy, dict) else None,
         "assessment": {"recommendation": assessment.get("recommendation")} if isinstance(assessment, dict) else None,
         "officer_decision": officer.get("decision") if isinstance(officer, dict) else None,
+        "policy_override": isinstance(officer, dict) and officer.get("policy_override") is True,
+        "requested_amount_krw": doc.get("requested_amount_krw"),
+        "sla_escalated": isinstance(doc.get("sla"), dict) and doc["sla"].get("escalated") is True,
     }

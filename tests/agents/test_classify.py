@@ -20,11 +20,15 @@ def _txn(amount: int, description: str, code: str) -> Transaction:
 
 
 def test_matches_synthetic_labels_for_every_demo_case():
-    # 합성 정답과 같아야 한다. 공급업체 이체는 규칙이 없으므로 unclassified_out이 정답이다.
+    # 합성 정답과 같아야 한다. 공급처·택배·광고·카드대금·솔루션 이용료와 건강보험 외 4대보험은
+    # 규칙이 없으므로 unclassified_out이 정답이다(의미 분류기 몫).
+    no_rule = {TxnCategory.SUPPLIER, TxnCategory.SHIPPING, TxnCategory.ADVERTISING, TxnCategory.CARD_PAYMENT,
+               TxnCategory.SOLUTION_FEE}
     for case in build_demo_cases(date(2026, 11, 2)).values():
         for t in case.transactions:
             label = case.labels[t.txn_id]
-            want = Category.UNCLASSIFIED_OUT if label is TxnCategory.SUPPLIER else Category(label.value)
+            pension = label is TxnCategory.SOCIAL_INSURANCE and "국민건강보험" not in t.description
+            want = Category.UNCLASSIFIED_OUT if label in no_rule or pension else Category(label.value)
             assert classify(t) == want, (t.description, t.txn_type_code)
 
 

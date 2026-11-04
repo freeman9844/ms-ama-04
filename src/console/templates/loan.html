@@ -15,13 +15,36 @@
     {% if user.can_decide %}
     <form method="post" action="/loans/{{ l.id|path }}/replay">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit"{% if replay_blocked %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
+      <button type="submit"{% if replay_blocked or replay_held %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
     </form>
     {% endif %}
   </div>
 </div>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if replay_blocked %}<p class="note">재생이 진행 중입니다. 10초마다 새로 고칩니다.</p>{% endif %}
+{% if m.status == "paused" %}
+<section class="card resume-card" aria-label="재생 일시정지">
+  <h2>재조정 요청으로 재생을 멈췄습니다</h2>
+  <p>{{ m.paused_week }}주차 경보에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 경보에서 재조정을 승인하거나 거절하면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
+</section>
+{% elif m.status == "awaiting_resume" %}
+<section class="card resume-card" aria-label="재생 재개 확인">
+  <h2>재생을 이어갈까요?</h2>
+  <p>재조정 결정(승인/거절)이 기록되었습니다. 남은 {{ weeks_left }}주 재생을 이어갈까요?</p>
+  {% if user.can_decide %}
+  <div class="actions">
+    <form method="post" action="/loans/{{ l.id|path }}/replay/resume">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">이어서 재생</button>
+    </form>
+    <form method="post" action="/loans/{{ l.id|path }}/replay/stop">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="button secondary">여기서 종료</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
 <div class="grid-4">
   {{ ch.kpi("대출", l.amount_krw|krw, l.tenor_months ~ "개월 · " ~ l.decision, "neutral") }}
   {% call ch.kpi("재생 진행", ui.processed ~ "/" ~ ui.weeks_total ~ "주", m.mode or "재생 전", "blue") %}{{ ch.progress(ui.progress_pct, "재생 진행률") }}{% endcall %}
@@ -33,7 +56,7 @@
   <dt>신청인</dt><dd>{{ l.applicant_id }} · {{ l.industry }}</dd>
   <dt>대출</dt><dd>{{ l.amount_krw|krw }} / {{ l.tenor_months }}개월 · {{ l.decision }} · {{ l.approved_at }}</dd>
   <dt>기준선</dt><dd>주 평균 매출 {{ l.baseline.avg_weekly_revenue|krw }} · 현금 버퍼 {{ l.baseline.cash_buffer_days }}일</dd>
-  {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}</dd>{% endif %}
+  {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}{% if m.resumed_at %} · 재개 {{ m.resumed_at|length }}회{% endif %}{% if m.stopped_at %} · 종료 {{ m.stopped_at }}{% endif %}</dd>{% endif %}
   {% if m.error %}<dt>오류</dt><dd class="error">{{ m.error }}</dd>{% endif %}
 </dl>
 </section>
@@ -52,12 +75,12 @@
 {{ ch.legend(ui.legend) }}
 {% endif %}
 <table>
-  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기준 대비</th><th>버퍼(일)</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
+  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기대 입금</th><th>기대 대비(3주)</th><th>버퍼(일)</th><th>전망 최저 잔고</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
   <tbody>
 {% for w in v.weeks %}{% set r = w.row %}
 <tr>
-  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.revenue_ratio }}</td>
-  <td>{{ r.buffer_days }}</td><td>{{ r.high_cost_count }}</td>
+  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
+  <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ r.shortfall_date }} 부족)</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
   <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}</td>
 </tr>
@@ -66,6 +89,32 @@
 </table>
 <p><small>노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.</small></p>
 </section>
+{% if ui.expected_chart %}
+<section class="card">
+<h2>기대 입금 대비 실제</h2>
+<p class="note">정산 채널별 주기·영업일·계절 지수로 만든 주차별 기대 입금(선)과 실제 정산 입금(막대)입니다. 기대의 85% 아래인 주는 주황색입니다.</p>
+{% call ch.columns(ui.expected_chart, "주차별 기대 입금 대비 실제 입금") %}{{ ch.line_overlay(ui.expected_line, "기대 입금", "teal", false) }}{% endcall %}
+{{ ch.legend([("실제 입금", "blue"), ("기대의 85% 미만", "amber"), ("기대 입금", "teal")]) }}
+</section>
+{% endif %}
+{% if ui.forecast %}{% set f = ui.forecast %}
+<section class="card">
+<h2>4주 잔고 전망 <small>{{ f.week }}주차 말 기준</small></h2>
+<div class="grid-4">
+  {{ ch.kpi("시작 잔고", f.start_balance|krw, f.week ~ "주차 마지막 날", "neutral") }}
+  {{ ch.kpi("최근 4주 달성률", f.attainment_pct ~ "%", "기대 입금 대비 실제(전망 입금에 반영)", "blue") }}
+  {{ ch.kpi("전망 최저 잔고", f.min_balance|krw if f.min_balance is not none else "-", f.min_date or "", "red" if f.shortfall_date else "green") }}
+  {{ ch.kpi("부족 예상일", f.shortfall_date or "없음", "잔고가 처음 0원 아래로 내려가는 날" if f.shortfall_date else "28일 안에 0원 아래로 내려가지 않음", "red" if f.shortfall_date else "green") }}
+</div>
+{{ ch.signed_line(f.chart, "다음 28일 일별 잔고 전망") }}
+{{ ch.legend([("전망 잔고", "purple"), ("0원 아래", "red")]) }}
+{% if f.totals %}<table>
+  <thead><tr><th>28일 합계</th><th>금액</th></tr></thead>
+  <tbody>{% for label, value in f.totals %}<tr><td>{{ label }}</td><td>{{ value|krw }}</td></tr>{% endfor %}</tbody>
+</table>{% endif %}
+<p><small>예정 출금 일정은 심사 시점 거래의 반복 패턴에서 뽑았습니다. 고금리 상환은 그 주 금액이 매주 반복된다고 가정합니다. 전망 최저 잔고가 0원 아래면 <span class="chip">잔고 부족 전망</span> 트리거가 걸립니다.</small></p>
+</section>
+{% endif %}
 {% endif %}
 
 {% for a in v.alerts %}

@@ -72,6 +72,26 @@ def test_detail_has_timeline_stepper_and_charts(client):
     assert "<details" in html and 'class="timeline"' in html
 
 
+def test_detail_tabs_and_assessment_panels(client):
+    html = page(client, "/applications/app-20261103-p01")
+    labels = re.findall(r'role="tab" aria-controls="tab-(\w+)"[^>]*>([^<]+)<', html)
+    assert labels == [("summary", "요약"), ("cashflow", "현금흐름"), ("policy", "정책 판정"), ("opinion", "에이전트 의견"),
+                      ("evidence", "근거 거래"), ("consent", "동의·데이터"), ("decision", "심사역 결정")]
+    assert html.count('role="tabpanel"') == 7 and '<script src="/static/tabs.js" defer></script>' in html
+    assert 'data-default-tab="tab-decision"' in html
+    assert 'class="chart gauge"' in html and 'class="chart donut"' in html and 'class="signals"' in html
+    assert "한도 산정" in html and "상환 여력" in html and "지출 구성" in html and "남는 돈" in html
+    assert 'class="claim-mark ok"' in html and 'class="claim-mark missing"' in html
+    assert client.get("/static/tabs.js").status_code == 200
+
+
+def test_detail_tabs_show_notices_when_empty(client):
+    html = page(client, "/applications/app-20261103-p06")
+    assert 'data-default-tab="tab-summary"' in html
+    for text in ("정책 판정 결과가 아직 없습니다.", "에이전트 평가가 아직 없습니다.", "에이전트 주장이 참조한 거래가 없습니다."):
+        assert text in html, text
+
+
 def test_withdrawn_detail_marks_failed_step(client):
     html = page(client, "/applications/app-20261103-p06")
     assert "step-failed" in html and "철회 종료" in html
@@ -85,13 +105,25 @@ def test_loans_list_has_kpis(client):
 
 def test_loan_has_chart_triggers_and_alert_steppers(client):
     html = page(client, "/loans/app-20261103-p03")
-    assert html.count('class="card kpi ') == 4
+    assert html.count('class="card kpi ') == 8  # 상단 4 + 4주 잔고 전망 4
     assert 'class="chart columns"' in html and 'class="line ' in html and 'class="trigger-mark"' in html
     for text in ("주간 흐름과 탐지기", "경보 6주차", "경보 10주차", "사후 13주 재생", "결정 보내기"):
         assert text in html, text
     assert 'class="stepper compact"' in html
     table = html.split("주간 흐름과 탐지기", 1)[1]
     assert "<details" not in table.split("</table>", 1)[0]
+    assert "잔고 부족 전망" in table and "2027-02-10 부족" in table
+
+
+def test_loan_shows_expected_inflow_and_balance_forecast(client):
+    html = page(client, "/loans/app-20261103-p03")
+    expected = html.split("기대 입금 대비 실제</h2>", 1)[1].split("</section>", 1)[0]
+    assert 'class="line stroke-teal"' in expected and 'class="bar-v fill-amber"' in expected
+    forecast = html.split("4주 잔고 전망 <small>13주차 말 기준", 1)[1].split("</section>", 1)[0]
+    assert 'class="ref stroke-red"' in forecast and 'class="dot fill-red"' in forecast
+    assert "2027-02-10" in forecast and "이번 대출 원리금" in forecast and "-1,717,552원" in forecast
+    running = page(client, "/loans/app-20261103-p04")
+    assert "4주 잔고 전망 <small>4주차 말 기준" in running and "28일 안에 0원 아래로 내려가지 않음" in running
 
 
 def test_ops_has_gauges_stacked_and_fairness_columns(client):

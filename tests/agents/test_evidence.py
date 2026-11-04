@@ -16,7 +16,7 @@ AS_OF = date(2026, 11, 2)
 def catalogs():
     cases = build_demo_cases(AS_OF)
     out = {}
-    for applicant_id in ("demo-healthy-001", "demo-thin-004"):
+    for applicant_id in ("seller-dailylook-01", "seller-knitroom-04"):
         case = cases[applicant_id]
         uw = compute_underwriting(
             f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
@@ -30,18 +30,18 @@ def catalogs():
 
 
 def test_catalog_exposes_features_signals_and_policy(catalogs):
-    c = catalogs["demo-healthy-001"]
-    assert c["M:dscr"] == 3.783
-    assert c["M:cash_buffer_days"] == 122.2
+    c = catalogs["seller-dailylook-01"]
+    assert c["M:dscr"] == 4.106
+    assert c["M:cash_buffer_days"] == 22.7
     assert c["M:requested_amount_krw"] == 3_300_000
-    assert c["M:avg_monthly_noi_krw"] == 1_494_712
+    assert c["M:avg_monthly_noi_krw"] == 2_674_318
     assert c["M:new_installment_krw"] == 287_061
     assert c["P:max_amount_krw"] == 3_300_000
     assert "M:classification_rules" not in c
 
 
 def test_catalog_monthly_series_and_seasonality_index(catalogs):
-    c = catalogs["demo-healthy-001"]
+    c = catalogs["seller-dailylook-01"]
     revenues = [v for k, v in c.items() if k.startswith("S:") and k.endswith(":revenue")]
     assert len(revenues) == 12
     assert c["S:2025-11:revenue"] > 0 and "S:2026-10:debt_service" in c
@@ -50,7 +50,7 @@ def test_catalog_monthly_series_and_seasonality_index(catalogs):
 
 
 def test_catalog_includes_reason_code_observations(catalogs):
-    c = catalogs["demo-thin-004"]
+    c = catalogs["seller-knitroom-04"]
     assert c["P:R001:observed"] == 4
     assert c["P:R001:threshold"] > 4
     assert c["P:max_amount_krw"] == 0

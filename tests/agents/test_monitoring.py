@@ -10,6 +10,7 @@ from agents.monitoring import (
     categorize,
     detect,
     evidence_catalog,
+    settlement_for,
     week_window,
     weekly_series,
 )
@@ -23,17 +24,22 @@ AS_OF = date(2026, 11, 2)
 
 @pytest.fixture(scope="module")
 def cafe():
-    return build_demo_cases(AS_OF)["demo-healthy-001"]
+    return build_demo_cases(AS_OF)["seller-dailylook-01"]
 
 
 @pytest.fixture(scope="module")
 def baseline(cafe):
     uw = compute_underwriting(
         "app-1", cafe.profile, cafe.transactions, cafe.tax_filings,
-        as_of=AS_OF, requested_amount_krw=50_000_000, requested_tenor_months=36,
+        as_of=AS_OF, requested_amount_krw=50_000_000, requested_tenor_months=12,
     )
     return Baseline.from_underwriting(
-        {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly}
+        {
+            "features": uw.features.model_dump(mode="json"),
+            "monthly": uw.monthly,
+            "settlement_profile": settlement_for(cafe.transactions, {}, AS_OF, cafe.profile.industry),
+        },
+        installment_krw=287_000,
     )
 
 
@@ -46,7 +52,9 @@ def _rows(case, scenario, baseline, weeks):
 def test_baseline_from_underwriting(baseline):
     assert baseline.avg_weekly_revenue > 0 and baseline.operating_daily_krw > 0
     assert set(baseline.seasonal_index) == set(range(1, 13))
-    assert baseline.seasonal_index[1] < 0.85 < 1.1 < baseline.seasonal_index[7]
+    # 패션: 설 연휴가 낀 2월이 가장 약하고, 연말 겨울 아우터가 가장 강하다.
+    assert baseline.seasonal_index[2] < 0.85 < 1.1 < baseline.seasonal_index[12]
+    assert baseline.settlement and baseline.settlement["channels"]
     assert Baseline.from_dict(baseline.to_dict()) == baseline
 
 
@@ -80,13 +88,69 @@ def test_detector_trips_on_buffer_then_new_debt(cafe, baseline):
     assert "new_debt" in detect(rows, baseline)
 
 
-def test_detector_is_naive_about_season(cafe, baseline):
+def test_expected_revenue_absorbs_season_and_settlement_timing(cafe, baseline):
+    # 단순 평균 대비로는 정산이 몰리지 않은 주가 0.85 아래로 떨어지지만, 기대 입금 대비로는 정상 셀러에 경보가 없다.
     _, rows = _rows(cafe, FlowScenario.STABLE, baseline, 13)
-    november = [detect(rows[: w], baseline) for w in range(1, 4)]
-    assert november == [[], [], []]
-    january = [detect(rows[: w], baseline) for w, r in enumerate(rows, 1) if r["start"].startswith("2027-01")]
-    assert january and all("inflow_drop" in t for t in january[1:])
-    assert not any("new_debt" in detect(rows[:w], baseline) for w in range(1, 14))
+    assert any(r["revenue_ratio"] < 0.85 for r in rows)
+    assert all(r["revenue_vs_expected"] >= 0.85 for r in rows)
+    assert [detect(rows[:w], baseline) for w in range(1, 14)] == [[]] * 13
+
+
+def test_without_profile_expected_falls_back_to_average(cafe, baseline):
+    plain = Baseline.from_dict({**baseline.to_dict(), "settlement": None})
+    _, rows = _rows(cafe, FlowScenario.STABLE, plain, 2)
+    assert rows[0]["expected_revenue"] == plain.avg_weekly_revenue
+    assert [r["revenue_vs_expected"] for r in rows] == [r["revenue_ratio"] for r in rows]
+
+
+def test_stacking_inflow_drop_shows_up_within_two_months(cafe, baseline):
+    _, rows = _rows(cafe, FlowScenario.STACKING, baseline, 8)
+    assert "inflow_drop" in detect(rows, baseline)
+
+
+@pytest.mark.parametrize("as_of", [date(2026, 9, 14), date(2026, 12, 28), date(2027, 1, 25)])
+def test_stable_sellers_raise_no_revenue_triggers_around_festivals(as_of):
+    # 라이브 데모는 오늘 날짜로 흐름을 만든다: 추석·연말·설이 낀 13주에도 정상 셀러 5명 모두 매출 트리거가 없어야 한다.
+    for seller, case in build_demo_cases(as_of).items():
+        uw = compute_underwriting(
+            "app-1", case.profile, case.transactions, case.tax_filings,
+            as_of=as_of, requested_amount_krw=5_000_000, requested_tenor_months=6,
+        )
+        base = Baseline.from_underwriting(
+            {
+                "features": uw.features.model_dump(mode="json"),
+                "monthly": uw.monthly,
+                "settlement_profile": settlement_for(case.transactions, {}, as_of, case.profile.industry),
+            },
+            installment_krw=900_000,
+        )
+        flow = generate_postloan(case, FlowScenario.STABLE, as_of, 7)
+        rows = weekly_series(flow.transactions, categorize(flow.transactions, {}), flow.start, 13, base)
+        hits = {(w, t) for w in range(1, 14) for t in detect(rows[:w], base)}
+        assert not {h for h in hits if h[1] in ("inflow_drop", "volatility_spike")}, (seller, sorted(hits))
+
+
+def test_stable_projection_never_runs_short(cafe, baseline):
+    _, rows = _rows(cafe, FlowScenario.STABLE, baseline, 13)
+    assert all(r["shortfall_date"] is None and r["projected_min_balance"] > 0 for r in rows)
+
+
+def test_stacking_projected_shortfall_comes_before_default(cafe, baseline):
+    flow, rows = _rows(cafe, FlowScenario.STACKING, baseline, 13)
+    first = next(r for r in rows if "projected_shortfall" in detect(rows[: r["week"]], baseline))
+    assert first["shortfall_date"] and date.fromisoformat(first["shortfall_date"]) <= flow.default_on
+    assert date.fromisoformat(first["end"]) < flow.default_on
+    assert first["projected_min_balance"] < 0
+
+
+def test_without_schedule_no_projection(cafe, baseline):
+    plain = Baseline.from_dict({**baseline.to_dict(), "settlement": {**baseline.settlement, "outflows": None}})
+    _, rows = _rows(cafe, FlowScenario.STACKING, plain, 13)
+    assert all("projected_min_balance" not in r for r in rows)
+    assert not any("projected_shortfall" in detect(rows[:w], plain) for w in range(1, 14))
+    # 설치 원리금이 없던 이전 기준선 문서도 읽는다.
+    old = {k: v for k, v in baseline.to_dict().items() if k != "installment_krw"}
+    assert Baseline.from_dict(old).installment_krw == 0
 
 
 def test_catalog_ids_are_evidence_ids(cafe, baseline):
@@ -99,6 +163,9 @@ def test_catalog_ids_are_evidence_ids(cafe, baseline):
     assert catalog["B:cohort:index:01"] == PEER_COHORTS["패션의류"]["index"][1]
     assert all(re.fullmatch(EVIDENCE_ID_PATTERN, k) for k in catalog)
     assert not any(k.startswith("W:5:") for k in catalog)
+    assert catalog["F:4:projected_min_balance"] == rows[3]["projected_min_balance"]
+    assert catalog["F:4:projected_min_date"] == rows[3]["projected_min_date"]
+    assert "F:4:shortfall_date" not in catalog  # 부족 예상일이 없으면 근거도 없다
 
 
 def test_peer_cohorts_cover_every_seller_industry():

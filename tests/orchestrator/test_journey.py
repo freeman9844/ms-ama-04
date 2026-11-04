@@ -12,8 +12,8 @@ from journey.orchestration import (
 
 START = {
     "application_id": "app-1",
-    "applicant_id": "demo-healthy-001",
-    "requested_amount_krw": 20_000_000,
+    "applicant_id": "seller-dailylook-01",
+    "requested_amount_krw": 10_000_000,
     "requested_tenor_months": 12,
 }
 CONSENT = {
@@ -71,7 +71,7 @@ def test_happy_path_reaches_approved(run_journey):
     assert all("secret-token" not in json.dumps(s, ensure_ascii=False) for s in ctx.saved)
     assert ctx.called("assemble_data")[0].input["token"] == "secret-token"
     uw = ctx.called("underwrite")[0].input
-    assert (uw["as_of"], uw["consent_id"], uw["requested_amount_krw"]) == ("2026-11-02", "c-1", 20_000_000)
+    assert (uw["as_of"], uw["consent_id"], uw["requested_amount_krw"]) == ("2026-11-02", "c-1", 10_000_000)
     assert ctx.called("evaluate_policy")[0].retry == "RETRY"
     assert ctx.timers[0].cancelled and ctx.custom_status == "approved"
 
@@ -92,13 +92,20 @@ def test_event_payload_as_json_string_is_parsed(run_journey):
 @pytest.mark.parametrize(
     ("payload", "status"),
     [
-        ({**APPROVE, "decision": "conditional", "conditions": ["월별 매출 보고"]}, "conditionally_approved"),
+        (APPROVE, "approved"),
         (DECLINE, "declined"),
     ],
 )
 def test_final_status_follows_officer_decision(run_journey, payload, status):
     result, _ = run_journey(START, acts(), [("event", payload)])
     assert result["status"] == status
+
+
+def test_retired_conditional_decision_is_rejected_and_wait_continues(run_journey):
+    conditional = {**APPROVE, "decision": "conditional", "conditions": ["월별 매출 보고"]}
+    result, ctx = run_journey(START, acts(), [("event", conditional), ("event", APPROVE)])
+    assert result["status"] == "approved"
+    assert [a["error"] for a in ctx.saved[-1]["decision_attempts"]] == ["conditional_retired"]
 
 
 def test_invalid_decision_is_recorded_and_wait_continues(run_journey):
@@ -228,7 +235,7 @@ def test_approval_registers_monitoring(run_journey):
     assert call.retry == "RETRY"
     assert call.input == {
         "application_id": "app-1",
-        "applicant_id": "demo-healthy-001",
+        "applicant_id": "seller-dailylook-01",
         "consent_id": "c-1",
         "decision": "approve",
         "amount_krw": 15_000_000,
@@ -250,7 +257,7 @@ def test_decline_does_not_register_monitoring(run_journey):
     assert result["status"] == "declined" and ctx.called("register_monitoring") == []
 
 
-WITHDRAW = {"consent_id": "c-1", "requested_by": "borrower:demo-healthy-001"}
+WITHDRAW = {"consent_id": "c-1", "requested_by": "borrower:seller-dailylook-01"}
 
 
 def test_withdrawal_while_awaiting_officer_ends_journey(run_journey):

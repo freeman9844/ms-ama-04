@@ -2,7 +2,9 @@
 {% set nav = "home" %}
 {% import "_charts.html" as ch %}
 {% set d = v.doc %}
-{% block head %}{% if in_progress %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
+{% set p = panels %}
+{% set default_tab = "decision" if (v.decidable and user.can_decide) or error else "summary" %}
+{% block head %}{% if in_progress %}<meta http-equiv="refresh" content="10">{% endif %}<script src="/static/tabs.js" defer></script>{% endblock %}
 {% block title %}{{ d.application_id }} · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
 <div class="page-head">
@@ -31,25 +33,103 @@
   {% if d.error %}<dt>오류</dt><dd class="error">{{ d.error.stage }}: {{ d.error.message }}</dd>{% endif %}
 </dl>
 </section>
-{% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
-{% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
-{% else %}<p class="pii">가명 표시 중(감사자 권한은 실명을 볼 수 없습니다).</p>{% endif %}
 
-{% if consents is not none %}{% include "_consents.html" %}{% endif %}
+{% set tabs = (("summary", "요약"), ("cashflow", "현금흐름"), ("policy", "정책 판정"), ("opinion", "에이전트 의견"),
+               ("evidence", "근거 거래"), ("consent", "동의·데이터"), ("decision", "심사역 결정")) %}
+<div class="tabs" data-tabs data-default-tab="tab-{{ default_tab }}">
+<ul class="tab-list" role="tablist" aria-label="신청 상세">
+{% for key, label in tabs %}<li role="presentation"><a id="tab-{{ key }}-tab" href="#tab-{{ key }}" role="tab" aria-controls="tab-{{ key }}" aria-selected="{{ 'true' if key == default_tab else 'false' }}">{{ label }}</a></li>{% endfor %}
+</ul>
 
-{% if ui.monthly or v.policy %}
+<section id="tab-summary" class="tab-panel" role="tabpanel" aria-labelledby="tab-summary-tab">
+<h2 class="tab-title">요약</h2>
+{% set s = p.summary %}
+<div class="grid-4">
+  {{ ch.kpi("정책 판정", s.decision, v.policy.rules_version if v.policy else "", s.decision_tone) }}
+  {{ ch.kpi("에이전트 권고", s.recommendation, "", s.recommendation_tone) }}
+  {{ ch.kpi("검토 에이전트", s.review, "", s.review_tone) }}
+  {{ ch.gauge(s.gauge, "한도 ÷ 신청액", s.gauge_text, s.gauge_sub, s.decision_tone) }}
+</div>
 <div class="grid-2">
+<section class="card">
+<h3>강점</h3>
+{% if p.strengths %}<ul class="pros">{% for x in p.strengths %}<li>{{ x }}</li>{% endfor %}</ul>
+{% else %}<p class="note">기준을 넉넉히 넘는 지표가 없습니다.</p>{% endif %}
+</section>
+<section class="card">
+<h3>위험</h3>
+{% if p.risks %}<ul class="cons">{% for x in p.risks %}<li>{{ x }}</li>{% endfor %}</ul>
+{% else %}<p class="note">정책 위반·주의 플래그가 없습니다.</p>{% endif %}
+</section>
+</div>
+{% if p.limit %}
+<section class="card">
+<h3>한도 산정 <small>세 값 중 가장 작은 값을 10만 원 단위로 내림</small></h3>
+{{ ch.hbars(p.limit.bars, "한도 산정 후보", "만 원") }}
+<p>가장 작은 값: <strong>{{ p.limit.binding }}</strong> → 산출 한도 {{ p.limit.computed|krw }}{% if p.limit.policy_limit is not none and p.limit.policy_limit != p.limit.computed %} · 정책 한도 {{ p.limit.policy_limit|krw }}(부적격이면 0원){% endif %}</p>
+</section>
+{% endif %}
+</section>
+
+<section id="tab-cashflow" class="tab-panel" role="tabpanel" aria-labelledby="tab-cashflow-tab">
+<h2 class="tab-title">현금흐름</h2>
+{% if ui.monthly or p.signals %}
 {% if ui.monthly %}
 <section class="card">
-<h2>월별 현금흐름</h2>
+<h3>월별 현금흐름</h3>
 {{ ch.columns(ui.monthly, "월별 매출과 지출") }}
 {{ ch.legend(ui.monthly_legend) }}
 </section>
 {% endif %}
+{% if p.signals %}
+<section class="card">
+<h3>지표 신호등 <small>초록 통과 · 주황 회부 기준 위반 · 빨강 거절 기준 위반</small></h3>
+<ul class="signals">
+{% for g in p.signals %}
+  <li class="signal signal-{{ g.tone }}">
+    <span class="swatch bg-{{ g.tone }}"></span>
+    <span class="signal-name">{{ g.name }} <small>{{ g.label }}</small></span>
+    {% if g.bar %}{{ ch.marker_bar(g.bar, g.name ~ " " ~ g.value ~ " / 기준 " ~ g.threshold, g.tone) }}{% endif %}
+    <span class="signal-text">{{ g.text }}</span>
+  </li>
+{% endfor %}
+</ul>
+</section>
+{% endif %}
+<div class="grid-2">
+{% if p.capacity %}
+<section class="card">
+<h3>상환 여력 <small>갚을 돈보다 적은 달 {{ p.capacity.short_months }}/{{ p.capacity.months }}</small></h3>
+{% call ch.columns(p.capacity.chart, "월별 상환 여력") %}{{ ch.line_overlay(p.capacity.line, "갚을 돈") }}{% endcall %}
+{{ ch.legend(p.capacity.legend) }}
+<p class="note">이번 대출 월 상환액 {{ p.capacity.installment|krw }}을 기존 상환에 더했습니다.</p>
+</section>
+{% endif %}
+{% if p.expenses %}
+<section class="card">
+<h3>지출 구성 <small>월평균{% if p.expenses.source == "monthly" %} · 3구분(과거 문서){% endif %}</small></h3>
+<div class="chart-row">
+{{ ch.donut(p.expenses.donut, "월평균 지출 구성과 남는 돈", "만 원") }}
+{{ ch.legend(p.expenses.legend) }}
+</div>
+<p class="note">가운데 숫자는 월평균 매출(만 원)입니다.</p>
+{% if p.expenses.leftover < 0 %}<p class="warn">월평균 지출이 매출보다 {{ (-p.expenses.leftover)|krw }} 많습니다.</p>{% endif %}
+</section>
+{% endif %}
+</div>
+{% if v.features %}
+<details><summary>전체 현금흐름 지표</summary>
+<table class="kv">{% for k, val in v.features|dictsort %}<tr><th>M:{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
+</details>
+{% endif %}
+{% else %}<p class="note">심사 지표가 아직 없습니다.</p>{% endif %}
+</section>
+
+<section id="tab-policy" class="tab-panel" role="tabpanel" aria-labelledby="tab-policy-tab">
+<h2 class="tab-title">정책 판정{% if v.policy %} <small>{{ v.policy.rules_version }}</small>{% endif %}</h2>
 {% if v.policy %}
 <section class="card">
-<h2>정책 판정 <small>{{ v.policy.rules_version }}</small></h2>
-<p>판정 <strong>{{ v.policy.decision }}</strong> · 한도 {{ v.policy.max_amount_krw|krw }} · 금리 구간 {{ v.policy.rate_band or "-" }}</p>
+<p>판정 <strong>{{ p.summary.decision }}</strong> ({{ v.policy.decision }}) · 한도 {{ v.policy.max_amount_krw|krw }} · 금리 구간 {{ v.policy.rate_band or "-" }}</p>
 {% for m in ui.markers %}
 <div class="marker-row">
   <span class="marker-code">{{ m.code }}</span>
@@ -57,41 +137,37 @@
   <span class="marker-values">{{ m.observed }} / {{ m.threshold }}</span>
 </div>
 {% endfor %}
+{% if v.policy.reason_codes %}
 <table>
   <thead><tr><th>코드</th><th>내용</th><th>관측값</th><th>기준</th></tr></thead>
   <tbody>{% for r in v.policy.reason_codes %}<tr><td>{{ r.code }}</td><td>{{ r.message }}</td><td>{{ r.observed }}</td><td>{{ r.threshold }}</td></tr>{% endfor %}</tbody>
 </table>
+{% else %}<p class="note">걸린 사유 코드가 없습니다.</p>{% endif %}
 </section>
-{% endif %}
-</div>
-{% endif %}
-
-{% if v.features %}
-<section class="card">
-<h2>현금흐름 지표</h2>
-<table class="kv">{% for k, val in v.features|dictsort %}<tr><th>M:{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
+{% else %}<p class="note">정책 판정 결과가 아직 없습니다.</p>{% endif %}
 </section>
-{% endif %}
 
+<section id="tab-opinion" class="tab-panel" role="tabpanel" aria-labelledby="tab-opinion-tab">
+<h2 class="tab-title">에이전트 의견</h2>
 {% if v.assessment %}
 {% set a = v.assessment %}
 <section class="card">
-<h2>에이전트 평가 <small>권고: {{ a.recommendation }}</small></h2>
+<h3>에이전트 평가 <small>권고: {{ a.recommendation|recommendation_label }}</small></h3>
 {% if ui.review %}{{ ch.stepper(ui.review, "에이전트 검토 단계", compact=true) }}{% endif %}
 <p class="summary">{{ a.summary }}</p>
 <h3>주장과 근거</h3>
 <ul class="claims">
-{% for c in v.claims %}
-  <li>{{ c.text }}
+{% for c in v.claims %}{% set chk = p.claims[loop.index0] %}
+  <li><span class="claim-mark {{ 'ok' if chk.ok else 'missing' }}" title="{{ '근거 모두 확인' if chk.ok else '근거 없음 ' ~ chk.missing|join(', ') }}">{{ "✓" if chk.ok else "⚠" }}</span> {{ c.text }}
     <div>{% for id, val in c.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else "없음" }}</span>{% endfor %}
-    {% for t in c.txn_ids %}<span class="chip txn">{{ t }}</span>{% endfor %}</div>
+    {% for t in c.txn_ids %}<a class="chip txn" href="#tab-evidence">{{ t }}</a>{% endfor %}</div>
   </li>
 {% endfor %}
 </ul>
-{% if a.proposed_structure %}{% set s = a.proposed_structure %}
+{% if a.proposed_structure %}{% set st = a.proposed_structure %}
 <h3>제안 구조</h3>
-<p>{{ s.amount_krw|krw }} · {{ s.tenor_months }}개월 · {{ s.schedule }}{% if s.reduced_payment_months %} · 감액 월 {{ s.reduced_payment_months|join(", ") }}{% endif %}</p>
-<p>{{ s.rationale }}</p>
+<p>{{ st.amount_krw|krw }} · {{ st.tenor_months }}개월 · {{ st.schedule }}{% if st.reduced_payment_months %} · 감액 월 {{ st.reduced_payment_months|join(", ") }}{% endif %}</p>
+<p>{{ st.rationale }}</p>
 {% endif %}
 {% if a.counterfactuals %}
 <h3>개선 조건(반사실)</h3>
@@ -100,20 +176,34 @@
 {% endif %}
 {% if a.review %}<p class="review">검토 에이전트: {{ "통과" if a.review.passed else "미통과" }} ({{ a.review.rounds }}회){% for i in a.review.issues %} · {{ i }}{% endfor %}</p>{% endif %}
 </section>
-{% endif %}
+{% else %}<p class="note">에이전트 평가가 아직 없습니다.</p>{% endif %}
+</section>
 
+<section id="tab-evidence" class="tab-panel" role="tabpanel" aria-labelledby="tab-evidence-tab">
+<h2 class="tab-title">근거 거래</h2>
 {% if v.transactions %}
 <section class="card">
-<h2>근거 거래</h2>
 <table>
   <thead><tr><th>거래 ID</th><th>일자</th><th>금액</th><th>적요</th></tr></thead>
   <tbody>{% for t in v.transactions %}<tr><td>{{ t.txn_id }}</td><td>{{ t.booked_on }}</td><td>{{ t.amount_krw|krw }}</td><td>{{ t.description }}</td></tr>{% endfor %}</tbody>
 </table>
 </section>
-{% endif %}
+{% else %}<p class="note">에이전트 주장이 참조한 거래가 없습니다.</p>{% endif %}
+</section>
 
+<section id="tab-consent" class="tab-panel" role="tabpanel" aria-labelledby="tab-consent-tab">
+<h2 class="tab-title">동의·데이터</h2>
+{% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
+{% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
+{% else %}<p class="pii">가명 표시 중(감사자 권한은 실명을 볼 수 없습니다).</p>{% endif %}
+{% if consents is not none %}{% include "_consents.html" %}
+{% elif d.consent %}<section class="card"><p>동의 {{ d.consent.consent_id }} · 범위 {{ (d.consent.scopes or [])|join(", ") }} · 만료 {{ d.consent.expires_at }}</p></section>
+{% else %}<p class="note">동의 기록이 없습니다.</p>{% endif %}
+</section>
+
+<section id="tab-decision" class="tab-panel" role="tabpanel" aria-labelledby="tab-decision-tab">
+<h2 class="tab-title">심사역 결정</h2>
 <section class="card">
-<h2>심사역 결정</h2>
 {% if d.officer_decision %}
 <p>{% if d.officer_decision.policy_override %}<span class="badge badge-red">정책 예외 승인</span> {% endif %}{{ d.officer_decision.decision }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
 {% if d.officer_decision.conditions %}<ul>{% for c in d.officer_decision.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
@@ -130,18 +220,17 @@
   {% if v.policy_blocked %}
   <script src="/static/decision.js" defer></script>
   <input type="hidden" name="policy_override" value="">
-  <p class="warn">정책 결과상 거절입니다. 승인하면 정책 예외 승인으로 기록되며 사유가 필요합니다(상품 최대 500만 원).</p>
+  <p class="warn">정책 결과상 거절입니다. 승인하면 정책 예외 승인으로 기록되며 사유가 필요합니다(상품 최대 1,000만 원).</p>
   {% endif %}
   <fieldset>
     <legend>결정</legend>
     {% set chosen = form.decision if form else "approve" %}
-    {% for value, label in (("approve", "승인"), ("conditional", "조건부 승인"), ("decline", "거절")) %}
+    {% for value, label in (("approve", "승인"), ("decline", "거절")) %}
     <label><input type="radio" name="decision" value="{{ value }}"{% if chosen == value %} checked{% endif %}> {{ label }}</label>
     {% endfor %}
   </fieldset>
   <label>승인 금액(원, 한도 {{ v.max_amount_krw|krw }})
     <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else d.requested_amount_krw }}"></label>
-  <label>조건(한 줄에 하나) <textarea name="conditions" rows="3">{{ form.conditions if form else "" }}</textarea></label>
   <label>사유 <textarea name="reason" rows="3">{{ form.reason if form else "" }}</textarea></label>
   <button type="submit">결정 보내기</button>
 </form>
@@ -149,4 +238,6 @@
 <p>{% if v.decidable %}감사자 권한은 결정할 수 없습니다.{% else %}심사역 결정 단계가 아닙니다.{% endif %}</p>
 {% endif %}
 </section>
+</section>
+</div>
 {% endblock %}

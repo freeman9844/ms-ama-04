@@ -4,7 +4,9 @@ import pytest
 
 from agents.classify import Category, classify
 from mockapis.demo import build_demo_cases
-from mockapis.postloan import STACKING_ONSET_DAY, FlowScenario, generate_postloan
+from mockapis.demo import build_load_cases
+from mockapis.postloan import INSURANCE_UNPAID_FROM_DAY, STACKING_ONSET_DAY, FlowScenario, generate_postloan
+from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, TxnCategory, generate_case
 
 AS_OF = date(2026, 11, 2)
@@ -12,7 +14,7 @@ AS_OF = date(2026, 11, 2)
 
 @pytest.fixture(scope="module")
 def cafe():
-    return build_demo_cases(AS_OF)["demo-healthy-001"]
+    return build_demo_cases(AS_OF)["seller-dailylook-01"]
 
 
 def test_same_seed_same_flow(cafe):
@@ -40,8 +42,11 @@ def test_stable_never_defaults_and_has_no_new_debt(cafe):
 
 @pytest.mark.parametrize("as_of", [date(2026, 11, 2), date(2026, 5, 4), date(2027, 2, 1), date(2026, 8, 3)])
 @pytest.mark.parametrize("seed", range(6))
-def test_stacking_defaults_late_enough_for_a_60_day_warning(as_of, seed):
-    case = generate_case(f"x{seed}", Archetype.HEALTHY_SEASONAL, as_of, seed)
+@pytest.mark.parametrize("seller", [None, *DEMO_PERSONAS])
+def test_stacking_defaults_late_enough_for_a_60_day_warning(as_of, seed, seller):
+    # 11월 시작은 행사·연말 매출이 잔고를 받쳐 준다. 규모·계절과 무관하게 부도 시점이 같은 범위에 와야 한다.
+    persona = DEMO_PERSONAS[seller] if seller else None
+    case = generate_case(f"x{seed}", Archetype.HEALTHY_SEASONAL, as_of, seed, persona=persona)
     flow = generate_postloan(case, FlowScenario.STACKING, as_of, seed)
     assert flow.default_on is not None
     first_debt = min(
@@ -67,3 +72,30 @@ def test_stacking_delays_payroll(cafe):
     flow = generate_postloan(cafe, FlowScenario.STACKING, AS_OF, 7)
     payroll_days = sorted({t.booked_on.day for t in flow.transactions if flow.labels[t.txn_id] is TxnCategory.PAYROLL})
     assert 20 in payroll_days
+
+
+def test_stacking_story_on_the_seller_engine(cafe):
+    flow = generate_postloan(cafe, FlowScenario.STACKING, AS_OF, 7)
+    by_desc = lambda d: [t for t in flow.transactions if t.description == d]  # noqa: E731
+    (capex,) = by_desc("시즌 재고 대량 선매입")
+    assert capex.booked_on == AS_OF + timedelta(days=2) and capex.amount_krw < -cafe.persona.monthly_sales_krw / 4
+    dues = by_desc("시즌 재고 외상 잔금")
+    assert len(dues) >= 8 and len({t.amount_krw for t in dues}) == 1
+    # 3주차부터 매주 수요일(공휴일이면 다음 영업일)
+    assert dues[0].booked_on >= AS_OF + timedelta(days=14) and all(t.booked_on.weekday() in (2, 3, 4) for t in dues)
+    unpaid_from = AS_OF + timedelta(days=INSURANCE_UNPAID_FROM_DAY)
+    insurance = [t for t in flow.transactions if flow.labels[t.txn_id] is TxnCategory.SOCIAL_INSURANCE]
+    assert insurance and all(t.booked_on < unpaid_from for t in insurance)
+
+
+def test_load_sellers_keep_their_own_persona_after_the_loan():
+    cases = build_load_cases(AS_OF)
+    small = min(cases.values(), key=lambda c: c.persona.monthly_sales_krw)
+    big = max(cases.values(), key=lambda c: c.persona.monthly_sales_krw)
+
+    def weekly(case):
+        flow = generate_postloan(case, FlowScenario.STABLE, AS_OF, 1)
+        return sum(t.amount_krw for t in flow.transactions if t.amount_krw > 0) / 13
+    sales_ratio = big.persona.monthly_sales_krw / small.persona.monthly_sales_krw
+    assert sales_ratio > 1.3
+    assert weekly(big) / weekly(small) == pytest.approx(sales_ratio, rel=0.25)

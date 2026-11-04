@@ -6,7 +6,7 @@ from collections.abc import Sequence
 TOLERANCE = 0.02
 _STRIP = (
     re.compile(r"\[\[[A-Z]+_[0-9a-f]+\]\]"),
-    re.compile(r"[MSPWB]:[A-Za-z0-9_.:-]+"),
+    re.compile(r"[MSPWBF]:[A-Za-z0-9_.:-]+"),
     re.compile(r"\d{4}-\d{2}(?:-\d{2})?"),
     re.compile(r"\bR\d{3}\b"),
     re.compile(r"(?<![\d.])(?:19|20)\d{2}\s*년"),

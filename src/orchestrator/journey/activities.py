@@ -12,8 +12,8 @@ from pydantic import TypeAdapter
 
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
-from agents.features import compute_underwriting
-from agents.monitoring import Baseline
+from agents.features import compute_underwriting, monthly_installment
+from agents.monitoring import Baseline, settlement_for
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
@@ -306,9 +306,10 @@ def _load(deps: Deps, consent_id: str) -> tuple[ApplicantProfile, list[Transacti
 
 def _semantic(
     deps: Deps, profile: ApplicantProfile, txns: list[Transaction], consent_id: str
-) -> tuple[dict[str, Any] | None, dict[str, Category]]:
+) -> tuple[dict[str, Any] | None, dict[str, Category], dict[str, str]]:
+    """(분류 기록, 부채 override, 출금 거래별 의미 라벨)."""
     if deps.decider is None:
-        return None, {}
+        return None, {}, {}
     fallback = LlmFallback(deps.agents, deps.classifier_model) if deps.agents is not None else None
     try:
         result = classify_unresolved(
@@ -320,16 +321,16 @@ def _semantic(
             cache=deps.cache,
         )
     except Exception as e:  # noqa: BLE001 - 의미 분류 실패는 규칙 분류만으로 진행한다
-        return {"error": f"{type(e).__name__}: {e}"[:300]}, {}
+        return {"error": f"{type(e).__name__}: {e}"[:300]}, {}, {}
     finally:
         if fallback is not None:
             _remember_foundry(deps, consent_id, fallback.conversations, [])
-    return result.record(), result.overrides
+    return result.record(), result.overrides, result.labels
 
 
 def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     profile, txns, filings = _load(deps, payload["consent_id"])
-    classification, overrides = _semantic(deps, profile, txns, payload["consent_id"])
+    classification, overrides, labels = _semantic(deps, profile, txns, payload["consent_id"])
     result = compute_underwriting(
         payload["application_id"],
         profile,
@@ -339,12 +340,16 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         requested_amount_krw=payload["requested_amount_krw"],
         requested_tenor_months=payload["requested_tenor_months"],
         overrides=overrides,
+        semantic_labels=labels,
     )
+    as_of = date.fromisoformat(payload["as_of"])
     return {
         "features": result.features.model_dump(mode="json"),
         "signals": result.signals,
         "flags": result.flags,
         "monthly": result.monthly,
+        "expense_breakdown": result.expense_breakdown,
+        "settlement_profile": settlement_for(txns, overrides, as_of, profile.industry),
         "classification": classification,
         "category_overrides": {k: v.value for k, v in overrides.items()},
     }
@@ -401,7 +406,10 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
             "amount_krw": payload["amount_krw"],
             "tenor_months": payload["tenor_months"],
             "approved_at": payload["decided_at"],
-            "baseline": Baseline.from_underwriting(payload["underwriting"]).to_dict(),
+            "baseline": Baseline.from_underwriting(
+                payload["underwriting"],
+                installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
+            ).to_dict(),
             "monitoring": existing.get("monitoring"),
             "updated_at": deps.clock().isoformat(),
         },

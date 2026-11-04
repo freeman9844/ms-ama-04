@@ -50,7 +50,7 @@ def _features(**kw):
         revenue_volatility=0.2,
         tax_bank_match_ratio=0.95,
         requested_amount_krw=20_000_000,
-        requested_tenor_months=24,
+        requested_tenor_months=12,
         industry="카페",
         region="서울 성동구",
         business_age_months=38,
@@ -146,7 +146,7 @@ def test_features_reject_nan_inf_and_ranges():
     with pytest.raises(ValidationError):
         _features(requested_amount_krw=0)
     with pytest.raises(ValidationError):
-        _features(requested_tenor_months=61)
+        _features(requested_tenor_months=13)
 
 
 def test_policy_decision_invariants():
@@ -224,7 +224,7 @@ def test_claim_requires_evidence_and_known_id_shape():
         Claim(text="근거 없는 주장")
     with pytest.raises(ValidationError):
         Claim(text="x", metric_ids=("dscr",))
-    assert Claim(text="x", txn_ids=("demo-healthy-001-00012",)).metric_ids == ()
+    assert Claim(text="x", txn_ids=("seller-dailylook-01-00012",)).metric_ids == ()
 
 
 def test_structure_schedule_consistency():

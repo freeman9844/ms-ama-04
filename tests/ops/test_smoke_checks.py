@@ -28,7 +28,7 @@ CFG = {
     "cosmos_database": "lending",
     "policy_url": "https://ca-policy.int.example",
     "mockapi_url": "https://ca-mockapi.int.example",
-    "e2e_applicant": "demo-healthy-001",
+    "e2e_applicant": "seller-dailylook-01",
     "ai_account_endpoint": "https://ais-x.services.ai.azure.com",
     "decision_deployment": "decision-1",
 }
@@ -219,7 +219,7 @@ def test_journey_starts_application_and_approves_within_policy_limit():
     [start] = http.find("POST", "/applications-start/messages")
     assert start["url"] == "https://stfnx.queue.core.windows.net/applications-start/messages"
     assert start["headers"]["x-ms-version"] == "2023-11-03"
-    assert queue_text(start) == {"application_id": "smoke-e2e-test", "applicant_id": "demo-healthy-001",
+    assert queue_text(start) == {"application_id": "smoke-e2e-test", "applicant_id": "seller-dailylook-01",
                                  "requested_amount_krw": 3_300_000, "requested_tenor_months": 12}
     [decision] = http.find("POST", "/officer-decisions/messages")
     assert queue_text(decision) == {"application_id": "smoke-e2e-test", "decision": {

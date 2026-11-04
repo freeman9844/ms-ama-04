@@ -103,6 +103,15 @@ def test_auditor_sees_pseudonyms_and_no_decision_form(env):
     assert "김대표" not in page and "빈스카페" not in page
     assert "[[PERSON_" in page
     assert "/decision" not in page and 'name="csrf"' not in page
+    assert 'data-default-tab="tab-summary"' in page
+
+
+def test_decision_tab_opens_for_officer_and_on_error_rerender(env):
+    client, _ = env
+    assert 'data-default-tab="tab-decision"' in client.get("/applications/app-1", headers=OFFICER).text
+    assert 'data-default-tab="tab-summary"' in client.get("/applications/app-2", headers=OFFICER).text
+    resp = decide(client, OFFICER, csrf(client, OFFICER), amount_krw="25000000")
+    assert resp.status_code == 422 and 'data-default-tab="tab-decision"' in resp.text
 
 
 def test_model_text_is_html_escaped(env, make_doc):
@@ -134,13 +143,14 @@ def test_officer_decision_is_sent_with_principal_as_officer(env):
     )]
 
 
-def test_conditional_decision_splits_conditions_and_decline_drops_amount(env):
+def test_conditional_decision_is_retired_and_decline_drops_amount(env):
     client, queue = env
     token = csrf(client, MANAGER)
-    assert decide(client, MANAGER, token, decision="conditional", conditions="월별 매출 보고\r\n\r\n 담보 설정 ").status_code == 202
-    assert queue.sent[-1][1]["decision"]["conditions"] == ["월별 매출 보고", "담보 설정"]
-    assert queue.sent[-1][1]["decision"]["officer_id"] == "oid-manager"
+    resp = decide(client, MANAGER, token, decision="conditional", conditions="월별 매출 보고")
+    assert resp.status_code == 422 and "조건부 승인은 더 이상 쓰지 않습니다" in resp.text
+    assert queue.sent == []
     assert decide(client, MANAGER, token, decision="decline", reason="상환 여력 부족").status_code == 202
+    assert queue.sent[-1][1]["decision"]["officer_id"] == "oid-manager"
     assert queue.sent[-1][1]["decision"]["amount_krw"] is None
 
 
@@ -182,6 +192,7 @@ def test_decision_form_defaults_amount_to_requested(env):
     page = client.get("/applications/app-1", headers=OFFICER).text
     assert 'name="amount_krw" inputmode="numeric" value="30000000"' in page
     assert "data-policy-blocked" not in page
+    assert 'value="conditional"' not in page and 'name="conditions"' not in page
 
 
 @pytest.fixture
@@ -221,6 +232,16 @@ def test_override_decision_is_labelled_on_detail(env, make_doc):
     assert "정책 예외 승인" in client.get("/applications/app-1", headers=OFFICER).text
 
 
+def test_past_conditional_decision_still_renders(env, make_doc):
+    client, _ = env
+    doc = make_doc(status="conditionally_approved")
+    doc["officer_decision"] = {"decision": "conditional", "officer_id": "oid-officer", "amount_krw": 5_000_000,
+                               "conditions": ["월별 매출 보고"], "reason": "", "policy_override": False, "at": "x"}
+    client.app.state.deps.store.docs["app-1"] = doc
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert "조건부 승인" in page and "월별 매출 보고" in page
+
+
 def test_decision_only_while_awaiting_officer(env):
     client, queue = env
     token = csrf(client, OFFICER)
@@ -243,10 +264,10 @@ def test_form_must_be_urlencoded_and_small(env):
 def test_new_application_is_enqueued_and_redirects(env):
     client, queue = env
     form_page = client.get("/applications/new", headers=OFFICER).text
-    assert "demo-healthy-001" in form_page and "demo-injection-005" in form_page
+    assert "seller-dailylook-01" in form_page and "seller-candle-05" in form_page
     token = csrf(client, OFFICER, "/applications/new")
     resp = client.post("/applications", headers=OFFICER, data={
-        "csrf": token, "applicant_id": "demo-healthy-001", "requested_amount_krw": "30,000,000",
+        "csrf": token, "applicant_id": "seller-dailylook-01", "requested_amount_krw": "10,000,000",
         "requested_tenor_months": "12"})
     assert resp.status_code == 303
     assert resp.headers["location"] == "/applications/app-20261101-abc123"
@@ -254,17 +275,17 @@ def test_new_application_is_enqueued_and_redirects(env):
     submitted_at = sent.pop("submitted_at")
     assert datetime.fromisoformat(submitted_at).tzinfo is not None
     assert (queue_name, sent) == ("applications-start", {
-        "application_id": "app-20261101-abc123", "applicant_id": "demo-healthy-001",
-        "requested_amount_krw": 30_000_000, "requested_tenor_months": 12, "sla_hours": 24.0,
+        "application_id": "app-20261101-abc123", "applicant_id": "seller-dailylook-01",
+        "requested_amount_krw": 10_000_000, "requested_tenor_months": 12, "sla_hours": 24.0,
         "source": "console"})
 
 
-@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_tenor_months": "61"},
+@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_amount_krw": "10000001"}, {"requested_tenor_months": "13"},
                                     {"applicant_id": ""}, {"requested_amount_krw": "lots"}])
 def test_new_application_validation(env, fields):
     client, queue = env
     token = csrf(client, OFFICER, "/applications/new")
-    form = {"csrf": token, "applicant_id": "demo-healthy-001", "requested_amount_krw": "30000000",
+    form = {"csrf": token, "applicant_id": "seller-dailylook-01",     "requested_amount_krw": "10000000",
             "requested_tenor_months": "12"} | fields
     assert client.post("/applications", headers=OFFICER, data=form).status_code == 422
     assert client.post("/applications", headers=OFFICER, data=form | {"csrf": ""}).status_code == 403
@@ -311,8 +332,8 @@ def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
     assert "데모 모드" in page.text and "/.auth/logout" not in page.text
     assert "빈스카페(대표 김대표)는 계절성이 있다" in client.get("/applications/app-1").text
     token = csrf(client, {}, "/applications/new")
-    resp = client.post("/applications", data={"csrf": token, "applicant_id": "demo-healthy-001",
-                                              "requested_amount_krw": "50,000,000", "requested_tenor_months": "12"})
+    resp = client.post("/applications", data={"csrf": token, "applicant_id": "seller-dailylook-01",
+                                              "requested_amount_krw": "5,000,000", "requested_tenor_months": "12"})
     assert resp.status_code == 303
     assert queue.sent[0][1]["application_id"] == "app-20261101-demo01"
 

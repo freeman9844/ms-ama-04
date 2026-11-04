@@ -51,6 +51,7 @@ def test_list_recent_queries_projection_across_partitions():
     assert (kind, query, cross) == ("query", LIST_QUERY, True)
     assert params == [{"name": "@limit", "value": 50}]
     assert "ORDER BY c.updated_at DESC" in query and "c.assessment.recommendation AS recommendation" in query
+    assert "c.source" in query
     assert "c.assessment " not in query.replace("c.assessment.recommendation", "")
 
 
@@ -77,20 +78,20 @@ def test_monitoring_store_reads_loans_and_partitioned_alerts():
 def test_privacy_store_reads_consents_proofs_and_grievances():
     consents, proofs, grievances = FakeContainer([{"id": "c-1"}]), FakeContainer(), FakeContainer([{"id": "grv-1"}])
     store = CosmosPrivacy(consents, proofs, grievances)
-    assert store.consents_for_applicant("demo-healthy-001") == [{"id": "c-1"}]
+    assert store.consents_for_applicant("seller-dailylook-01") == [{"id": "c-1"}]
     assert store.consents_for_application("app-1") == [{"id": "c-1"}]
     assert consents.calls == [
-        ("query", CONSENTS_BY_APPLICANT, [{"name": "@applicant", "value": "demo-healthy-001"}], True),
+        ("query", CONSENTS_BY_APPLICANT, [{"name": "@applicant", "value": "seller-dailylook-01"}], True),
         ("query", CONSENTS_BY_APPLICATION, [{"name": "@application", "value": "app-1"}], True),
     ]
     assert store.get_consent("c-1") == {"id": "c-1"} and consents.calls[-1] == ("read", "c-1", "c-1")
     assert store.get_proof("c-1") == {"id": "c-1"} and proofs.calls[-1] == ("read", "c-1", "c-1")
     assert CosmosPrivacy(FakeContainer(missing=True), FakeContainer(missing=True), grievances).get_proof("c-x") is None
     assert store.list_grievances(50) == [{"id": "grv-1"}]
-    assert store.grievances_for_applicant("demo-healthy-001") == [{"id": "grv-1"}]
+    assert store.grievances_for_applicant("seller-dailylook-01") == [{"id": "grv-1"}]
     assert grievances.calls == [
         ("query", GRIEVANCES_QUERY, [{"name": "@limit", "value": 50}], True),
-        ("query", GRIEVANCES_BY_APPLICANT, [{"name": "@applicant", "value": "demo-healthy-001"}], True),
+        ("query", GRIEVANCES_BY_APPLICANT, [{"name": "@applicant", "value": "seller-dailylook-01"}], True),
     ]
     # 이의제기는 신청 파티션(/application_id)에 있다.
     assert store.get_grievance("app-1", "grv-1") == {"id": "grv-1"}
@@ -170,6 +171,9 @@ def test_cosmos_ops_lists_runs_and_projects_docs():
     assert docs[0]["application_id"] == "a" and "assembly" not in docs[0]
     assert docs[0]["policy"] == {"decision": "eligible", "reason_codes": []}
     assert c.queries[1][1] == [{"name": "@run", "value": "load-20261102010000"}]
+    recent = ops.recent(100)
+    assert recent[0]["application_id"] == "a" and "assembly" not in recent[0]
+    assert "ORDER BY c.received_at DESC" in c.queries[2][0] and c.queries[2][1] == [{"name": "@limit", "value": 100}]
     assert all(q[2] for q in c.queries)
 
 

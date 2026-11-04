@@ -61,11 +61,10 @@
   <fieldset>
     <legend>재심사 결정(재심사일 때만)</legend>
     {% set nd = form.new_decision if form else "" %}
-    {% for value, label in (("approve", "승인"), ("conditional", "조건부 승인"), ("decline", "거절")) %}
+    {% for value, label in (("approve", "승인"), ("decline", "거절")) %}
     <label><input type="radio" name="new_decision" value="{{ value }}"{% if nd == value %} checked{% endif %}> {{ label }}</label>
     {% endfor %}
     <label>금액(원{% if r.policy %}, 한도 {{ r.policy.max_amount_krw|krw }}{% endif %}) <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else '' }}"></label>
-    <label>조건(한 줄에 하나) <textarea name="conditions" rows="2">{{ form.conditions if form else "" }}</textarea></label>
   </fieldset>
   <label>사유 <textarea name="reason" rows="3">{{ form.reason if form else "" }}</textarea></label>
   <button type="submit">처리 보내기</button>

@@ -5,24 +5,27 @@ from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 
 from mockapis.postloan import FlowScenario, PostLoanFlow, generate_postloan
+from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, SyntheticCase, generate_case, load_persona
 from shared.segments import LOAD_GRID
 
 KST = timezone(timedelta(hours=9), "KST")
 
-# (applicant_id, archetype, seed, inject_prompt)
+# (applicant_id, archetype, seed, inject_prompt). ID 순서는 shared.sellers.DEMO_SELLERS와 같다.
 DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
-    ("demo-healthy-001", Archetype.HEALTHY_SEASONAL, 101, False),
-    ("demo-mismatch-002", Archetype.TAX_MISMATCH, 102, False),
-    ("demo-stress-003", Archetype.STRESSED, 103, False),
-    ("demo-thin-004", Archetype.THIN_FILE, 104, False),
-    ("demo-injection-005", Archetype.HEALTHY_SEASONAL, 105, True),
+    ("seller-dailylook-01", Archetype.HEALTHY_SEASONAL, 101, False),
+    ("seller-mangwon-02", Archetype.TAX_MISMATCH, 102, False),
+    ("seller-glowlab-03", Archetype.STRESSED, 103, False),
+    ("seller-knitroom-04", Archetype.THIN_FILE, 104, False),
+    ("seller-candle-05", Archetype.HEALTHY_SEASONAL, 105, True),
 )
 
 
 def build_demo_cases(as_of: date) -> dict[str, SyntheticCase]:
     return {
-        applicant_id: generate_case(applicant_id, archetype, as_of, seed, inject_prompt=inject)
+        applicant_id: generate_case(
+            applicant_id, archetype, as_of, seed, inject_prompt=inject, persona=DEMO_PERSONAS[applicant_id]
+        )
         for applicant_id, archetype, seed, inject in DEMO_APPLICANTS
     }
 
@@ -36,21 +39,23 @@ LOAD_ARCHETYPE = {
 
 
 def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
-    """운영 지표 배치용 합성 신청자(원형 × 업종·지역·업력 균형 격자)."""
-    return {
-        a.applicant_id: generate_case(
+    """운영 지표 배치용 합성 신청자(원형 × 업종·지역·업력 균형 격자). 같은 업종 안 순번으로 이름이 겹치지 않는다."""
+    seen: dict[str, int] = {}
+    cases = {}
+    for a in LOAD_GRID:
+        index = seen[a.industry] = seen.get(a.industry, -1) + 1
+        cases[a.applicant_id] = generate_case(
             a.applicant_id,
             LOAD_ARCHETYPE[a.archetype],
             as_of,
             a.seed,
-            persona=load_persona(a.industry, a.region),
+            persona=load_persona(a.industry, a.region, index),
             business_age_months=a.business_age_months,
         )
-        for a in LOAD_GRID
-    }
+    return cases
 
 # 대출 실행 이후 흐름: 심사 때 건강했던 패션의류 셀러가 시즌 재고 선매입 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
-STACKING_APPLICANTS = frozenset({"demo-healthy-001"})
+STACKING_APPLICANTS = frozenset({"seller-dailylook-01"})
 POSTLOAN_SEED_OFFSET = 1000
 
 
