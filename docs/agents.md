@@ -46,13 +46,14 @@
 - **분석가 도구 allowlist(`src/agents/underwriting.py`):** `get_metrics`, `get_monthly_series`, `query_transactions`(가명 거래, 최대 `MAX_TXNS=20`), 그리고 Foundry 내장 `code_interpreter`. 쓰기 도구 없음.
 - **검토자:** 도구 없음. 주장별 근거 충족을 예/아니오로 판정한다.
 - **반성 패턴:** 결정적 grounding 검사(`check_grounding` + `src/agents/grounding.py`의 숫자 대조, 허용 오차 2%) → 통과 시 검토자 → 지적 사항을 다음 라운드 입력으로, 최대 `MAX_ROUNDS=3`회. 3회 초과 시 `review_not_passed`로 심사역에게 넘긴다.
-- **가드레일:** 모델로 가는 모든 문자열은 가명처리. Code Interpreter 컨테이너는 실행마다 즉시 삭제(`delete_container`). 근거 목록에 없는 숫자(직접 계산 포함) 사용 금지. 정책이 ineligible이면 추천은 decline/refer만.
+- **가드레일:** 모델로 가는 모든 문자열은 가명처리. Code Interpreter 컨테이너는 실행마다 즉시 삭제(`delete_container`). 근거 목록에 없는 숫자(직접 계산 포함) 사용 금지. 정책이 ineligible이면 추천은 decline/refer만. 제안 구조의 기간은 1~12개월(`check_grounding`의 구조 검사, P9). 권고 `conditional`은 남아 있지만 심사역 결정에는 조건부 승인이 없으므로 콘솔은 "승인 권고(조건 제안)"로 표시한다.
 - **알려진 한계:** 평가에서 1라운드 근거 통과율이 모델에 민감하다. 어떤 실패도 예외로 올리지 않고(1라운드 실패면 평가 없음, 이후 실패면 직전 초안을 미통과로) `assessment_unavailable` 플래그로 남긴다.
 - **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 3장(검토자 `gpt-5.4-mini` 고정) — 분석가 `gpt-5.4`는 1라운드 근거 통과 100.0%·검토 통과 87.5%·건당 $0.0631, `gpt-5.4-mini`는 62.5%·62.5%·$0.0199. 품질 차이 때문에 분석가는 `gpt-5.4`, 검토자는 `gpt-5.4-mini`로 둔다.
 
 ## 조기경보
 
 - **목적:** 통계 탐지기 트리거가 있을 때 의미 기반으로 스트레스를 조사하고 경보 여부·심각도·권고를 정한다(L4, 사후).
+- **트리거:** `inflow_drop`·`new_debt`·`buffer_drop`에 더해, 결정적 4주 잔고 전망(`src/agents/forecast.py`의 `project`)이 0원 아래로 내려가면 `projected_shortfall`. 전망은 심사 시점 정산 프로필(채널별 정산 지연·수수료)과 최근 3개월 고정 지출 일정으로 만들며 LLM을 쓰지 않는다. 근거 지표는 `W:<주차>:<지표>`(주간 실측)와 `F:<주차>:projected_min_balance`(전망)를 인용한다.
 - **도구 allowlist(`src/agents/early_warning.py`):** `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `query_transactions`, `raise_alert`. `raise_alert`는 결정적 grounding 검사를 통과해야 `accepted=true`이고, 첫 성공만 유효하다.
 - **가드레일:** 모델 입력 가명처리. 근거 검사 실패 시 `issues`를 돌려줘 같은 실행에서 고치게 한다.
 - **실패 시 동작:** 에이전트를 쓸 수 없으면 탐지기 결과만으로 medium 경보를 올린다(fail-safe: 사람이 본다).
@@ -61,6 +62,7 @@
 ## 추심
 
 - **목적:** 조기경보(`contact_borrower`·`hardship_review`)를 받아 승인된 스크립트로만 연락하고, 상환 곤란이면 재조정 요청을 심사역에게 넘긴다(L3). 재조정 결정은 사람만 한다.
+- **재생 정지·재개(P9):** 13주 재생 중 재조정 요청이 생기면 재생이 그 주에서 멈추고(대출 `paused`, 콘솔 "재조정 대기"), 심사역이 승인/거절하면 `awaiting_resume`으로 바뀌어 "이어서 재생"/"여기서 종료"를 고른다. 기다리는 사이 심사 동의가 만료·철회되면 재개 요청은 이유를 오류로 남기고 재생을 종료한다(`stopped`). 재조정 결과(유예·분할)는 이후 재생 흐름에 반영하지 않는다(`docs/limitations.md`).
 - **도구 allowlist(`src/agents/collections.py`):** `get_alert`, `get_contact_history`, `list_scripts`, `send_script`(승인 스크립트 enum만), `route_hardship`(`revenue_shock`/`illness_or_disaster`/`debt_overload`).
 - **가드레일:** 공정 추심 규칙을 도구 안에서 결정적으로 강제 — 7일 `MAX_CONTACTS_PER_7_DAYS=7`회, `CONTACT_HOURS` 08:00~21:00(KST) 밖이면 발송 보류(`deferred`). 자유 문장 발송 불가, 승인 스크립트만. `send_script`는 한 번만 성공.
 - **실패 시 동작:** 에이전트를 쓸 수 없으면 severity로 스크립트를 고르고 재조정 요청은 만들지 않는다.

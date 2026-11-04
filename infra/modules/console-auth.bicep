@@ -11,7 +11,7 @@ param redirectUri string
 param operatorPrincipalId string = ''
 
 var roles = [
-  { value: 'CreditOfficer', name: '심사역', description: '신청 조회·실명 복원·승인/조건부/거절 결정·신규 신청' }
+  { value: 'CreditOfficer', name: '심사역', description: '신청 조회·실명 복원·승인/거절 결정·신규 신청' }
   { value: 'CreditManager', name: '심사 관리자', description: '심사역 권한과 같음(에스컬레이션 처리)' }
   { value: 'Auditor', name: '감사자', description: '가명 상태로 조회만' }
 ]

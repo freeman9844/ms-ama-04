@@ -1,16 +1,23 @@
 """미리보기용 합성 데이터와 메모리 저장소. 실제 차주·실제 측정값이 아니다(화면 확인 전용).
 
-신청 11건(상태 골고루), 대출 3건(재생 완료·재생 중·재생 전), 운영 측정 실행 1개를 만든다.
+신청 11건(상태 골고루), 대출 3건(재생 완료·재생 중·재생 전), 운영 측정 실행 1개를 만든다. 신청의 심사 지표·월별
+현금흐름·지출 구성·정책 판정은 데모·부하 셀러 합성 거래에 실제 엔진(agents.features, 정책 규칙 v2)을 돌려 만든다.
 원천 데이터(RawStore)는 비워 두어 상세 화면은 가명 토큰 복원 불가 상태로 보인다.
 """
 
 from datetime import date, datetime, timedelta, timezone
+from functools import cache
 from typing import Any
 
+from agents.features import compute_underwriting
 from agents.forecast import summarize
-
+from agents.monitoring import settlement_for
 from console.app import ConsoleDeps
 from console.auth import CREDIT_OFFICER, Principal
+from mockapis.demo import build_demo_cases, build_load_cases
+from mockapis.synth import SyntheticCase
+from policy.engine import evaluate
+from policy.rules import load_rules
 
 KST = timezone(timedelta(hours=9))
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=KST)
@@ -19,8 +26,43 @@ RUN_ID = "load-20261103090000"
 PRINCIPAL = Principal(user_id="preview-officer", name="미리보기 심사역", roles=frozenset({CREDIT_OFFICER}))
 FLOW = ("received", "consent_granted", "data_assembled", "underwritten", "assessed", "awaiting_officer")
 OFFSETS = (0, 20, 65, 100, 190, 195)
-MONTHS = ("2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09")
-REVENUE = (6_300_000, 6_800_000, 6_000_000, 7_300_000, 7_800_000, 7_000_000)
+AS_OF = date(2026, 11, 2)
+TENOR = 12
+# 신청 번호 → 셀러. 데모 셀러 5곳과 부하 셀러 6곳(상호가 겹치지 않는다).
+SELLERS = {1: "load-healthy-01", 2: "seller-mangwon-02", 3: "seller-dailylook-01", 4: "seller-candle-05",
+           5: "seller-knitroom-04", 6: "load-mismatch-01", 7: "load-thin-01", 8: "load-healthy-02",
+           9: "load-stress-01", 10: "seller-glowlab-03", 11: "load-healthy-03"}
+
+
+@cache
+def _cases() -> dict[str, SyntheticCase]:
+    return {**build_demo_cases(AS_OF), **build_load_cases(AS_OF)}
+
+
+def seller(n: int) -> SyntheticCase:
+    return _cases()[SELLERS[n]]
+
+
+# 합성 정답 라벨 → 의미 분류 에이전트 라벨(의미 분류가 정답을 맞혔다고 가정한 미리보기)
+SEMANTIC_LABEL = {"supplier": "supplier", "rent": "rent", "payroll": "payroll", "social_insurance": "tax_or_insurance",
+                  "tax": "tax_or_insurance", "advertising": "other_operating", "solution_fee": "other_operating",
+                  "shipping": "other_operating", "card_payment": "other_operating",
+                  "loan_repayment": "loan_repayment", "high_cost_lender": "high_cost_lender",
+                  "owner_transfer": "owner_transfer"}
+
+
+def _underwriting(app_id: str, case: SyntheticCase, amount: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """오케스트레이터 underwrite·evaluate_policy와 같은 모양. 지출 구성 라벨만 합성 정답에서 가져온다."""
+    labels = {k: SEMANTIC_LABEL[v.value] for k, v in case.labels.items() if v.value in SEMANTIC_LABEL}
+    uw = compute_underwriting(app_id, case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
+                              requested_amount_krw=amount, requested_tenor_months=TENOR, semantic_labels=labels)
+    underwriting = {
+        "features": uw.features.model_dump(mode="json"), "signals": uw.signals, "flags": uw.flags,
+        "monthly": uw.monthly, "expense_breakdown": uw.expense_breakdown,
+        "settlement_profile": settlement_for(case.transactions, {}, AS_OF, case.profile.industry),
+        "classification": None, "category_overrides": {},
+    }
+    return underwriting, evaluate(uw.features, load_rules()).model_dump(mode="json")
 
 
 def _at(start: datetime, seconds: int) -> str:
@@ -33,38 +75,52 @@ def _timeline(start: datetime, statuses: tuple[str, ...], extra: tuple[tuple[str
     return out
 
 
-def _monthly() -> list[dict[str, Any]]:
-    return [{"month": m, "revenue": r, "operating_out": round(r * 0.62), "debt_service": 400_000,
-             "owner_draw": 500_000 + i * 30_000} for i, (m, r) in enumerate(zip(MONTHS, REVENUE, strict=True))]
+def _man(krw: float) -> str:
+    return f"{round(krw / 10_000):,}"
 
 
-def _assessment(app_id: str, rec: str) -> dict[str, Any]:
+REC_OF = {"eligible": "approve", "refer": "refer", "ineligible": "decline"}
+DECISION_KO = {"eligible": "적격", "refer": "검토 필요", "ineligible": "부적격"}
+
+
+def _assessment(app_id: str, rec: str, uw: dict[str, Any], policy: dict[str, Any], amount: int) -> dict[str, Any]:
+    f, s = uw["features"], uw["signals"]
+    limit = policy["max_amount_krw"] or 0
+    structure = None
+    if rec != "decline" and limit > 0:
+        structure = {"amount_krw": min(amount, limit), "tenor_months": TENOR, "schedule": "level",
+                     "reduced_payment_months": [],
+                     "rationale": f"월 상환액이 월평균 정산 입금 {_man(f['avg_monthly_inflow_krw'])}만 원 대비 작다."}
     return {
         "application_id": app_id,
         "recommendation": rec,
-        "summary": "최근 6개월 매출이 월 600만~780만 원으로 안정적이고 상환 여력(DSCR 1.8)이 정책 기준을 넘는다.",
+        "summary": (f"최근 {s['months_used']}개월 월평균 정산 입금 {_man(f['avg_monthly_inflow_krw'])}만 원, "
+                    f"DSCR {f['dscr']:.2f}, 현금 버퍼 {f['cash_buffer_days']:.0f}일이다. "
+                    f"정책 판정은 {DECISION_KO[policy['decision']]}이다."),
         "claims": [
-            {"text": "DSCR 1.8로 정책 기준 1.25를 넘는다", "metric_ids": ["M:dscr", "P:R101:threshold"], "txn_ids": []},
-            {"text": "대표자 인출 비율 18%로 기준 35% 안에 있다", "metric_ids": ["S:owner_draw_ratio"], "txn_ids": []},
+            {"text": f"DSCR {f['dscr']:.2f}", "metric_ids": ["M:dscr"], "txn_ids": []},
+            {"text": f"현금 버퍼 {f['cash_buffer_days']:.0f}일", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
+            {"text": f"대표자 월평균 인출 {_man(s['avg_monthly_owner_draw_krw'])}만 원",
+             "metric_ids": ["S:avg_monthly_owner_draw_krw"], "txn_ids": []},
         ],
-        "proposed_structure": {"amount_krw": 5_000_000, "tenor_months": 12, "schedule": "level",
-                               "reduced_payment_months": ["02"], "rationale": "비수기 2월 상환액을 줄인다."},
+        "proposed_structure": structure,
         "counterfactuals": [
-            {"metric_id": "M:dscr", "current": 1.8, "target": 2.2, "explanation": "DSCR이 2.2 이상이면 금리 구간 A"},
-            {"metric_id": "S:owner_draw_ratio", "current": 0.18, "target": 0.1,
-             "explanation": "대표자 인출을 10% 이하로 줄이면 한도 상향"},
+            {"metric_id": "M:cash_buffer_days", "current": f["cash_buffer_days"], "target": 30.0,
+             "explanation": "현금 버퍼가 30일 이상이면 한도 여유가 커진다"},
         ],
         "review": {"passed": True, "rounds": 2, "issues": []},
         "models": {"analyst": "gpt-5.4", "reviewer": "gpt-5.4-mini"},
     }
 
 
-def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "approve", amount: int = 5_000_000,
+def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "policy", amount: int = 8_000_000,
          **overrides: Any) -> dict[str, Any]:
+    """rec="policy"면 정책 판정을 따른 추천(적격→승인, 검토 필요→검토, 부적격→거절)을 쓴다."""
     app_id = f"app-20261103-p{n:02d}"
+    case = seller(n)
     doc: dict[str, Any] = {
-        "id": app_id, "application_id": app_id, "applicant_id": f"preview-{n:02d}",
-        "requested_amount_krw": amount, "requested_tenor_months": 12, "status": status,
+        "id": app_id, "application_id": app_id, "applicant_id": case.profile.applicant_id,
+        "requested_amount_krw": amount, "requested_tenor_months": TENOR, "status": status,
         "received_at": timeline[0]["at"], "updated_at": timeline[-1]["at"], "timeline": timeline,
         "underwriting": None, "policy": None, "assessment": None, "flags": [],
         "sla": {"hours": 24, "deadline": (datetime.fromisoformat(timeline[0]["at"]) + timedelta(hours=24)).isoformat(),
@@ -72,24 +128,11 @@ def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "approv
         "decision_attempts": [], "officer_decision": None, "error": None,
     }
     if any(t["status"] == "underwritten" for t in timeline):
-        doc["underwriting"] = {
-            "features": {"dscr": 1.8, "avg_monthly_inflow_krw": 6_866_667, "industry": "패션의류"},
-            "signals": {"owner_draw_ratio": 0.18}, "flags": [], "monthly": _monthly(),
-            "classification": None, "category_overrides": {},
-        }
-        doc["policy"] = {
-            "application_id": app_id, "decision": "eligible", "max_amount_krw": 5_000_000, "rate_band": "B",
-            "reason_codes": [
-                {"code": "R101", "message": "DSCR 기준 충족", "field": "dscr", "observed": 1.8, "threshold": 1.25},
-                {"code": "R102", "message": "대표자 인출 비율 기준 이내", "field": "owner_draw_ratio",
-                 "observed": 0.18, "threshold": 0.35},
-                {"code": "R104", "message": "업력 기준 충족(개월)", "field": "business_age_months",
-                 "observed": 48, "threshold": 36},
-            ],
-            "rules_version": "2026.11-v2",
-        }
+        doc["underwriting"], doc["policy"] = _underwriting(app_id, case, amount)
+        doc["flags"] = list(doc["underwriting"]["flags"])
     if rec is not None and doc["policy"] is not None:
-        doc["assessment"] = _assessment(app_id, rec)
+        rec = REC_OF[doc["policy"]["decision"]] if rec == "policy" else rec
+        doc["assessment"] = _assessment(app_id, rec, doc["underwriting"], doc["policy"], amount)
     doc.update(overrides)
     return doc
 
@@ -102,24 +145,24 @@ def applications() -> list[dict[str, Any]]:
     s = [_start(m) for m in (6, 1500, 300, 280, 260, 240, 30, 2, 90, 12, 1800)]
     return [
         _doc(1, "awaiting_officer", _timeline(s[0], FLOW)),
-        _doc(2, "escalated", _timeline(s[1], FLOW, (("escalated", 86_400),)), rec="refer",
+        _doc(2, "escalated", _timeline(s[1], FLOW, (("escalated", 86_400),)),
              sla={"hours": 24, "deadline": _at(s[1], 86_400), "escalated": True}),
-        _doc(3, "approved", _timeline(s[2], FLOW, (("approved", 3_600),)),
+        _doc(3, "approved", _timeline(s[2], FLOW, (("approved", 3_600),)), amount=5_000_000,
              officer_decision={"decision": "approve", "amount_krw": 5_000_000, "officer_id": "preview-officer",
                                "conditions": [], "reason": "정책 한도 안, 상환 여력 충분"}),
         _doc(4, "conditionally_approved", _timeline(s[3], FLOW, (("conditionally_approved", 4_000),)),
-             rec="conditional",
+             amount=4_000_000, rec="conditional",  # P9 이전 조건부 승인 문서도 그대로 보여야 한다
              officer_decision={"decision": "conditional", "amount_krw": 4_000_000, "officer_id": "preview-officer",
                                "conditions": ["월별 매출 보고"], "reason": "비수기 대비 조건 부여"}),
-        _doc(5, "declined", _timeline(s[4], FLOW, (("declined", 3_000),)), rec="decline",
+        _doc(5, "declined", _timeline(s[4], FLOW, (("declined", 3_000),)),
              officer_decision={"decision": "decline", "amount_krw": None, "officer_id": "preview-officer",
-                               "conditions": [], "reason": "고금리 차입 중첩"}),
+                               "conditions": [], "reason": "정책 부적격(R001 거래 이력 부족, R101 매출 불일치)"}),
         _doc(6, "withdrawn", _timeline(s[5], FLOW[:3], (("withdrawn", 120),)), rec=None),
         _doc(7, "data_incomplete", _timeline(s[6], FLOW[:2], (("data_incomplete", 70),)), rec=None),
         _doc(8, "received", _timeline(s[7], FLOW[:1]), rec=None),
         _doc(9, "failed", _timeline(s[8], FLOW[:4], (("failed", 150),)), rec=None,
              error={"stage": "assess", "message": "모델 응답 시간 초과(합성 예시)"}),
-        _doc(10, "assessed", _timeline(s[9], FLOW[:5]), rec="conditional"),
+        _doc(10, "assessed", _timeline(s[9], FLOW[:5])),
         _doc(11, "approved", _timeline(s[10], FLOW, (("approved", 2_400),)), amount=3_000_000,
              officer_decision={"decision": "approve", "amount_krw": 3_000_000, "officer_id": "preview-officer",
                                "conditions": [], "reason": "정책 한도 안"}),
@@ -218,14 +261,18 @@ def _monitoring(replay_id: str, status: str, weeks: int, started: datetime) -> d
     }
 
 
+SIGNAL_METRIC = {"inflow_drop": "W:{w}:revenue", "new_debt": "W:{w}:high_cost_lender",
+                 "buffer_drop": "W:{w}:buffer_days", "projected_shortfall": "F:{w}:projected_min_balance"}
+
+
 def _alert(loan_id: str, replay_id: str, week: int, severity: str, restructure: str | None) -> dict[str, Any]:
     alert_id = f"ew-{replay_id}-w{week:02d}"
     doc: dict[str, Any] = {
         "id": alert_id, "schema_version": "1", "alert_id": alert_id, "loan_id": loan_id, "week": week,
         "as_of": _row(week)["end"], "severity": severity,
         "summary": f"{week}주차 매출이 기준 대비 크게 줄고 현금 버퍼가 감소했다(합성 예시).",
-        "signals": [{"kind": t, "text": f"{week}주차 {t} 신호", "metric_ids": [f"W:{week}:revenue"], "txn_ids": []}
-                    for t in TRIGGERS[week]],
+        "signals": [{"kind": t, "text": f"{week}주차 {t} 신호", "metric_ids": [SIGNAL_METRIC[t].format(w=week)],
+                     "txn_ids": []} for t in TRIGGERS[week]],
         "recommended_action": "hardship_review" if restructure else "monitor", "triggers": TRIGGERS[week],
         "models": {"investigator": "gpt-5.4"}, "replay_id": replay_id,
         "status": "restructure_pending" if restructure == "pending_officer" else "handled",
@@ -246,11 +293,14 @@ def _alert(loan_id: str, replay_id: str, week: int, severity: str, restructure: 
 
 
 def loans() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    done = _loan("app-20261103-p03", "preview-03", "패션의류", 5_000_000,
+    def who(n: int) -> tuple[str, str]:
+        return seller(n).profile.applicant_id, seller(n).profile.industry
+
+    done = _loan("app-20261103-p03", *who(3), 5_000_000,
                  _monitoring("rp-preview-1", "completed", 13, NOW - timedelta(hours=2)))
-    running = _loan("app-20261103-p04", "preview-04", "식품", 4_000_000,
+    running = _loan("app-20261103-p04", *who(4), 4_000_000,
                     _monitoring("rp-preview-2", "replaying", 4, NOW - timedelta(minutes=2)))
-    idle = _loan("app-20261103-p11", "preview-11", "반려동물", 3_000_000, None)
+    idle = _loan("app-20261103-p11", *who(11), 3_000_000, None)
     alerts = [_alert(done["id"], "rp-preview-1", 6, "medium", None),
               _alert(done["id"], "rp-preview-1", 10, "high", "pending_officer")]
     return [done, running, idle], alerts
@@ -272,7 +322,7 @@ def _projected(i: int, industry: str, rec: str, region: str, age: str, outcomes:
 
 
 def ops_docs() -> list[dict[str, Any]]:
-    food = ("approve", "decline", "refer", "decline", "approve", "decline", "conditional", "decline", "approve",
+    food = ("approve", "decline", "refer", "decline", "approve", "decline", "refer", "decline", "approve",
             "decline", "refer")
     plan = ([("패션의류", "approve")] * 10 + [("식품", r) for r in food]
             + [("반려동물", "approve"), ("반려동물", "decline"), ("반려동물", "approve")])
