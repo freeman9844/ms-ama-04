@@ -18,6 +18,21 @@ DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
     ("seller-glowlab-03", Archetype.STRESSED, 103, False),
     ("seller-knitroom-04", Archetype.THIN_FILE, 104, False),
     ("seller-candle-05", Archetype.HEALTHY_SEASONAL, 105, True),
+    ("seller-gearstore-06", Archetype.HEALTHY_SEASONAL, 106, False),
+    ("seller-petfood-07", Archetype.HEALTHY_SEASONAL, 107, False),
+    ("seller-ceramic-08", Archetype.HEALTHY_SEASONAL, 108, False),
+    ("seller-kimchi-09", Archetype.TAX_MISMATCH, 109, False),
+    ("seller-linen-10", Archetype.HEALTHY_SEASONAL, 110, False),
+    ("seller-skinlab-11", Archetype.STRESSED, 111, False),
+    ("seller-kitchen-12", Archetype.TAX_MISMATCH, 112, False),
+    ("seller-cable-13", Archetype.STRESSED, 113, False),
+    ("seller-leather-14", Archetype.THIN_FILE, 114, False),
+    ("seller-tangerine-15", Archetype.HEALTHY_SEASONAL, 115, False),
+    ("seller-petcare-16", Archetype.TAX_MISMATCH, 116, False),
+    ("seller-tint-17", Archetype.THIN_FILE, 117, False),
+    ("seller-sofa-18", Archetype.STRESSED, 118, False),
+    ("seller-streetfit-19", Archetype.THIN_FILE, 119, False),
+    ("seller-bakery-20", Archetype.HEALTHY_SEASONAL, 120, False),
 )
 
 
@@ -54,8 +69,9 @@ def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
         )
     return cases
 
-# 대출 실행 이후 흐름: 심사 때 건강했던 패션의류 셀러가 시즌 재고 선매입 뒤 고금리 대출을 쌓는다(조기경보 데모의 주인공).
-STACKING_APPLICANTS = frozenset({"seller-dailylook-01"})
+# 대출 실행 이후 흐름: 심사 때 건강했던 셀러가 시즌 재고 선매입 뒤 고금리 대출을 쌓는다(조기경보 데모).
+# 주인공은 패션의류 seller-dailylook-01이고, 업종이 다른 건강 셀러 3곳도 같은 흐름을 탄다. 나머지는 정상 상환.
+STACKING_APPLICANTS = frozenset({"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"})
 POSTLOAN_SEED_OFFSET = 1000
 
 

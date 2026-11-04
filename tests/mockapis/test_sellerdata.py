@@ -94,3 +94,16 @@ def test_load_sellers_have_unique_names():
 
 def test_truth_label_covers_every_synthetic_category():
     assert set(TRUTH_LABEL) == set(TxnCategory)
+
+
+def test_demo_sellers_have_unique_names_apart_from_load_sellers():
+    from shared.sellers import LOAD_BUSINESS_NAMES
+
+    businesses = [p.business_name for p in DEMO_PERSONAS.values()]
+    people = [n for p in DEMO_PERSONAS.values() for n in (p.representative, *p.employees)]
+    load = build_load_cases(date(2026, 11, 1)).values()
+    load_people = {n for c in load for n in (c.persona.representative, *c.persona.employees)}
+    assert len(DEMO_PERSONAS) == 20
+    assert len(set(businesses)) == len(businesses)
+    assert not set(businesses) & {n for names in LOAD_BUSINESS_NAMES.values() for n in names}
+    assert len(set(people)) == len(people) and not set(people) & load_people

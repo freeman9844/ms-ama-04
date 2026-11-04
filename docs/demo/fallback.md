@@ -6,7 +6,7 @@
 
 ## 사전 준비 목록
 
-데모 전날까지 만들어 둡니다. 동의 유효 기간은 90일이라(`src/orchestrator/journey/models.py`의 `CONSENT_TTL_DAYS`) 그보다 오래된 사전 건은 다시 만듭니다. A·B는 반드시 `seller-dailylook-01`(성수데일리룩)로 만듭니다. 사후 흐름에 고금리 대출 누적(조기경보 시나리오)이 있는 셀러는 `seller-dailylook-01`뿐이라(`src/mockapis/demo.py`의 `STACKING_APPLICANTS`), 다른 셀러로 B를 만들면 재생은 끝나도 경보·재조정 요청이 없을 수 있습니다. C는 삭제 증명만 보므로 셀러가 달라도 됩니다. 신청은 고객 페이지 `/apply`(동의 3개 모두 체크 → `신청하기`)나 콘솔 `새 신청` 어느 쪽으로 넣어도 같은 흐름을 탑니다.
+데모 전날까지 만들어 둡니다. 동의 유효 기간은 90일이라(`src/orchestrator/journey/models.py`의 `CONSENT_TTL_DAYS`) 그보다 오래된 사전 건은 다시 만듭니다. A·B는 반드시 `seller-dailylook-01`(성수데일리룩)로 만듭니다. 사후 흐름에 고금리 대출 누적(조기경보 시나리오)이 있는 셀러는 `seller-dailylook-01`·`seller-gearstore-06`(용산기어스토어)·`seller-linen-10`(을지로린넨)·`seller-tangerine-15`(제주귤하루) 네 곳이고(`src/mockapis/demo.py`의 `STACKING_APPLICANTS`), 대본은 `seller-dailylook-01`을 기준으로 씁니다. 그 밖의 셀러로 B를 만들면 재생은 끝나도 경보·재조정 요청이 없을 수 있습니다. C는 삭제 증명만 보므로 셀러가 달라도 됩니다. 신청은 고객 페이지 `/apply`(동의 3개 모두 체크 → `신청하기`)나 콘솔 `새 신청` 어느 쪽으로 넣어도 같은 흐름을 탑니다.
 
 | 이름 | 만드는 방법 | ID(P9 배포 뒤 준비) | 확인 방법 |
 |---|---|---|---|

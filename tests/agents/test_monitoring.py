@@ -14,7 +14,7 @@ from agents.monitoring import (
     week_window,
     weekly_series,
 )
-from mockapis.demo import build_demo_cases
+from mockapis.demo import STACKING_APPLICANTS, build_demo_cases
 from mockapis.postloan import PROCEEDS_KRW, FlowScenario, generate_postloan
 from shared.contracts import EVIDENCE_ID_PATTERN
 from shared.segments import SELLER_INDUSTRIES
@@ -108,26 +108,41 @@ def test_stacking_inflow_drop_shows_up_within_two_months(cafe, baseline):
     assert "inflow_drop" in detect(rows, baseline)
 
 
+def _demo_series(case, scenario, as_of):
+    uw = compute_underwriting(
+        "app-1", case.profile, case.transactions, case.tax_filings,
+        as_of=as_of, requested_amount_krw=5_000_000, requested_tenor_months=6,
+    )
+    base = Baseline.from_underwriting(
+        {
+            "features": uw.features.model_dump(mode="json"),
+            "monthly": uw.monthly,
+            "settlement_profile": settlement_for(case.transactions, {}, as_of, case.profile.industry),
+        },
+        installment_krw=900_000,
+    )
+    flow = generate_postloan(case, scenario, as_of, 7)
+    rows = weekly_series(flow.transactions, categorize(flow.transactions, {}), flow.start, 13, base)
+    return flow, rows, base
+
+
 @pytest.mark.parametrize("as_of", [date(2026, 9, 14), date(2026, 12, 28), date(2027, 1, 25)])
 def test_stable_sellers_raise_no_revenue_triggers_around_festivals(as_of):
-    # 라이브 데모는 오늘 날짜로 흐름을 만든다: 추석·연말·설이 낀 13주에도 정상 셀러 5명 모두 매출 트리거가 없어야 한다.
+    # 라이브 데모는 오늘 날짜로 흐름을 만든다: 추석·연말·설이 낀 13주에도 데모 셀러 모두 매출 트리거가 없어야 한다.
     for seller, case in build_demo_cases(as_of).items():
-        uw = compute_underwriting(
-            "app-1", case.profile, case.transactions, case.tax_filings,
-            as_of=as_of, requested_amount_krw=5_000_000, requested_tenor_months=6,
-        )
-        base = Baseline.from_underwriting(
-            {
-                "features": uw.features.model_dump(mode="json"),
-                "monthly": uw.monthly,
-                "settlement_profile": settlement_for(case.transactions, {}, as_of, case.profile.industry),
-            },
-            installment_krw=900_000,
-        )
-        flow = generate_postloan(case, FlowScenario.STABLE, as_of, 7)
-        rows = weekly_series(flow.transactions, categorize(flow.transactions, {}), flow.start, 13, base)
+        _, rows, base = _demo_series(case, FlowScenario.STABLE, as_of)
         hits = {(w, t) for w in range(1, 14) for t in detect(rows[:w], base)}
         assert not {h for h in hits if h[1] in ("inflow_drop", "volatility_spike")}, (seller, sorted(hits))
+
+
+@pytest.mark.parametrize("as_of", [AS_OF, date(2026, 12, 28), date(2027, 1, 25)])
+@pytest.mark.parametrize("seller", sorted(STACKING_APPLICANTS))
+def test_stacking_sellers_warn_before_default(seller, as_of):
+    # 대출 중첩 셀러는 업종과 시작일에 관계없이 신규 차입을 잡고, 잔고 부족 전망이 부도보다 먼저 나온다.
+    flow, rows, base = _demo_series(build_demo_cases(as_of)[seller], FlowScenario.STACKING, as_of)
+    assert any("new_debt" in detect(rows[:w], base) for w in range(1, 14))
+    first = next(r for r in rows if "projected_shortfall" in detect(rows[: r["week"]], base))
+    assert date.fromisoformat(first["end"]) < flow.default_on
 
 
 def test_stable_projection_never_runs_short(cafe, baseline):

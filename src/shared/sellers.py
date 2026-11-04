@@ -23,6 +23,21 @@ DEMO_SELLERS: tuple[DemoSeller, ...] = (
     DemoSeller("seller-glowlab-03", "해운대뷰티랩", ("스마트스토어", "쿠팡", "자사몰"), "뷰티"),
     DemoSeller("seller-knitroom-04", "판교손뜨개공방", ("스마트스토어", "자사몰"), "핸드메이드"),
     DemoSeller("seller-candle-05", "연남캔들웍스", ("스마트스토어", "자사몰"), "리빙"),
+    DemoSeller("seller-gearstore-06", "용산기어스토어", ("쿠팡", "스마트스토어", "11번가"), "디지털"),
+    DemoSeller("seller-petfood-07", "광교펫푸드랩", ("쿠팡", "스마트스토어", "자사몰"), "반려동물"),
+    DemoSeller("seller-ceramic-08", "이천도예공방", ("스마트스토어", "자사몰"), "핸드메이드"),
+    DemoSeller("seller-kimchi-09", "전주한상김치", ("쿠팡", "스마트스토어", "자사몰"), "식품"),
+    DemoSeller("seller-linen-10", "을지로린넨", ("스마트스토어", "쿠팡", "자사몰"), "패션의류"),
+    DemoSeller("seller-skinlab-11", "대구스킨랩", ("스마트스토어", "쿠팡", "11번가"), "뷰티"),
+    DemoSeller("seller-kitchen-12", "인천키친웨어", ("쿠팡", "스마트스토어", "11번가"), "리빙"),
+    DemoSeller("seller-cable-13", "구로케이블몰", ("쿠팡", "11번가", "스마트스토어"), "디지털"),
+    DemoSeller("seller-leather-14", "성수가죽공방", ("스마트스토어", "자사몰"), "핸드메이드"),
+    DemoSeller("seller-tangerine-15", "제주귤하루", ("쿠팡", "스마트스토어", "자사몰"), "식품"),
+    DemoSeller("seller-petcare-16", "분당펫케어샵", ("쿠팡", "스마트스토어"), "반려동물"),
+    DemoSeller("seller-tint-17", "홍대틴트하우스", ("스마트스토어", "자사몰"), "뷰티"),
+    DemoSeller("seller-sofa-18", "광주소파공장", ("쿠팡", "스마트스토어", "자사몰"), "리빙"),
+    DemoSeller("seller-streetfit-19", "동대문스트릿핏", ("스마트스토어", "쿠팡"), "패션의류"),
+    DemoSeller("seller-bakery-20", "대전밀빵공방", ("쿠팡", "스마트스토어", "자사몰"), "식품"),
 )
 SELLER_BY_ID = {s.applicant_id: s for s in DEMO_SELLERS}
 

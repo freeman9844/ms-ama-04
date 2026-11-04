@@ -39,6 +39,21 @@ def test_build_demo_cases():
         "seller-glowlab-03": Archetype.STRESSED,
         "seller-knitroom-04": Archetype.THIN_FILE,
         "seller-candle-05": Archetype.HEALTHY_SEASONAL,
+        "seller-gearstore-06": Archetype.HEALTHY_SEASONAL,
+        "seller-petfood-07": Archetype.HEALTHY_SEASONAL,
+        "seller-ceramic-08": Archetype.HEALTHY_SEASONAL,
+        "seller-kimchi-09": Archetype.TAX_MISMATCH,
+        "seller-linen-10": Archetype.HEALTHY_SEASONAL,
+        "seller-skinlab-11": Archetype.STRESSED,
+        "seller-kitchen-12": Archetype.TAX_MISMATCH,
+        "seller-cable-13": Archetype.STRESSED,
+        "seller-leather-14": Archetype.THIN_FILE,
+        "seller-tangerine-15": Archetype.HEALTHY_SEASONAL,
+        "seller-petcare-16": Archetype.TAX_MISMATCH,
+        "seller-tint-17": Archetype.THIN_FILE,
+        "seller-sofa-18": Archetype.STRESSED,
+        "seller-streetfit-19": Archetype.THIN_FILE,
+        "seller-bakery-20": Archetype.HEALTHY_SEASONAL,
     }
     injected = [cid for cid, c in cases.items() if any(t.description == INJECTION_TEXT for t in c.transactions)]
     assert injected == ["seller-candle-05"]
@@ -81,13 +96,9 @@ def test_postloan_flows_cast_the_healthy_seller_as_the_stacking_hero():
 
     as_of = date(2026, 11, 2)
     flows = build_postloan_flows(build_demo_cases(as_of), as_of)
-    assert {k: f.scenario for k, f in flows.items()} == {
-        "seller-dailylook-01": FlowScenario.STACKING,
-        "seller-mangwon-02": FlowScenario.STABLE,
-        "seller-glowlab-03": FlowScenario.STABLE,
-        "seller-knitroom-04": FlowScenario.STABLE,
-        "seller-candle-05": FlowScenario.STABLE,
-    }
+    stacking = {"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"}
+    assert {k for k, f in flows.items() if f.scenario is FlowScenario.STACKING} == stacking
+    assert set(flows) == {a for a, *_ in DEMO_APPLICANTS}
     assert all(f.start == as_of for f in flows.values())
 
 
@@ -107,7 +118,7 @@ def test_main_serves_flow_for_load_applicant(monkeypatch):
 
 def test_demo_cases_unchanged():
     cases = build_demo_cases(date(2026, 10, 1))
-    assert {k: _digest(v) for k, v in cases.items()} == DIGESTS
+    assert {k: _digest(cases[k]) for k in DIGESTS} == DIGESTS
 
 
 def test_load_cases_follow_grid():
