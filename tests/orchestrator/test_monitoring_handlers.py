@@ -550,6 +550,46 @@ def test_resume_after_underwriting_consent_ended_stops_with_reason(mock_app, end
     assert replay(deps) is None  # 새 재생도 같은 이유로 시작하지 않는다
 
 
+@pytest.mark.parametrize("ended", ["expired", "revoked"])
+def test_resume_after_monitoring_consent_ended_stops_with_reason(mock_app, ended):
+    # 사후 동의가 끝나면 flow.json이 지워져 남은 주차를 읽을 수 없다. 재개 전에 이유를 남기고 끝낸다.
+    deps, replay_id = paused_inline(mock_app)
+    decide_restructure(deps, loan(deps)["monitoring"]["pause_alert_id"])
+    cid = loan(deps)["monitoring"]["consent_id"]
+    consent = deps.store.read("consents", cid, cid)
+    consent["status"] = ended
+    deps.store.upsert("consents", consent)
+    assert replay(deps, action="resume", replay_id=replay_id) is None
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["stopped_at"]) == ("stopped", NOW.isoformat())
+    assert "사후 동의가 끝나" in mon["error"]
+
+
+def test_decision_landing_between_pause_check_and_pause_write_still_awaits_resume(mock_app):
+    # 주차 처리가 '대기 중' 요청을 읽은 직후 심사역 결정이 도착하면, 결정 쪽은 아직 '재생 중'인 대출을 보고
+    # 재개 대기로 올리지 않는다. 뒤이어 멈춤을 쓰면 결정이 끝났는데도 '멈춤'에 영영 남는다.
+    deps, replay_id = paused_inline(mock_app)
+    doc = loan(deps)
+    alert_id = doc["monitoring"]["pause_alert_id"]
+    doc["monitoring"].update(status="replaying", paused_week=None, pause_alert_id=None)
+    deps.store.upsert(LOANS, doc)
+    read = deps.store.read
+
+    def racing_read(container, item_id, partition_key):
+        got = read(container, item_id, partition_key)
+        if container == ALERTS and item_id == alert_id and deps.store.read is racing_read:
+            deps.store.read = read
+            assert decide_restructure(deps, alert_id) is True
+        return got
+
+    deps.store.read = racing_read
+    week = doc["monitoring"]["processed_week"]
+    assert monitoring_module._after_week(deps, LOAN, replay_id, week, alert_id) == "paused"
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["pause_alert_id"]) == ("awaiting_resume", alert_id)
+    assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == week + 1
+
+
 def test_restructure_decision_for_other_alert_does_not_unpause(mock_app):
     deps, _ = paused_inline(mock_app)
     doc = loan(deps)

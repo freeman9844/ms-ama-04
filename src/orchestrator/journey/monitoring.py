@@ -170,12 +170,24 @@ def _held_loan(deps: Deps, loan_id: str, replay_id: str, status: str) -> dict[st
     return loan
 
 
-def _underwriting_consent_ended(deps: Deps, loan: dict[str, Any]) -> str | None:
-    """사후 탐지는 심사 동의로 받은 프로필(가명화 키)이 필요하다. 동의가 끝나면 원천 데이터가 없다."""
-    cid = loan["underwriting_consent_id"]
-    consent = deps.store.read("consents", cid, cid)
+def _consent_ended(deps: Deps, cid: str | None) -> str | None:
+    consent = deps.store.read("consents", cid, cid) if cid else None
     status = (consent or {}).get("status")
     return status if status in ENDED_CONSENT else None
+
+
+def _underwriting_consent_ended(deps: Deps, loan: dict[str, Any]) -> str | None:
+    """사후 탐지는 심사 동의로 받은 프로필(가명화 키)이 필요하다. 동의가 끝나면 원천 데이터가 없다."""
+    return _consent_ended(deps, loan["underwriting_consent_id"])
+
+
+def _resume_blocker(deps: Deps, loan: dict[str, Any]) -> str | None:
+    """재개하면 남은 주차가 읽을 원천(심사 프로필·사후 flow.json)이 동의 종료로 지워졌는지."""
+    if ended := _underwriting_consent_ended(deps, loan):
+        return f"심사 동의가 끝나({ended}) 재생을 이어갈 수 없습니다."
+    if ended := _consent_ended(deps, loan["monitoring"].get("consent_id")):
+        return f"사후 동의가 끝나({ended}) 재생을 이어갈 수 없습니다."
+    return None
 
 
 def resume_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | None:
@@ -184,13 +196,14 @@ def resume_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | 
     if loan is None:
         return None
     mon, now = loan["monitoring"], deps.clock().isoformat()
-    ended = _underwriting_consent_ended(deps, loan)
-    if ended:
+    blocker = _resume_blocker(deps, loan)
+    if blocker:
         # 재개를 받아 주면 주차 처리가 계속 실패해 '재생 중'에 멈춘다. 이유를 남기고 재생을 끝낸다.
-        log.warning("심사 동의가 끝나 재생을 이어갈 수 없음: %s (%s)", loan_id, ended)
-        mon.update(status="stopped", stopped_at=now, error=f"심사 동의가 끝나({ended}) 재생을 이어갈 수 없습니다.")
+        log.warning("재생을 이어갈 수 없음: %s (%s)", loan_id, blocker)
+        mon.update(status="stopped", stopped_at=now, error=blocker)
         loan["updated_at"] = now
-        deps.store.replace(LOANS, loan, loan.get("_etag"))
+        if not deps.store.replace(LOANS, loan, loan.get("_etag")):
+            log.warning("동시 요청으로 재생 종료 기록 실패: %s", loan_id)
         return None
     mon.update(status="replaying", started_at=now, resumed_at=[*mon.get("resumed_at", []), now])
     loan["updated_at"] = now
@@ -243,26 +256,54 @@ def _run_weeks(deps: Deps, loan_id: str, replay_id: str, first_week: int) -> Non
             deps.store.upsert(LOANS, loan)
 
 
+WRITE_ATTEMPTS = 3  # 동시 수정(etag 불일치) 때 다시 읽고 판단하는 횟수
+
+
 def _after_week(deps: Deps, loan_id: str, replay_id: str, week: int, alert_id: str | None) -> str:
     """주차 처리(경보가 있으면 추심까지) 뒤 "next"|"paused"|"done"을 정한다. 재조정 요청이 생기면 멈춘다.
 
     지난 주차·지난 재생의 중복 메시지는 processed_week가 이미 앞서 있어 "done"이 된다(다음 주차를 두 번 내지 않는다).
     """
-    loan = deps.store.read(LOANS, loan_id, loan_id)
-    mon = (loan or {}).get("monitoring")
-    if not mon or mon["replay_id"] != replay_id or mon["processed_week"] != week:
-        return "done"
-    if mon["status"] in REPLAY_HELD:
-        return "paused"
-    if mon["status"] != "replaying":
-        return "done"
-    alert = deps.store.read(ALERTS, alert_id, loan_id) if alert_id else None
-    if ((alert or {}).get("restructure") or {}).get("status") == "pending_officer":
+    for _ in range(WRITE_ATTEMPTS):
+        loan = deps.store.read(LOANS, loan_id, loan_id)
+        mon = (loan or {}).get("monitoring")
+        if not mon or mon["replay_id"] != replay_id or mon["processed_week"] != week:
+            return "done"
+        if mon["status"] in REPLAY_HELD:
+            return "paused"
+        if mon["status"] != "replaying":
+            return "done"
+        alert = deps.store.read(ALERTS, alert_id, loan_id) if alert_id else None
+        if ((alert or {}).get("restructure") or {}).get("status") != "pending_officer":
+            return "next"
         mon.update(status="paused", paused_week=week, pause_alert_id=alert_id)
         loan["updated_at"] = deps.clock().isoformat()  # type: ignore[index]
-        deps.store.upsert(LOANS, loan)  # type: ignore[arg-type]
-        return "paused"
-    return "next"
+        if deps.store.replace(LOANS, loan, loan.get("_etag")):  # type: ignore[union-attr]
+            # 요청을 읽은 뒤 멈춤을 쓰기 전에 결정이 끝났으면 결정 쪽은 멈춤을 못 봤다. 여기서 재개 대기로 올린다.
+            _promote_if_decided(deps, loan_id, alert_id)  # type: ignore[arg-type]
+            return "paused"
+    log.warning("동시 수정이 이어져 멈춤을 기록하지 못함: %s 주차 %s", loan_id, week)
+    return "done"
+
+
+def _promote_if_decided(deps: Deps, loan_id: str, alert_id: str) -> None:
+    """이 요청 때문에 멈춘 재생이고 심사역 결정이 끝났으면 재개 대기로 올린다.
+
+    결정 처리와 주차 처리는 각자 자기 쓰기를 마친 뒤 이 함수를 부른다. 어느 순서로 겹쳐도 나중 쪽이 앞쪽의 쓰기를 본다.
+    """
+    for _ in range(WRITE_ATTEMPTS):
+        loan = deps.store.read(LOANS, loan_id, loan_id)
+        mon = (loan or {}).get("monitoring") or {}
+        if mon.get("status") != "paused" or mon.get("pause_alert_id") != alert_id:
+            return
+        alert = deps.store.read(ALERTS, alert_id, loan_id)
+        if ((alert or {}).get("restructure") or {}).get("status") not in ("approved", "declined"):
+            return
+        mon["status"] = "awaiting_resume"
+        loan["updated_at"] = deps.clock().isoformat()  # type: ignore[index]
+        if deps.store.replace(LOANS, loan, loan.get("_etag")):  # type: ignore[union-attr]
+            return
+    log.warning("동시 수정이 이어져 재개 대기로 올리지 못함: %s", loan_id)
 
 
 def _continue(deps: Deps, loan_id: str, replay_id: str, week: int, alert_id: str | None) -> None:
@@ -458,10 +499,5 @@ def handle_restructure_decision(deps: Deps, body: str) -> bool:
     )
     doc["status"] = f"restructure_{status}"  # type: ignore[index]
     deps.store.upsert(ALERTS, doc)  # type: ignore[arg-type]
-    loan = deps.store.read(LOANS, msg.loan_id, msg.loan_id)
-    mon = (loan or {}).get("monitoring") or {}
-    if mon.get("status") == "paused" and mon.get("pause_alert_id") == msg.alert_id:
-        mon["status"] = "awaiting_resume"
-        loan["updated_at"] = deps.clock().isoformat()  # type: ignore[index]
-        deps.store.upsert(LOANS, loan)  # type: ignore[arg-type]
+    _promote_if_decided(deps, msg.loan_id, msg.alert_id)
     return True
