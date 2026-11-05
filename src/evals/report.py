@@ -63,6 +63,7 @@ def build_summary(
     by_model: dict[str, Any],
     cleanup: dict[str, int] | None,
     errors: list[str],
+    gateway: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     failures = [f for s in suites.values() for f in s.get("failures", [])]
     return {
@@ -82,6 +83,7 @@ def build_summary(
         "failure_counts": dict(Counter(f["type"] for f in failures).most_common()),
         "cleanup": cleanup,
         "errors": errors,
+        "gateway": gateway or {"enabled": False, "content_blocked": 0, "rate_limited": 0},
     }
 
 
@@ -174,6 +176,13 @@ def _human_review(summary: dict[str, Any]) -> list[str]:
     return out
 
 
+def _gateway_line(g: dict[str, Any]) -> str:
+    if not g.get("enabled"):
+        return "- AI 게이트웨이: 꺼짐"
+    return (f"- AI 게이트웨이: 켜짐 (콘텐츠 차단 {g.get('content_blocked', 0)}건, "
+            f"토큰 한도 {g.get('rate_limited', 0)}건)")
+
+
 def render_markdown(summary: dict[str, Any]) -> str:
     s = summary["suites"]
     lines = [
@@ -183,6 +192,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- 시간: {summary['started_at']} ~ {summary['finished_at']}",
         f"- 예산: ${summary['budget_usd']:.2f}, 사용(단가 확인분): ${summary['spent_usd']:.4f}"
         + (" — **부분 결과**(예산 도달 또는 오류)" if summary["partial"] else ""),
+        _gateway_line(summary.get("gateway") or {}),
         f"- 단가 출처: {summary['prices_source']}", "",
         "## 1. 데이터셋", "",
         f"기준일 {summary['dataset']['as_of']}, 시드 {json.dumps(summary['dataset']['seeds'])}. "

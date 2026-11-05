@@ -1,0 +1,26 @@
+{
+  "task": "gateway-probe",
+  "mode": "throttle",
+  "model": "gpt-5.4-mini",
+  "checks": {
+    "throttle": {
+      "attempts": [
+        "ok",
+        "rate_limited"
+      ],
+      "expected": "rate_limited",
+      "reproduced": true
+    }
+  },
+  "run_id": "job-eval-5zu5jnw",
+  "gateway": {
+    "enabled": true,
+    "content_blocked": 0,
+    "rate_limited": 1
+  },
+  "cleanup": {
+    "deleted": 2,
+    "absent": 0,
+    "failed": 0
+  }
+}

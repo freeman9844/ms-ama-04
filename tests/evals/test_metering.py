@@ -9,14 +9,14 @@ PRICES = {"_source": "test", "m": {"input_per_1m": 1.0, "output_per_1m": 10.0}, 
 USAGE = {"usage": {"input_tokens": 1000, "output_tokens": 100}}
 
 
-def _client(meter: Meter, statuses: list[int], body: dict | None = None) -> tuple[httpx.Client, list[float]]:
+def _client(meter: Meter, statuses: list[int], body: dict | None = None, **kw) -> tuple[httpx.Client, list[float]]:
     replies = iter(statuses)
     waits: list[float] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(next(replies), json=body or USAGE)
 
-    return httpx.Client(transport=MeteredTransport(meter, httpx.MockTransport(handler), sleep=waits.append)), waits
+    return httpx.Client(transport=MeteredTransport(meter, httpx.MockTransport(handler), sleep=waits.append, **kw)), waits
 
 
 def test_retries_throttling_and_records_one_call_with_cost():
@@ -36,6 +36,16 @@ def test_gives_up_after_three_retries():
     with meter.scope(model="m"):
         assert client.post("https://x/openai/v1/responses", json={}).status_code == 429
     assert meter.records[0].retries == 3
+
+
+def test_excluded_429_is_returned_at_once_but_503_still_retries():
+    meter = Meter(PRICES, 10)
+    client, waits = _client(meter, [429, 503, 200], retry_status=frozenset({502, 503, 504}))
+    with meter.scope(model="m"):
+        assert client.post("https://x/openai/v1/responses", json={}).status_code == 429
+        assert client.post("https://x/openai/v1/responses", json={}).status_code == 200
+    assert [(r.status, r.retries) for r in meter.records] == [(429, 0), (200, 1)]
+    assert waits == [2.0]
 
 
 def test_unpriced_model_has_no_cost_and_does_not_spend_budget():

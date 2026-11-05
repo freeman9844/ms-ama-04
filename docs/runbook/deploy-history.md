@@ -726,3 +726,75 @@ curl.exe -X POST --data-binary "@orchestrator.zip" -H "Authorization: Bearer $to
 - **데모 셀러 20곳**: 15곳을 추가했습니다(정상 8·불일치 4·스트레스 4·이력 부족 4, 다중 대출 징후 4곳 포함).
 - **보안**: GitGuardian이 Key Vault 기본 역할 GUID 변수명(`kvSecrets*`)을 비밀로 오탐해, 이름을 `kvValueReader`·`kvValueAdmin`으로 바꾸고 GitHub 이력을 재작성했습니다(역할 ID와 배포 결과는 같음).
 - **배포**: `mockapi:20261104170552`, `console:20261104171030`, `eval:20261104171517`. smoke 성공, `/apply`에 새 셀러 15곳 표시와 목록 업체명 표시를 확인했습니다. 기존 데모 케이스는 건드리지 않았습니다.
+
+## AI 게이트웨이(APIM) 도입 (2026-11-05, `d451d34`)
+
+에이전트 8종과 거래 분류(Decision-1)의 모든 LLM 호출을 APIM Developer(내부 VNet 모드)로 보내는 AI 게이트웨이를 도입했습니다(결정 [ADR-010](../adr/ADR-010-ai-gateway.md), 설계 `docs/superpowers/specs/2026-11-05-ai-gateway-apim-design.md`). 브랜치 `ai-gateway-apim`, 커밋 범위 `3ae8cef..d451d34`:
+
+| 구분 | 커밋 |
+|---|---|
+| 인프라 | `834c07f`(APIM 내부 VNet), `ac8c7ec`(API·정책·에이전트별 제품), `8f3f907`(Foundry 연결·`AI_GATEWAY` 스위치), `d61cd5e`(게이트웨이 로그 → Log Analytics) |
+| 앱·평가 | `4fcc74d`·`2e6167f`·`e57f346`(연결 라우팅, 429·403 분류), `dbc4e4e`(오케스트레이터·Decision-1 경로), `08778bf`(평가 라우팅·프로브 과제), `e177d66`·`869aa6f`(`ops gateway probe`), `febe3f1`(콘솔 콘텐츠 차단 배지) |
+| 실측 중 수정 | `f728948`(TPM), `f9eaeb1`(프로브 429 재시도), `f28057c`(Prompt Shields 1만 자), `f43de5d`(도구 라운드), `c05b1b5`·`d451d34`(`gpt-5.4` 용량·분석가 TPM) |
+
+### 관문(Task 4, 라우팅 꺼진 상태)
+
+| 항목 | 실측 |
+|---|---|
+| APIM 생성 | Developer 내부 모드 프로비저닝 27분 19초 |
+| 연결 | `gw-*` 9개가 `ApiManagement` 범주로 생성 성공. `ModelGateway` 범주 대체 사다리는 쓰지 않음 |
+| 관문 1(호출 경로) | `gw-reviewer/gpt-5.4-mini`, function + code_interpreter + json_schema → `completed`. Agent Service는 `POST /openai/deployments/<모델>/chat/completions`로 호출(`/responses` 아님) |
+| 관문 2(429) | HTTP 429, `retry-after` 53초, `rate_limit_exceeded`("Token limit is exceeded"). Agent Service가 내부에서 1회 재시도해 APIM에 429 2건 |
+| 관문 3(차단) | 403이 아니라 HTTP 424(`model_error`, `CustomerManagedDownstreamError … 'innerStatusCode': 403`). APIM 403은 81ms. 그래서 `BLOCK_MARKERS`에 `'innerstatuscode': 403` 추가 |
+| 지표·로그 | AppMetrics에 `agent=gw-probe/gw-reviewer`, `model=gpt-5.4-mini` 토큰 합계 기록. `ApiManagementGatewayLogs`는 비어 있어 진단 설정을 더함(`d61cd5e`), 이후 채워짐(본문·헤더 미기록) |
+| 스모크 | 창을 닫은 뒤 성공 |
+
+### 라우팅 켜기와 실측(Task 11)
+
+| 단계 | 실측 |
+|---|---|
+| `AI_GATEWAY_ROUTING=true` 프로비저닝 | 4분 6초(배포 태그 `20261105045427`). `ops window open --acr` 9분 17초 |
+| 부하 `load-20261105070836`(3건, 15초 간격) | 도달 3/3, 접수 → 대기열 p95 1.1분, 에이전트 단계 ok 8/9(신용 평가 1건 `gw-analyst` 429), 신청당 $0.0323. 게이트웨이 로그 60분: openai 200 56건, 429 90건(`gw-probe` 74·`gw-analyst` 16), decision 200 15건 |
+| 1분 피크 토큰(3시간) | `gw-analyst` 27,505, `gw-data-assembly` 8,388, `gw-reviewer` 2,327, `gw-txn-classifier` 1,762, `gw-consent-notice` 651, `gw-probe` 1,863 → 분석가가 한도 20K 초과. 분석가 20K → 50K, 데이터 수집 15K → 17K(`f728948`) |
+| 프로브 unsafe | `job-eval-aw9qy70`: APIM 403 재현(75ms) |
+| 프로브 unsafe(`f28057c` 뒤 재확인) | `job-eval-3hh7xn5`(2026-11-05): `content_blocked`, `reproduced=true`. 1만 자 이하 조건을 더한 뒤에도 Prompt Shields가 계속 차단함을 확인 |
+| 프로브 throttle(1차) | `job-eval-zimhc4h`: 재현 실패(8회 모두 ok). 시도당 APIM 429 약 11회가 65초에 걸쳐 찍힌 뒤 200 — 클라이언트 429 재시도(MeteredTransport 3회 + FoundryAgents 1회)가 창이 풀릴 때까지 기다림 |
+| 프로브 throttle(수정 뒤) | `f9eaeb1`: 프로브 모드에서 `retry_throttle=False`. 재배포 뒤 `job-eval-5zu5jnw`에서 `ok → rate_limited` 재현. 운영 재시도는 그대로 |
+| 평가 `job-eval-ba66ts9` | $1.83, 실패 13건, 게이트웨이 "콘텐츠 차단 7건, 토큰 한도 0건". 조기경보 양성 경로 전부 에이전트 오류. 원인: ① Prompt Shields가 1만 자 초과 프롬프트를 거부 → APIM 403 `ContentSafetyPolicyViolated`(오차단 7건), ② `llm-token-limit` 429(`gw-early-warning` 173·`gw-txn-classifier` 16), ③ Decision API 백엔드 429 14건(모델 용량, 평가 재시도가 흡수 — 그대로 둠) |
+| 수정 `f28057c` | 정책이 메시지 길이 합 `promptChars`를 계산해 1만 자 이하일 때만 `shield-prompt` 적용(넘으면 카테고리 검사 + 모델 배포 필터 `Microsoft.DefaultV2`만). TPM: `gw-early-warning` 50K, `gw-txn-classifier` 20K(평가 피크 9,982의 2배). 창을 열고 닫으며 프로비저닝 성공(APIM이 새 정책 수락) |
+| 평가 `job-eval-aqisk13` | $2.11, 실패 18건, "콘텐츠 차단 0건, 토큰 한도 0건". 조기경보 에이전트 오류 6건 — 22주차 모두 도구 라운드 상한(7호출)에 걸림(직접 경로 평균 4.59). 게이트웨이 경로는 호출당 입력 증가가 150–650 토큰으로 직접 경로(600–2,100)보다 작음 = 턴당 도구 호출이 적음 |
+| 수정 `f43de5d` | 라우팅 에이전트(`GatewayRunner`·`EvalRunner`)에만 `GATEWAY_MAX_ROUNDS = 12`, 직접 경로는 `max_rounds=6` 유지 |
+| 평가 `job-eval-adcwjhc`(early_warning) | $1.84, 실패 1건(gpt-5.4 `ev-etax_k`가 탐지기 단독 경보로 폴백), precision·recall 1.0/1.0(mini 6경로·gpt-5.4 5경로), "콘텐츠 차단 0건, 토큰 한도 0건". 직접 호출 기준선 `job-eval-zjmcwjv`도 1.0/1.0 |
+| 스모크 | `job-smoke-7gvt209`(라우팅 켠 직후), `job-smoke-tu6sfos`(`f43de5d` 배포 뒤), `job-smoke-4des4o7`(최종 TPM 뒤) 모두 성공 |
+
+### 분석가 TPM 조정과 부하 비교(48건)
+
+| 부하 실행 | 분석가 TPM | 결과 |
+|---|---|---|
+| `load-20261105111618` | 50K | SLO2 92.4%(신용 평가 11건 실패), `gw-analyst` 429 236건, 피크 59.7K |
+| `load-20261105114119` | 100K(`c05b1b5`, `gpt-5.4` 용량 50 → 150 포함) | SLO2 98.6%, 429 56건, 피크 110.6K |
+| `load-20261105120255` | 150K(`d451d34`, `gpt-5.4` 용량 150 → 200 포함) | p95 1.8분, SLO2 100%(144/144), 건당 AI $0.0939 |
+| `load-20261104143855`(P9, 직접 호출) | — | p95 1.4분, SLO2 100%(144/144), 건당 AI $0.0589 |
+
+- 비용은 직접 호출 대비 약 +59%($0.0589 → $0.0939)입니다. 게이트웨이 경로가 라운드마다 전체 맥락을 다시 보내고 라운드가 늘어 `gpt-5.4` 입력이 1.16M 토큰이었습니다(캐시 할인 미반영 상한).
+- 최종 1분 피크(`load-20261105120255`): 분석가 147.7K, 검토자 15.4K, 데이터 수집 13.2K, 분류 3.8K. 재시도가 흡수한 429는 분석가 36건·검토자 14건이며 `gw-reviewer`는 15K를 유지했습니다(SLO 영향 없음).
+- `gpt-5.4`는 GlobalStandard 배포 용량을 50 → 150(`c05b1b5`) → 200(`d451d34`, 1K TPM 단위, 쿼터 250)으로 올렸습니다. 종량제라 고정비는 늘지 않습니다.
+
+최종 에이전트별 TPM(`infra/resources.bicep`의 `gateways` 표): `gw-analyst` 150,000 · `gw-early-warning` 50,000 · `gw-reviewer` 15,000 · `gw-data-assembly` 17,000 · `gw-txn-classifier` 20,000 · `gw-collections` 10,000 · `gw-consent-notice` 5,000 · `gw-grievance` 5,000 · `gw-probe` 1,000. `gw-early-warning`은 평가 1분 피크 53.7K가 한도 50K를 넘었지만 Agent Service 재시도가 흡수했고(429 50건, 클라이언트 호출은 모두 200) 운영 조사는 대출당 주 1회라 그대로 뒀습니다. `gw-collections`·`gw-grievance`는 이 경로에서 측정하지 못했습니다.
+
+### 운영자 네트워크: 모바일 회선의 App Service 출구 IP
+
+- **증상**: 모바일 회선에서 `ops deploy orchestrator`가 403 두 번. 창이 열려 있었고 `api.ipify`가 알려 준 IP의 /16을 허용해도 마찬가지였습니다(콘솔 Container Apps 접속은 별개).
+- **원인**: App Service(Functions 주 사이트와 SCM 사이트)로 가는 트래픽이 통신사 NAT 출구 IP로 나가 `api.ipify` 값과 달랐습니다. 서로 다른 /24 대역의 IP 3개가 회전했습니다.
+- **해결**: 창이 열린 동안 Functions 앱에 임시 진단 설정(`ipsec-probe-temp`)으로 `AppServiceIPSecAuditLogs`를 작업 영역에 보내고, SCM 사이트에 몇 번 요청한 뒤 약 5분 기다려 `AppServiceIPSecAuditLogs | extend ip=tostring(split(CIp, ':')[0]) | distinct ip`로 IP를 조회했습니다. 그 IP들을 `/32` `operator-alt2`~`operator-alt4`(priority 111부터)로 임시 허용하고, 위 `curl` Kudu `/api/publish`로 게시(`66d1aad6`, status 4)한 뒤 규칙과 진단 설정을 지우고 `ops window close`로 닫았습니다. 절차는 [deploy](deploy.md#app-service-출구-ip가-다를-때)에 있습니다.
+- `publicNetworkAccess`는 창이 닫힌 동안 `Disabled`라 접근 제한 테스트는 창이 열렸을 때만 의미가 있습니다. 같은 날 콘솔 403도 한 번 있었는데 모바일 IP가 다시 바뀐 탓이라(배포 문제 아님) `window open`·`close`로 `CONSOLE_IP`를 갱신했습니다.
+
+### 롤백
+
+```powershell
+azd env set AI_GATEWAY_ROUTING false
+azd provision --no-prompt
+python -m ops smoke
+```
+
+모든 LLM 호출(Decision-1 포함)이 직접 호출로 돌아가고, APIM 리소스와 월 약 $51은 남습니다. APIM을 지우려면 롤백 뒤 리소스를 삭제합니다(재생성 30–60분, 실측 27분). 자세한 절차는 [deploy](deploy.md#ai-게이트웨이-켜기끄기)입니다.

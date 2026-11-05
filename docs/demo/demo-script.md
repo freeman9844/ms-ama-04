@@ -21,6 +21,7 @@
 | 0:50 | 심사 근거와 승인 | 신청 상세 탭(`요약`·`현금흐름`·`정책 판정`·`에이전트 의견`) → `심사역 결정` `승인` | 라이브 건이 `심사역 대기`면 라이브 건, 아니면 사전 건 A |
 | 1:20 | 조기경보와 재조정 | `/loans/<ID>` 재조정 대기 → 재조정 결정 → `이어서 재생`, 기대 입금·4주 잔고 전망 | 사전 대출 B |
 | 1:45 | 동의 만료 | 라이브 건 `동의·데이터` 탭 `지금 만료(데모)` → `/consents/<ID>/proof` | 라이브 건(승인 여부 무관, 지연 시 사전 동의 C) |
+| 부록 | AI 게이트웨이 | 로그 쿼리(AppMetrics `Total Tokens`, `Properties.agent`)로 에이전트별 토큰, `ops gateway probe`의 429·403 | 질문이 나올 때 보조 장면(2분 일정 밖) |
 
 ## 0:00 문제 제시 (계획 15초)
 
@@ -86,3 +87,17 @@
 ## 마무리
 
 "셀러의 신청에서 승인, 사후 경보와 재조정, 동의 종료 뒤 삭제 증명까지 한 흐름입니다." 한 문장으로 닫고 2:00 안에 끝냅니다. 시간이 남으면 질문을 받습니다.
+
+## 부록: AI 게이트웨이 보조 장면
+
+2분 일정 밖이고, "모델 호출을 어떻게 통제하느냐"는 질문이 나올 때만 씁니다([ADR-010](../adr/ADR-010-ai-gateway.md)).
+
+- **말:** "모든 에이전트의 모델 호출은 API Management 게이트웨이를 지납니다. 에이전트마다 분당 토큰 한도가 있고, 프롬프트 인젝션은 콘텐츠 안전 검사가 막고, 어느 에이전트가 토큰을 얼마나 썼는지 한곳에서 봅니다."
+- **에이전트별 토큰:** Log Analytics의 AppMetrics에서 `Total Tokens`를 `Properties.agent`로 나눠 1분 합계를 봅니다(분석가가 가장 크고 최종 부하 피크 147.7K).
+- **429·403 재현:** `python -m ops gateway probe --mode throttle`(토큰 한도 429)와 `--mode unsafe`(콘텐츠 차단 403)를 미리 돌려 두고 `eval/reports/<실행>/probe.json`을 보여 줍니다. 실측 실행은 `eval/reports/job-eval-5zu5jnw`(`ok → rate_limited`)와 `eval/reports/job-eval-aw9qy70`(APIM 403, 75ms)입니다.
+
+### 429/콘텐츠 차단이 보이면
+
+1. 신청 상세의 `AI 게이트웨이` 줄에 `콘텐츠 차단 · <단계>` 배지가 있으면 그 단계의 모델 호출이 콘텐츠 안전(403)에 막힌 것입니다. 토큰 한도(429)는 콘솔 배지가 없고 사용량의 `gateway=rate_limited` 태그와 게이트웨이 로그(`ApiManagementGatewayLogs`)에서만 보입니다. 단계 결과는 단계마다 다릅니다: 신용 평가가 429로 평가를 못 만들면 그 단계가 `failed`(실측 부하에서 1건)이고, 안전망·폴백이 있는 단계는 폴백으로 이어집니다.
+2. 프로브로 같은 증상을 다시 만들어 확인합니다: `python -m ops gateway probe --mode throttle|unsafe`, 결과는 `eval/reports/<실행>/probe.json`. 재현이 안 되면 종료 코드 2입니다.
+3. 데모를 계속해야 하면 게이트웨이를 끄고 직접 호출로 돌립니다: `azd env set AI_GATEWAY_ROUTING false` → `azd provision --no-prompt`(절차는 [배포](../runbook/deploy.md#ai-게이트웨이-켜기끄기)). 필요하면 [fallback](fallback.md)의 전환 대사를 씁니다.

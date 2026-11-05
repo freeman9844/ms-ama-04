@@ -138,3 +138,6 @@ class FakeAzure:
 
     def _judge_scores(self, state: dict[str, Any], text: str, results: list[Any]) -> Any:
         return {"groundedness": 4, "relevance": 4, "coherence": 4, "reason": "가짜 판정"}
+
+    def _probe_reply(self, state: dict[str, Any], text: str, results: list[Any]) -> Any:
+        return {"reply": "ok"}

@@ -1,0 +1,25 @@
+{
+  "task": "gateway-probe",
+  "mode": "unsafe",
+  "model": "gpt-5.4-mini",
+  "checks": {
+    "unsafe": {
+      "attempts": [
+        "content_blocked"
+      ],
+      "expected": "content_blocked",
+      "reproduced": true
+    }
+  },
+  "run_id": "job-eval-aw9qy70",
+  "gateway": {
+    "enabled": true,
+    "content_blocked": 1,
+    "rate_limited": 0
+  },
+  "cleanup": {
+    "deleted": 1,
+    "absent": 0,
+    "failed": 0
+  }
+}

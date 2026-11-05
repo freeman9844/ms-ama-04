@@ -27,6 +27,19 @@
 - AI 비용 합계 $1.016, 신청당 $1.016 ÷ 24건 = **$0.0423**(`ops/reports/load-20261102110233/report.md` 2장).
 - 이 값은 **캐시 할인 미반영 상한**이고 단가 미확인 호출 48건을 제외한 수치다(`docs/runbook/deploy-history.md:577`). 실패한 에이전트 호출은 토큰을 몰라 호출 수만 센다(`docs/runbook/deploy-history.md:602`).
 
+## 게이트웨이 경로 건당 AI 비용
+
+모든 LLM 호출을 APIM AI 게이트웨이로 보내면([ADR-010](adr/ADR-010-ai-gateway.md)) 같은 48건 부하(`ops load`)의 건당 AI 비용이 올랐다. 위 24건 실측과 다른 격자(48건)라 직접 호출 기준선도 P9 재측정값으로 비교한다.
+
+| 경로 | 부하 실행 | p95(SLO1) | SLO2 | 건당 AI 비용 |
+|---|---|---|---|---|
+| 직접 호출(P9) | `load-20261104143855` | 1.4분 | 100%(144/144) | $0.0589 |
+| 게이트웨이(최종 TPM) | `load-20261105120255` | 1.8분 | 100%(144/144) | $0.0939 |
+
+- 증가 약 **+59%**($0.0589 → $0.0939). 게이트웨이(chat completions) 경로는 라운드마다 전체 맥락을 다시 보내고 도구 라운드도 늘어(`GATEWAY_MAX_ROUNDS = 12`), 이 부하에서 `gpt-5.4` 입력이 1.16M 토큰이었다. 캐시 할인은 반영하지 않은 상한이다.
+- 같은 이유로 `gpt-5.4` 배포 용량을 50 → 200(종량제, 쿼터 250)으로 올렸고 분석가 TPM은 150,000이다. 용량은 고정비를 만들지 않는다.
+- 평가 비용: 조기경보 평가 `job-eval-adcwjhc` $1.84, 전체 평가 `job-eval-aqisk13` $2.11(직접 호출 기준선 `job-eval-zjmcwjv` $1.95).
+
 ## 월 고정비
 
 - 측정값: **월 $304.73**(`ops/reports/load-20261102110233/report.md` 2장). Cost Management 실측 2026-10-25\~10-31 중 데이터가 있는 하루(10-31) × 30으로 환산했고, Foundry Models 사용량은 제외했다(`docs/runbook/deploy-history.md:578`).
@@ -39,6 +52,7 @@
 | Service Bus Premium 1 MU | 약 $677 | 쓰지 않을 때 `ops pause`로 절감 |
 | AI Search Basic | 약 $74 | Foundry 벡터 저장소 |
 | ACR Premium | 약 $50 | Private Endpoint 필요 |
+| API Management Developer | 약 $51 | AI 게이트웨이, SLA 없음([ADR-010](adr/ADR-010-ai-gateway.md)). 위 측정 고정비는 도입 전 값이라 이 금액이 들어 있지 않다 |
 | Private Endpoint 약 17개 | 약 $125 | 개당 약 $7.3 |
 | 모델·Functions·Container Apps·Cosmos serverless | 사용량 기반 | 유휴 시 거의 0 |
 | Application Gateway WAF v2 | 미구축(약 $365) | 운영 아키텍처 문서에만 기술 |
@@ -55,6 +69,8 @@
 
 반올림 요약: 월 100건 $3.09/건, 1,000건 $0.35/건, 10,000건 $0.07/건 — 수작업 $3,500/건 대비 0.1% 이하다(`docs/runbook/deploy-history.md:578`).
 
+게이트웨이 경로로 환산하면(건당 AI $0.0939, 고정비 $304.73 + APIM $51 = 월 $355.73, 두 값은 측정 시점이 달라 계산값): 월 100건 약 $3.65/건, 1,000건 약 $0.45/건, 10,000건 약 $0.13/건으로 모두 수작업 대비 0.1% 이하다.
+
 ## 평가 비용
 
 - P6a 평가 1회 실행(`job-eval-9imbutm`) 비용은 **$1.93**(단가 확인분, 예산 $5, `partial=False`, 모델 호출 341회)이다(`eval/reports/job-eval-9imbutm/report.md`, `docs/runbook/deploy-history.md:490`).
@@ -63,6 +79,7 @@
 ## 절감 레버
 
 - **일시 정지(`ops pause`)**: 쓰지 않을 때 Service Bus Premium을 내려 고정비의 가장 큰 항목을 없앤다(초기 추정 약 $677). pause 5.8분·resume 4.7분(`docs/runbook/deploy-history.md:55`). pause 중에도 남는 비용 항목은 AI Search·ACR·Private Endpoint 등 상주 리소스다.
+- **게이트웨이 끄기**: 데모를 쉬는 기간에는 `AI_GATEWAY_ROUTING=false`로 프로비저닝한 뒤 APIM을 삭제하면 월 약 $51을 아낀다(재생성 30–60분, 실측 첫 생성 27분). 롤백 절차는 [배포](runbook/deploy.md#ai-게이트웨이-켜기끄기)에 있다.
 - **배포 창 운영**: public 접근을 배포 창에만 잠깐 열고 닫는다. 주 목적은 비용 절감이 아니라 공격 표면 관리이며(상주 게이트웨이를 두지 않는 운영 방식), 이 자체의 비용 효과는 측정하지 않았다.
 - **모델 등급(정성적 설계 선택)**: 규칙으로 못 푼 적요만 LLM에 보내고, 먼저 선택형 분류 모델(`decision-1`)에 물은 뒤 기권·낮은 확신(0.7 미만)만 `gpt-5.4-mini` 에이전트(`txn-classifier`)가 보완한다([ADR-005](adr/ADR-005-classification-model.md)). 비용을 염두에 둔 등급 선택이지만 mini 단독 대비 신청당 호출 수는 측정했다(8.375회 vs 1.000회, 오히려 더 많음). `decision-1`은 공개 단가를 확인하지 못해 **비용 이점은 검증하지 못했다**. 평가에서 세 구성은 천장 효과로 품질이 같아 비용·지연으로만 비교한다(`eval/reports/job-eval-9imbutm/report.md`).
 - **분류 캐시**: 분류 결과를 Cosmos에 캐시해 같은 적요의 재호출을 줄인다(토큰이 든 적요·이체 적요는 캐시 제외).

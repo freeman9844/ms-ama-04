@@ -8,7 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agents.data_assembly import FLAG_AGENT_FALLBACK, SourceError
-from agents.runtime import AgentError, AgentRun
+from agents.gateway import GatewayRunner
+from agents.runtime import AgentError, AgentRun, FoundryAgents
 from agents.underwriting import ANALYST_AGENT, FLAG_ASSESSMENT_UNAVAILABLE, REVIEWER_AGENT
 from journey.activities import (
     ACTIVITIES,
@@ -435,6 +436,32 @@ def test_agent_settings_builds_agents_decider_and_models():
     assert (settings["analyst_model"], settings["reviewer_model"]) == ("gpt-x", "gpt-5.4-mini")
     assert settings["classifier_model"] == "gpt-5.4-mini"
     assert (settings["notice_model"], settings["grievance_model"]) == ("gpt-5.4-mini", "gpt-5.4-mini")
+
+
+def test_agent_settings_routes_via_gateway():
+    env = {
+        "AI_PROJECT_ENDPOINT": "https://ais.services.ai.azure.com/api/projects/p",
+        "AI_ACCOUNT_ENDPOINT": "https://ais.services.ai.azure.com",
+        "DECISION_DEPLOYMENT": "decision-1",
+        "AI_GATEWAY": "apim",
+        "AI_GATEWAY_URL": "https://apim-x.azure-api.net",
+    }
+    settings = agent_settings(env, lambda scope: "t")
+    assert isinstance(settings["agents"], GatewayRunner)
+    assert settings["decider"]._url == "https://apim-x.azure-api.net/decision/providers/microsoft/v1/systemone"
+
+
+def test_agent_settings_gateway_off_calls_directly():
+    env = {
+        "AI_PROJECT_ENDPOINT": "https://ais.services.ai.azure.com/api/projects/p",
+        "AI_ACCOUNT_ENDPOINT": "https://ais.services.ai.azure.com",
+        "DECISION_DEPLOYMENT": "decision-1",
+        "AI_GATEWAY": "off",
+        "AI_GATEWAY_URL": "https://apim-x.azure-api.net",
+    }
+    settings = agent_settings(env, lambda scope: "t")
+    assert isinstance(settings["agents"], FoundryAgents)
+    assert settings["decider"]._url == "https://ais.services.ai.azure.com/providers/microsoft/v1/systemone"
 
 
 def test_request_consent_schedules_lifecycle(deps):

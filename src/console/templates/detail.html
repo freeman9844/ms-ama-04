@@ -31,6 +31,7 @@
   <dt>접수</dt><dd>{{ d.received_at }}</dd>
   {% if d.sla %}<dt>SLA 마감</dt><dd>{{ d.sla.deadline }}{% if d.sla.escalated %} (초과){% endif %}</dd>{% endif %}
   {% if d.flags %}<dt>플래그</dt><dd>{% for f in d.flags %}<span class="chip warn">{{ f }}</span>{% endfor %}</dd>{% endif %}
+  {% if ui.gateway_blocks %}<dt>AI 게이트웨이</dt><dd>{% for b in ui.gateway_blocks %}<span class="chip warn">콘텐츠 차단 · {{ b }}</span>{% endfor %}</dd>{% endif %}
   {% if d.withdrawal %}<dt>동의 철회</dt><dd>{{ d.withdrawal.consent_id }} · {{ d.withdrawal.requested_by }} · {{ d.withdrawal.at }}</dd>{% endif %}
   {% if d.error %}<dt>오류</dt><dd class="error">{{ d.error.stage }}: {{ d.error.message }}</dd>{% endif %}
 </dl>

@@ -1,0 +1,616 @@
+{
+  "run_id": "job-eval-adcwjhc",
+  "mode": "azure",
+  "started_at": "2026-11-05T10:55:04+00:00",
+  "finished_at": "2026-11-05T11:15:14+00:00",
+  "disclaimer": "합성 데이터 기준 결과다. 실제 고객·실제 성능을 나타내지 않으며, 수치는 같은 시드에서도 LLM 응답 변동이 있다.",
+  "budget_usd": 5.0,
+  "spent_usd": 1.842452,
+  "partial": false,
+  "dataset": {
+    "as_of": "2026-11-01",
+    "seeds": {
+      "classify": [
+        101,
+        102
+      ],
+      "underwriting": 201,
+      "early_warning": 301
+    },
+    "classify": {
+      "apps": 8,
+      "hard_bank": 32,
+      "labelled_txns": 1902,
+      "labels": {
+        "high_cost_lender": 66,
+        "loan_repayment": 96,
+        "other_operating": 472,
+        "owner_transfer": 96,
+        "payroll": 176,
+        "rent": 96,
+        "supplier": 524,
+        "tax_or_insurance": 376
+      }
+    },
+    "underwriting": {
+      "cases": 8,
+      "injected": 4,
+      "counterfactual_pairs": 2
+    },
+    "early_warning": {
+      "paths": [
+        {
+          "path_id": "ev-ehealk",
+          "archetype": "healthy_seasonal",
+          "scenario": "stacking",
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "default_on": null
+        },
+        {
+          "path_id": "ev-etax_k",
+          "archetype": "tax_mismatch",
+          "scenario": "stacking",
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estrek",
+          "archetype": "stressed",
+          "scenario": "stacking",
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-estreb",
+          "archetype": "stressed",
+          "scenario": "stable",
+          "default_on": null
+        }
+      ]
+    }
+  },
+  "models": {
+    "full": "gpt-5.4",
+    "mini": "gpt-5.4-mini",
+    "decision": "decision-1",
+    "reviewer": "gpt-5.4-mini",
+    "judge": "gpt-5.4"
+  },
+  "prices_source": "Azure OpenAI Global Standard 단가(USD/1M 토큰), azurespeed.com 집계·Azure 가격 페이지 기준 2026-11 확인. 캐시 입력 할인은 반영하지 않아 상한 추정이다. Decision-1은 공개 단가를 확인하지 못해 비용 집계에서 '단가 미확인' 호출 수로만 남긴다.",
+  "suites": {
+    "early_warning": {
+      "partial": false,
+      "skipped": 0,
+      "configs": {
+        "gpt-5.4-mini": {
+          "paths": 6,
+          "evaluated": 6,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "tn": 3,
+          "precision": 1.0,
+          "recall": 1.0,
+          "investigations": 11,
+          "decisions": {
+            "alert": 8,
+            "no_alert": 3
+          },
+          "rejected_attempt_rate": 0.5455,
+          "mean_lead_days": 73.0,
+          "lead_days": [
+            73,
+            73,
+            73
+          ],
+          "model_calls": 108,
+          "cost_usd": 0.364156,
+          "unpriced_calls": 0
+        },
+        "gpt-5.4": {
+          "paths": 6,
+          "evaluated": 5,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 3,
+          "precision": 1.0,
+          "recall": 1.0,
+          "investigations": 7,
+          "decisions": {
+            "no_alert": 1,
+            "alert": 6
+          },
+          "rejected_attempt_rate": 0.5714,
+          "mean_lead_days": 52.0,
+          "lead_days": [
+            31,
+            73
+          ],
+          "model_calls": 127,
+          "cost_usd": 1.478296,
+          "unpriced_calls": 0
+        }
+      },
+      "cases": [
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-ehealk",
+          "archetype": "healthy_seasonal",
+          "scenario": "stacking",
+          "positive": true,
+          "status": "ok",
+          "investigations": 4,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 1,
+          "default_on": "2027-01-20",
+          "lead_days": 73,
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-08",
+              "new_triggers": [
+                "buffer_drop",
+                "new_debt"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 4,
+              "severity": "medium"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-20",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-27",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "decision": "no_alert",
+              "rejected_attempts": 2,
+              "severity": null
+            },
+            {
+              "week": 13,
+              "as_of": "2027-01-31",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 3,
+              "severity": "high"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "default_on": null,
+          "lead_days": null,
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-etax_k",
+          "archetype": "tax_mismatch",
+          "scenario": "stacking",
+          "positive": true,
+          "status": "ok",
+          "investigations": 4,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 1,
+          "default_on": "2027-01-20",
+          "lead_days": 73,
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-08",
+              "new_triggers": [
+                "buffer_drop",
+                "new_debt"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-27",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "decision": "no_alert",
+              "rejected_attempts": 4,
+              "severity": null
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-03",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high"
+            },
+            {
+              "week": 13,
+              "as_of": "2027-01-31",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "decision": "no_alert",
+              "rejected_attempts": 5,
+              "severity": null
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "default_on": null,
+          "lead_days": null,
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-estrek",
+          "archetype": "stressed",
+          "scenario": "stacking",
+          "positive": true,
+          "status": "ok",
+          "investigations": 3,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 1,
+          "default_on": "2027-01-20",
+          "lead_days": 73,
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-08",
+              "new_triggers": [
+                "buffer_drop",
+                "new_debt"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-27",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high"
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-03",
+              "new_triggers": [
+                "volatility_spike",
+                "projected_shortfall"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.4-mini",
+          "case": "ev-estreb",
+          "archetype": "stressed",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "default_on": null,
+          "lead_days": null,
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-ehealk",
+          "archetype": "healthy_seasonal",
+          "scenario": "stacking",
+          "positive": true,
+          "status": "ok",
+          "investigations": 4,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 7,
+          "default_on": "2027-01-20",
+          "lead_days": 31,
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-08",
+              "new_triggers": [
+                "buffer_drop",
+                "new_debt"
+              ],
+              "decision": "no_alert",
+              "rejected_attempts": 0,
+              "severity": null
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-20",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-27",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high"
+            },
+            {
+              "week": 13,
+              "as_of": "2027-01-31",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "default_on": null,
+          "lead_days": null,
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-etax_k",
+          "archetype": "tax_mismatch",
+          "scenario": "stacking",
+          "positive": true,
+          "status": "error",
+          "investigations": 4,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 8,
+          "default_on": "2027-01-20",
+          "lead_days": 24,
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-08",
+              "new_triggers": [
+                "buffer_drop",
+                "new_debt"
+              ],
+              "decision": "fallback_alert",
+              "rejected_attempts": 1,
+              "severity": null
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-27",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high"
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-03",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high"
+            },
+            {
+              "week": 13,
+              "as_of": "2027-01-31",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "decision": "fallback_alert",
+              "rejected_attempts": 3,
+              "severity": null
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "default_on": null,
+          "lead_days": null,
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-estrek",
+          "archetype": "stressed",
+          "scenario": "stacking",
+          "positive": true,
+          "status": "ok",
+          "investigations": 3,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 1,
+          "default_on": "2027-01-20",
+          "lead_days": 73,
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-08",
+              "new_triggers": [
+                "buffer_drop",
+                "new_debt"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 3,
+              "severity": "high"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-27",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high"
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-03",
+              "new_triggers": [
+                "volatility_spike",
+                "projected_shortfall"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.4",
+          "case": "ev-estreb",
+          "archetype": "stressed",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "default_on": null,
+          "lead_days": null,
+          "weeks": []
+        }
+      ],
+      "failures": [
+        {
+          "type": "agent_error",
+          "suite": "early_warning",
+          "config": "gpt-5.4",
+          "case": "ev-etax_k",
+          "detail": "조사 에이전트 실패(탐지기 단독 경보로 대체)"
+        }
+      ],
+      "detector_only": {
+        "paths": 6,
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "tn": 3,
+        "precision": 1.0,
+        "recall": 1.0
+      }
+    }
+  },
+  "by_model": {
+    "gpt-5.4": {
+      "calls": 127,
+      "errors": 0,
+      "retries": 13,
+      "p50_ms": 3190,
+      "p95_ms": 9798,
+      "input_tokens": 507237,
+      "output_tokens": 14014,
+      "cost_usd": 1.478296
+    },
+    "gpt-5.4-mini": {
+      "calls": 108,
+      "errors": 0,
+      "retries": 13,
+      "p50_ms": 2572,
+      "p95_ms": 8610,
+      "input_tokens": 386782,
+      "output_tokens": 16460,
+      "cost_usd": 0.364156
+    }
+  },
+  "failure_counts": {
+    "agent_error": 1
+  },
+  "cleanup": {
+    "deleted": 22,
+    "absent": 0,
+    "failed": 0
+  },
+  "errors": [],
+  "gateway": {
+    "enabled": true,
+    "content_blocked": 0,
+    "rate_limited": 0
+  }
+}

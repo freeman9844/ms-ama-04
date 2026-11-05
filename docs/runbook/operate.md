@@ -59,11 +59,16 @@ python -m ops deploy eval                           # az acr build → SERVICE_E
 python -m ops window close
 python -m ops eval --suite all                      # Job 시작 → 종료 대기 → Log Analytics에서 리포트 복원 → eval/reports/
 python -m ops eval --collect <실행 이름>            # 회수만 다시(로그 수집 지연으로 복원 실패했을 때)
+python -m ops gateway probe --mode throttle         # AI 게이트웨이 토큰 한도(429) 재현 → eval/reports/<실행>/probe.json
+python -m ops gateway probe --mode unsafe           # 콘텐츠 차단(403) 재현. 재현 안 되면 종료 코드 2
 ```
 
 - 산출물은 `eval/reports/<실행 이름>/`에 저장됩니다. 실측 실행 하나는 `eval/reports/job-eval-9imbutm/report.md`입니다.
 - `ops eval --suite`의 값은 `all`, `classify`, `underwriting`, `early_warning`, `safety`입니다(`src/ops/cli.py`의 `EVAL_SUITES`).
 - 결과 해석과 한계는 리포트의 한계 절과 [deploy-history](deploy-history.md)의 P6a 절을 봅니다.
+- `ops gateway probe`는 eval Job으로 프로브를 돌려 AI 게이트웨이 동작을 확인합니다(`--mode all|throttle|unsafe`, 기본 `all`; `--collect <실행>`으로 끝난 결과만 회수). 프로브 모드에서는 클라이언트 429 재시도를 꺼서 APIM의 429가 그대로 보입니다. `AI_GATEWAY_ROUTING`이 켜져 있어야 합니다([deploy](deploy.md#ai-게이트웨이-켜기끄기)). 평가 리포트의 게이트웨이 줄은 "콘텐츠 차단 N건, 토큰 한도 N건"으로 요약합니다.
+- APIM이 비정상일 때의 롤백 빠른 경로(앱 설정 `AI_GATEWAY=off` 직접 변경)는 [deploy](deploy.md#ai-게이트웨이-켜기끄기)를 봅니다.
+- 게이트웨이 로그(`ApiManagementGatewayLogs`)와 에이전트별 토큰 지표(AppMetrics `Total Tokens`, `Properties.agent`)는 Log Analytics에서 봅니다. TPM을 바꿀 때는 지표의 1분 피크를 기준으로 `infra/resources.bicep`의 `gateways` 표를 고칩니다.
 
 ## 운영 지표·장애 주입
 

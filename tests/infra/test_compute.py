@@ -35,8 +35,9 @@ def test_two_container_apps_environments(closed):
 
 
 def test_internal_environment_domain_resolves_in_vnet(closed):
-    records = closed.of_type("Microsoft.Network/privateDnsZones/A")
+    records = [r for r in closed.of_type("Microsoft.Network/privateDnsZones/A")
+               if not r["name"].startswith("azure-api.net/")]
     assert sorted(r["name"].rsplit("/", 1)[-1] for r in records) == ["*", "@"]
     aca_links = [link for link in closed.of_type("Microsoft.Network/privateDnsZones/virtualNetworkLinks")
-                 if not link["name"].startswith("privatelink.")]
+                 if not link["name"].startswith("privatelink.") and "azure-api.net" not in link["name"]]
     assert len(aca_links) == 1

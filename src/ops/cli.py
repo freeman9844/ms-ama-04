@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import Callable
 
@@ -10,12 +11,13 @@ from ops import faults, opsrun
 from ops.azcli import OpsError, Runner, subprocess_runner
 from ops.azdenv import get_env
 from ops.console_gate import check_console_gate
-from ops.eval_runner import run_eval
+from ops.eval_runner import run_eval, run_gateway_probe
 from ops.lifecycle import pause, resume, teardown
 from ops.smoke_runner import run_smoke
 from ops.window import close_window, fetch_public_ip, open_window, window_status
 
 EVAL_SUITES = ("all", "classify", "underwriting", "early_warning", "safety")
+GATEWAY_PROBE_MODES = ("all", "throttle", "unsafe")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
     evaluator = commands.add_parser("eval", help="평가 Job 실행 후 리포트를 eval/reports/<실행>/에 저장")
     evaluator.add_argument("--suite", default="all", choices=EVAL_SUITES)
     evaluator.add_argument("--collect", metavar="EXECUTION", help="Job을 다시 돌리지 않고 끝난 실행의 리포트만 회수")
+    gateway = commands.add_parser("gateway", help="AI 게이트웨이(APIM) 확인")
+    gateway_actions = gateway.add_subparsers(dest="action", required=True)
+    probe = gateway_actions.add_parser("probe", help="eval Job으로 토큰 한도(429)·콘텐츠 차단(403) 재현")
+    probe.add_argument("--mode", default="all", choices=GATEWAY_PROBE_MODES)
+    probe.add_argument("--collect", metavar="EXECUTION", help="Job을 다시 돌리지 않고 끝난 프로브 결과만 회수")
     loader = commands.add_parser("load", help="job-ops로 균형 격자 신청을 제출하고 결과를 ops/reports/<run>/에 저장")
     loader.add_argument("--count", type=int, default=opsrun.MAX_COUNT, help=f"제출 건수(1~{opsrun.MAX_COUNT})")
     loader.add_argument("--interval", type=float, default=15.0, help="제출 간격 초")
@@ -101,6 +108,15 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             print(f"평가 완료: {result.execution} (partial={summary.get('partial')}, "
                   f"사용 ${summary.get('spent_usd')}, 실패 {failures}건)", file=out)
             print(f"리포트: {result.out_dir}", file=out)
+        elif args.command == "gateway":
+            result = run_gateway_probe(runner, mode=args.mode, collect=args.collect)
+            print(json.dumps(result.summary, ensure_ascii=False, indent=2), file=out)
+            print(f"프로브 결과: {result.out_dir}", file=out)
+            checks = result.summary.get("checks")
+            checks = checks if isinstance(checks, dict) else {}
+            # 빈 checks는 all()이 True가 되므로 재현 실패로 따로 막는다.
+            if not checks or not all(isinstance(c, dict) and c.get("reproduced") for c in checks.values()):
+                return 2
         elif args.command == "load":
             result = opsrun.load(runner, count=args.count, interval_s=args.interval,
                                  progress=lambda m: print(m, file=out))

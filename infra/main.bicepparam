@@ -23,3 +23,4 @@ param consoleIp = readEnvironmentVariable('CONSOLE_IP', '')
 param consoleAuthEnabled = readEnvironmentVariable('CONSOLE_AUTH_ENABLED', 'true') != 'false'
 param consoleDemoRole = readEnvironmentVariable('CONSOLE_DEMO_ROLE', 'CreditOfficer')
 param opsAlertEmail = readEnvironmentVariable('OPS_ALERT_EMAIL', '')
+param aiGatewayRouting = readEnvironmentVariable('AI_GATEWAY_ROUTING', 'true') == 'true'
