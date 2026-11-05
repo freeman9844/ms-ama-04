@@ -208,7 +208,7 @@ class Meter:
 
 
 class MeteredTransport(httpx.BaseTransport):
-    """429·502·503·504는 지수 백오프로 최대 3회 재시도하고, 최종 응답 하나를 Meter에 기록한다."""
+    """retry_status(기본 429·502·503·504)는 지수 백오프로 최대 3회 재시도하고, 최종 응답 하나를 Meter에 기록한다."""
 
     def __init__(
         self,
@@ -217,9 +217,11 @@ class MeteredTransport(httpx.BaseTransport):
         *,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        retry_status: frozenset[int] = RETRY_STATUS,
     ) -> None:
         self._meter, self._inner = meter, inner or httpx.HTTPTransport()
         self._sleep, self._clock = sleep, clock
+        self._retry_status = retry_status
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         request.read()
@@ -231,7 +233,7 @@ class MeteredTransport(httpx.BaseTransport):
             except httpx.HTTPError as e:
                 self._meter.observe(request, None, int((self._clock() - started) * 1000), retries, type(e).__name__)
                 raise
-            if response.status_code in RETRY_STATUS and retries < MAX_RETRIES:
+            if response.status_code in self._retry_status and retries < MAX_RETRIES:
                 response.close()
                 self._sleep(BACKOFF_S * 2**retries)
                 retries += 1

@@ -176,11 +176,14 @@ class FoundryAgents:
         client: httpx.Client | None = None,
         timeout: float = 120.0,
         sleep: Callable[[float], None] = time.sleep,
+        retry_throttle: bool = True,
     ) -> None:
         self._base = project_endpoint.rstrip("/")
         self._token = token
         self._client = client or httpx.Client(timeout=timeout)
         self._sleep = sleep
+        # False면 429를 다시 보내지 않고 바로 GatewayThrottled로 올린다(게이트웨이 프로브).
+        self._retry_throttle = retry_throttle
         self._versions: dict[str, str] = {}
 
     def _request(self, method: str, path: str, body: Any) -> httpx.Response:
@@ -191,7 +194,7 @@ class FoundryAgents:
     def _call(self, method: str, path: str, body: Any = None, conversation_id: str | None = None) -> dict[str, Any]:
         try:
             r = self._request(method, path, body)
-            if r.status_code == 429:
+            if r.status_code == 429 and self._retry_throttle:
                 # 게이트웨이 토큰 한도. 429는 응답을 만들지 않으므로 한 번만 다시 보낸다(입력 중복 없음).
                 self._sleep(_retry_after(r))
                 r = self._request(method, path, body)

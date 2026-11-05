@@ -112,9 +112,12 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] = os.environ,
     prices = load_prices()
     meter = Meter(prices, args.budget)
     models = Models.from_env(env)
-    backend = fake_backend(meter, models) if args.fake else azure_backend(meter, models, env)
+    probe = env.get("EVAL_TASK") == gateway_probe.TASK
+    # 프로브는 첫 429를 그대로 본다. 클라이언트 재시도가 기다리면 1분 토큰 창이 풀려 한도가 재현되지 않는다.
+    backend = (fake_backend(meter, models, retry_throttle=not probe) if args.fake
+               else azure_backend(meter, models, env, retry_throttle=not probe))
     runner = EvalRunner(backend.agents, meter, gateway=gateway_enabled(env) and not args.fake)
-    if env.get("EVAL_TASK") == gateway_probe.TASK:
+    if probe:
         return run_gateway_probe(env, runner=runner, meter=meter, backend=backend, models=models, run_id=run_id,
                                  out_dir=out_dir, emit=args.emit, log=log)
     # 가명 키는 실행마다 새로 만든다(평가 결과는 가명값을 저장하지 않는다).

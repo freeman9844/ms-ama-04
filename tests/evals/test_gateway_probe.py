@@ -1,10 +1,13 @@
 import dataclasses
 import json
 
+import httpx
+
 from agents.runtime import AgentRun, GatewayBlocked, GatewayThrottled
 from evals import gateway_probe
 from evals.__main__ import load_prices, main
 from evals.backend import Models, fake_backend
+from evals.fake import FakeAzure
 from evals.metering import Meter
 from evals.runner import EvalRunner
 
@@ -85,3 +88,26 @@ def test_main_gateway_probe_task_writes_probe_json(tmp_path):
     assert probe["mode"] == "unsafe" and probe["checks"]["unsafe"]["attempts"] == ["ok"]
     assert probe["gateway"]["enabled"] is False and probe["cleanup"]["deleted"] == 1
     assert not (tmp_path / "summary.json").exists()
+
+
+class ThrottleSecondCall(FakeAzure):
+    """프로브의 두 번째 응답 생성 호출만 429를 돌려준다(재시도하면 통과해 버린다)."""
+
+    def __init__(self):
+        super().__init__()
+        self.responses = 0
+
+    def __call__(self, request):
+        if request.url.path == "/openai/v1/responses":
+            self.responses += 1
+            if self.responses == 2:
+                return httpx.Response(429, json={"error": {"code": "429"}})
+        return super().__call__(request)
+
+
+def test_main_gateway_probe_surfaces_first_429(tmp_path, monkeypatch):
+    monkeypatch.setattr("evals.backend.FakeAzure", ThrottleSecondCall)
+    env = {"EVAL_TASK": gateway_probe.TASK, "PROBE_MODE": "throttle"}
+    assert main(["--fake", "--out", str(tmp_path)], env=env, log=lambda m: None) == 0
+    throttle = json.loads((tmp_path / gateway_probe.OUTPUT).read_text(encoding="utf-8"))["checks"]["throttle"]
+    assert throttle["attempts"] == ["ok", "rate_limited"] and throttle["reproduced"] is True

@@ -13,7 +13,7 @@ from agents.gateway import decision_base
 from agents.runtime import FoundryAgents
 from agents.txn_classify import DecisionClient
 from evals.fake import FakeAzure
-from evals.metering import Meter, MeteredTransport
+from evals.metering import RETRY_STATUS, Meter, MeteredTransport
 
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -71,16 +71,20 @@ class Backend:
         self.client.close()
 
 
-def _client(meter: Meter, inner: httpx.BaseTransport | None, sleep: Callable[[float], None] | None = None) -> httpx.Client:
+def _client(meter: Meter, inner: httpx.BaseTransport | None, sleep: Callable[[float], None] | None = None, *,
+            retry_throttle: bool = True) -> httpx.Client:
     kw: dict[str, Any] = {"sleep": sleep} if sleep else {}
+    if not retry_throttle:
+        kw["retry_status"] = RETRY_STATUS - {429}
     return httpx.Client(transport=MeteredTransport(meter, inner, **kw), timeout=TIMEOUT_S)
 
 
-def fake_backend(meter: Meter, models: Models) -> Backend:
+def fake_backend(meter: Meter, models: Models, *, retry_throttle: bool = True) -> Backend:
+    """retry_throttle=False면 transport·FoundryAgents 모두 429를 재시도하지 않는다(게이트웨이 프로브)."""
     fake = FakeAzure()
-    client = _client(meter, httpx.MockTransport(fake), sleep=lambda _: None)
+    client = _client(meter, httpx.MockTransport(fake), sleep=lambda _: None, retry_throttle=retry_throttle)
     return Backend(
-        agents=FoundryAgents(FAKE_ENDPOINT, lambda: "fake", client=client),
+        agents=FoundryAgents(FAKE_ENDPOINT, lambda: "fake", client=client, retry_throttle=retry_throttle),
         decider=DecisionClient(FAKE_ENDPOINT, models.decision, lambda: "fake", client=client),
         client=client,
         fake=fake,
@@ -88,16 +92,18 @@ def fake_backend(meter: Meter, models: Models) -> Backend:
     )
 
 
-def azure_backend(meter: Meter, models: Models, env: Mapping[str, str] = os.environ) -> Backend:
+def azure_backend(meter: Meter, models: Models, env: Mapping[str, str] = os.environ, *,
+                  retry_throttle: bool = True) -> Backend:
     from azure.identity import AzureCliCredential, ManagedIdentityCredential
 
     # 컨테이너 Job은 사용자 할당 관리 ID, 운영자 PC 프로브는 az login 자격 증명을 쓴다.
     credential: Any = (
         ManagedIdentityCredential(client_id=env["AZURE_CLIENT_ID"]) if env.get("AZURE_CLIENT_ID") else AzureCliCredential()
     )
-    client = _client(meter, None)
+    client = _client(meter, None, retry_throttle=retry_throttle)
     return Backend(
-        agents=FoundryAgents(env["AI_PROJECT_ENDPOINT"], CachedToken(credential, FOUNDRY_SCOPE), client=client),
+        agents=FoundryAgents(env["AI_PROJECT_ENDPOINT"], CachedToken(credential, FOUNDRY_SCOPE), client=client,
+                             retry_throttle=retry_throttle),
         decider=DecisionClient(
             decision_base(env), models.decision, CachedToken(credential, COGNITIVE_SCOPE), client=client
         ),

@@ -303,7 +303,7 @@ def test_missing_usage_split_counts_zero():
     assert (run.input_tokens, run.output_tokens, run.total_tokens) == (0, 0, 100)
 
 
-def _gateway_agents(responses, sleeps):
+def _gateway_agents(responses, sleeps, **kw):
     def handle(request: httpx.Request) -> httpx.Response:
         if "/versions" in request.url.path:
             return httpx.Response(200, json={"version": "1"})
@@ -312,7 +312,7 @@ def _gateway_agents(responses, sleeps):
         return responses.pop(0)
 
     client = httpx.Client(transport=httpx.MockTransport(handle))
-    return FoundryAgents(BASE, lambda: "tok", client=client, sleep=sleeps.append)
+    return FoundryAgents(BASE, lambda: "tok", client=client, sleep=sleeps.append, **kw)
 
 
 def test_runtime_retries_429_once():
@@ -320,6 +320,15 @@ def test_runtime_retries_429_once():
     a = _gateway_agents([httpx.Response(429, headers={"retry-after": "2"}), httpx.Response(200, json={"ok": 1})], sleeps)
     assert a._call("POST", "/openai/v1/responses", {}) == {"ok": 1}
     assert sleeps == [2.0]
+
+
+def test_runtime_without_throttle_retry_raises_on_first_429():
+    sleeps = []
+    responses = [httpx.Response(429, headers={"retry-after": "2"}), httpx.Response(200, json={"ok": 1})]
+    a = _gateway_agents(responses, sleeps, retry_throttle=False)
+    with pytest.raises(GatewayThrottled):
+        a._call("POST", "/openai/v1/responses", {})
+    assert sleeps == [] and len(responses) == 1
 
 
 def test_runtime_second_429_raises_throttled_without_body():
