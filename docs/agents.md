@@ -84,6 +84,21 @@
 
 ## 공통 런타임
 
-- **도구 호출 루프(`src/agents/runtime.py`):** 프롬프트 에이전트를 REST로 돌린다. 버전 생성(`POST /agents/{name}/versions`) → 대화 생성 → 응답 생성(`agent_reference` + conversation). `function_call`이 있으면 VNet 안에서 핸들러를 실행해 `function_call_output`으로 되돌리며, 최대 `max_rounds=6` 라운드. 도구 예외 내용은 모델에 노출하지 않는다(`{"error": ...}`만 반환). 출력은 `output_model`로 스키마 검증한다.
+- **도구 호출 루프(`src/agents/runtime.py`):** 프롬프트 에이전트를 REST로 돌린다. 버전 생성(`POST /agents/{name}/versions`) → 대화 생성 → 응답 생성(`agent_reference` + conversation). `function_call`이 있으면 VNet 안에서 핸들러를 실행해 `function_call_output`으로 되돌리며, 최대 `max_rounds=6` 라운드(직접 호출 기본값. AI 게이트웨이를 거치는 에이전트는 아래 `GATEWAY_MAX_ROUNDS = 12`). 도구 예외 내용은 모델에 노출하지 않는다(`{"error": ...}`만 반환). 출력은 `output_model`로 스키마 검증한다.
 - **대화·컨테이너 삭제:** `delete_conversation`은 입력·출력 항목을 포함해 대화를 지우고(`deleted`/`absent`/`failed`), `delete_container`는 Code Interpreter 컨테이너(가명 집계 데이터가 올라간 곳)를 즉시 삭제한다. 동의 철회·수명주기 종료 시 남은 Foundry 대화를 정리한다.
 - **계량(`src/orchestrator/journey/metering.py`):** `MeteredRunner`가 호출마다 모델·입출력 토큰·라운드를 모으고, `step_records`가 단계 기록(`steps[]`)으로 바꾼다. 거래 분류는 심사 지표 산출의 하위 단계(`classify`)로 분리 기록하고, Decision-1 호출 수를 `decision_calls`로 센다. 단계 기록에는 예외 종류·표준 코드만 남긴다(`safe_detail`).
+- **AI 게이트웨이(`src/agents/gateway.py`, [ADR-010](adr/ADR-010-ai-gateway.md)):** `AI_GATEWAY=apim`이고 `AI_GATEWAY_URL`이 있으면 `GatewayRunner`가 모델 이름을 `gw-<agent>/<model>`로 바꿔 Foundry BYOM 연결로 APIM을 거친다(결과의 모델은 원래 배포 이름으로 되돌려 계량·단가에 쓴다). 거래 분류 Decision-1은 `AI_GATEWAY_URL`의 decision API를 직접 부르고(콘텐츠 안전 없음), 채점자(quality-judge)는 직접 호출한다. 429·403은 `GatewayThrottled`·`GatewayBlocked`로 구분한다. 연결표(`CONNECTIONS`)와 최종 TPM(`infra/resources.bicep`의 `gateways`):
+
+  | 에이전트 | 연결 | TPM |
+  |---|---|---|
+  | `underwriting-analyst` | `gw-analyst` | 150,000 |
+  | `early-warning-investigator` | `gw-early-warning` | 50,000 |
+  | `underwriting-reviewer` | `gw-reviewer` | 15,000 |
+  | `data-assembly` | `gw-data-assembly` | 17,000 |
+  | `txn-classifier` | `gw-txn-classifier` | 20,000 |
+  | `collections-agent` | `gw-collections` | 10,000 |
+  | `consent-notice-agent` | `gw-consent-notice` | 5,000 |
+  | `grievance-reply-agent` | `gw-grievance` | 5,000 |
+  | (프로브 전용) | `gw-probe` | 1,000 |
+
+- **도구 라운드 상한:** 직접 호출은 `max_rounds=6`을 유지한다. 게이트웨이(chat completions) 경로에서는 모델이 턴당 도구 호출을 덜 해서 조기경보 조사가 모든 주차에서 6라운드 상한에 걸렸기 때문에, 라우팅되는 에이전트(`GatewayRunner`, 평가의 `EvalRunner`)에만 `GATEWAY_MAX_ROUNDS = 12`를 적용한다. 대가는 조사 한 번당 최대 2배의 라운드·토큰이다(건당 AI 비용 변화는 [비용 모델](cost-model.md#게이트웨이-경로-건당-ai-비용)).

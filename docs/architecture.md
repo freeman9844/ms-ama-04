@@ -50,6 +50,7 @@ flowchart TB
     smoke["smoke / eval / ops Job"]
   end
   foundry["Foundry Agent Service<br/>프롬프트 에이전트 + 모델"]
+  apim["API Management<br/>AI 게이트웨이 (내부 모드)"]
   search["AI Search"]
   acr["Container Registry"]
   cosmos["Cosmos DB (NoSQL)"]
@@ -62,7 +63,10 @@ flowchart TB
   console -->|읽기| cosmos
   console -->|명령| queues
   queues --> orch
-  orch --> foundry
+  orch -->|에이전트 실행| foundry
+  foundry -->|모델 호출, BYOM 연결 gw-*| apim
+  orch -->|거래 분류 Decision-1| apim
+  apim -->|MI 인증, 모델 배포| foundry
   foundry -.->|벡터 저장소| search
   orch --> policy
   orch --> mock
@@ -85,6 +89,7 @@ flowchart TB
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
 | Mock API | Container Apps internal `cae-int` | 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정) 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | 합성 데이터(프로세스 내 생성) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
+| AI 게이트웨이 | API Management Developer, 내부 VNet 모드(`snet-apim`) | 에이전트별 TPM 한도, 콘텐츠 안전(Prompt Shields), 토큰 지표(agent·model) | 없음(본문 미기록) | 에이전트별 구독 키(Foundry 연결) → APIM MI로 Foundry 호출 | `infra/modules/apim.bicep`, `infra/modules/foundry/gateway-connections.bicep`, `src/agents/gateway.py` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
 | Container Registry | Azure Container Registry + PE | 콘솔·Policy·Mock·Job 컨테이너 이미지 | 이미지 | MI `AcrPull`, 배포 창에 운영자 push | `infra/modules/acr.bicep` |
 | smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | id-eval: Blob `eval-reports`(쓰기)·Foundry/OpenAI; id-ops: Cosmos(읽기)·큐; id-smoke: Cosmos·Blob(읽기)·큐·Service Bus(송신)·Key Vault·Foundry(전 경로 점검) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
@@ -106,6 +111,7 @@ flowchart TB
     fn["snet-functions 192.168.2.0/26<br/>Functions Flex"]
     appsint["snet-apps-int 192.168.4.0/24<br/>cae-int (internal)"]
     appsweb["snet-apps-web 192.168.5.0/24<br/>cae-web (external)"]
+    apimnet["snet-apim 192.168.6.0/27<br/>APIM (internal)"]
   end
   operator["운영자 IP"]
   pe -->|Private DNS| data["Foundry·Cosmos·Storage·Search·KV·Service Bus·ACR·Functions"]
@@ -113,7 +119,7 @@ flowchart TB
   operator -.->|배포 창: public 허용| fn
   appsweb --> appsint
   fn --> appsint
-```
+  agents --> apimnet```
 
 평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경이지만 상시 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막으며(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원), 배포 창 토글과 무관하게 열려 있다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
 
@@ -124,8 +130,13 @@ flowchart TB
 | `snet-functions` | `192.168.2.0/26` | 예 | Functions Flex Consumption VNet 통합 |
 | `snet-apps-int` | `192.168.4.0/24` | 예 | internal Container Apps 환경(Policy·Mock·Job) |
 | `snet-apps-web` | `192.168.5.0/24` | 예 | external Container Apps 환경(콘솔만) |
+| `snet-apim` | `192.168.6.0/27` | 아니오 | APIM 내부 모드(게이트웨이 사설 IP, 공인 IP 없음) |
 
 주소·프리픽스는 `infra/modules/network.bicep`의 템플릿 값이다. Private Endpoint·DNS zone은 `infra/modules/pe.bicep`와 `infra/modules/dns.bicep`로 리소스별(`infra/resources.bicep` 호출부)에 붙는다: Key Vault, Storage(blob/queue/table), Cosmos, AI Search, Foundry 계정, Service Bus, ACR, Functions.
+
+## AI 게이트웨이
+
+모든 운영 LLM 호출은 APIM(Developer, 내부 VNet 모드)을 지난다([ADR-010](adr/ADR-010-ai-gateway.md)). `AI_GATEWAY_ROUTING=true`(Bicep)면 에이전트마다 Foundry BYOM 연결 `gw-*`가 있고, Agent Service는 `POST /openai/deployments/<모델>/chat/completions`로 APIM을 부른다. 정책은 콘텐츠 안전(Prompt Shields) → 에이전트별 `llm-token-limit`(TPM) → 관리 ID 인증 → 토큰 지표 순이다. 프롬프트가 1만 자를 넘으면 Prompt Shields가 거부하므로 그때는 카테고리 검사만 돌고 모델 배포의 `Microsoft.DefaultV2` 필터가 남는다. 거래 분류 Decision-1은 `AI_GATEWAY_URL`의 decision API(콘텐츠 안전 없음)로 가고, 평가 채점자(quality-judge)는 직접 호출한다. 429는 `GatewayThrottled`, 403(Agent Service에는 HTTP 424 + `innerStatusCode 403`으로 전달)은 `GatewayBlocked`로 분류한다. 게이트웨이 경로는 도구 호출이 적어 라우팅된 에이전트에만 `GATEWAY_MAX_ROUNDS = 12`를 쓴다([에이전트](agents.md#공통-런타임)). 에이전트별 연결·TPM은 [에이전트](agents.md#공통-런타임)에 있다.
 
 ## 신청 1건 흐름
 
@@ -201,6 +212,7 @@ flowchart LR
 | Mock API | 데이터 수집 실패 | 동의 범위 안 재시도 + 안전망 수집. 불완전이면 "데이터 불완전"으로 심사역에게 넘김 | source-flaky 회복: mockapi 호출 일부 실패에도 전 신청 `awaiting_officer` 복귀(`ops/reports/fault-20261102111447/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Policy Engine | 판정 불가 | fail-closed: 판정 없이 진행 안 함. `policy_unavailable`+`assessment_unavailable` 플래그, 심사역 판단으로 넘김. 호출에 프로세스 단위 서킷(`src/orchestrator/journey/circuit.py`) | policy-down: 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`(`ops/reports/fault-20261102111750/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Service Bus | L4 이벤트 지연 | 세션 구독(`requiresSession`)·중복 감지(멱등 지원)·만료 dead-letter. 평상시 pause 시 `monitoring-replay` 큐 인라인 처리 | 세션·중복 감지·`deadLetteringOnMessageExpiration` 설정 `infra/modules/servicebus.bicep` |
+| AI 게이트웨이(APIM) | 모든 LLM 호출 실패·지연 | 429는 `GatewayThrottled`, 403은 `GatewayBlocked`로 구분해 단계 `degraded`·사용량 `gateway` 태그로 남기고 심사역 단계로 넘김. 장애 시 `AI_GATEWAY_ROUTING=false`로 직접 호출 복귀 | 프로브 재현 `eval/reports/<실행>/probe.json`(Task 11): 콘텐츠 차단 `job-eval-aw9qy70`, 토큰 한도 `job-eval-5zu5jnw` |
 
 **한계:** 서킷 브레이커는 프로세스(Flex 인스턴스) 단위다(`src/orchestrator/journey/circuit.py`). Flex가 여러 인스턴스로 확장되면 서킷 상태가 인스턴스별로 따로 쌓여 전역 open이 보장되지 않는다. 분산 서킷은 운영 전환 과제다([ADR-001](adr/ADR-001-orchestration.md) 재검토 조건).
 
@@ -226,6 +238,6 @@ flowchart LR
 | 서킷 브레이커 | 프로세스(Flex 인스턴스) 단위 | 분산 서킷(공유 상태) |
 | 가용성 | 단일 리전 | 다중 리전 DR |
 | 모델 배포 | Global Standard | Data Zone / PTU([ADR-002](adr/ADR-002-model-deployment.md)) |
-| 입력 방어 | 없음(미구축) | AI Content Safety Prompt Shields 등 프롬프트 입력 방어(상위 Spec §2.3). 현재 `infra/`·`src/`에 Content Safety/Prompt Shields 구현 없음 |
+| 입력 방어 | AI 게이트웨이(APIM)의 Prompt Shields·유해 카테고리 검사([ADR-010](adr/ADR-010-ai-gateway.md)). 프롬프트 1만 자 초과는 카테고리 검사 + 모델 필터 `Microsoft.DefaultV2`만, Decision-1에는 미적용 | 프롬프트 길이 제한에 걸리지 않는 입력 방어 보강, Standard v2 이상에서 게이트웨이 SLA 확보 |
 
-모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)과 연결된다. 이 과제들의 운영 전환 체크리스트는 [한계와 운영 전환](limitations.md)에 있다.
+모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)·[ADR-010](adr/ADR-010-ai-gateway.md)과 연결된다. 이 과제들의 운영 전환 체크리스트는 [한계와 운영 전환](limitations.md)에 있다.

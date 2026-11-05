@@ -13,3 +13,4 @@
 | [ADR-007](ADR-007-demo-auth-mode.md) | 데모 인증 모드 | 채택 · as-built | Easy Auth off + 고정 역할 + IP 허용만, 전환 시 Entra 복원 | [architecture](../architecture.md), [deploy-history](../runbook/deploy-history.md) |
 | [ADR-008](ADR-008-vnet-jobs-for-eval-ops.md) | 평가·운영 VNet Job | 채택 · as-built | 사설 데이터 접근은 VNet 안 Container Apps Job, 결과는 로그 조각으로 회수 | [deploy](../runbook/deploy.md) |
 | [ADR-009](ADR-009-deletion-vs-explainability.md) | 삭제 vs 설명 가능성 | 채택 · as-built | 원천 데이터 삭제·증명 + 판단 기록(파생값·근거 ID) 보존 | [deploy-history](../runbook/deploy-history.md), [architecture](../architecture.md) |
+| [ADR-010](ADR-010-ai-gateway.md) | AI 게이트웨이 | 채택 · as-built | APIM Developer 내부 모드, 에이전트별 연결·TPM·콘텐츠 안전, 플래그로 롤백 | [architecture](../architecture.md), [deploy-history](../runbook/deploy-history.md) |

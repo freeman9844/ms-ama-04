@@ -11,6 +11,7 @@
 - 측정 표본이 작아(SLO 24건, 평가 케이스 소수) 수치는 경향으로만 읽고, 공정성 경보 하나는 표본 잡음일 수 있다.
 - 동의·삭제·이의제기 수명주기는 구현했으나 갱신·재조정·회신은 기록·시뮬레이션에 그치고, 데모 시나리오에 동의 철회 장면은 없다.
 - 운영 전환 과제(Entra 복원·App Gateway WAF·분산 서킷·다중 리전·모델 처리 위치)는 아래 체크리스트와 [아키텍처#운영 아키텍처](architecture.md#운영-아키텍처)에 모았다.
+- 모든 LLM 호출은 SLA 없는 APIM Developer(AI 게이트웨이)를 지나고, 1만 자 초과 프롬프트에는 Prompt Shields가 적용되지 않는다. 직접 호출 대비 건당 AI 비용이 약 59% 늘었다([ADR-010](adr/ADR-010-ai-gateway.md)).
 
 ## 인증·접근
 
@@ -48,6 +49,15 @@
 - `demo-stress-003`은 고금리 대출이 감지되어도 정책상 eligible이고, 분석가는 이를 claim·counterfactual로 드러낸다. (P4a)
 - `agent_assessment_mismatch` 플래그가 측정 신청 24/24건(장애 신청 4/5건)에 붙었다. 데이터 조립 에이전트가 보고한 상태가 결정론 판정과 다르다는 뜻으로, 원인 분석은 후속 과제다(`docs/runbook/deploy-history.md:600`). 분류 모델 `decision-1`은 공개 단가를 확인하지 못해 비용에서 호출 수만 남고, 모델 처리 위치(Global Standard)는 [ADR-002](adr/ADR-002-model-deployment.md)에 정리했다. (P6b)
 - Foundry 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 에이전트 입력이 가명화된 값뿐이라는 원칙에 기댄다. (P6b)
+- AI 게이트웨이(APIM Developer)는 SLA가 없는 단일 인스턴스라 게이트웨이가 멈추면 모든 LLM 호출이 실패한다. 복구는 `AI_GATEWAY_ROUTING=false` 재프로비저닝(직접 호출)이다. ([ADR-010](adr/ADR-010-ai-gateway.md))
+- Foundry 연결 범주 `ApiManagement`는 공식적으로 Standard v2·Premium 대상이고, Developer에서는 동작을 실측으로만 확인했다(2026-11-05). BYOM 연결은 프리뷰라 GA에서 바뀔 수 있다. (ADR-010)
+- Prompt Shields는 10,000자를 넘는 프롬프트를 거부하므로, 정책이 메시지 길이 합(`promptChars`)이 10,000자 이하일 때만 `shield-prompt`를 켠다(오차단 수정 `f28057c`). 그보다 긴 프롬프트는 카테고리 검사와 모델 배포 필터 `Microsoft.DefaultV2`만 적용된다. 긴 입력의 탈옥 시도는 APIM에서 막히지 않는다. (ADR-010)
+- Decision-1(decision API)에는 콘텐츠 안전을 걸지 않는다(분류 입력은 거래 적요뿐이고 Prompt Shields는 채팅 형식 대상). 평가 채점자(quality-judge)는 게이트웨이를 거치지 않고 직접 호출한다. (ADR-010)
+- VNet에 연결한 `azure-api.net` 사설 DNS 영역이 같은 영역의 공용 이름을 가린다(VNet 안에서는 그 영역에 등록한 APIM 이름만 풀린다). (ADR-010)
+- 게이트웨이 로그에는 LLM 요청·응답 본문과 헤더를 남기지 않는다(호출 수·상태·지연·토큰 지표만). 원인 분석은 지표와 Foundry 트레이스에 기댄다. (ADR-010)
+- 평가(eval) 트래픽이 운영과 같은 에이전트별 TPM을 나눠 쓴다. 조기경보 평가 피크(1분 53.7K)는 한도 50K를 넘어 Agent Service 재시도가 흡수했다. 평가 전용 제품 분리는 후속 과제다. (ADR-010)
+- `llm-token-limit`은 `estimate-prompt-tokens=false`라 한도를 넘긴 요청 자체는 통과하고 카운터가 넘은 **다음 호출부터** 429가 된다. 429가 나도 Agent Service가 1회, 클라이언트가 재시도한다. (ADR-010)
+- 게이트웨이 경로는 같은 일을 하는 데 더 많은 토큰을 쓴다: 건당 AI 비용 $0.0589 → $0.0939(+59%), 분석가 TPM 150K·`gpt-5.4` 용량 200이 필요했다([비용 모델](cost-model.md#게이트웨이-경로-건당-ai-비용)). `collections-agent`·`grievance-reply-agent`의 TPM(10K·5K)은 측정하지 못한 여유값이다. (ADR-010)
 
 ## 동의·삭제·이의제기
 
@@ -97,7 +107,7 @@
 - P6b 검토에서 발견한 I1 수정(Policy 앱의 ASGI `http send`/`http receive` 스팬이 App Insights에서 제외되지 않던 문제 — 제외용 환경변수가 동작하지 않던 설정)은 Azure에 배포됐고 반영을 확인했다. 2026-11-03 리허설에서 최근 45분 Policy 요청 2건(라이브 리허설 건 포함) 중 ` http send`/` http receive` 스팬이 0건이었다([리허설 기록](demo/rehearsal.md)). 표본이 2건이라 경향 확인 수준이다.
 - Service Bus 모드 사후 재생은 2026-11-03 리허설 전까지 라이브에서 검증되지 않았고(그전 재생 실측은 모두 인라인 모드), 리허설에서 구독 규칙 결함을 발견해 고쳤다. Bicep이 `$Default` 이름으로 CorrelationFilter를 PUT하면 규칙이 남지 않고 자동 `1=1` 규칙도 사라져 두 구독(`flow.updated/early-warning`, `alert.raised/collections`)의 규칙이 0개가 되어 재생 메시지가 모두 버려졌다. `subject-label` 규칙을 추가한 수정(커밋 `8cfe7d1`) 뒤 첫 라이브 재생이 약 3.1분에 성공했다(인라인 모드 참고 실측 132초보다 김). 재개·프로비저닝 뒤 규칙 확인은 [배포](runbook/deploy.md#service-bus-구독-규칙-확인)에 있다.
 - 재생 버튼을 두 번 누르면 `replay_in_progress` 확인이 원자적이지 않아 두 실행이 통과해 모니터링 동의가 2개 생기던 경쟁 조건은 `start_replay`의 ETag 조건부 대출 선점으로 고쳤다(커밋 `6c003a5`). 선점에 실패한 요청은 "동시 재생 요청 무시"로 끝난다. 그래도 데모에서는 재생 버튼을 한 번만 누른다.
-- 운영자 공인 IP는 회사 NAT처럼 출구 IP가 여러 개로 회전할 수 있어(2026-11-03 하루 4개 관측) 바뀔 때마다 console ingress와 Functions에 `/32` 임시 규칙을 하나씩 더해야 하고, 프로비저닝(`window open` 등)은 Functions의 임시 규칙을 지우므로 다시 추가해야 한다([배포](runbook/deploy.md#운영자-ip가-바뀔-때)).
+- 운영자 공인 IP는 회사 NAT처럼 출구 IP가 여러 개로 회전할 수 있어(2026-11-03 하루 4개 관측) 바뀔 때마다 console ingress와 Functions에 `/32` 임시 규칙을 하나씩 더해야 하고, 프로비저닝(`window open` 등)은 Functions의 임시 규칙을 지우므로 다시 추가해야 한다([배포](runbook/deploy.md#운영자-ip가-바뀔-때)). 모바일 회선에서는 App Service(Functions 주 사이트·SCM)로 가는 트래픽이 `api.ipify`가 알려 주는 IP와 다른 통신사 NAT 출구 IP(관측 3개, 서로 다른 /24)로 나가 창이 열려 있어도 `ops deploy orchestrator`가 403이었다. 이때는 임시 진단 설정으로 실제 출구 IP를 찾아 허용한다(같은 절 "App Service 출구 IP가 다를 때").
 - 2분 데모 리허설은 1회(2026-11-03) 실시했으나 탐색 위주였고 2분 대본 시간 측정은 하지 못했다. 대본은 그 결과로 보완했고 2회차 리허설은 하지 않았다([리허설 기록](demo/rehearsal.md)).
 
 ## 상위 Spec 위험(§7)
@@ -128,7 +138,8 @@
 - [ ] 실데이터 투입 전 법률·규제 검토(실제 마이데이터·홈택스·PG 연동, 개인신용정보 처리).
 - [ ] 공정성 표본 확대: 지역 approve율 37.5%p 경보가 표본 잡음인지 더 큰 표본으로 재측정.
 - [ ] `agent_assessment_mismatch`(측정 24/24) 원인 분석.
-- [ ] Content Safety Prompt Shields 등 입력 방어 도입(as-built 미구현, `docs/security/threat-model.md:95`).
+- [ ] APIM Standard v2 이상으로 전환(SLA, `ApiManagement` 연결 범주 공식 지원, [ADR-010](adr/ADR-010-ai-gateway.md)). 1만 자 초과 프롬프트 방어와 Decision-1 입력 방어도 이때 함께 본다.
+- [ ] 평가 전용 APIM 제품 분리(평가 트래픽이 운영 TPM을 잠식하지 않게).
 
 ---
 
