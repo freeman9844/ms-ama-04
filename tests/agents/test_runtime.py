@@ -4,7 +4,7 @@ import httpx
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from agents.runtime import AgentError, AgentSpec, FoundryAgents
+from agents.runtime import AgentError, AgentSpec, FoundryAgents, GatewayBlocked, GatewayThrottled, _status_error
 
 BASE = "https://ais.example/api/projects/proj-lending"
 
@@ -301,3 +301,88 @@ def test_run_accumulates_input_output_tokens_and_model():
 def test_missing_usage_split_counts_zero():
     run = agents(FakeFoundry(done({"status": "complete"}, tokens=100))).run(SPEC, "신청", {})
     assert (run.input_tokens, run.output_tokens, run.total_tokens) == (0, 0, 100)
+
+
+def _gateway_agents(responses, sleeps):
+    def handle(request: httpx.Request) -> httpx.Response:
+        if "/versions" in request.url.path:
+            return httpx.Response(200, json={"version": "1"})
+        if request.url.path.endswith("/conversations"):
+            return httpx.Response(200, json={"id": "conv-1"})
+        return responses.pop(0)
+
+    client = httpx.Client(transport=httpx.MockTransport(handle))
+    return FoundryAgents(BASE, lambda: "tok", client=client, sleep=sleeps.append)
+
+
+def test_runtime_retries_429_once():
+    sleeps = []
+    a = _gateway_agents([httpx.Response(429, headers={"retry-after": "2"}), httpx.Response(200, json={"ok": 1})], sleeps)
+    assert a._call("POST", "/openai/v1/responses", {}) == {"ok": 1}
+    assert sleeps == [2.0]
+
+
+def test_runtime_second_429_raises_throttled_without_body():
+    sleeps = []
+    body = {"error": {"message": "secret-ish detail"}}
+    a = _gateway_agents([httpx.Response(429, json=body), httpx.Response(429, json=body)], sleeps)
+    with pytest.raises(GatewayThrottled) as info:
+        a._call("POST", "/openai/v1/responses", {}, "conv-9")
+    assert str(info.value) == "rate_limited: POST /openai/v1/responses"
+    assert info.value.conversation_id == "conv-9"
+    assert sleeps == [1.0]
+
+
+@pytest.mark.parametrize("header, expected", [("120", 10.0), ("abc", 1.0), ("-3", 0.0)])
+def test_retry_after_is_clamped(header, expected):
+    sleeps = []
+    a = _gateway_agents([httpx.Response(429, headers={"retry-after": header}), httpx.Response(200, json={})], sleeps)
+    a._call("POST", "/x", {})
+    assert sleeps == [expected]
+
+
+# Task 4 관문 3 실측: Agent Service가 APIM llm-content-safety의 403을 424 CustomerManagedDownstreamError로 감싸 돌려준다.
+GATE3_424_BODY = {
+    "error": {
+        "message": "CustomerManagedDownstreamError ModelGateway response: {'error': 'CustomerManagedDownstreamError', "
+        "'message': 'Data proxy returned 424 because the customer-managed downstream service responded with 403. "
+        "This indicates a customer-managed downstream issue rather than a data proxy failure.', "
+        "'innerStatusCode': 403, 'innerReasonPhrase': 'Forbidden'} Request ID: req-1",
+        "type": "server_error",
+        "param": None,
+        "code": "model_error",
+        "request_id": "req-1",
+    }
+}
+
+
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (403, {"error": {"code": "ContentSafety", "message": "Prompt Shield detected jailbreak in 사용자 입력"}}),
+        (424, GATE3_424_BODY),
+    ],
+)
+def test_runtime_block_marker_raises_blocked_without_body(status, body):
+    sleeps = []
+    a = _gateway_agents([httpx.Response(status, json=body)], sleeps)
+    with pytest.raises(GatewayBlocked) as info:
+        a._call("POST", "/openai/v1/responses", {})
+    assert str(info.value) == "content_blocked: POST /openai/v1/responses"
+    assert sleeps == []
+
+
+def test_status_error_classifies_failed_responses():
+    blocked = _status_error({"status": "failed", "error": {"code": "content_filter"}}, "c1")
+    throttled = _status_error({"status": "failed", "error": {"code": "rate_limit_exceeded"}}, "c1")
+    other = _status_error({"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}, "c1")
+    assert type(blocked) is GatewayBlocked and str(blocked) == "content_blocked: 응답 상태 failed"
+    assert type(throttled) is GatewayThrottled and str(throttled) == "rate_limited: 응답 상태 failed"
+    assert type(other) is AgentError and str(other) == "응답 상태 incomplete"
+
+
+def test_run_preserves_gateway_error_type():
+    a = _gateway_agents([httpx.Response(403, json={"error": {"code": "ContentSafety"}})], [])
+    with pytest.raises(GatewayBlocked) as info:
+        a.run(SPEC, "입력", {})
+    assert info.value.conversation_id == "conv-1"

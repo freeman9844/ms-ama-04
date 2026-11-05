@@ -8,6 +8,7 @@ probe(2026-10-31)로 확인한 REST 형태만 쓴다.
 """
 
 import json
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +27,53 @@ class AgentError(RuntimeError):
         super().__init__(message)
         self.conversation_id = conversation_id
         self.containers = containers
+
+
+MAX_RETRY_AFTER_S = 10.0
+DEFAULT_RETRY_AFTER_S = 1.0
+# 소문자 부분 문자열. AI 게이트웨이(APIM llm-content-safety·llm-token-limit)와 모델 자체 필터의 오류 본문을 가른다.
+# Task 4 관문에서 관측한 본문에 맞춰 보정한다.
+# "'innerstatuscode': 403": Agent Service가 APIM llm-content-safety의 403을 HTTP 424 CustomerManagedDownstreamError로
+# 감싸 돌려준다(Task 4 관문 3). openai API에서 내부 403은 이 정책뿐이다(키 오류는 401).
+BLOCK_MARKERS = (
+    "content_filter", "content safety", "contentsafety", "responsibleaipolicyviolation", "jailbreak", "prompt shield",
+    "'innerstatuscode': 403",
+)
+THROTTLE_MARKERS = (
+    "rate_limit", "rate limit", "ratelimit", "too many requests", "token limit", "tokens per minute",
+)
+
+
+class GatewayBlocked(AgentError):
+    """콘텐츠 안전 정책이 요청·응답을 막았다. 메시지는 'content_blocked:'로 시작하고 본문을 담지 않는다."""
+
+
+class GatewayThrottled(AgentError):
+    """게이트웨이 토큰 한도(429)에 걸렸다. 메시지는 'rate_limited:'로 시작한다."""
+
+
+def _has(text: str, markers: tuple[str, ...]) -> bool:
+    low = text.lower()
+    return any(m in low for m in markers)
+
+
+def _retry_after(response: httpx.Response) -> float:
+    try:
+        value = float(response.headers.get("retry-after", DEFAULT_RETRY_AFTER_S))
+    except ValueError:
+        value = DEFAULT_RETRY_AFTER_S
+    return min(max(value, 0.0), MAX_RETRY_AFTER_S)
+
+
+def _status_error(response: dict[str, Any], conversation_id: str | None) -> AgentError:
+    """completed가 아닌 응답을 오류로. 차단·한도를 구분하고 본문은 메시지에 넣지 않는다."""
+    status = response.get("status")
+    detail = json.dumps({k: response.get(k) for k in ("error", "incomplete_details")}, ensure_ascii=False)
+    if _has(detail, BLOCK_MARKERS):
+        return GatewayBlocked(f"content_blocked: 응답 상태 {status}", conversation_id)
+    if _has(detail, THROTTLE_MARKERS):
+        return GatewayThrottled(f"rate_limited: 응답 상태 {status}", conversation_id)
+    return AgentError(f"응답 상태 {status}", conversation_id)
 
 
 @dataclass(frozen=True)
@@ -123,19 +171,34 @@ class FoundryAgents:
         *,
         client: httpx.Client | None = None,
         timeout: float = 120.0,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._base = project_endpoint.rstrip("/")
         self._token = token
         self._client = client or httpx.Client(timeout=timeout)
+        self._sleep = sleep
         self._versions: dict[str, str] = {}
+
+    def _request(self, method: str, path: str, body: Any) -> httpx.Response:
+        return self._client.request(
+            method, self._base + path, json=body, headers={"Authorization": f"Bearer {self._token()}"}
+        )
 
     def _call(self, method: str, path: str, body: Any = None, conversation_id: str | None = None) -> dict[str, Any]:
         try:
-            r = self._client.request(
-                method, self._base + path, json=body, headers={"Authorization": f"Bearer {self._token()}"}
-            )
+            r = self._request(method, path, body)
+            if r.status_code == 429:
+                # 게이트웨이 토큰 한도. 429는 응답을 만들지 않으므로 한 번만 다시 보낸다(입력 중복 없음).
+                self._sleep(_retry_after(r))
+                r = self._request(method, path, body)
         except httpx.HTTPError as e:
             raise AgentError(f"{method} {path}: {type(e).__name__}", conversation_id) from e
+        if r.status_code == 429:
+            raise GatewayThrottled(f"rate_limited: {method} {path}", conversation_id)
+        if r.status_code >= 400 and _has(r.text, BLOCK_MARKERS):
+            raise GatewayBlocked(f"content_blocked: {method} {path}", conversation_id)
+        if r.status_code >= 400 and _has(r.text, THROTTLE_MARKERS):
+            raise GatewayThrottled(f"rate_limited: {method} {path}", conversation_id)
         if r.status_code >= 400:
             raise AgentError(f"{method} {path}: HTTP {r.status_code} {r.text[:300]}", conversation_id)
         return r.json() if r.content else {}
@@ -180,7 +243,7 @@ class FoundryAgents:
         try:
             return self._loop(spec, version, conversation_id, input_text, handlers, max_rounds, containers)
         except AgentError as e:
-            raise AgentError(str(e), conversation_id, tuple(containers)) from e
+            raise type(e)(str(e), conversation_id, tuple(containers)) from e
         except Exception as e:  # noqa: BLE001 - 정리(컨테이너 삭제·대화 기록)에 필요한 ID를 잃지 않는다
             raise AgentError(f"예상치 못한 오류: {type(e).__name__}", conversation_id, tuple(containers)) from e
 
@@ -257,7 +320,7 @@ class FoundryAgents:
             inp, out, tokens = inp + i, out + o, tokens + t
 
         if response.get("status") != "completed":
-            raise AgentError(f"응답 상태 {response.get('status')}", conversation_id)
+            raise _status_error(response, conversation_id)
         try:
             output = spec.output_model.model_validate_json(_output_text(response))
         except ValidationError as e:
