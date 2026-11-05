@@ -13,3 +13,4 @@ param policyImage = 'acramatest.azurecr.io/policy:v1'
 param mockapiImage = 'acramatest.azurecr.io/mockapi:v1'
 param consoleImage = 'acramatest.azurecr.io/console:v1'
 param evalImage = 'acramatest.azurecr.io/eval:v1'
+param aiGatewayRouting = false

@@ -28,10 +28,10 @@ def test_smoke_job_runs_inline_script_in_internal_environment(closed):
 def test_smoke_config_covers_all_private_endpoints(closed):
     config = _config(closed)
     hosts = config["private_hosts"]
-    assert len(hosts) == 14
+    assert len(hosts) == 15
     for suffix in (".openai.azure.com", ".services.ai.azure.com", ".cognitiveservices.azure.com",
                    ".search.windows.net", ".documents.azure.com", ".vault.azure.net",
-                   ".servicebus.windows.net", ".azurecr.io", ".azurewebsites.net"):
+                   ".servicebus.windows.net", ".azurecr.io", ".azurewebsites.net", ".azure-api.net"):
         assert any(h.endswith(suffix) for h in hosts), suffix
     assert sum(".core.windows.net" in h for h in hosts) == 5  # stagt/stdat/stfn blob + stfn queue/table
     assert config["chat_models"] == ["gpt-5.4", "gpt-5.4-mini"]
@@ -42,4 +42,4 @@ def test_smoke_config_covers_all_private_endpoints(closed):
 def test_smoke_config_when_service_bus_paused(variant):
     config = _config(variant)
     assert config["servicebus_host"] == ""
-    assert len(config["private_hosts"]) == 13
+    assert len(config["private_hosts"]) == 14

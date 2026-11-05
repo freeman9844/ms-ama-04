@@ -66,6 +66,9 @@ param consoleDemoRole string = 'CreditOfficer'
 @description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
 param opsAlertEmail string = ''
 
+@description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다. 롤백은 false로 다시 프로비저닝.')
+param aiGatewayRouting bool = true
+
 var tags = {
   'azd-env-name': environmentName
   project: 'ama-cashflow-lending'
@@ -109,6 +112,7 @@ module resources 'resources.bicep' = {
     consoleAuthEnabled: consoleAuthEnabled
     consoleDemoRole: consoleDemoRole
     opsAlertEmail: opsAlertEmail
+    aiGatewayRouting: aiGatewayRouting
   }
 }
 

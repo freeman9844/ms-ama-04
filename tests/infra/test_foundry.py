@@ -76,7 +76,8 @@ def test_account_data_plane_roles(closed):
 def test_project_connections_use_entra_auth(closed):
     connections = closed.of_type(f"{AIS}/projects/connections")
     # App Insights 트레이스 연결(P6b)은 프로젝트 관리 ID를 쓴다(test_ops_job.py).
-    byo = [c for c in connections if c["properties"]["category"] != "AppInsights"]
+    byo = [c for c in connections if c["properties"]["category"] != "AppInsights"
+           and c["properties"]["category"] not in ("ApiManagement", "ModelGateway")]
     assert {c["properties"]["category"] for c in byo} == {"CosmosDB", "AzureStorageAccount", "CognitiveSearch"}
     assert {c["properties"]["authType"] for c in byo} == {"AAD"}
 

@@ -27,6 +27,8 @@ param consoleAuthEnabled bool
 param consoleDemoRole string
 @description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
 param opsAlertEmail string = ''
+@description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다(AI_GATEWAY=apim). false면 직접 호출(롤백).')
+param aiGatewayRouting bool
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -561,6 +563,8 @@ module functions 'modules/functions.bicep' = {
       MOCKAPI_URL: mockapiUrl
       SERVICEBUS_FQDN: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
       KEYVAULT_URI: keyVault.outputs.uri
+      AI_GATEWAY: gatewaySettings.AI_GATEWAY
+      AI_GATEWAY_URL: gatewaySettings.AI_GATEWAY_URL
     }, serviceBusEnabled ? {
       // Service Bus 트리거(관리 ID). pause 상태에서는 트리거를 등록하지 않으므로 두지 않습니다.
       ServiceBusConnection__fullyQualifiedNamespace: '${names.sb}.servicebus.windows.net'
@@ -635,6 +639,7 @@ var smokePrivateHosts = concat([
   '${names.kv}${environment().suffixes.keyvaultDns}'
   '${names.acr}${environment().suffixes.acrLoginServer}'
   '${names.func}.azurewebsites.net'
+  '${names.apim}.azure-api.net'
 ], serviceBusEnabled ? [ '${names.sb}.servicebus.windows.net' ] : [])
 
 module smokeJob 'modules/smoke-job.bicep' = {
@@ -709,6 +714,8 @@ module evalJob 'modules/eval-job.bicep' = {
       { name: 'EVAL_EMIT_LOGS', value: '1' }
       { name: 'EVAL_BLOB_ACCOUNT_URL', value: stData.outputs.blobEndpoint }
       { name: 'EVAL_BLOB_CONTAINER', value: evalReportsContainer }
+      { name: 'AI_GATEWAY', value: gatewaySettings.AI_GATEWAY }
+      { name: 'AI_GATEWAY_URL', value: gatewaySettings.AI_GATEWAY_URL }
     ]
   }
 }
@@ -770,6 +777,24 @@ module apim 'modules/apim.bicep' = {
     gateways: gateways
   }
   dependsOn: [ dns ]
+}
+
+module gatewayConnections 'modules/foundry/gateway-connections.bicep' = {
+  name: 'gateway-connections'
+  params: {
+    accountName: aiAccount.outputs.name
+    projectName: aiProject.outputs.name
+    apimName: apim.outputs.name
+    connections: map(gateways, g => g.name)
+    modelDeployments: modelDeployments
+  }
+  // caphost 프로비저닝 중이거나 다른 연결 PUT과 겹치면 409가 나므로 뒤에 둡니다.
+  dependsOn: [ aiCapHost, opsInsights ]
+}
+
+var gatewaySettings = {
+  AI_GATEWAY: aiGatewayRouting ? 'apim' : 'off'
+  AI_GATEWAY_URL: 'https://${names.apim}.azure-api.net'
 }
 
 module opsInsights 'modules/ops-insights.bicep' = {

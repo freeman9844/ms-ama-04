@@ -1,3 +1,8 @@
+import json
+import re
+
+from tests.infra.test_console import INFRA
+
 APIM = "Microsoft.ApiManagement/service"
 NSG = "Microsoft.Network/networkSecurityGroups"
 COGNITIVE_USER = "a97b65f3-24c7-4388-baec-2e87135dc908"
@@ -131,3 +136,64 @@ def test_products_policies_and_subscriptions(closed):
     for name, sub in subs.items():
         assert sub["properties"]["scope"].endswith(f"/products/{name}")
         assert sub["properties"]["displayName"] == name
+
+
+CONNECTION = "Microsoft.CognitiveServices/accounts/projects/connections"
+JOB = "Microsoft.App/jobs"
+
+
+def _gateway_connections(exp) -> dict[str, dict]:
+    return {k: v["properties"] for k, v in _by_leaf(exp, CONNECTION).items() if k.startswith("gw-")}
+
+
+def test_gateway_connections(closed):
+    conns = _gateway_connections(closed)
+    assert set(conns) == set(GATEWAYS)
+    for props in conns.values():
+        assert props["category"] == "ApiManagement"
+        assert re.fullmatch(r"https://apim-[a-z0-9]+\.azure-api\.net/openai", props["target"])
+        assert props["authType"] == "ApiKey"
+        assert props["isSharedToAll"] is True
+        meta = props["metadata"]
+        assert meta["deploymentInPath"] == "true"
+        assert meta["inferenceAPIVersion"] == "2025-04-01-preview"
+        # PSRule은 '['로 시작하는 문자열을 ARM 리터럴 이스케이프('[[')로 펼칩니다.
+        models = meta["models"].removeprefix("[") if meta["models"].startswith("[[") else meta["models"]
+        assert {m["name"] for m in json.loads(models)} == {"gpt-5.4", "gpt-5.4-mini"}
+
+
+def test_connection_keys_from_list_secrets():
+    text = (INFRA / "modules" / "foundry" / "gateway-connections.bicep").read_text(encoding="utf-8")
+    assert "listSecrets(resourceId('Microsoft.ApiManagement/service/subscriptions', apimName, c)" in text
+    assert "@batchSize(1)" in text
+
+
+def test_no_secret_outputs():
+    for path in (INFRA / "modules" / "apim.bicep", INFRA / "modules" / "foundry" / "gateway-connections.bicep"):
+        outputs = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("output ")]
+        assert not [line for line in outputs if re.search(r"key|secret|listSecrets", line, re.IGNORECASE)], path
+
+
+def _func_settings(exp) -> dict[str, str]:
+    site = exp.one("Microsoft.Web/sites", "func-")
+    return {s["name"]: s["value"] for s in site["properties"]["siteConfig"]["appSettings"]}
+
+
+def _eval_env(exp) -> dict[str, str]:
+    container = exp.one(JOB, "job-eval")["properties"]["template"]["containers"][0]
+    return {e["name"]: e.get("value") for e in container["env"]}
+
+
+def test_gateway_switch_in_app_settings(closed, variant):
+    on = _func_settings(closed)
+    assert on["AI_GATEWAY"] == "apim"
+    assert re.fullmatch(r"https://apim-[a-z0-9]+\.azure-api\.net", on["AI_GATEWAY_URL"])
+    assert _func_settings(variant)["AI_GATEWAY"] == "off"
+    assert _eval_env(closed)["AI_GATEWAY"] == "apim"
+    assert _eval_env(variant)["AI_GATEWAY"] == "off"
+    assert _eval_env(closed)["AI_GATEWAY_URL"] == on["AI_GATEWAY_URL"]
+
+
+def test_azd_routing_switch(expand_azd):
+    assert expand_azd({}).root_parameters()["aiGatewayRouting"] is True
+    assert expand_azd({"AI_GATEWAY_ROUTING": "false"}).root_parameters()["aiGatewayRouting"] is False
