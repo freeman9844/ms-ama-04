@@ -157,3 +157,12 @@ def test_case_error_and_judge_failure_do_not_stop_the_suite(monkeypatch):
     config = out["configs"][models.mini]
     assert (config["cases"], config["assessed"], config["judge_mean"]) == (2, 1, None)
     assert config["final_grounding_rate"] is not None
+
+
+def test_report_shows_gateway_line(tmp_path):
+    assert main(["--fake", "--suite", "classify", "--out", str(tmp_path)], env={}, log=lambda m: None) == 0
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["gateway"] == {"enabled": False, "content_blocked": 0, "rate_limited": 0}
+    assert "- AI 게이트웨이: 꺼짐" in (tmp_path / "report.md").read_text(encoding="utf-8")
+    on = report.render_markdown({**summary, "gateway": {"enabled": True, "content_blocked": 1, "rate_limited": 2}})
+    assert "- AI 게이트웨이: 켜짐 (콘텐츠 차단 1건, 토큰 한도 2건)" in on

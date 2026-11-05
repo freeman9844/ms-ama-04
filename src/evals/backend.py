@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from agents.gateway import decision_base
 from agents.runtime import FoundryAgents
 from agents.txn_classify import DecisionClient
 from evals.fake import FakeAzure
@@ -98,7 +99,7 @@ def azure_backend(meter: Meter, models: Models, env: Mapping[str, str] = os.envi
     return Backend(
         agents=FoundryAgents(env["AI_PROJECT_ENDPOINT"], CachedToken(credential, FOUNDRY_SCOPE), client=client),
         decider=DecisionClient(
-            env["AI_ACCOUNT_ENDPOINT"], models.decision, CachedToken(credential, COGNITIVE_SCOPE), client=client
+            decision_base(env), models.decision, CachedToken(credential, COGNITIVE_SCOPE), client=client
         ),
         client=client,
         info={"mode": "azure", "project_endpoint": env["AI_PROJECT_ENDPOINT"]},

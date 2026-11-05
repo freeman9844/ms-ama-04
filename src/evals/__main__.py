@@ -14,7 +14,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from evals import datasets, report, transport
+from agents.gateway import gateway_enabled
+from evals import datasets, gateway_probe, report, transport
 from evals.backend import Backend, Models, azure_backend, fake_backend
 from evals.judge import Judge
 from evals.metering import Meter
@@ -79,6 +80,29 @@ def run_suites(names: list[str], *, backend: Backend, meter: Meter, runner: Eval
     return results, errors
 
 
+def run_gateway_probe(env: Mapping[str, str], *, runner: EvalRunner, meter: Meter, backend: Backend, models: Models,
+                      run_id: str, out_dir: Path, emit: bool, log: Callable[[str], None]) -> int:
+    """EVAL_TASK=gateway-probe: 프로브만 돌리고 probe.json을 남긴다(평가 리포트는 만들지 않음)."""
+    mode = env.get("PROBE_MODE", "all")
+    cleanup: dict[str, int] | None = None
+    try:
+        result = gateway_probe.run_probe(runner, meter, model=models.mini, mode=mode)
+    finally:
+        try:
+            cleanup = runner.cleanup()
+        except Exception as e:  # noqa: BLE001
+            log(f"[probe] 대화 정리 실패: {type(e).__name__}")
+        backend.close()
+    result = {**result, "run_id": run_id, "gateway": runner.gateway_summary(), "cleanup": cleanup}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / gateway_probe.OUTPUT
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"[probe] {path} " + ", ".join(f"{k}={v['reproduced']}" for k, v in result["checks"].items()))
+    if emit:
+        log(f"[probe] 로그 조각 {transport.emit(run_id, [path], log)}줄")
+    return 0
+
+
 def main(argv: list[str] | None = None, env: Mapping[str, str] = os.environ,
          log: Callable[[str], None] = print) -> int:
     args = parse(argv, env)
@@ -89,7 +113,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] = os.environ,
     meter = Meter(prices, args.budget)
     models = Models.from_env(env)
     backend = fake_backend(meter, models) if args.fake else azure_backend(meter, models, env)
-    runner = EvalRunner(backend.agents, meter)
+    runner = EvalRunner(backend.agents, meter, gateway=gateway_enabled(env) and not args.fake)
+    if env.get("EVAL_TASK") == gateway_probe.TASK:
+        return run_gateway_probe(env, runner=runner, meter=meter, backend=backend, models=models, run_id=run_id,
+                                 out_dir=out_dir, emit=args.emit, log=log)
     # 가명 키는 실행마다 새로 만든다(평가 결과는 가명값을 저장하지 않는다).
     key = secrets.token_bytes(32)
     errors: list[str] = []
@@ -109,6 +136,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] = os.environ,
         models={"full": models.full, "mini": models.mini, "decision": models.decision, "reviewer": models.reviewer,
                 "judge": models.judge},
         prices_source=prices.get("_source", ""), suites=results, by_model=meter.by_model(), cleanup=cleanup, errors=errors,
+        gateway=runner.gateway_summary(),
     )
     paths = report.write(out_dir, summary, meter.records)
     log(f"[eval] 리포트 {out_dir} (partial={summary['partial']}, 실패 {sum(summary['failure_counts'].values())}건)")
