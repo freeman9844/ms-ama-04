@@ -30,9 +30,11 @@ class Spec:
 class Inner:
     def __init__(self):
         self.seen: list[Spec] = []
+        self.kwargs: list[dict] = []
 
     def run(self, spec, input_text, handlers, **kwargs):
         self.seen.append(spec)
+        self.kwargs.append(kwargs)
         return AgentRun(spec.name, "1", "conv-1", None, [], 0, 0, model=spec.model)
 
     def delete_conversation(self, conversation_id):
@@ -81,6 +83,15 @@ def test_runner_leaves_direct_agents_and_delegates():
     runner.run(Spec(JUDGE_AGENT, "gpt-5.4"), "t", {})
     assert inner.seen[0].model == "gpt-5.4"
     assert runner.delete_conversation("c") == "deleted"
+
+
+def test_runner_raises_round_limit_for_routed_agents_only():
+    inner = Inner()
+    runner = GatewayRunner(inner)
+    runner.run(Spec("early-warning-investigator", "gpt-5.4"), "t", {})
+    runner.run(Spec("early-warning-investigator", "gpt-5.4"), "t", {}, max_rounds=3)
+    runner.run(Spec(JUDGE_AGENT, "gpt-5.4"), "t", {})
+    assert inner.kwargs == [{"max_rounds": 12}, {"max_rounds": 3}, {}]
 
 
 def test_connections_match_bicep_gateways():

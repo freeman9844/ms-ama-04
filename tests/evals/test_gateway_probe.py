@@ -15,10 +15,12 @@ from evals.runner import EvalRunner
 class Agents:
     def __init__(self, errors=()):
         self.specs = []
+        self.kwargs = []
         self.errors = list(errors)
 
-    def run(self, spec, text, handlers):
+    def run(self, spec, text, handlers, **kwargs):
         self.specs.append(spec)
+        self.kwargs.append(kwargs)
         error = self.errors.pop(0) if self.errors else None
         if error:
             raise error
@@ -55,6 +57,17 @@ def test_eval_runner_judge_and_gateway_off_call_directly():
         EvalRunner(agents, meter, gateway=True).run(dataclasses.replace(spec, name="quality-judge"), "t", {})
         EvalRunner(agents, meter).run(spec, "t", {})
     assert [s.model for s in agents.specs] == ["gpt-5.4", "gpt-5.4"]
+
+
+def test_eval_runner_raises_round_limit_only_for_routed_agents():
+    agents = Agents()
+    meter = _meter()
+    spec = gateway_probe.probe_spec("gpt-5.4-mini")
+    with meter.scope(suite="s", config="c", case="k"):
+        EvalRunner(agents, meter, gateway=True).run(spec, "t", {})
+        EvalRunner(agents, meter, gateway=True).run(dataclasses.replace(spec, name="quality-judge"), "t", {})
+        EvalRunner(agents, meter).run(spec, "t", {})
+    assert agents.kwargs == [{"max_rounds": 12}, {}, {}]
 
 
 def test_run_probe_reproduces_block_and_throttle():

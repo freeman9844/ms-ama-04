@@ -8,7 +8,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from agents.gateway import DIRECT_AGENTS, gateway_model
+from agents.gateway import DIRECT_AGENTS, GATEWAY_MAX_ROUNDS, gateway_model
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from evals.metering import Meter
 
@@ -17,7 +17,8 @@ GATEWAY_ERRORS = ("content_blocked", "rate_limited")
 
 
 class Agents(Protocol):
-    def run(self, spec: AgentSpec, input_text: str, handlers: Mapping[str, ToolHandler]) -> AgentRun: ...
+    def run(self, spec: AgentSpec, input_text: str, handlers: Mapping[str, ToolHandler], *,
+            max_rounds: int = ...) -> AgentRun: ...
     def delete_container(self, container_id: str) -> bool: ...
     def delete_conversation(self, conversation_id: str) -> str: ...
 
@@ -32,11 +33,12 @@ class EvalRunner:
         self.runs: list[dict[str, Any]] = []
         self.conversations: list[str] = []
 
-    def _model(self, spec: AgentSpec) -> str:
+    def _routed(self, spec: AgentSpec) -> bool:
         # 운영과 같은 게이트웨이 연결로 잰다. 채점자는 직접 호출(운영 TPM을 쓰지 않음).
-        if self._gateway and spec.name not in DIRECT_AGENTS:
-            return gateway_model(spec.name, spec.model)
-        return spec.model
+        return self._gateway and spec.name not in DIRECT_AGENTS
+
+    def _model(self, spec: AgentSpec) -> str:
+        return gateway_model(spec.name, spec.model) if self._routed(spec) else spec.model
 
     def run(self, spec: AgentSpec, input_text: str, handlers: Mapping[str, ToolHandler]) -> AgentRun:
         named = dataclasses.replace(spec, name=eval_agent_name(spec.name, spec.model), model=self._model(spec))
@@ -45,7 +47,10 @@ class EvalRunner:
         self.runs.append(entry)
         with self._meter.scope(model=spec.model):
             try:
-                run = self._agents.run(named, input_text, handlers)
+                if self._routed(spec):
+                    run = self._agents.run(named, input_text, handlers, max_rounds=GATEWAY_MAX_ROUNDS)
+                else:
+                    run = self._agents.run(named, input_text, handlers)
             except AgentError as e:
                 if e.conversation_id:
                     self.conversations.append(e.conversation_id)

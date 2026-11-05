@@ -27,6 +27,8 @@ PROBE_AGENT = "gateway-probe"
 # 평가 채점자는 운영 경로가 아니므로 게이트웨이를 거치지 않는다(운영 TPM을 쓰지 않게).
 DIRECT_AGENTS = frozenset({"quality-judge"})
 DECISION_PATH = "/decision"
+# 게이트웨이 경로(chat completions)에서는 모델이 한 턴에 도구를 적게 불러 라운드가 늘어난다(Task 11 실측) — 직접 호출 기본값 6의 두 배.
+GATEWAY_MAX_ROUNDS = 12
 
 
 def gateway_enabled(env: Mapping[str, str]) -> bool:
@@ -57,6 +59,7 @@ class GatewayRunner:
         if spec.name in DIRECT_AGENTS:
             return self._inner.run(spec, input_text, handlers, **kwargs)
         routed = dataclasses.replace(spec, model=gateway_model(spec.name, spec.model))
+        kwargs.setdefault("max_rounds", GATEWAY_MAX_ROUNDS)
         run = self._inner.run(routed, input_text, handlers, **kwargs)
         return dataclasses.replace(run, model=spec.model) if isinstance(run, AgentRun) else run
 
