@@ -70,6 +70,17 @@ def test_apim_logger_uses_managed_identity(closed):
     assert diag["properties"]["frontend"]["request"]["body"]["bytes"] == 0
 
 
+def test_gateway_logs_to_azure_monitor(closed):
+    diag = _by_leaf(closed, "Microsoft.ApiManagement/service/diagnostics")["azuremonitor"]["properties"]
+    assert diag["loggerId"].endswith("/loggers/azuremonitor")
+    assert diag["logClientIp"] is False
+    for side in ("frontend", "backend"):
+        for direction in ("request", "response"):
+            part = diag[side][direction]
+            assert part["headers"] == [], f"{side}.{direction} headers"
+            assert part["body"]["bytes"] == 0, f"{side}.{direction} body"
+
+
 def test_apim_private_a_record(closed):
     record = closed.one("Microsoft.Network/privateDnsZones/A", "apim-")
     assert record["name"].startswith("azure-api.net/apim-")

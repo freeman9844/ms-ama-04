@@ -99,6 +99,36 @@ resource diagnostic 'Microsoft.ApiManagement/service/diagnostics@2024-05-01' = {
   }
 }
 
+// ApiManagementGatewayLogs는 azuremonitor 진단이 있어야 채워집니다. 헤더·본문은 남기지 않습니다.
+resource azmonLogger 'Microsoft.ApiManagement/service/loggers@2024-05-01' = {
+  parent: apim
+  name: 'azuremonitor'
+  properties: {
+    loggerType: 'azureMonitor'
+    isBuffered: true
+  }
+}
+
+resource azmonDiagnostic 'Microsoft.ApiManagement/service/diagnostics@2024-05-01' = {
+  parent: apim
+  name: 'azuremonitor'
+  properties: {
+    loggerId: azmonLogger.id
+    logClientIp: false
+    verbosity: 'information'
+    sampling: { samplingType: 'fixed', percentage: 100 }
+    frontend: {
+      request: { headers: [], body: { bytes: 0 } }
+      response: { headers: [], body: { bytes: 0 } }
+    }
+    backend: {
+      request: { headers: [], body: { bytes: 0 } }
+      response: { headers: [], body: { bytes: 0 } }
+    }
+  }
+  dependsOn: [ toLaw ]
+}
+
 resource toLaw 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: 'to-law'
   scope: apim
