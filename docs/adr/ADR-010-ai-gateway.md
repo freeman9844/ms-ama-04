@@ -10,7 +10,7 @@
 - APIM Developer(내부 VNet 모드, `snet-apim`)를 게이트웨이로 두고, 에이전트마다 제품·구독·Foundry 연결(`gw-*`)을 하나씩 만든다.
 - 정책 순서: 콘텐츠 안전(Prompt Shields) → 제품별 `llm-token-limit` → MI 인증 → `llm-emit-token-metric`(agent·model 차원).
 - 앱은 `AI_GATEWAY=apim`이면 모델 이름을 `gw-<agent>/<model>`로 바꿔 호출한다(`GatewayRunner`). 채점자(quality-judge)는 직접 호출한다.
-- 429·403은 `GatewayThrottled`·`GatewayBlocked`로 구분해 사용량 `gateway` 태그와 콘솔 배지로 남긴다.
+- 429·403은 `GatewayThrottled`·`GatewayBlocked`로 구분해 사용량 `gateway` 태그(`rate_limited`·`content_blocked`)로 남기고, 콘솔 상세 배지는 콘텐츠 차단(403)만 표시한다. 429는 태그와 게이트웨이 로그로만 본다.
 - 예외: 채점자(quality-judge)는 직접 호출(운영 TPM을 쓰지 않음), Decision-1 decision API에는 콘텐츠 안전을 걸지 않는다(입력이 거래 적요뿐이고 Prompt Shields는 채팅 형식 대상).
 - 롤백은 `AI_GATEWAY_ROUTING=false` 재프로비저닝 한 번이다.
 

@@ -119,7 +119,8 @@ flowchart TB
   operator -.->|배포 창: public 허용| fn
   appsweb --> appsint
   fn --> appsint
-  agents --> apimnet```
+  agents --> apimnet
+```
 
 평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경이지만 상시 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막으며(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원), 배포 창 토글과 무관하게 열려 있다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
 
@@ -212,7 +213,7 @@ flowchart LR
 | Mock API | 데이터 수집 실패 | 동의 범위 안 재시도 + 안전망 수집. 불완전이면 "데이터 불완전"으로 심사역에게 넘김 | source-flaky 회복: mockapi 호출 일부 실패에도 전 신청 `awaiting_officer` 복귀(`ops/reports/fault-20261102111447/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Policy Engine | 판정 불가 | fail-closed: 판정 없이 진행 안 함. `policy_unavailable`+`assessment_unavailable` 플래그, 심사역 판단으로 넘김. 호출에 프로세스 단위 서킷(`src/orchestrator/journey/circuit.py`) | policy-down: 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`(`ops/reports/fault-20261102111750/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Service Bus | L4 이벤트 지연 | 세션 구독(`requiresSession`)·중복 감지(멱등 지원)·만료 dead-letter. 평상시 pause 시 `monitoring-replay` 큐 인라인 처리 | 세션·중복 감지·`deadLetteringOnMessageExpiration` 설정 `infra/modules/servicebus.bicep` |
-| AI 게이트웨이(APIM) | 모든 LLM 호출 실패·지연 | 429는 `GatewayThrottled`, 403은 `GatewayBlocked`로 구분해 단계 `degraded`·사용량 `gateway` 태그로 남기고 심사역 단계로 넘김. 장애 시 `AI_GATEWAY_ROUTING=false`로 직접 호출 복귀 | 프로브 재현 `eval/reports/<실행>/probe.json`(Task 11): 콘텐츠 차단 `job-eval-aw9qy70`, 토큰 한도 `job-eval-5zu5jnw` |
+| AI 게이트웨이(APIM) | 모든 LLM 호출 실패·지연 | 429는 `GatewayThrottled`, 403은 `GatewayBlocked`로 구분해 사용량 `gateway`(`rate_limited`·`content_blocked`) 태그로 남긴다. 단계 결과는 단계 규칙을 따른다: 신용 평가는 평가가 비면 `failed`(부하 실측에서 `gw-analyst` 429로 1건), 안전망·폴백이 있는 단계는 폴백으로 이어진다. 콘솔 배지는 콘텐츠 차단(403)만 표시한다. 장애 시 `AI_GATEWAY_ROUTING=false`로 직접 호출 복귀 | 프로브 재현 `eval/reports/<실행>/probe.json`(Task 11): 콘텐츠 차단 `job-eval-aw9qy70`, 토큰 한도 `job-eval-5zu5jnw` |
 
 **한계:** 서킷 브레이커는 프로세스(Flex 인스턴스) 단위다(`src/orchestrator/journey/circuit.py`). Flex가 여러 인스턴스로 확장되면 서킷 상태가 인스턴스별로 따로 쌓여 전역 open이 보장되지 않는다. 분산 서킷은 운영 전환 과제다([ADR-001](adr/ADR-001-orchestration.md) 재검토 조건).
 

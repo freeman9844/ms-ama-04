@@ -4,7 +4,7 @@
 
 > **합성 데이터 기준.** 실제 마이데이터·홈택스·PG API 대신 합성 데이터와 Mock API를 쓴다. 통제의 실측 수치는 `eval/reports/job-eval-9imbutm/report.md`와 [runbook/deploy-history.md](../runbook/deploy-history.md)의 실행 기록에서만 인용한다.
 
-> 상위 Spec 대비: 설계 Spec은 간접 프롬프트 주입 대응으로 **Content Safety Prompt Shields**를 들었으나, 이 저장소에는 Prompt Shields가 구현되어 있지 않다(아래 AI 위험 `AI8`). 간접 주입은 "LLM 출력은 추천일 뿐이고 결정론적 Policy Engine과 심사역이 판정한다"는 설계로만 완화한다.
+> 상위 Spec 대비: 설계 Spec은 간접 프롬프트 주입 대응으로 **Content Safety Prompt Shields**를 들었고, 이제 APIM AI 게이트웨이가 라우팅된 에이전트 호출에 적용한다(프롬프트 10,000자 이하일 때만 Prompt Shields, 그보다 길면 카테고리 검사와 모델 배포 필터 `Microsoft.DefaultV2`만. Decision-1 decision API와 채점자 quality-judge에는 미적용, [ADR-010](../adr/ADR-010-ai-gateway.md), 아래 AI 위험 `AI8`). 그래도 간접 주입은 "LLM 출력은 추천일 뿐이고 결정론적 Policy Engine과 심사역이 판정한다"는 설계가 근간이다.
 
 ## 상태 범례
 
@@ -13,6 +13,7 @@
 | `검증` | 통제에 테스트 또는 실측 보고서 근거가 있다(증거 칸에 `tests/…` 또는 `…/report.md`·`deploy-history.md` 경로). |
 | `구현` | 코드·IaC에 통제가 있으나 전용 테스트·실측은 없다. |
 | `미구현` | 상위 Spec이 요구했으나 as-built에 없다. |
+| `부분 완화` | 통제가 일부 경로·조건에만 적용되고 남은 공백이 있다(해당 행에 관련 ADR 명시). |
 | `데모 완화` | 운영 수준 통제를 데모 제약으로 약화했다(해당 행에 관련 ADR 명시, 예: 인증 [ADR-007](../adr/ADR-007-demo-auth-mode.md), 모델 처리 위치 [ADR-002](../adr/ADR-002-model-deployment.md)). |
 
 ## 신뢰 경계
@@ -92,7 +93,7 @@ flowchart TB
 | AI5 | PII 유출(트레이스) | Foundry 대화·트레이스에 입력 잔존 | Foundry | 실행 후 대화 삭제, 입력은 가명화 값 원칙 — 트레이스 `genAIContent`에 프롬프트는 남음(잔여 위험) | `src/agents/runtime.py:201`, `docs/runbook/deploy-history.md:606` | 데모 완화 |
 | AI6 | PII 유출(보고서) | 평가·운영 보고서에 원문 유출 | 보고서 | 값은 기록하지 않고 종류만 남김, 오류는 `safe_detail` | `eval/reports/job-eval-9imbutm/report.md:88`, `src/orchestrator/journey/metering.py:30` | 검증 |
 | AI7 | 과도한 자율성 | 에이전트가 범위 밖 행동·자금 이동 | 에이전트 런타임 | 도구 allowlist, 추심은 승인 스크립트 ID만, 최종 신용 결정은 LLM 밖 Policy Engine | `src/agents/runtime.py:163`, `src/agents/collections.py:70`, [ADR-003](../adr/ADR-003-deterministic-policy.md) | 검증 |
-| AI8 | 주입 방어 공백 | Content Safety Prompt Shields 미도입 | 모델 입력 | 상위 Spec은 요구했으나 as-built에 없음 — 설계상 "출력은 추천, 판정은 정책·심사역"에만 의존 | `src/agents/`, `infra/modules/foundry/` | 미구현 |
+| AI8 | 주입 방어 공백 | Content Safety Prompt Shields 적용 범위 제한 | 모델 입력 | APIM AI 게이트웨이가 라우팅된 에이전트 호출에 Prompt Shields 적용(프롬프트 10,000자 이하일 때만, 초과 시 카테고리 검사 + 모델 배포 필터 `Microsoft.DefaultV2`만). Decision-1 decision API와 quality-judge(직접 호출)에는 미적용. 그 밖에는 설계상 "출력은 추천, 판정은 정책·심사역"에 의존([ADR-010](../adr/ADR-010-ai-gateway.md)) | `infra/modules/apim.bicep`, `src/agents/gateway.py` | 부분 완화 |
 | AI9 | 모델 처리 위치 | Global Standard 추론이 국외 리전에서 처리 | Foundry 추론 | 처리 범위 비보장, 가명화·최소 전송·국내 저장으로 완화, SKU는 Bicep 파라미터 | [ADR-002](../adr/ADR-002-model-deployment.md), `src/shared/pseudonymize.py:69` | 데모 완화 |
 
 > 위 주입 측정은 모두 **간접**(적요·이의 본문) 경로다. 운영자·차주가 모델에 직접 지시하는 **직접 프롬프트 주입** 전용 테스트는 없고, 간접 주입과 같은 "출력은 추천, 판정은 정책·심사역" 설계로만 완화한다. 저항률 100%는 판별 가능한 2건 기준이며, 쌍 1회 실행이라 LLM 변동과 구분되지 않는다(`eval/reports/job-eval-9imbutm/report.md:74`).
@@ -137,6 +138,6 @@ flowchart TB
 - **Foundry 트레이스 잔존:** 대화는 삭제하지만 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 입력이 가명화 값뿐이라는 원칙에 기댄다(`docs/runbook/deploy-history.md:606`).
 - **Durable 실행 기록:** 신청 진행 상태는 Durable Task 저장소에 남고 삭제하지 않는다. 활동 입력의 동의 토큰도 함께 남는다([한계](../limitations.md#동의삭제이의제기)).
 - **서킷 인스턴스별:** 서킷 브레이커는 프로세스·인스턴스별이라 전역 상태를 공유하지 않는다(`src/orchestrator/journey/adapters.py:96`).
-- **Prompt Shields 미구현:** 간접 주입 방어 레이어가 없어 `AI8`의 공백이 남는다.
+- **Prompt Shields 적용 범위:** 게이트웨이가 10,000자 이하 프롬프트에만 Prompt Shields를 걸고, 그보다 긴 프롬프트·Decision-1·채점자 직접 호출에는 걸지 않아 `AI8`의 공백이 일부 남는다([ADR-010](../adr/ADR-010-ai-gateway.md)).
 
 잔여 위험의 운영 전환 과제와 as-built 한계 전체는 [한계와 운영 전환](../limitations.md)에 정리했다.

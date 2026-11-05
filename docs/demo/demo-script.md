@@ -98,6 +98,6 @@
 
 ### 429/콘텐츠 차단이 보이면
 
-1. 신청 상세의 `AI 게이트웨이` 줄에 `콘텐츠 차단 · <단계>` 배지가 있으면 그 단계의 모델 호출이 콘텐츠 안전에 막힌 것입니다. 토큰 한도(429)는 단계가 `degraded`로 남고 사용량의 `gateway` 태그로 구분됩니다. 두 경우 모두 심사역 단계로 넘어가므로 흐름은 멈추지 않습니다.
+1. 신청 상세의 `AI 게이트웨이` 줄에 `콘텐츠 차단 · <단계>` 배지가 있으면 그 단계의 모델 호출이 콘텐츠 안전(403)에 막힌 것입니다. 토큰 한도(429)는 콘솔 배지가 없고 사용량의 `gateway=rate_limited` 태그와 게이트웨이 로그(`ApiManagementGatewayLogs`)에서만 보입니다. 단계 결과는 단계마다 다릅니다: 신용 평가가 429로 평가를 못 만들면 그 단계가 `failed`(실측 부하에서 1건)이고, 안전망·폴백이 있는 단계는 폴백으로 이어집니다.
 2. 프로브로 같은 증상을 다시 만들어 확인합니다: `python -m ops gateway probe --mode throttle|unsafe`, 결과는 `eval/reports/<실행>/probe.json`. 재현이 안 되면 종료 코드 2입니다.
 3. 데모를 계속해야 하면 게이트웨이를 끄고 직접 호출로 돌립니다: `azd env set AI_GATEWAY_ROUTING false` → `azd provision --no-prompt`(절차는 [배포](../runbook/deploy.md#ai-게이트웨이-켜기끄기)). 필요하면 [fallback](fallback.md)의 전환 대사를 씁니다.
