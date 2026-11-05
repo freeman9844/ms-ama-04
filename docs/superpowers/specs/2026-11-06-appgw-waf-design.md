@@ -70,7 +70,7 @@ Key Vault는 항상 공용 접근 Disabled다. 구독의 MCAPS 정책(`MCAPSGovD
 
 - **`CONSOLE_URL`:** `https://amalend-<접미사>.koreacentral.cloudapp.azure.com`(App Gateway). `CONSOLE_APP_NAME`은 그대로다.
 - **`console_gate`:** `CONSOLE_URL`(App Gateway)을 확인한다. 자체 서명이라 이 확인에서만 TLS 검증을 끄고, 그 사실을 결과 문구에 적는다. 403은 "WAF가 현재 IP를 막았다(CONSOLE_IP 갱신 필요)"로 안내한다. App Gateway가 아직 없으면(인증서 대기) 그 상태를 알린다.
-- **Easy Auth 복원 경로(ADR-007):** 앱 등록 리디렉션 URI를 App Gateway FQDN으로 바꾸고, `authConfigs`에 `httpSettings.forwardProxy.convention: Standard`를 둬 `X-Forwarded-Host`를 따르게 한다. 데모에서는 꺼진 채라 동작은 바뀌지 않는다.
+- **Easy Auth 복원 경로(ADR-007):** 앱 등록 리디렉션 URI를 App Gateway FQDN으로 바꾸고, `authConfigs`에 `httpSettings.forwardProxy`(`convention: Custom`, `customHostHeaderName: X-Original-Host`, `customProtoHeaderName: X-Forwarded-Proto`)를 둬 App Gateway가 넣는 원래 호스트를 따르게 한다(App Gateway v2는 `X-Forwarded-Host`를 보내지 않고 `X-Original-Host`를 보낸다). 데모에서는 꺼진 채라 동작은 바뀌지 않는다.
 - **`CONSOLE_IP`:** 지금처럼 `window open`이 갱신하고 `window close`는 유지한다. 반영 대상만 Container App ingress에서 WAF 정책으로 바뀐다.
 - **VNet 안 smoke:** 바꾸지 않는다.
 
