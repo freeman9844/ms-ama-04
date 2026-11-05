@@ -156,6 +156,13 @@ def test_host_json():
     assert host["extensions"]["queues"]["messageEncoding"] == "none"
 
 
+def test_host_json_polls_queues_fast():
+    # 기본값(큐 1분, Durable 30초)이면 한가한 인스턴스가 심사역 결정을 늦게 집는다.
+    ext = json.loads((ROOT / "host.json").read_text(encoding="utf-8"))["extensions"]
+    assert ext["queues"]["maxPollingInterval"] == "00:00:02"
+    assert ext["durableTask"]["storageProvider"]["maxQueuePollingInterval"] == "00:00:02"
+
+
 def test_requirements_pin_runtime_sdks():
     lines = (ROOT / "requirements.txt").read_text(encoding="utf-8").split()
     names = {line.split("==")[0] for line in lines}

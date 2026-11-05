@@ -54,7 +54,8 @@
 | ACR Premium | 약 $50 | Private Endpoint 필요 |
 | API Management Developer | 약 $51 | AI 게이트웨이, SLA 없음([ADR-010](adr/ADR-010-ai-gateway.md)). 위 측정 고정비는 도입 전 값이라 이 금액이 들어 있지 않다 |
 | Private Endpoint 약 17개 | 약 $125 | 개당 약 $7.3 |
-| 모델·Functions·Container Apps·Cosmos serverless | 사용량 기반 | 유휴 시 거의 0 |
+| Functions Flex always ready 3개 | 약 $62 | `durable`·`officer_decision`·`start_application` 그룹 각 1개(2GB × $0.000004/GB-s 대기 단가). 심사역 결정·신청 접수의 콜드 스타트를 없앤다. 위 측정 고정비에는 들어 있지 않다 |
+| 모델·Functions(always ready 외)·Container Apps·Cosmos serverless | 사용량 기반 | 유휴 시 거의 0 |
 | Application Gateway WAF v2 | 미구축(약 $365) | 운영 아키텍처 문서에만 기술 |
 
 ## 물량별 단가

@@ -26,6 +26,12 @@ def test_function_app_runtime_identity_and_vnet(closed):
     assert storage["authentication"]["type"] == "UserAssignedIdentity"
 
 
+def test_function_app_keeps_decision_path_warm(closed):
+    scale = closed.one(SITE, "func-")["properties"]["functionAppConfig"]["scaleAndConcurrency"]
+    ready = {r["name"]: r["instanceCount"] for r in scale["alwaysReady"]}
+    assert ready == {"durable": 1, "function:officer_decision": 1, "function:start_application": 1}
+
+
 def test_function_app_uses_identity_based_host_storage(closed):
     settings = _settings(closed.one(SITE, "func-"))
     assert settings["AzureWebJobsStorage__accountName"].startswith("stfn")
