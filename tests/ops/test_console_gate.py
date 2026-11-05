@@ -6,8 +6,9 @@ from ops.azcli import OpsError
 from ops.cli import main
 from ops.console_gate import check_console_gate, urllib_fetch
 
-ENV = {"CONSOLE_URL": "https://ca-console.example.koreacentral.azurecontainerapps.io",
-       "CONSOLE_CLIENT_ID": "22222222-2222-2222-2222-222222222222"}
+ENV = {"CONSOLE_URL": "https://amalend-abc.koreacentral.cloudapp.azure.com",
+       "CONSOLE_CLIENT_ID": "22222222-2222-2222-2222-222222222222",
+       "APPGW_CERT_SECRET_ID": "https://kvx.vault.azure.net/secrets/appgw-console"}
 LOGIN = ("https://login.microsoftonline.com/tenant-1/oauth2/v2.0/authorize?response_type=id_token"
          "&client_id=22222222-2222-2222-2222-222222222222&redirect_uri=x")
 
@@ -91,6 +92,29 @@ def test_gate_requires_console_outputs():
         check_console_gate({}, lambda url: (302, LOGIN))
 
 
+def test_gate_requires_app_gateway_certificate():
+    env = {k: v for k, v in ENV.items() if k != "APPGW_CERT_SECRET_ID"}
+    with pytest.raises(OpsError, match="App Gateway.*window open"):
+        check_console_gate(env, lambda url: pytest.fail("게이트웨이가 없으면 호출하지 않습니다"))
+
+
+def test_urllib_fetch_skips_tls_verification_for_self_signed_gateway(monkeypatch):
+    import ssl
+    import urllib.error
+    import urllib.request
+    handlers = []
+
+    class Opener:
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *h: handlers.extend(h) or Opener())
+    assert urllib_fetch(ENV["CONSOLE_URL"] + "/") == (403, None)
+    [https] = [h for h in handlers if isinstance(h, urllib.request.HTTPSHandler)]
+    assert https._context.verify_mode == ssl.CERT_NONE
+    assert https._context.check_hostname is False
+
+
 def test_cli_smoke_checks_console_gate_after_job(fake_runner, monkeypatch):
     order = []
     monkeypatch.setattr("ops.cli.run_smoke", lambda runner: order.append("job") or "job-smoke-1")
@@ -107,7 +131,8 @@ DEMO_ENV = ENV | {"CONSOLE_AUTH_ENABLED": "false"}
 
 def test_gate_in_demo_mode_expects_console_open_to_operator_ip():
     fetch, calls = fake_fetch({f"{ENV['CONSOLE_URL']}/": (200, None)})
-    assert "데모 모드" in check_console_gate(DEMO_ENV, fetch)
+    result = check_console_gate(DEMO_ENV, fetch)
+    assert "데모 모드" in result and "App Gateway" in result
     assert calls == [f"{ENV['CONSOLE_URL']}/"]
 
 
