@@ -8,3 +8,4 @@ param operatorPrincipalId = '11111111-1111-1111-1111-111111111111'
 param serviceBusEnabled = true
 param deployCapabilityHost = true
 param consoleIp = '20.30.40.50'
+param appGwCertSecretId = 'https://kvamatest.vault.azure.net/secrets/appgw-console'

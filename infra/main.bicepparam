@@ -24,3 +24,4 @@ param consoleAuthEnabled = readEnvironmentVariable('CONSOLE_AUTH_ENABLED', 'true
 param consoleDemoRole = readEnvironmentVariable('CONSOLE_DEMO_ROLE', 'CreditOfficer')
 param opsAlertEmail = readEnvironmentVariable('OPS_ALERT_EMAIL', '')
 param aiGatewayRouting = readEnvironmentVariable('AI_GATEWAY_ROUTING', 'true') == 'true'
+param appGwCertSecretId = readEnvironmentVariable('APPGW_CERT_SECRET_ID', '')

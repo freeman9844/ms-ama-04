@@ -68,6 +68,9 @@ param opsAlertEmail string = ''
 
 @description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다. 롤백은 false로 다시 프로비저닝.')
 param aiGatewayRouting bool = true
+@description('콘솔 TLS 인증서의 Key Vault 비밀 ID(azd env APPGW_CERT_SECRET_ID, ops window open이 설정). 비면 App Gateway 공용 IP만 만듭니다.')
+#disable-next-line secure-secrets-in-params // 비밀 값이 아니라 Key Vault 비밀의 URI입니다.
+param appGwCertSecretId string = ''
 
 var tags = {
   'azd-env-name': environmentName
@@ -115,6 +118,7 @@ module resources 'resources.bicep' = {
     consoleDemoRole: consoleDemoRole
     opsAlertEmail: opsAlertEmail
     aiGatewayRouting: aiGatewayRouting
+    appGwCertSecretId: appGwCertSecretId
   }
 }
 
@@ -165,3 +169,5 @@ output EVAL_REPORTS_CONTAINER string = resources.outputs.EVAL_REPORTS_CONTAINER
 output CONSOLE_APP_NAME string = resources.outputs.CONSOLE_APP_NAME
 output CONSOLE_URL string = resources.outputs.CONSOLE_URL
 output CONSOLE_CLIENT_ID string = resources.outputs.CONSOLE_CLIENT_ID
+output APPGW_NAME string = resources.outputs.APPGW_NAME
+output APPGW_FQDN string = resources.outputs.APPGW_FQDN

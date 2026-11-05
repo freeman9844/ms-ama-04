@@ -29,6 +29,9 @@ param consoleDemoRole string
 param opsAlertEmail string = ''
 @description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다(AI_GATEWAY=apim). false면 직접 호출(롤백).')
 param aiGatewayRouting bool
+@description('콘솔 TLS 인증서의 Key Vault 비밀 ID(ops window open이 설정). 비면 App Gateway 공용 IP만 만듭니다.')
+#disable-next-line secure-secrets-in-params // 비밀 값이 아니라 Key Vault 비밀의 URI입니다.
+param appGwCertSecretId string
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -56,6 +59,7 @@ var names = {
   idConsole: 'id-console-${environmentName}'
   idEval: 'id-eval-${environmentName}'
   idOps: 'id-ops-${environmentName}'
+  idAppgw: 'id-appgw-${environmentName}'
   smokeJob: 'job-smoke'
   evalJob: 'job-eval'
   opsJob: 'job-ops'
@@ -64,6 +68,9 @@ var names = {
   caConsole: 'ca-console'
   consoleApp: 'amalend-console-${environmentName}-${sfx}'
   apim: 'apim-${sfx}'
+  agw: 'agw-${environmentName}'
+  waf: 'waf-${environmentName}'
+  pipAgw: 'pip-agw-${environmentName}'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -144,6 +151,7 @@ module identities 'modules/identities.bicep' = {
       console: names.idConsole
       eval: names.idEval
       ops: names.idOps
+      appgw: names.idAppgw
     }
     location: location
     tags: tags
@@ -178,6 +186,7 @@ module keyVault 'modules/keyvault.bicep' = {
       { principalId: identities.outputs.appsPrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.kvValueReader, principalType: sp }
+      { principalId: identities.outputs.appgwPrincipalId, roleId: role.kvValueReader, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.kvValueAdmin, principalType: 'User' }
     ] : [])
@@ -607,6 +616,34 @@ module caConsole 'modules/container-app.bicep' = {
 output CONSOLE_APP_NAME string = caConsole.outputs.name
 output CONSOLE_URL string = 'https://${consoleFqdn}'
 output CONSOLE_CLIENT_ID string = consoleAuth.outputs.clientId
+
+// ── 콘솔 진입점: Application Gateway WAF v2 ─────────────────────────────
+// FQDN은 공용 IP 출력 대신 계산합니다. 첫 프로비저닝 직후 ops가 이 이름으로 인증서를 만들고, 펼침 테스트도 결정적입니다.
+var appGwDnsLabel = '${environmentName}-${sfx}'
+var appGwFqdn = '${appGwDnsLabel}.${location}.cloudapp.azure.com'
+
+module appGateway 'modules/appgw.bicep' = {
+  name: 'appgw'
+  params: {
+    name: names.agw
+    policyName: names.waf
+    pipName: names.pipAgw
+    dnsLabel: appGwDnsLabel
+    location: location
+    tags: tags
+    subnetId: subnetId['snet-appgw']
+    identityId: identities.outputs.appgwId
+    certSecretId: appGwCertSecretId
+    backendFqdn: consoleFqdn
+    allowedIp: consoleIp
+    lawId: monitoring.outputs.lawId
+  }
+  // 인증서 읽기 역할, 내부 도메인 DNS, 백엔드 앱이 먼저 있어야 게이트웨이가 정상 기동합니다.
+  dependsOn: [ keyVault, acaIntDns, caConsole ]
+}
+
+output APPGW_NAME string = names.agw
+output APPGW_FQDN string = appGwFqdn
 
 // ── VNet 안 smoke Job (T8) ─────────────────────────────────────────────
 // Private Endpoint가 있는 모든 호스트. VNet 안에서 사설 IP로 해석되어야 합니다.
