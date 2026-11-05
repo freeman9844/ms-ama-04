@@ -48,7 +48,6 @@ var names = {
   sb: 'sb-${sfx}'
   acr: 'acr${sfx}'
   caeInt: 'cae-int-${environmentName}'
-  caeWeb: 'cae-web-${environmentName}'
   plan: 'plan-${environmentName}'
   func: 'func-${sfx}'
   idOrchestrator: 'id-orch-${environmentName}'
@@ -458,25 +457,11 @@ module acaIntDns 'modules/aca-dns.bicep' = {
   }
 }
 
-module acaWeb 'modules/aca-env.bicep' = {
-  name: 'aca-web'
-  params: {
-    name: names.caeWeb
-    location: location
-    tags: tags
-    subnetId: subnetId['snet-apps-web']
-    internal: false
-    lawName: monitoring.outputs.lawName
-  }
-}
-
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output ACR_NAME string = acr.outputs.name
 output CONTAINER_APPS_INT_ENVIRONMENT_ID string = acaInt.outputs.id
 output CONTAINER_APPS_INT_ENVIRONMENT_NAME string = acaInt.outputs.name
 output CONTAINER_APPS_INT_DOMAIN string = acaInt.outputs.defaultDomain
-output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = acaWeb.outputs.id
-output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = acaWeb.outputs.name
 
 // ── 앱 런타임: 정책 엔진·Mock API (P3) ──────────────────────────────────
 var acaIntDomain = acaInt.outputs.defaultDomain
@@ -577,9 +562,9 @@ module functions 'modules/functions.bicep' = {
 output FUNCTION_APP_NAME string = functions.outputs.name
 
 // ── 심사역 콘솔 (P4b) ──────────────────────────────────────────────────
-// 외부 Container Apps 환경(snet-apps-web, 같은 VNet이라 Private Endpoint DNS가 풀립니다).
+// 내부 Container Apps 환경(cae-int)에서 돌고, 인터넷 진입은 App Gateway WAF v2 하나뿐입니다.
 // 진입은 운영자 IP 허용 목록 + Entra 로그인(앱 역할)으로 막습니다.
-var consoleFqdn = '${names.caConsole}.${acaWeb.outputs.defaultDomain}'
+var consoleFqdn = '${names.caConsole}.${acaIntDomain}'
 
 module consoleAuth 'modules/console-auth.bicep' = {
   name: 'console-auth'
@@ -598,7 +583,7 @@ module caConsole 'modules/container-app.bicep' = {
     location: location
     tags: tags
     serviceName: 'console'
-    environmentId: acaWeb.outputs.id
+    environmentId: acaInt.outputs.id
     identityId: identities.outputs.consoleId
     identityClientId: identities.outputs.consoleClientId
     registryServer: acr.outputs.loginServer

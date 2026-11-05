@@ -29,15 +29,18 @@ def test_vnet_uses_class_c_private_range(closed):
 
 def test_subnets_and_delegations(closed):
     subnets = _subnets(closed)
-    assert set(subnets) == {"snet-agents", "snet-pe", "snet-functions",     "snet-apps-int", "snet-apps-web", "snet-apim"}
-    for name in ("snet-agents", "snet-functions", "snet-apps-int", "snet-apps-web"):
+    assert set(subnets) == {"snet-agents", "snet-pe", "snet-functions", "snet-apps-int", "snet-appgw", "snet-apim"}
+    for name in ("snet-agents", "snet-functions", "snet-apps-int"):
         services = [d["properties"]["serviceName"] for d in subnets[name]["delegations"]]
         assert services == ["Microsoft.App/environments"], name
     assert subnets["snet-pe"]["delegations"] == []
+    # App Gateway v2 서브넷은 위임·NSG 없이 게이트웨이 전용입니다.
+    assert subnets["snet-appgw"]["delegations"] == []
+    assert "networkSecurityGroup" not in subnets["snet-appgw"]
     assert subnets["snet-agents"]["addressPrefix"] == "192.168.0.0/24"
     assert subnets["snet-functions"]["addressPrefix"] == "192.168.2.0/26"
     assert subnets["snet-apps-int"]["addressPrefix"] == "192.168.4.0/24"
-    assert subnets["snet-apps-web"]["addressPrefix"] == "192.168.5.0/24"
+    assert subnets["snet-appgw"]["addressPrefix"] == "192.168.7.0/24"
 
 
 def test_all_private_dns_zones_exist_and_are_linked(closed):

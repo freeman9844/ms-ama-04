@@ -1,4 +1,4 @@
-"""심사역 콘솔(P4b) IaC: 외부 환경 Container App, IP 허용 목록, Easy Auth, Graph 앱 등록, 최소 권한."""
+"""심사역 콘솔(P4b) IaC: 내부 환경 Container App(App Gateway WAF 뒤), Easy Auth, Graph 앱 등록, 최소 권한."""
 import json
 import re
 import shutil
@@ -29,9 +29,9 @@ def _resources(template: dict) -> list[dict]:
     return list(res.values()) if isinstance(res, dict) else res
 
 
-def test_console_runs_in_web_environment_with_own_identity(closed):
+def test_console_runs_in_internal_environment_with_own_identity(closed):
     app = closed.one(CA, "ca-console")
-    assert app["properties"]["environmentId"].endswith("/managedEnvironments/cae-web-amatest")
+    assert app["properties"]["environmentId"].endswith("/managedEnvironments/cae-int-amatest")
     assert list(app["identity"]["userAssignedIdentities"]) == [
         next(i["id"] for i in closed.of_type("Microsoft.ManagedIdentity/userAssignedIdentities")
              if i["name"] == "id-console-amatest")]

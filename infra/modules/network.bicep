@@ -7,8 +7,8 @@ var subnets = [
   { name: 'snet-agents', prefix: '192.168.0.0/24', delegated: true, nsg: false }    // Foundry Agent Service 전용(위임, 단독)
   { name: 'snet-pe', prefix: '192.168.1.0/24', delegated: false, nsg: false }       // Private Endpoint
   { name: 'snet-functions', prefix: '192.168.2.0/26', delegated: true, nsg: false } // Flex Consumption VNet 통합
-  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegated: true, nsg: false }  // internal Container Apps 환경(Policy, Mock API, smoke)
-  { name: 'snet-apps-web', prefix: '192.168.5.0/24', delegated: true, nsg: false }  // external Container Apps 환경(콘솔만)
+  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegated: true, nsg: false }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
+  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegated: false, nsg: false }    // Application Gateway WAF v2(콘솔 진입점, 전용)
   { name: 'snet-apim', prefix: '192.168.6.0/27', delegated: false, nsg: true }      // API Management 내부 모드(AI 게이트웨이)
 ]
 
