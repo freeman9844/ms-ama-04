@@ -11,6 +11,7 @@ from agents.forecast import OUTFLOW_LABELS
 from console import charts
 from console.monitoring import SEVERITY_LABELS, TRIGGER_LABELS
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
+from opsmetrics.labels import STEP_LABELS
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -205,6 +206,17 @@ def journey_steps(doc: Mapping[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def gateway_blocks(doc: Mapping[str, Any]) -> list[str]:
+    """AI 게이트웨이 콘텐츠 차단이 있었던 단계 이름(처음 나온 순서, 중복 없음)."""
+    labels: list[str] = []
+    for step in doc.get("steps") or []:
+        if any(u.get("gateway") == "content_blocked" for u in step.get("usage") or [] if isinstance(u, Mapping)):
+            label = STEP_LABELS.get(step.get("step"), str(step.get("step")))
+            if label not in labels:
+                labels.append(label)
+    return labels
+
+
 def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
     monthly = [m for m in (doc.get("underwriting") or {}).get("monthly") or [] if isinstance(m, Mapping)]
@@ -243,6 +255,7 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "markers": markers,
         "counterfactuals": counterfactuals,
         "review": review,
+        "gateway_blocks": gateway_blocks(doc),
     }
 
 

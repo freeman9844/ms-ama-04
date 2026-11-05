@@ -268,3 +268,14 @@ def test_formatters():
 def test_status_labels_are_shared_with_app():
     from console import statuses
     assert STATUS_LABELS is statuses.STATUS_LABELS
+
+
+def test_gateway_blocks_lists_blocked_steps_in_order():
+    doc = {"steps": [
+        {"step": "assemble", "usage": [{"model": "m", "gateway": "content_blocked"}]},
+        {"step": "classify", "usage": [{"model": "m", "gateway": "rate_limited"}]},
+        {"step": "assemble", "usage": [{"model": "m", "gateway": "content_blocked"}]},
+        {"step": "consent", "usage": []},
+    ]}
+    assert dashboard.gateway_blocks(doc) == ["데이터 수집"]
+    assert dashboard.gateway_blocks({}) == []

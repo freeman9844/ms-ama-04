@@ -378,3 +378,18 @@ def test_list_shows_business_name_to_deciders_and_id_to_auditors(env):
     assert "성수데일리룩" in rows and "seller-dailylook-01" in rows
     assert "성수데일리룩" not in client.get("/applications/rows", headers=AUDITOR_H).text
     assert "성수데일리룩" in client.get("/applications/app-1", headers=OFFICER).text
+
+
+def test_detail_shows_gateway_block_badge(env, make_doc):
+    client, _ = env
+    assert "AI 게이트웨이" not in client.get("/applications/app-1", headers=OFFICER).text
+    doc = make_doc()
+    doc["steps"] = [*(doc.get("steps") or []), {
+        "step": "assemble", "outcome": "degraded", "started_at": "2026-11-05T01:00:00+00:00",
+        "ended_at": "2026-11-05T01:00:05+00:00", "duration_ms": 5000, "agent": True,
+        "usage": [{"model": "gpt-5.4-mini", "input_tokens": 0, "output_tokens": 0, "calls": 1,
+                   "gateway": "content_blocked"}],
+    }]
+    client.app.state.deps.store.docs["app-1"] = doc
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert "<dt>AI 게이트웨이</dt>" in page and "콘텐츠 차단 · 데이터 수집" in page
