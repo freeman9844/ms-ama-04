@@ -60,11 +60,19 @@ def subscription_runner(runner: Runner, env: dict[str, str]) -> Runner:
     return scoped
 
 
-def rest_post(az: Runner, url: str, body: dict) -> dict:
-    """az rest POST. az.cmd는 따옴표가 든 인자를 깨뜨리므로 본문은 임시 파일로 넘긴다."""
+def _rest_with_body(az: Runner, method: str, url: str, body: dict) -> dict:
+    """az.cmd는 따옴표가 든 인자를 깨뜨리므로 본문은 임시 파일로 넘기고, 끝나면 바로 지운다."""
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(body, f)
     try:
-        return json.loads(az(["az", "rest", "--method", "post", "--url", url, "--body", f"@{f.name}"]) or "{}")
+        return json.loads(az(["az", "rest", "--method", method, "--url", url, "--body", f"@{f.name}"]) or "{}")
     finally:
         os.unlink(f.name)
+
+
+def rest_post(az: Runner, url: str, body: dict) -> dict:
+    return _rest_with_body(az, "post", url, body)
+
+
+def rest_put(az: Runner, url: str, body: dict) -> dict:
+    return _rest_with_body(az, "put", url, body)
