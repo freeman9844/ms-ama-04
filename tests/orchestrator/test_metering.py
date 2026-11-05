@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from journey import metering
 from journey.metering import METER_KEY, MeteredRunner, failed_record, outcome_of, run_metered, safe_detail, step_records
 
@@ -193,3 +194,39 @@ def test_classify_error_detail_has_no_message():
     out = run_metered("underwrite", lambda d, p: {"classification": {"error": "ValueError: 적요 '홍길동'"}},
                       FakeDeps(Clock()), {})
     assert out[METER_KEY]["substeps"][0]["detail"] == "ValueError"
+
+
+class _Raising:
+    def __init__(self, error):
+        self.error = error
+
+    def run(self, spec, text, handlers):
+        raise self.error
+
+
+@pytest.mark.parametrize("error, tag", [
+    (GatewayBlocked("content_blocked: x"), "content_blocked"),
+    (GatewayThrottled("rate_limited: x"), "rate_limited"),
+    (AgentError("x"), None),
+])
+def test_metered_runner_tags_gateway_errors(error, tag):
+    runner = MeteredRunner(_Raising(error))
+    with pytest.raises(type(error)):
+        runner.run(SPEC, "t", {})
+    assert runner.entries()[0].get("gateway") == tag
+
+
+def test_run_metered_keeps_gateway_tag_when_activity_recovers():
+    deps = FakeDeps(Clock(), agents=_Raising(GatewayBlocked("content_blocked: x")))
+
+    def activity(d, payload):
+        try:
+            d.agents.run(SPEC, "t", {})
+        except AgentError:
+            pass
+        return {"status": "complete"}
+
+    result = run_metered("assemble_data", activity, deps, {"application_id": "app-1"})
+    assert result[METER_KEY]["usage"] == [
+        {"model": "gpt-5.4-mini", "input_tokens": 0, "output_tokens": 0, "calls": 1, "gateway": "content_blocked"}
+    ]

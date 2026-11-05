@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from agents.data_assembly import DEFAULT_MODEL, SourceError
+from agents.gateway import GatewayRunner, decision_base, gateway_enabled
 from agents.runtime import FoundryAgents
 from agents.txn_classify import DecisionClient
 from journey import telemetry
@@ -240,7 +241,9 @@ def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[
     """Foundry 에이전트·Decision-1·모델 설정. 엔드포인트가 없으면 해당 기능은 꺼진다."""
     settings: dict[str, Any] = {}
     if endpoint := env.get("AI_PROJECT_ENDPOINT"):
-        settings["agents"] = FoundryAgents(endpoint, lambda: token(FOUNDRY_SCOPE))
+        agents = FoundryAgents(endpoint, lambda: token(FOUNDRY_SCOPE))
+        # AI 게이트웨이가 켜지면 에이전트 정의의 모델을 gw-<agent>/<model>로 바꿔 APIM을 거친다.
+        settings["agents"] = GatewayRunner(agents) if gateway_enabled(env) else agents
         settings["model"] = env.get("DATA_ASSEMBLY_MODEL", DEFAULT_MODEL)
         settings["analyst_model"] = env.get("ANALYST_MODEL", ANALYST_MODEL)
         settings["reviewer_model"] = env.get("REVIEWER_MODEL", REVIEWER_MODEL)
@@ -249,8 +252,8 @@ def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[
         settings["collections_model"] = env.get("COLLECTIONS_MODEL", COLLECTIONS_MODEL)
         settings["notice_model"] = env.get("NOTICE_MODEL", NOTICE_MODEL)
         settings["grievance_model"] = env.get("GRIEVANCE_MODEL", GRIEVANCE_MODEL)
-    if (account := env.get("AI_ACCOUNT_ENDPOINT")) and (deployment := env.get("DECISION_DEPLOYMENT")):
-        settings["decider"] = DecisionClient(account, deployment, lambda: token(COGNITIVE_SCOPE))
+    if env.get("AI_ACCOUNT_ENDPOINT") and (deployment := env.get("DECISION_DEPLOYMENT")):
+        settings["decider"] = DecisionClient(decision_base(env), deployment, lambda: token(COGNITIVE_SCOPE))
     return settings
 
 

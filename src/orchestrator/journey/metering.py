@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from agents.data_assembly import FLAG_AGENT_FALLBACK
+from agents.runtime import GatewayBlocked, GatewayThrottled
 from journey import telemetry
 
 METER_KEY = "_meter"
@@ -33,6 +34,15 @@ def safe_detail(detail: str) -> str:
     return (m.group(0) if m else "error")[:DETAIL_MAX]
 
 
+def _gateway_tag(error: Exception) -> str | None:
+    """콘솔 배지용. 게이트웨이 차단·한도만 표시하고 그 밖의 오류는 표시하지 않는다."""
+    if isinstance(error, GatewayBlocked):
+        return "content_blocked"
+    if isinstance(error, GatewayThrottled):
+        return "rate_limited"
+    return None
+
+
 class MeteredRunner:
     """에이전트 러너를 감싸 호출마다 모델·토큰을 모은다. 그 밖의 메서드(대화·컨테이너 삭제)는 위임한다."""
 
@@ -46,8 +56,11 @@ class MeteredRunner:
         with telemetry.span(f"invoke_agent {name}", attrs) as sp:
             try:
                 run = self._inner.run(spec, input_text, handlers, **kwargs)
-            except Exception:
-                self._usage.append({"model": spec.model, "input_tokens": 0, "output_tokens": 0, "calls": 1})
+            except Exception as e:
+                entry = {"model": spec.model, "input_tokens": 0, "output_tokens": 0, "calls": 1}
+                if tag := _gateway_tag(e):
+                    entry["gateway"] = tag
+                self._usage.append(entry)
                 raise
             entry = {
                 "model": spec.model,
