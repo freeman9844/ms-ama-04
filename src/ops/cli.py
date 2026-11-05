@@ -112,7 +112,10 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             result = run_gateway_probe(runner, mode=args.mode, collect=args.collect)
             print(json.dumps(result.summary, ensure_ascii=False, indent=2), file=out)
             print(f"프로브 결과: {result.out_dir}", file=out)
-            if not all(c.get("reproduced") for c in result.summary.get("checks", {}).values()):
+            checks = result.summary.get("checks")
+            checks = checks if isinstance(checks, dict) else {}
+            # 빈 checks는 all()이 True가 되므로 재현 실패로 따로 막는다.
+            if not checks or not all(isinstance(c, dict) and c.get("reproduced") for c in checks.values()):
                 return 2
         elif args.command == "load":
             result = opsrun.load(runner, count=args.count, interval_s=args.interval,

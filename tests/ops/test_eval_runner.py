@@ -189,13 +189,19 @@ def test_gateway_probe_give_up_message_points_to_probe_collect(fake_runner, tmp_
     with pytest.raises(OpsError) as err:
         run_gateway_probe(runner, mode="unsafe", collect=EXEC, out_root=tmp_path, sleep=lambda s: None, log_limit=2)
     assert f"python -m ops gateway probe --mode unsafe --collect {EXEC}" in str(err.value)
+    # 프로브는 Blob에 올리지 않으므로 Blob 사본 안내를 하지 않는다.
+    assert "Blob" not in str(err.value)
 
 
-@pytest.mark.parametrize("reproduced, code", [(True, 0), (False, 2)])
-def test_cli_gateway_probe_exit_code(fake_runner, tmp_path, monkeypatch, reproduced, code):
+@pytest.mark.parametrize("checks, code", [
+    ({"throttle": {**PROBE["checks"]["throttle"], "reproduced": True}}, 0),
+    ({"throttle": {**PROBE["checks"]["throttle"], "reproduced": False}}, 2),
+    ({}, 2),  # 확인한 항목이 없으면 재현으로 보지 않는다.
+])
+def test_cli_gateway_probe_exit_code(fake_runner, tmp_path, monkeypatch, checks, code):
     monkeypatch.setattr("ops.eval_runner.REPORTS", tmp_path)
-    probe = {**PROBE, "checks": {"throttle": {**PROBE["checks"]["throttle"], "reproduced": reproduced}}}
+    probe = {**PROBE, "checks": checks}
     runner = _runner(fake_runner, _rows({"probe.json": json.dumps(probe).encode()}))
     out = io.StringIO()
     assert main(["gateway", "probe", "--collect", EXEC], runner=runner, out=out) == code
-    assert '"reproduced"' in out.getvalue() and str(tmp_path / EXEC) in out.getvalue()
+    assert '"checks"' in out.getvalue() and str(tmp_path / EXEC) in out.getvalue()

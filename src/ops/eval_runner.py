@@ -29,7 +29,8 @@ class EvalResult:
 def run_eval(runner: Runner, *, suite: str = "all", collect: str | None = None, out_root: Path | None = None,
              sleep: Callable[[float], None] | None = None, poll_wait: float = 15, poll_limit: int = 250,
              log_wait: float = 30, log_limit: int = 20, overrides: dict[str, str] | None = None,
-             required: tuple[str, ...] = REQUIRED, rerun: str = "python -m ops eval --collect") -> EvalResult:
+             required: tuple[str, ...] = REQUIRED, rerun: str = "python -m ops eval --collect",
+             blob_copy: bool = True) -> EvalResult:
     """Job을 시작해 끝날 때까지 기다린 뒤 리포트를 회수한다. collect에 실행 이름을 주면 회수만 다시 한다."""
     sleep = sleep or time.sleep
     env = get_env(runner)
@@ -49,11 +50,12 @@ def run_eval(runner: Runner, *, suite: str = "all", collect: str | None = None, 
     try:
         files = collect_with_retry(az, workspace, execution, required, sleep=sleep, wait=log_wait, limit=log_limit)
     except (TransportError, OpsError) as err:  # 조각 누락·수집 지연·일시적 조회 오류
+        # 평가 리포트만 Blob에 사본을 올린다(프로브는 올리지 않음).
         container = env.get("EVAL_REPORTS_CONTAINER", "eval-reports")
+        copy = f"원본 사본: 데이터 스토리지 Blob {container}/{execution}/ (사설 엔드포인트 전용)\n" if blob_copy else ""
         raise OpsError(
             f"리포트 복원 실패: {err}\n잠시 뒤 회수만 다시: {rerun} {execution}\n"
-            f"원본 사본: 데이터 스토리지 Blob {container}/{execution}/ (사설 엔드포인트 전용)\n"
-            f"{log_hint(env, execution)}") from err
+            f"{copy}{log_hint(env, execution)}") from err
     out_dir = (out_root or REPORTS) / execution
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, data in files.items():
@@ -64,4 +66,5 @@ def run_eval(runner: Runner, *, suite: str = "all", collect: str | None = None, 
 def run_gateway_probe(runner: Runner, *, mode: str = "all", collect: str | None = None, **kwargs) -> EvalResult:
     """eval Job을 프로브 모드(EVAL_TASK)로 돌려 probe.json을 회수한다. EvalResult.summary가 프로브 결과다."""
     return run_eval(runner, collect=collect, overrides={"EVAL_TASK": PROBE_TASK, "PROBE_MODE": mode},
-                    required=PROBE_REQUIRED, rerun=f"python -m ops gateway probe --mode {mode} --collect", **kwargs)
+                    required=PROBE_REQUIRED, rerun=f"python -m ops gateway probe --mode {mode} --collect",
+                    blob_copy=False, **kwargs)
