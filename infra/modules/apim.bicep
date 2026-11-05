@@ -183,12 +183,38 @@ resource safetyBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = {
 }
 
 // ── 정책 ────────────────────────────────────────────────────────────────
-// 순서: 콘텐츠 안전(프롬프트 차단) → 제품 정책(<base/>: 에이전트별 TPM) → MI 인증 → 토큰 지표.
+// 순서: 프롬프트 길이 계산 → 콘텐츠 안전(프롬프트 차단) → 제품 정책(<base/>: 에이전트별 TPM) → MI 인증 → 토큰 지표.
+// Prompt Shields 10,000자 한도 — 넘는 프롬프트는 범주 검사만(모델 배포 기본 콘텐츠 필터 DefaultV2가 탈옥 검사를 이어서 함).
+// 길이는 모든 역할(system 포함)의 messages[*].content 합계로, Prompt Shields가 받는 길이의 상한입니다.
 // 연결이 보내는 구독 키(api-key)는 백엔드로 넘기지 않습니다.
 var openaiPolicy = '''
 <policies>
   <inbound>
-    <llm-content-safety backend-id="content-safety" shield-prompt="true">
+    <set-variable name="promptChars" value='@{
+      try {
+        var messages = context.Request.Body.As<JObject>(preserveContent: true)["messages"] as JArray;
+        if (messages == null) { return 0; }
+        var total = 0;
+        foreach (var message in messages) {
+          var content = (message as JObject)?["content"];
+          if (content == null) { continue; }
+          if (content.Type == JTokenType.String) {
+            total += ((string)content).Length;
+          } else if (content.Type == JTokenType.Array) {
+            foreach (var part in content) {
+              var text = (part as JObject)?["text"];
+              if (text != null) {
+                if (text.Type == JTokenType.String) { total += ((string)text).Length; }
+              }
+            }
+          }
+        }
+        return total;
+      } catch {
+        return 0;
+      }
+    }' />
+    <llm-content-safety backend-id="content-safety" shield-prompt='@((int)context.Variables["promptChars"] <= 10000)'>
       <categories output-type="EightSeverityLevels">
         <category name="Hate" threshold="4" />
         <category name="Sexual" threshold="4" />

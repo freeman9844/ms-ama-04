@@ -9,10 +9,10 @@ COGNITIVE_USER = "a97b65f3-24c7-4388-baec-2e87135dc908"
 METRICS_PUBLISHER = "3913510d-42f4-4e42-8a64-420c390055eb"
 GATEWAYS = {
     "gw-analyst": 50000,
-    "gw-early-warning": 20000,
+    "gw-early-warning": 50000,
     "gw-reviewer": 15000,
     "gw-data-assembly": 17000,
-    "gw-txn-classifier": 10000,
+    "gw-txn-classifier": 20000,
     "gw-collections": 10000,
     "gw-consent-notice": 5000,
     "gw-grievance": 5000,
@@ -107,7 +107,13 @@ def test_openai_api_policy(closed):
     ops = _by_leaf(closed, "Microsoft.ApiManagement/service/apis/operations")
     assert ops["chat-completions"]["properties"]["urlTemplate"] == "/deployments/{deployment-id}/chat/completions"
     policy = _by_leaf(closed, "Microsoft.ApiManagement/service/apis/policies", 2)["openai"]["properties"]["value"]
-    assert 'llm-content-safety backend-id="content-safety" shield-prompt="true"' in policy
+    assert '<set-variable name="promptChars"' in policy
+    assert "context.Request.Body.As<JObject>(preserveContent: true)" in policy
+    assert policy.index('name="promptChars"') < policy.index("<llm-content-safety")
+    assert (
+        'llm-content-safety backend-id="content-safety" '
+        """shield-prompt='@((int)context.Variables["promptChars"] <= 10000)'"""
+    ) in policy
     assert policy.count('threshold="4"') == 4
     assert '<set-header name="api-key" exists-action="delete" />' in policy
     assert 'authentication-managed-identity resource="https://cognitiveservices.azure.com"' in policy
