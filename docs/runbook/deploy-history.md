@@ -798,3 +798,10 @@ python -m ops smoke
 ```
 
 모든 LLM 호출(Decision-1 포함)이 직접 호출로 돌아가고, APIM 리소스와 월 약 $51은 남습니다. APIM을 지우려면 롤백 뒤 리소스를 삭제합니다(재생성 30–60분, 실측 27분). 자세한 절차는 [deploy](deploy.md#ai-게이트웨이-켜기끄기)입니다.
+
+## 2026-11-05 심사역 결정 반영 지연 단축
+
+- **증상**: 콘솔에서 승인한 뒤 화면 반영까지 약 11초(app-20261105-a25bc0: 클릭 13:33:12 → 오케스트레이션 이벤트 수신 13:33:23 UTC).
+- **원인**: Flex Consumption은 트리거 그룹별로 0에서 확장해 officer_decision 큐 트리거가 콜드 스타트했고, 한가한 인스턴스는 큐를 최대 60초(Durable 큐 30초) 간격으로 확인합니다.
+- **조치**(`a68a9a0`): `host.json`의 `queues.maxPollingInterval`과 `durableTask.storageProvider.maxQueuePollingInterval`을 2초로, `durable`·`function:officer_decision`·`function:start_application` 그룹에 always ready 1개씩(월 약 $62). `ops window open` → `ops deploy orchestrator` → `ops window close`.
+- **측정**(app-20261105-bc8e70, 콘솔 경유): 승인 POST 후 상태 반영 **2.6초**, 사후 모니터링 링크 5.2초.
