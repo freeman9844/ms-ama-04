@@ -19,9 +19,9 @@ param mockapiImage string
 param consoleImage string
 @description('평가 Job 이미지. 비면 자리표시 이미지(ops deploy eval 전).')
 param evalImage string
-@description('콘솔에 접속할 운영자 공인 IPv4. 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
+@description('콘솔에 접속할 운영자 공인 IPv4(App Gateway WAF 사용자 지정 규칙). 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
 param consoleIp string
-@description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(IP 허용 목록만 남음, 데모 전용).')
+@description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(WAF 운영자 IP 규칙만 남음, 데모 전용).')
 param consoleAuthEnabled bool
 @description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
 param consoleDemoRole string
@@ -572,7 +572,7 @@ output FUNCTION_APP_NAME string = functions.outputs.name
 
 // ── 심사역 콘솔 (P4b) ──────────────────────────────────────────────────
 // 내부 Container Apps 환경(cae-int)에서 돌고, 인터넷 진입은 App Gateway WAF v2 하나뿐입니다.
-// 진입은 운영자 IP 허용 목록 + Entra 로그인(앱 역할)으로 막습니다.
+// 진입은 WAF 운영자 IP 규칙 + Entra 로그인(앱 역할)으로 막습니다.
 var consoleFqdn = '${names.caConsole}.${acaIntDomain}'
 
 module consoleAuth 'modules/console-auth.bicep' = {
@@ -580,7 +580,7 @@ module consoleAuth 'modules/console-auth.bicep' = {
   params: {
     uniqueName: names.consoleApp
     displayName: 'AMA Lending 심사 콘솔 (${environmentName})'
-    redirectUri: 'https://${consoleFqdn}/.auth/login/aad/callback'
+    redirectUri: 'https://${appGwFqdn}/.auth/login/aad/callback'
     operatorPrincipalId: operatorPrincipalId
   }
 }
@@ -597,7 +597,6 @@ module caConsole 'modules/container-app.bicep' = {
     identityClientId: identities.outputs.consoleClientId
     registryServer: acr.outputs.loginServer
     image: consoleImage
-    ipAllowList: [ empty(consoleIp) ? '192.0.2.0/32' : '${consoleIp}/32' ]
     authClientId: consoleAuth.outputs.clientId
     authEnabled: consoleAuthEnabled
     envVars: concat([
@@ -614,7 +613,7 @@ module caConsole 'modules/container-app.bicep' = {
 }
 
 output CONSOLE_APP_NAME string = caConsole.outputs.name
-output CONSOLE_URL string = 'https://${consoleFqdn}'
+output CONSOLE_URL string = 'https://${appGwFqdn}'
 output CONSOLE_CLIENT_ID string = consoleAuth.outputs.clientId
 
 // ── 콘솔 진입점: Application Gateway WAF v2 ─────────────────────────────

@@ -10,5 +10,4 @@ param environmentId = '/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resou
 param identityId = '/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/rg-amatest/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-console-amatest'
 param identityClientId = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
 param registryServer = 'acramatest.azurecr.io'
-param ipAllowList = ['20.30.40.50/32']
 param authClientId = '22222222-2222-2222-2222-222222222222'

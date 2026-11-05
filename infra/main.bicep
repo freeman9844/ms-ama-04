@@ -53,10 +53,10 @@ param consoleImage string = ''
 @description('평가 Job 이미지. 비면 자리표시 이미지(ops deploy eval 전).')
 param evalImage string = ''
 
-@description('심사역 콘솔 접속 허용 IPv4(ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
+@description('심사역 콘솔 접속 허용 IPv4(App Gateway WAF 규칙, ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
 param consoleIp string = ''
 
-@description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). IP 허용 목록은 그대로입니다.')
+@description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). WAF 운영자 IP 규칙은 그대로입니다.')
 param consoleAuthEnabled bool = true
 
 @description('데모 모드의 고정 사용자 역할(azd env CONSOLE_DEMO_ROLE). Auditor면 가명 읽기 전용 데모입니다.')
