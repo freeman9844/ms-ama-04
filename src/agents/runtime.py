@@ -8,6 +8,7 @@ probe(2026-10-31)로 확인한 REST 형태만 쓴다.
 """
 
 import json
+import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -32,7 +33,8 @@ class AgentError(RuntimeError):
 MAX_RETRY_AFTER_S = 10.0
 DEFAULT_RETRY_AFTER_S = 1.0
 # 소문자 부분 문자열. AI 게이트웨이(APIM llm-content-safety·llm-token-limit)와 모델 자체 필터의 오류 본문을 가른다.
-# Task 4 관문에서 관측한 본문에 맞춰 보정한다.
+# Task 4 관문에서 관측한 본문에 맞춰 보정한다. 한도 표지어는 관측 문구 그대로 좁혀
+# 다른 400(예: 컨텍스트 길이 초과의 "token limit")을 한도로 오인하지 않게 한다.
 # "'innerstatuscode': 403": Agent Service가 APIM llm-content-safety의 403을 HTTP 424 CustomerManagedDownstreamError로
 # 감싸 돌려준다(Task 4 관문 3). openai API에서 내부 403은 이 정책뿐이다(키 오류는 401).
 BLOCK_MARKERS = (
@@ -40,7 +42,7 @@ BLOCK_MARKERS = (
     "'innerstatuscode': 403",
 )
 THROTTLE_MARKERS = (
-    "rate_limit", "rate limit", "ratelimit", "too many requests", "token limit", "tokens per minute",
+    "rate_limit", "rate limit exceeded", "ratelimit", "too many requests", "token limit is exceeded", "tokens per minute",
 )
 
 
@@ -61,6 +63,8 @@ def _retry_after(response: httpx.Response) -> float:
     try:
         value = float(response.headers.get("retry-after", DEFAULT_RETRY_AFTER_S))
     except ValueError:
+        value = DEFAULT_RETRY_AFTER_S
+    if not math.isfinite(value):
         value = DEFAULT_RETRY_AFTER_S
     return min(max(value, 0.0), MAX_RETRY_AFTER_S)
 

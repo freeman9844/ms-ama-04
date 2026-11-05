@@ -4,7 +4,7 @@ import httpx
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from agents.runtime import AgentError, AgentSpec, FoundryAgents, GatewayBlocked, GatewayThrottled, _status_error
+from agents.runtime import AgentError, AgentSpec, FoundryAgents, GatewayBlocked, GatewayThrottled, THROTTLE_MARKERS, _has, _status_error
 
 BASE = "https://ais.example/api/projects/proj-lending"
 
@@ -333,12 +333,43 @@ def test_runtime_second_429_raises_throttled_without_body():
     assert sleeps == [1.0]
 
 
-@pytest.mark.parametrize("header, expected", [("120", 10.0), ("abc", 1.0), ("-3", 0.0)])
+@pytest.mark.parametrize("header, expected", [("120", 10.0), ("abc", 1.0), ("-3", 0.0), ("nan", 1.0)])
 def test_retry_after_is_clamped(header, expected):
     sleeps = []
     a = _gateway_agents([httpx.Response(429, headers={"retry-after": header}), httpx.Response(200, json={})], sleeps)
     a._call("POST", "/x", {})
     assert sleeps == [expected]
+
+
+def test_context_length_400_is_not_throttled():
+    sleeps = []
+    body = {
+        "error": {
+            "code": "context_length_exceeded",
+            "message": "This model's maximum context length is 128000 tokens. Please reduce the token limit of your messages.",
+        }
+    }
+    a = _gateway_agents([httpx.Response(400, json=body)], sleeps)
+    with pytest.raises(AgentError) as info:
+        a._call("POST", "/openai/v1/responses", {})
+    assert type(info.value) is AgentError
+    assert "HTTP 400" in str(info.value)
+    assert sleeps == []
+
+
+def test_gate2_throttle_body_matches_throttle_markers():
+    # Task 4 관문 2 실측 본문(HTTP 429). 상태와 별개로 표지어도 걸려야 한다.
+    body = {
+        "error": {
+            "code": "rate_limit_exceeded",
+            "message": "Rate limit exceeded. Model could not be accessed - Received 429 status code from model. "
+            "ModelGateway response: {'statusCode': 429, 'message': 'Token limit is exceeded. Try again in 53 seconds.'} "
+            "Request ID: req-2.",
+            "type": "error",
+            "additionalInfo": {"request_id": "req-2", "rate_limit_source": "unknown"},
+        }
+    }
+    assert _has(json.dumps(body), THROTTLE_MARKERS)
 
 
 # Task 4 관문 3 실측: Agent Service가 APIM llm-content-safety의 403을 424 CustomerManagedDownstreamError로 감싸 돌려준다.
