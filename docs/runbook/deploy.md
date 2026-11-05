@@ -61,6 +61,14 @@ python -m ops smoke                      # 배포 뒤 확인
 
 - APIM(Developer, 내부 VNet 모드)은 처음 만들 때 30–60분이 걸립니다(실측 27분 19초, `docs/runbook/deploy-history.md`의 "AI 게이트웨이(APIM) 도입" 절). 이미 있는 상태에서 라우팅만 켜는 프로비저닝은 약 4분이었습니다.
 - 끄면(`false`) Decision-1을 포함한 모든 LLM 호출이 직접 호출로 돌아갑니다(롤백). 롤백 뒤에도 APIM 리소스와 월 약 $51 고정비는 남습니다. 지우려면 [비용 모델](../cost-model.md#절감-레버)을 봅니다.
+- APIM 자체가 비정상이면 `AI_GATEWAY_ROUTING=false` 프로비저닝이 실패할 수 있습니다. 연결 모듈이 여전히 APIM 키(`listSecrets`)를 읽기 때문입니다. 이때는 앱 설정을 직접 바꾸는 빠른 경로를 씁니다(앱은 `AI_GATEWAY == "apim"`일 때만 게이트웨이를 씁니다, `src/agents/gateway.py`).
+
+  ```powershell
+  az functionapp config appsettings set -g <resource-group> -n <function-app> --settings AI_GATEWAY=off
+  az containerapp job update -g <resource-group> -n <eval-job> --set-env-vars AI_GATEWAY=off
+  ```
+
+  APIM이 복구되면 `AI_GATEWAY_ROUTING=false`로 다시 프로비저닝합니다. 다음 프로비저닝이 Bicep 값으로 설정을 되돌립니다.
 - 429·콘텐츠 차단 동작 확인은 [운영](operate.md#평가eval)의 `ops gateway probe`를 씁니다.
 
 ## 운영자 IP가 바뀔 때

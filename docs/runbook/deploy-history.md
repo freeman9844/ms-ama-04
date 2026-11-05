@@ -757,6 +757,7 @@ curl.exe -X POST --data-binary "@orchestrator.zip" -H "Authorization: Bearer $to
 | 부하 `load-20261105070836`(3건, 15초 간격) | 도달 3/3, 접수 → 대기열 p95 1.1분, 에이전트 단계 ok 8/9(신용 평가 1건 `gw-analyst` 429), 신청당 $0.0323. 게이트웨이 로그 60분: openai 200 56건, 429 90건(`gw-probe` 74·`gw-analyst` 16), decision 200 15건 |
 | 1분 피크 토큰(3시간) | `gw-analyst` 27,505, `gw-data-assembly` 8,388, `gw-reviewer` 2,327, `gw-txn-classifier` 1,762, `gw-consent-notice` 651, `gw-probe` 1,863 → 분석가가 한도 20K 초과. 분석가 20K → 50K, 데이터 수집 15K → 17K(`f728948`) |
 | 프로브 unsafe | `job-eval-aw9qy70`: APIM 403 재현(75ms) |
+| 프로브 unsafe(`f28057c` 뒤 재확인) | `job-eval-3hh7xn5`(2026-11-05): `content_blocked`, `reproduced=true`. 1만 자 이하 조건을 더한 뒤에도 Prompt Shields가 계속 차단함을 확인 |
 | 프로브 throttle(1차) | `job-eval-zimhc4h`: 재현 실패(8회 모두 ok). 시도당 APIM 429 약 11회가 65초에 걸쳐 찍힌 뒤 200 — 클라이언트 429 재시도(MeteredTransport 3회 + FoundryAgents 1회)가 창이 풀릴 때까지 기다림 |
 | 프로브 throttle(수정 뒤) | `f9eaeb1`: 프로브 모드에서 `retry_throttle=False`. 재배포 뒤 `job-eval-5zu5jnw`에서 `ok → rate_limited` 재현. 운영 재시도는 그대로 |
 | 평가 `job-eval-ba66ts9` | $1.83, 실패 13건, 게이트웨이 "콘텐츠 차단 7건, 토큰 한도 0건". 조기경보 양성 경로 전부 에이전트 오류. 원인: ① Prompt Shields가 1만 자 초과 프롬프트를 거부 → APIM 403 `ContentSafetyPolicyViolated`(오차단 7건), ② `llm-token-limit` 429(`gw-early-warning` 173·`gw-txn-classifier` 16), ③ Decision API 백엔드 429 14건(모델 용량, 평가 재시도가 흡수 — 그대로 둠) |

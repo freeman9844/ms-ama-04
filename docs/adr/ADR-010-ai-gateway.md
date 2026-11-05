@@ -34,7 +34,7 @@
 - 처음에는 `ApiManagementGatewayLogs`가 비어 있어 Log Analytics 진단 설정을 더했고(`d61cd5e`), 이후 채워진다. 요청·응답 본문과 헤더는 기록하지 않는다.
 
 **프로브 재현(`ops gateway probe`)**
-- 콘텐츠 차단: `job-eval-aw9qy70`에서 APIM 403(75ms)이 재현됐다.
+- 콘텐츠 차단: `job-eval-aw9qy70`에서 APIM 403(75ms)이 재현됐다. 조건부 Prompt Shields 수정(`f28057c`) 뒤에 unsafe 프로브를 다시 돌린 `job-eval-3hh7xn5`(2026-11-05)도 `content_blocked`, `reproduced=true`라서, 1만 자 이하 조건을 더한 뒤에도 Prompt Shields가 계속 차단함을 확인했다.
 - 토큰 한도: 첫 시도(`job-eval-zimhc4h`)는 재현하지 못했다. 클라이언트 429 재시도(MeteredTransport 최대 3회 + FoundryAgents 1회)가 슬라이딩 창이 풀릴 때까지 기다려 시도당 APIM 429가 약 11회(65초) 찍힌 뒤 200이 돌아왔다. 프로브 모드에서만 클라이언트 429 재시도를 끄도록 고쳐(`f9eaeb1`, `retry_throttle=False`) `job-eval-5zu5jnw`에서 `ok → rate_limited`가 재현됐다. 운영 재시도는 그대로다.
 
 **Prompt Shields 10,000자 한도(`f28057c`)**

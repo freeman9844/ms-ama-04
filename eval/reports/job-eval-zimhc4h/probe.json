@@ -1,0 +1,32 @@
+{
+  "task": "gateway-probe",
+  "mode": "throttle",
+  "model": "gpt-5.4-mini",
+  "checks": {
+    "throttle": {
+      "attempts": [
+        "ok",
+        "ok",
+        "ok",
+        "ok",
+        "ok",
+        "ok",
+        "ok",
+        "ok"
+      ],
+      "expected": "rate_limited",
+      "reproduced": false
+    }
+  },
+  "run_id": "job-eval-zimhc4h",
+  "gateway": {
+    "enabled": true,
+    "content_blocked": 0,
+    "rate_limited": 0
+  },
+  "cleanup": {
+    "deleted": 8,
+    "absent": 0,
+    "failed": 0
+  }
+}
