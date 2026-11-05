@@ -67,15 +67,18 @@ Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provisio
 `python -m ops smoke`는 두 가지를 확인합니다(`src/ops/cli.py`의 `smoke` 명령).
 
 1. VNet 안에서 smoke Job을 실행해 Private Endpoint 경로·모델·데이터 서비스·정책/Mock 상태·신청 여정까지 점검합니다. 점검 항목 이름은 [operate](operate.md#smoke)에 있습니다. 점검 개수는 단계마다 늘어 최초 배포(P2)는 21개, 이후 24개(P5b)였습니다.
-2. 운영자 PC에서 콘솔 로그인 관문을 확인합니다(`src/ops/console_gate.py`). 로그인 없이 들어가면 Entra 로그인으로 리디렉션되거나(데모 모드에서는 200), 현재 IP가 막혔으면 403을 알려 줍니다.
+2. 운영자 PC에서 콘솔 관문을 확인합니다(`src/ops/console_gate.py`). 게이트웨이 인증서가 자체 서명이라 TLS 검증은 건너뜁니다. 로그인 없이 들어가면 Entra 로그인으로 리디렉션되거나(데모 모드에서는 200), 403이면 WAF 운영자 IP 규칙이 막은 것입니다. 인증서 비밀 ID(`APPGW_CERT_SECRET_ID`)가 없으면 `window open`을 먼저 실행하라는 오류가 납니다.
 
-콘솔 접속 주소는 azd 환경 값 `CONSOLE_URL`입니다.
+콘솔 접속 주소는 App Gateway 주소입니다. azd 환경 값 `APPGW_FQDN`(또는 `CONSOLE_URL`, `https://<APPGW_FQDN>`)을 씁니다.
 
 ```powershell
+azd env get-value APPGW_FQDN
 azd env get-value CONSOLE_URL
 ```
 
-- 콘솔 ingress는 azd 환경의 `CONSOLE_IP`(`<운영자 공인 IP>/32`)만 허용합니다. `python -m ops window open`이 `CONSOLE_IP`를 현재 공인 IP로 설정하고, `window close`는 이 값을 바꾸지 않습니다(`src/ops/window.py`).
+- 게이트웨이는 자체 서명 인증서를 쓰므로 브라우저에 인증서 경고가 뜹니다. 데모에서는 "고급"에서 계속 진행합니다(운영 전환 시 공인 CA 인증서로 교체, [ADR-011](../adr/ADR-011-appgw-waf-entry.md)).
+- 첫 `python -m ops window open`은 프로비저닝 → 인증서 생성·Key Vault 저장(`src/ops/appgw_cert.py`) → 두 번째 프로비저닝으로 게이트웨이를 만들므로 더 오래 걸립니다. 인증서는 없거나 만료 30일 전이면 `window open`이 새로 씁니다.
+- WAF는 azd 환경의 `CONSOLE_IP`(`<운영자 공인 IP>/32`)가 아닌 요청을 403으로 막습니다. `python -m ops window open`이 `CONSOLE_IP`를 현재 공인 IP로 설정하고, `window close`는 이 값을 바꾸지 않습니다(`src/ops/window.py`).
 - 공인 IP가 바뀌면 [deploy](deploy.md#운영자-ip가-바뀔-때)를 따릅니다.
 - 첫 배포 직후 smoke에서 걸리는 문제는 [troubleshooting](troubleshooting.md)을 봅니다.
 
@@ -83,7 +86,7 @@ azd env get-value CONSOLE_URL
 
 테넌트 정책 때문에 Entra 로그인을 쓸 수 없을 때(예: 사용자 동의가 막혀 "관리자 승인 필요")의 데모 전용 스위치입니다.
 Easy Auth를 끄고, 콘솔은 모든 요청을 고정 데모 사용자(`CONSOLE_DEMO_ROLE`, 기본 `CreditOfficer`)로 처리합니다.
-진입 통제는 운영자 IP 허용 목록(`CONSOLE_IP`/32)만 남습니다. 화면 상단에 "데모 모드" 배너가 보입니다.
+진입 통제는 WAF 운영자 IP 규칙(`CONSOLE_IP`/32)만 남습니다. 화면 상단에 "데모 모드" 배너가 보입니다.
 
 ```powershell
 azd env set CONSOLE_AUTH_ENABLED false     # 다시 켜려면 true

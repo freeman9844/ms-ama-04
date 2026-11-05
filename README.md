@@ -8,14 +8,16 @@ Case Study 18 캡스톤 데모다. 소상공인 운전자금 대출 심사를 2�
 flowchart LR
   officer["심사역 / 운영자"]
   subgraph azure["Azure Korea Central (VNet 격리, 데이터 평면 Private Endpoint)"]
-    console["Officer Console<br/>external + 운영자 IP 허용, 데모 인증"]
+    gw["Application Gateway WAF v2<br/>공용 IP, 운영자 IP만"]
+    console["Officer Console<br/>internal cae-int, 데모 인증"]
     orch["Journey Orchestrator<br/>Durable Functions"]
     foundry["Foundry 에이전트 + 모델"]
     policy["Policy Engine<br/>결정론적 규칙"]
     mock["Mock MyData/세무/PG API"]
     data["Cosmos / Blob / 큐"]
   end
-  officer -->|IP 허용목록| console
+  officer -->|HTTPS| gw
+  gw -->|운영자 IP만| console
   console -->|명령 큐| orch
   console -->|읽기| data
   orch <--> foundry
@@ -63,7 +65,10 @@ python -m ops smoke                       # VNet 안에서 Private Endpoint 경�
 python -m ops window open --acr           # 배포 창: 운영자 IP만 잠시 허용
 python -m ops deploy all                  # 이미지 4종 + Functions 코드
 python -m ops window close                # 작업 뒤 반드시 닫기
+azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN> (자체 서명 인증서 경고는 넘긴다)
 ```
+
+콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서 생성을 위해 두 번 프로비저닝한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)).
 
 ## 문서 지도
 
@@ -71,7 +76,7 @@ python -m ops window close                # 작업 뒤 반드시 닫기
 |---|---|
 | [아키텍처](docs/architecture.md) | 컨테이너·네트워크·신청 흐름·사후 흐름·계약·장애 도메인·확장 경로 |
 | [에이전트](docs/agents.md) | 에이전트별 역할·도구·가드레일과 공통 런타임 |
-| [ADR 색인](docs/adr/README.md) | 아키텍처 결정 기록 ADR-001~009(오케스트레이션·모델 배포·결정론 정책·네트워크·인증 등) |
+| [ADR 색인](docs/adr/README.md) | 아키텍처 결정 기록 ADR-001~011(오케스트레이션·모델 배포·결정론 정책·네트워크·인증·AI 게이트웨이·App Gateway WAF 진입 등) |
 | [위협 모델](docs/security/threat-model.md) | STRIDE + AI 위험, 통제와 잔여 위험 |
 | [비용 모델](docs/cost-model.md) | 건당 AI 비용·월 고정비·월 물량별 건당 총비용 |
 | [한계와 운영 전환](docs/limitations.md) | as-built 한계, 상위 Spec 위험 현황, 운영 전환 체크리스트 |
@@ -88,10 +93,10 @@ python -m ops window close                # 작업 뒤 반드시 닫기
 ## 알려진 한계(요약)
 
 - 실데이터·실사용자 대신 모의 API와 합성 데이터로 전 구간을 돌린 데모다(마이데이터·홈택스·PG는 Mock API).
-- 콘솔 인증은 데모 모드(Easy Auth 꺼짐, 운영자 IP 허용목록만)이고 심사역 ID가 고정 값이라 감사 추적에 실제 신원이 없다([ADR-007](docs/adr/ADR-007-demo-auth-mode.md)).
+- 콘솔 인증은 데모 모드(Easy Auth 꺼짐, WAF 운영자 IP 규칙만)이고 심사역 ID가 고정 값이라 감사 추적에 실제 신원이 없다([ADR-007](docs/adr/ADR-007-demo-auth-mode.md)).
 - 측정 표본이 작아(SLO 24건, 평가 케이스 소수) 수치는 경향으로만 읽고, 공정성 경보 하나는 표본 잡음일 수 있다.
 - 동의·삭제·이의제기 수명주기는 구현했으나 갱신·재조정·회신은 기록·시뮬레이션에 그치고, 데모 시나리오에 동의 철회 장면은 없다.
-- 운영 전환 과제(Entra 복원·App Gateway WAF·분산 서킷·다중 리전·모델 처리 위치)는 [한계와 운영 전환](docs/limitations.md)의 체크리스트에 모았다.
+- 콘솔 진입은 자체 서명 인증서의 App Gateway WAF라 브라우저 경고가 뜬다. 운영 전환 과제(Entra 복원·공인 인증서·분산 서킷·다중 리전·모델 처리 위치)는 [한계와 운영 전환](docs/limitations.md)의 체크리스트에 모았다.
 
 ## 단계별 이력
 

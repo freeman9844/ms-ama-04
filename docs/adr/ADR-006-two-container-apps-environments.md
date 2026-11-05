@@ -1,7 +1,7 @@
 # ADR-006: Container Apps 환경 2개 분리(internal + external)
 
 ## 상태
-채택(P2, 2026-10-31~11-02) · as-built
+대체됨(2026-11-06, [ADR-011](ADR-011-appgw-waf-entry.md)) · 이전 as-built
 
 ## 맥락
 Policy Engine·Mock API·배포 Job은 VNet 안에서만 접근해야 하고, 심사역 콘솔만 외부로 노출한다. Container Apps에서 internal ingress(`external: false`)는 **같은 환경 안의 앱**에서만 접근할 수 있다. 그러면 Azure Functions 오케스트레이터(별도 호스팅)가 internal 앱을 호출할 수 없다. 상위 Spec §2.2는 환경을 둘로 나누고 internal 환경은 Private DNS로 VNet 안에서만, external 환경엔 콘솔만 두도록 한다(`docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md` §2.2).
@@ -19,6 +19,7 @@ Container Apps 환경을 둘로 나눈다. **`cae-int`**(internal, 내부 부하
 ## 결과
 - 장점: internal 앱은 VNet 밖에서 접근 불가, 콘솔만 좁게 노출된다. Consumption 전용 workload profile 환경은 기본 요금이 없어 환경을 나눠도 비용이 거의 늘지 않는다(상위 Spec §2.2).
 - 대가: 환경·Private DNS zone을 둘 운영하고, internal↔Functions 경로가 Private DNS 해석에 의존한다. 콘솔 외부 진입은 운영 전환 시 Application Gateway로 바꿔야 한다([../architecture.md](../architecture.md) 운영 아키텍처).
+- 2026-11-06부터 `cae-web`을 지우고 콘솔을 `cae-int`로 옮겼다. 인터넷 진입은 App Gateway WAF가 맡는다([ADR-011](ADR-011-appgw-waf-entry.md)).
 
 ## 재검토 조건
 - 운영 전환으로 internal 환경 앞 Application Gateway(WAF v2) + Entra 단일 진입을 도입할 때.

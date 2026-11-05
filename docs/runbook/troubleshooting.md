@@ -15,8 +15,8 @@
 - `health:*`가 404: 앱이 아직 자리표시 이미지입니다. `azd env get-value SERVICE_POLICY_IMAGE_NAME`을 확인하고
   `python -m ops deploy policy`(또는 `mockapi`)를 다시 실행합니다. (P3)
 - 동의에 `lifecycle_error: queue_disabled`: 함수 설정 `QUEUE_ENDPOINT`가 없습니다. `ops window open`으로 설정을 다시 넣습니다. (P5b)
-- 운영자 PC 공인 IP가 연결마다 바뀌어 배포·콘솔이 403: `ops window status`의 IP와 다른 IP를 Functions 접근 제한·console ingress에
-  `operator-alt` 규칙으로 잠시 추가하고, 작업 뒤 지웁니다(`ops window close`는 Functions 규칙을 Bicep 상태로 되돌립니다). (P6b)
+- 운영자 PC 공인 IP가 연결마다 바뀌어 배포가 403: `ops window status`의 IP와 다른 IP를 Functions 접근 제한에
+  `operator-alt` 규칙으로 잠시 추가하고, 작업 뒤 지웁니다(`ops window close`는 Functions 규칙을 Bicep 상태로 되돌립니다). 콘솔이 403이면 App Gateway WAF가 막은 것이라 `window open --ip <현재 IP>`로 `CONSOLE_IP`를 갱신합니다([deploy](deploy.md#운영자-ip가-바뀔-때)). (P6b)
 
 ## 신청 여정·오케스트레이터
 

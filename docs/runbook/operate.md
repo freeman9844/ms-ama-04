@@ -97,6 +97,6 @@ python -m ops metrics --run load-<시각> --fault-runs fault-<…> fault-<…>  
 | ACR Premium | 약 $50 | Private Endpoint 필요 |
 | Private Endpoint 약 17개 | 약 $125 | 개당 약 $7.3 |
 | 모델, Functions, Container Apps, Cosmos serverless | 사용량 기반 | 유휴 시 거의 0 |
-| Application Gateway WAF v2 | (구축 안 함) | 운영 아키텍처 문서에만 기술, 약 $365 |
+| Application Gateway WAF v2 | 약 $370 | 콘솔 진입점, 상시([ADR-011](../adr/ADR-011-appgw-waf-entry.md)) |
 
 월 고정비의 실측 추정은 `ops/reports/load-20261102110233/report.md`(Cost Management 일평균 × 30)를 봅니다.
