@@ -72,6 +72,12 @@ resource site 'Microsoft.Web/sites@2024-04-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 40
         instanceMemoryMB: 2048
+        // 심사역 결정·신청 접수 경로는 콜드 스타트 없이 바로 처리한다(그룹당 1개, 월 약 $20).
+        alwaysReady: [
+          { name: 'durable', instanceCount: 1 }
+          { name: 'function:officer_decision', instanceCount: 1 }
+          { name: 'function:start_application', instanceCount: 1 }
+        ]
       }
       runtime: { name: 'python', version: '3.12' }
     }
