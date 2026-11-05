@@ -6,6 +6,7 @@ from pathlib import Path
 AIS = "Microsoft.CognitiveServices/accounts"
 ROLE_FOUNDRY_USER = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 ROLE_OPENAI_USER = "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd"
+ROLE_COGNITIVE_USER = "a97b65f3-24c7-4388-baec-2e87135dc908"
 ROLE_BLOB_OWNER = "b7e6dc6d-f1e8-4753-8033-0f276bb0955b"
 ROLE_BLOB_CONTRIBUTOR = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
 ROLE_COSMOS_OPERATOR = "230815da-be43-4aae-9cb4-875f7bd000aa"
@@ -69,7 +70,7 @@ def test_model_sku_parameters_switch_to_data_zone(variant):
 
 
 def test_account_data_plane_roles(closed):
-    assert closed.roles_on("ais-") == {ROLE_FOUNDRY_USER, ROLE_OPENAI_USER}
+    assert closed.roles_on("ais-") == {ROLE_FOUNDRY_USER, ROLE_OPENAI_USER, ROLE_COGNITIVE_USER}
 
 
 def test_project_connections_use_entra_auth(closed):

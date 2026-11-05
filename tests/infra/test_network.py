@@ -14,7 +14,7 @@ EXPECTED_ZONES = {
     "privatelink.azurewebsites.net",
 }
 # 태그를 받지 않는 확장 리소스 유형
-UNTAGGED = {"Microsoft.Authorization/roleAssignments"}
+UNTAGGED = {"Microsoft.Authorization/roleAssignments", "Microsoft.Insights/diagnosticSettings"}
 
 
 def _subnets(exp):
@@ -29,7 +29,7 @@ def test_vnet_uses_class_c_private_range(closed):
 
 def test_subnets_and_delegations(closed):
     subnets = _subnets(closed)
-    assert set(subnets) == {"snet-agents", "snet-pe", "snet-functions", "snet-apps-int", "snet-apps-web"}
+    assert set(subnets) == {"snet-agents", "snet-pe", "snet-functions",     "snet-apps-int", "snet-apps-web", "snet-apim"}
     for name in ("snet-agents", "snet-functions", "snet-apps-int", "snet-apps-web"):
         services = [d["properties"]["serviceName"] for d in subnets[name]["delegations"]]
         assert services == ["Microsoft.App/environments"], name

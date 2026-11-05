@@ -62,6 +62,7 @@ var names = {
   caMockapi: 'ca-mockapi'
   caConsole: 'ca-console'
   consoleApp: 'amalend-console-${environmentName}-${sfx}'
+  apim: 'apim-${sfx}'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -81,6 +82,7 @@ var dnsZoneNames = [
   'privatelink.servicebus.windows.net'
   'privatelink.azurecr.io'
   'privatelink.azurewebsites.net'
+  'azure-api.net'
 ]
 
 // 기본 제공 역할 정의 GUID (az role definition list로 확인, 2026-10-31)
@@ -736,6 +738,38 @@ module opsJob 'modules/eval-job.bicep' = {
       { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${environment().suffixes.storage}' }
     ]
   }
+}
+
+// ── AI 게이트웨이(APIM) ────────────────────────────────────────────────
+// 에이전트마다 제품·구독·Foundry 연결 하나. TPM은 Task 11 실측 피크의 2배 이상으로 맞춥니다.
+// src/agents/gateway.py CONNECTIONS와 이름이 같아야 합니다(테스트가 교차 확인).
+var gateways = [
+  { name: 'gw-analyst', tpm: 20000 }
+  { name: 'gw-early-warning', tpm: 20000 }
+  { name: 'gw-reviewer', tpm: 15000 }
+  { name: 'gw-data-assembly', tpm: 15000 }
+  { name: 'gw-txn-classifier', tpm: 10000 }
+  { name: 'gw-collections', tpm: 10000 }
+  { name: 'gw-consent-notice', tpm: 5000 }
+  { name: 'gw-grievance', tpm: 5000 }
+  { name: 'gw-probe', tpm: 1000 }
+]
+
+module apim 'modules/apim.bicep' = {
+  name: 'apim'
+  params: {
+    name: names.apim
+    location: location
+    tags: tags
+    subnetId: subnetId['snet-apim']
+    aiAccountName: aiAccount.outputs.name
+    appiName: monitoring.outputs.appiName
+    appiConnectionString: monitoring.outputs.appiConnectionString
+    lawId: monitoring.outputs.lawId
+    allowedAppIds: [ identities.outputs.orchestratorClientId, identities.outputs.evalClientId ]
+    gateways: gateways
+  }
+  dependsOn: [ dns ]
 }
 
 module opsInsights 'modules/ops-insights.bicep' = {
