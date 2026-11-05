@@ -8,7 +8,7 @@ NSG = "Microsoft.Network/networkSecurityGroups"
 COGNITIVE_USER = "a97b65f3-24c7-4388-baec-2e87135dc908"
 METRICS_PUBLISHER = "3913510d-42f4-4e42-8a64-420c390055eb"
 GATEWAYS = {
-    "gw-analyst": 50000,
+    "gw-analyst": 100000,
     "gw-early-warning": 50000,
     "gw-reviewer": 15000,
     "gw-data-assembly": 17000,
