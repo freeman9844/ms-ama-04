@@ -749,7 +749,8 @@ module opsJob 'modules/eval-job.bicep' = {
 
 // ── AI 게이트웨이(APIM) ────────────────────────────────────────────────
 // 에이전트마다 제품·구독·Foundry 연결 하나. TPM은 Task 11 실측(운영 부하+평가) 피크 기준입니다.
-// gpt-5.4를 주로 쓰는 gw-analyst + gw-early-warning 합(200K)은 gpt-5.4 배포 용량(main.bicep)과 같습니다.
+// gpt-5.4를 주로 쓰는 gw-analyst + gw-early-warning 합(200K)은 GlobalStandard gpt-5.4 배포 용량(main.bicep)과 같습니다.
+// DataZoneStandard는 배포 용량이 100K라 APIM TPM보다 배포 한도가 먼저 걸립니다.
 // src/agents/gateway.py CONNECTIONS와 이름이 같아야 합니다(테스트가 교차 확인).
 var gateways = [
   { name: 'gw-analyst', tpm: 150000 }

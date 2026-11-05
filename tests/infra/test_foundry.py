@@ -45,6 +45,7 @@ def test_model_deployments_default_to_global_standard(closed):
     assert deployments["decision-1"]["properties"]["model"]["format"] == "Microsoft"
     assert deployments["decision-1"]["properties"]["model"]["name"] == "Microsoft-Decision-1"
     assert deployments["gpt-5.4"]["properties"]["model"]["version"] == "2026-03-05"
+    assert deployments["gpt-5.4"]["sku"]["capacity"] == 200
 
 
 def test_model_deployment_names_avoid_reserved_words(closed):
@@ -66,7 +67,10 @@ def test_account_private_endpoint_waits_for_model_deployments():
 
 
 def test_model_sku_parameters_switch_to_data_zone(variant):
-    assert {d["sku"]["name"] for d in _deployments(variant).values()} == {"DataZoneStandard"}
+    deployments = _deployments(variant)
+    assert {d["sku"]["name"] for d in deployments.values()} == {"DataZoneStandard"}
+    # DataZoneStandard gpt-5.4 쿼터(100K)를 넘지 않아야 합니다(ADR-002).
+    assert deployments["gpt-5.4"]["sku"]["capacity"] == 100
 
 
 def test_account_data_plane_roles(closed):

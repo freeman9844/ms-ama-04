@@ -23,6 +23,7 @@
 ## 결과
 - 장점: 데모에서 가장 넓은 모델·쿼터를 쓰면서, SKU를 파라미터로 둬 운영 전환 시 한 줄로 바꾼다. 가명화·최소 전송으로 모델 전송 PII를 줄인다(실측: 검사한 모델 호출 341회 중 PII 잔존 0회, `eval/reports/job-eval-9imbutm/report.md` 5장).
 - 대가: 추론 처리 위치가 국내로 보장되지 않는다(상위 Spec의 국내 처리 제약 미충족, as-built 잔여 위험). abuse monitoring 데이터 처리 조건 확인이 남는다.
+- as-built 차이: gpt-5.4의 GlobalStandard 배포 용량은 AI 게이트웨이(ADR-010) 도입 이후 200K TPM이고, DataZoneStandard일 때는 쿼터에 맞춰 100K다(`infra/main.bicep`).
 - as-built 차이: `Microsoft-Decision-1`은 APAC Global Standard 지원이 문서·CLI에서 엇갈려, 실패 시 `DataZoneStandard`로 전환하도록 `decisionModelSku`를 별도로 둔다(`infra/main.bicep`, [../runbook/troubleshooting.md](../runbook/troubleshooting.md)).
 
 ## 재검토 조건

@@ -62,7 +62,7 @@
 | `grievance-reply-agent` | `gw-grievance` | gpt-5.4-mini | 5K |
 | `gateway-probe`(관문·시연 프로브) | `gw-probe` | gpt-5.4-mini | 1K |
 
-- TPM 합계는 배포 쿼터(gpt-5.4 50K, gpt-5.4-mini 100K) 안이다.
+- TPM 합계는 as-built 배포 용량 안이다. gpt-5.4는 GlobalStandard 200K(`gw-analyst` 150K + `gw-early-warning` 50K), gpt-5.4-mini는 100K다. gpt-5.4가 DataZoneStandard면 쿼터가 100K라 배포 한도(100K)가 APIM TPM보다 먼저 걸린다.
 - 초기값은 계획 단계 부하 테스트(`ops load`)로 다시 맞춘다. 기준은 측정된 분당 최대 사용량의 2배 이상이며, 부하 테스트에서 429가 나면 안 된다.
 - `gw-probe`는 프로브 전용 연결·구독이다. 사전 검증과 429·차단 시연에만 쓰고 업무 에이전트는 쓰지 않는다.
 

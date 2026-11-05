@@ -76,10 +76,11 @@ var tags = {
 }
 
 // capacity 단위는 1K TPM. 구독 쿼터(GlobalStandard): gpt-5.4 250, gpt-5.4-mini 1000.
-// gpt-5.4 200 = AI 게이트웨이 gw-analyst 150K + gw-early-warning 50K(종량제라 용량을 늘려도 고정비는 없습니다).
+// gpt-5.4 GlobalStandard 200 = AI 게이트웨이 gw-analyst 150K + gw-early-warning 50K(종량제라 용량을 늘려도 고정비는 없습니다).
+// DataZoneStandard 쿼터는 100이라 100으로 낮추며, 이때는 APIM TPM 합(200K)보다 배포 한도(100K)가 먼저 걸립니다.
 // ARM은 리소스 이름에 예약어 MICROSOFT를 허용하지 않으므로 Decision-1은 배포 이름을 따로 둡니다.
 var modelDeployments = [
-  { name: 'gpt-5.4', format: 'OpenAI', version: '2026-03-05', sku: chatModelSku, capacity: 200 }
+  { name: 'gpt-5.4', format: 'OpenAI', version: '2026-03-05', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 200 : 100 }
   { name: 'gpt-5.4-mini', format: 'OpenAI', version: '2026-03-17', sku: chatModelSku, capacity: 100 }
   { name: 'Microsoft-Decision-1', deploymentName: 'decision-1', format: 'Microsoft', version: '1', sku: decisionModelSku, capacity: 50 }
 ]
