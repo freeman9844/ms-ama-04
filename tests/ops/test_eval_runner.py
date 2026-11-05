@@ -7,7 +7,7 @@ import pytest
 from evals.transport import chunks
 from ops.azcli import OpsError
 from ops.cli import main
-from ops.eval_runner import run_eval
+from ops.eval_runner import run_eval, run_gateway_probe
 
 ENV = {"AZURE_SUBSCRIPTION_ID": "sub-azd", "AZURE_RESOURCE_GROUP": "rg-amalend", "EVAL_JOB_NAME": "job-eval",
        "LOG_ANALYTICS_CUSTOMER_ID": "law-guid"}
@@ -156,3 +156,46 @@ def test_cli_eval_collect(fake_runner, tmp_path, monkeypatch):
     out = io.StringIO()
     assert main(["eval", "--collect", EXEC], runner=runner, out=out) == 0
     assert str(tmp_path / EXEC) in out.getvalue() and runner.commands(*START) == []
+
+
+PROBE = {"task": "gateway-probe", "mode": "throttle",
+         "checks": {"throttle": {"attempts": ["ok", "rate_limited"], "expected": "rate_limited", "reproduced": True}}}
+PROBE_FILES = {"probe.json": json.dumps(PROBE).encode()}
+
+
+def test_gateway_probe_starts_job_with_task_and_collects_probe(fake_runner, tmp_path):
+    runner = (_runner(fake_runner, _rows(PROBE_FILES))
+              .on("az", "containerapp", "job", "show", results=[json.dumps(TEMPLATE)])
+              .on("az", "rest", results=[json.dumps({"name": EXEC})]))
+    bodies = []
+
+    def spy(args, *, stream=False):
+        if args[:2] == ["az", "rest"]:
+            path = Path(args[args.index("--body") + 1].removeprefix("@"))
+            bodies.append(json.loads(path.read_text(encoding="utf-8")))
+        return runner(args, stream=stream)
+
+    result = run_gateway_probe(spy, mode="throttle", out_root=tmp_path, sleep=lambda s: None)
+    assert result.summary == PROBE
+    env = bodies[0]["containers"][0]["env"]
+    assert {"name": "EVAL_TASK", "value": "gateway-probe"} in env
+    assert {"name": "PROBE_MODE", "value": "throttle"} in env
+    assert {"name": "EVAL_SUITE", "value": "all"} in env
+    assert (tmp_path / EXEC / "probe.json").read_bytes() == PROBE_FILES["probe.json"]
+
+
+def test_gateway_probe_give_up_message_points_to_probe_collect(fake_runner, tmp_path):
+    runner = _runner(fake_runner, _rows(PROBE_FILES, drop=0))
+    with pytest.raises(OpsError) as err:
+        run_gateway_probe(runner, mode="unsafe", collect=EXEC, out_root=tmp_path, sleep=lambda s: None, log_limit=2)
+    assert f"python -m ops gateway probe --mode unsafe --collect {EXEC}" in str(err.value)
+
+
+@pytest.mark.parametrize("reproduced, code", [(True, 0), (False, 2)])
+def test_cli_gateway_probe_exit_code(fake_runner, tmp_path, monkeypatch, reproduced, code):
+    monkeypatch.setattr("ops.eval_runner.REPORTS", tmp_path)
+    probe = {**PROBE, "checks": {"throttle": {**PROBE["checks"]["throttle"], "reproduced": reproduced}}}
+    runner = _runner(fake_runner, _rows({"probe.json": json.dumps(probe).encode()}))
+    out = io.StringIO()
+    assert main(["gateway", "probe", "--collect", EXEC], runner=runner, out=out) == code
+    assert '"reproduced"' in out.getvalue() and str(tmp_path / EXEC) in out.getvalue()
