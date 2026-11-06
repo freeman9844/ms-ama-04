@@ -34,8 +34,9 @@ def test_subnets_and_delegations(closed):
         services = [d["properties"]["serviceName"] for d in subnets[name]["delegations"]]
         assert services == ["Microsoft.App/environments"], name
     assert subnets["snet-pe"]["delegations"] == []
-    # App Gateway v2 서브넷은 위임·NSG 없이 게이트웨이 전용입니다.
-    assert subnets["snet-appgw"]["delegations"] == []
+    # App Gateway 네트워크 격리 기능이 켜진 구독은 게이트웨이 서브넷 위임이 필수이고, NSG는 두지 않습니다.
+    appgw_services = [d["properties"]["serviceName"] for d in subnets["snet-appgw"]["delegations"]]
+    assert appgw_services == ["Microsoft.Network/applicationGateways"]
     assert "networkSecurityGroup" not in subnets["snet-appgw"]
     assert subnets["snet-agents"]["addressPrefix"] == "192.168.0.0/24"
     assert subnets["snet-functions"]["addressPrefix"] == "192.168.2.0/26"

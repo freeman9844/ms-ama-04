@@ -132,7 +132,7 @@ flowchart TB
 | `snet-pe` | `192.168.1.0/24` | 아니오 | Private Endpoint |
 | `snet-functions` | `192.168.2.0/26` | 예 | Functions Flex Consumption VNet 통합 |
 | `snet-apps-int` | `192.168.4.0/24` | 예 | internal Container Apps 환경(콘솔·Policy·Mock·Job) |
-| `snet-appgw` | `192.168.7.0/24` | 아니오 | Application Gateway WAF v2(위임·NSG 없음) |
+| `snet-appgw` | `192.168.7.0/24` | 예 | Application Gateway WAF v2(`Microsoft.Network/applicationGateways` 위임(네트워크 격리 필수), NSG 없음) |
 | `snet-apim` | `192.168.6.0/27` | 아니오 | APIM 내부 모드(게이트웨이 사설 IP, 공인 IP 없음) |
 
 주소·프리픽스는 `infra/modules/network.bicep`의 템플릿 값이다. Private Endpoint·DNS zone은 `infra/modules/pe.bicep`와 `infra/modules/dns.bicep`로 리소스별(`infra/resources.bicep` 호출부)에 붙는다: Key Vault, Storage(blob/queue/table), Cosmos, AI Search, Foundry 계정, Service Bus, ACR, Functions.

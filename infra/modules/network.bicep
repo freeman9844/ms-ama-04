@@ -4,12 +4,12 @@ param location string
 param tags object
 
 var subnets = [
-  { name: 'snet-agents', prefix: '192.168.0.0/24', delegated: true, nsg: false }    // Foundry Agent Service 전용(위임, 단독)
-  { name: 'snet-pe', prefix: '192.168.1.0/24', delegated: false, nsg: false }       // Private Endpoint
-  { name: 'snet-functions', prefix: '192.168.2.0/26', delegated: true, nsg: false } // Flex Consumption VNet 통합
-  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegated: true, nsg: false }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
-  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegated: false, nsg: false }    // Application Gateway WAF v2(콘솔 진입점, 전용)
-  { name: 'snet-apim', prefix: '192.168.6.0/27', delegated: false, nsg: true }      // API Management 내부 모드(AI 게이트웨이)
+  { name: 'snet-agents', prefix: '192.168.0.0/24', delegation: 'Microsoft.App/environments', nsg: false }    // Foundry Agent Service 전용(위임, 단독)
+  { name: 'snet-pe', prefix: '192.168.1.0/24', delegation: '', nsg: false }       // Private Endpoint
+  { name: 'snet-functions', prefix: '192.168.2.0/26', delegation: 'Microsoft.App/environments', nsg: false } // Flex Consumption VNet 통합
+  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegation: 'Microsoft.App/environments', nsg: false }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
+  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegation: 'Microsoft.Network/applicationGateways', nsg: false }    // Application Gateway WAF v2(콘솔 진입점, 전용). 위임은 App Gateway 네트워크 격리가 요구
+  { name: 'snet-apim', prefix: '192.168.6.0/27', delegation: '', nsg: true }      // API Management 내부 모드(AI 게이트웨이)
 ]
 
 // APIM VNet 주입 필수 규칙만 둡니다. 인터넷 인바운드는 열지 않습니다(내부 모드).
@@ -62,12 +62,12 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
       properties: union({
         addressPrefix: s.prefix
         privateEndpointNetworkPolicies: 'Disabled'
-        delegations: s.delegated ? [
+        delegations: empty(s.delegation) ? [] : [
           {
-            name: 'Microsoft.App.environments'
-            properties: { serviceName: 'Microsoft.App/environments' }
+            name: replace(s.delegation, '/', '.')
+            properties: { serviceName: s.delegation }
           }
-        ] : []
+        ]
       }, s.nsg ? { networkSecurityGroup: { id: nsg.id } } : {})
     }]
   }
