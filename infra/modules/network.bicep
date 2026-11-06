@@ -4,12 +4,12 @@ param location string
 param tags object
 
 var subnets = [
-  { name: 'snet-agents', prefix: '192.168.0.0/24', delegation: 'Microsoft.App/environments', nsg: false }    // Foundry Agent Service 전용(위임, 단독)
-  { name: 'snet-pe', prefix: '192.168.1.0/24', delegation: '', nsg: false }       // Private Endpoint
-  { name: 'snet-functions', prefix: '192.168.2.0/26', delegation: 'Microsoft.App/environments', nsg: false } // Flex Consumption VNet 통합
-  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegation: 'Microsoft.App/environments', nsg: false }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
-  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegation: 'Microsoft.Network/applicationGateways', nsg: false }    // Application Gateway WAF v2(콘솔 진입점, 전용). 위임은 App Gateway 네트워크 격리가 요구
-  { name: 'snet-apim', prefix: '192.168.6.0/27', delegation: '', nsg: true }      // API Management 내부 모드(AI 게이트웨이)
+  { name: 'snet-agents', prefix: '192.168.0.0/24', delegation: 'Microsoft.App/environments', nsg: '' }    // Foundry Agent Service 전용(위임, 단독)
+  { name: 'snet-pe', prefix: '192.168.1.0/24', delegation: '', nsg: '' }       // Private Endpoint
+  { name: 'snet-functions', prefix: '192.168.2.0/26', delegation: 'Microsoft.App/environments', nsg: '' } // Flex Consumption VNet 통합
+  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegation: 'Microsoft.App/environments', nsg: '' }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
+  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegation: 'Microsoft.Network/applicationGateways', nsg: 'appgw' }    // Application Gateway WAF v2(콘솔 진입점, 전용). 위임은 App Gateway 네트워크 격리가 요구, NSG는 nsg-appgw
+  { name: 'snet-apim', prefix: '192.168.6.0/27', delegation: '', nsg: 'apim' }      // API Management 내부 모드(AI 게이트웨이)
 ]
 
 // APIM VNet 주입 필수 규칙만 둡니다. 인터넷 인바운드는 열지 않습니다(내부 모드).
@@ -51,6 +51,29 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
   }
 }
 
+// 테넌트 정책이 NSG 없는 서브넷에 기본 거부 NSG를 붙이므로 직접 소유합니다. IP 허용 목록은 NSG가 아니라 WAF 사용자 지정 규칙이 적용합니다.
+resource nsgAppGw 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
+  name: 'nsg-appgw'
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [
+      {
+        name: 'allow-gateway-manager'
+        properties: { priority: 100, direction: 'Inbound', access: 'Allow', protocol: 'Tcp', sourceAddressPrefix: 'GatewayManager', sourcePortRange: '*', destinationAddressPrefix: '*', destinationPortRange: '65200-65535' }
+      }
+      {
+        name: 'allow-azure-lb'
+        properties: { priority: 110, direction: 'Inbound', access: 'Allow', protocol: '*', sourceAddressPrefix: 'AzureLoadBalancer', sourcePortRange: '*', destinationAddressPrefix: '*', destinationPortRange: '*' }
+      }
+      {
+        name: 'allow-internet-web'
+        properties: { priority: 120, direction: 'Inbound', access: 'Allow', protocol: 'Tcp', sourceAddressPrefix: 'Internet', sourcePortRange: '*', destinationAddressPrefix: '*', destinationPortRanges: [ '80', '443' ] }
+      }
+    ]
+  }
+}
+
 resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: name
   location: location
@@ -68,7 +91,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
             properties: { serviceName: s.delegation }
           }
         ]
-      }, s.nsg ? { networkSecurityGroup: { id: nsg.id } } : {})
+      }, s.nsg == 'apim' ? { networkSecurityGroup: { id: nsg.id } } : (s.nsg == 'appgw' ? { networkSecurityGroup: { id: nsgAppGw.id } } : {}))
     }]
   }
 }
