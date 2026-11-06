@@ -61,14 +61,14 @@ Azure 배포 요약(자세한 순서와 문제 대응은 [setup](docs/runbook/se
 ```powershell
 azd env new amalend --location koreacentral --subscription <구독 ID>
 azd provision --no-prompt                 # 최초 프로비저닝
-python -m ops smoke                       # VNet 안에서 Private Endpoint 경로 검증
-python -m ops window open --acr           # 배포 창: 운영자 IP만 잠시 허용
+python -m ops window open --acr           # 배포 창: 운영자 IP만 잠시 허용 + 최초에는 인증서·게이트웨이 생성
+python -m ops smoke                       # Private Endpoint 경로 + 콘솔 관문 검증(게이트웨이가 있어야 함)
 python -m ops deploy all                  # 이미지 4종 + Functions 코드
 python -m ops window close                # 작업 뒤 반드시 닫기
 azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN> (자체 서명 인증서 경고는 넘긴다)
 ```
 
-콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서 생성을 위해 두 번 프로비저닝한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)).
+콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서·게이트웨이를 만들려고 두 번 프로비저닝하므로 smoke는 그 뒤에 실행한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)).
 
 ## 문서 지도
 

@@ -46,8 +46,12 @@ azd env set OPERATOR_IP closed
 azd provision --preview
 azd provision --no-prompt          # 실측: 성공 실행 7.6분(최초 실패 2회 포함 누적 약 28분)
 azd env set DEPLOY_CAPHOST false   # 이후 재프로비저닝에서 capability host 재생성 방지
-python -m ops smoke                # VNet 안에서 Private Endpoint 경로 검증(실측 약 1.2분, 21개 점검, P2)
+python -m ops window open          # 최초에는 게이트웨이 인증서 생성 + 게이트웨이 프로비저닝(아래 "배포 뒤 확인")
+python -m ops smoke                # Private Endpoint 경로 검증(실측 약 1.2분, 21개 점검, P2) + 콘솔 관문
 ```
+
+최초 `azd provision`에는 App Gateway가 없습니다(인증서 비밀 ID `APPGW_CERT_SECRET_ID`가 없으면 게이트웨이를 만들지 않음).
+smoke의 콘솔 관문은 게이트웨이가 있어야 하므로 smoke는 반드시 첫 `window open` 뒤에 실행합니다. 그 전에 실행하면 `window open`을 먼저 하라는 오류가 납니다.
 
 이후 재프로비저닝(capability host 제외)은 약 3.5분, smoke Job 스크립트(`src/ops/smoke_checks.py`)는
 Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provision`이 필요합니다.
