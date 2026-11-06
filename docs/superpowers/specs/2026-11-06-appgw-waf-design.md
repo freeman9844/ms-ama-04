@@ -1,6 +1,6 @@
 # App Gateway WAF v2 진입점 설계
 
-상태: 승인(2026-11-06), 인증서 경로 A′로 수정. 앞 단계: 심사역 결정 반영 지연 단축(배포 완료, `2b272aa`).
+상태: 구현·배포 완료(2026-11-06, `1a20c38`). 인증서 경로 A′로 수정, 라이브 롤아웃에서 서브넷 위임·NSG를 고침(§10). 앞 단계: 심사역 결정 반영 지연 단축(배포 완료, `2b272aa`).
 
 ## 1. 목표
 
@@ -23,7 +23,7 @@
 | 접근 범위 | **운영자 IP만**. 콘솔 전체(심사역 화면과 `/apply` 고객 화면 모두)를 `CONSOLE_IP` 한 개만 허용한다. 데모 인증 모드(ADR-007, 고정 `demo-operator`)라 인터넷 공개는 하지 않는다. |
 | WAF 정책 | Prevention 모드, 관리형 규칙 `Microsoft_DefaultRuleSet` 2.1, 요청 본문 검사 켬. 사용자 지정 규칙 1개(우선순위 10): `RemoteAddr`가 `CONSOLE_IP/32`가 **아니면** Block. `CONSOLE_IP`가 비면 문서용 주소 `192.0.2.0/32`만 허용한다(기존 콘솔 규칙과 같은 관례). 오탐이 실측되면 해당 규칙만 제외 항목으로 끈다. |
 | 콘솔 위치 | **내부 환경 `cae-int`로 이동**. 외부 환경 `cae-web`과 서브넷 `snet-apps-web`(192.168.5.0/24)는 삭제한다. 콘솔 ingress는 환경 안 `external: true`(VNet 전용), IP 제한 없음. |
-| 서브넷 | 새 서브넷 `snet-appgw` **192.168.7.0/24**(위임 없음, NSG 없음). 192.168.3.0/24는 예비로 남긴다. |
+| 서브넷 | 새 서브넷 `snet-appgw` **192.168.7.0/24**. `Microsoft.Network/applicationGateways`로 위임한다(구독에 App Gateway 네트워크 격리 기능이 등록돼 있어 필수). NSG `nsg-appgw`를 직접 소유한다(인바운드 GatewayManager 65200–65535, AzureLoadBalancer, Internet 80/443 허용). 테넌트 정책이 NSG 없는 서브넷에 기본 거부 NSG를 붙이기 때문이다. IP 제한은 NSG가 아니라 WAF 사용자 지정 규칙이 맡아 비운영자는 시간 초과가 아닌 403을 받는다. 192.168.3.0/24는 예비로 남긴다. |
 | 이름 | `agw-amalend`(App Gateway), `waf-amalend`(WAF 정책), `pip-agw-amalend`(공인 IP), `id-appgw-amalend`(관리 ID). `<접미사>`는 기존 `uniqueString` 접미사다. |
 | 프런트엔드 | 공인 IP(Standard, 정적) 1개와 DNS 레이블 `amalend-<접미사>` → `amalend-<접미사>.koreacentral.cloudapp.azure.com`. 리스너 443(HTTPS)과 80(HTTPS로 301 리디렉션). |
 | 인증서 | **접근법 A′.** `ops`가 운영자 PC 메모리에서 자체 서명 PFX(CN·SAN = 위 FQDN, 365일, RSA 2048, 암호 없음)를 만들어 **제어 평면 ARM PUT**으로 Key Vault 비밀 `appgw-console`(`contentType: application/x-pkcs12`)에 넣는다. App Gateway 사용자 할당 관리 ID가 버전 없는 비밀 ID로 참조한다. 개인 키는 디스크·azd `.env`에 남지 않고 Key Vault는 계속 비공개다. 브라우저 경고는 데모에서 한 번 수락한다. |
@@ -71,7 +71,8 @@ Key Vault는 항상 공용 접근 Disabled다. 구독의 MCAPS 정책(`MCAPSGovD
 - **`CONSOLE_URL`:** `https://amalend-<접미사>.koreacentral.cloudapp.azure.com`(App Gateway). `CONSOLE_APP_NAME`은 그대로다.
 - **`console_gate`:** `CONSOLE_URL`(App Gateway)을 확인한다. 자체 서명이라 이 확인에서만 TLS 검증을 끄고, 그 사실을 결과 문구에 적는다. 403은 "WAF가 현재 IP를 막았다(CONSOLE_IP 갱신 필요)"로 안내한다. App Gateway가 아직 없으면(인증서 대기) 그 상태를 알린다.
 - **Easy Auth 복원 경로(ADR-007):** 앱 등록 리디렉션 URI를 App Gateway FQDN으로 바꾸고, `authConfigs`에 `httpSettings.forwardProxy`(`convention: Custom`, `customHostHeaderName: X-Original-Host`, `customProtoHeaderName: X-Forwarded-Proto`)를 둬 App Gateway가 넣는 원래 호스트를 따르게 한다(App Gateway v2는 `X-Forwarded-Host`를 보내지 않고 `X-Original-Host`를 보낸다). 데모에서는 꺼진 채라 동작은 바뀌지 않는다.
-- **`CONSOLE_IP`:** 지금처럼 `window open`이 갱신하고 `window close`는 유지한다. 반영 대상만 Container App ingress에서 WAF 정책으로 바뀐다.
+- **`CONSOLE_IP`:** 지금처럼 `window open`이 갱신하고 `window close`는 유지한다. 반영 대상만 Container App ingress에서 WAF 정책으로 바뀐다. 모바일 회선이라 출구 IP가 창을 연 뒤에 바뀌면 프로비저닝 없이 `azd env set CONSOLE_IP <새 IP>`와 WAF 정책 `allowOperatorOnly`의 `matchValues` 갱신으로 바로 고칠 수 있다(다음 프로비저닝도 같은 값을 쓴다).
+- **콘솔 주소:** 첫 화면은 `CONSOLE_URL` 루트(`/`)다. `/applications`는 POST 전용이라 GET은 405가 정상이다.
 - **VNet 안 smoke:** 바꾸지 않는다.
 
 ## 6. 롤아웃(파괴적 단계 포함)
@@ -109,6 +110,23 @@ Container App의 `environmentId`는 바꿀 수 없어서 콘솔을 지우고 다
 |---|---|
 | DRS 2.1 오탐으로 콘솔 폼 POST가 403 | 라이브 확인에서 FirewallLog로 규칙 ID를 찾아 해당 규칙만 제외한다. 결과를 deploy-history에 남긴다. |
 | App Gateway가 Key Vault 비밀을 못 읽어 배포 실패 | 관리 ID와 역할은 1차 프로비저닝에서, App Gateway는 2차에서 만들어 역할 전파 시간을 번다. 사설 DNS로 Key Vault가 풀리는지 확인한다. |
-| App Gateway가 암호 없는 PFX 비밀을 거부 | 라이브 롤아웃에서 확인한다. 거부되면 PFX를 같은 경로로 다시 쓰되 인증서 객체(`certificates/import`)가 필요한지 검토하고 사용자에게 알린다. |
-| 운영자 IP 변경(모바일 NAT) | 기존처럼 `window open`으로 `CONSOLE_IP`를 갱신한다. |
+| App Gateway가 암호 없는 PFX 비밀을 거부 | 라이브 롤아웃에서 확인했다: 버전 없는 비밀 ID로 정상 로드(백엔드 Healthy). |
+| 운영자 IP 변경(모바일 NAT) | `window open`으로 `CONSOLE_IP`를 갱신하거나, 급하면 §5의 WAF `matchValues` 직접 갱신을 쓴다(롤아웃 중 실제로 발생). |
+| 테넌트 정책이 서브넷에 NSG를 자동 부착 | `nsg-appgw`를 IaC로 소유한다(§2). 정책이 만든 연결 안 된 NSG는 정리 대상이다. |
 | 비용 | 상시 월 약 $370 증가. 유휴 환경 합계 약 $410 → 약 $780. |
+
+## 10. 구현·롤아웃 결과(as-built, 2026-11-06)
+
+계획과 달라진 점과 실측값이다. 자세한 기록은 `docs/runbook/deploy-history.md`의 "2026-11-06 App Gateway WAF v2 진입점"에 있다.
+
+| 항목 | 결과 |
+|---|---|
+| 삭제 | `ca-console` 24초, `cae-web-amalend` 1218초. |
+| 서브넷 위임(계획 변경) | 2차 프로비저닝이 `ApplicationGatewayNetworkIsolationRequiresSubnetDelegation`으로 실패했다. 구독에 `EnableApplicationGatewayNetworkIsolation`이 등록돼 있어 2025-05-05 이후 게이트웨이 서브넷 위임이 필수다. `fad9181`로 `snet-appgw`를 위임했다. |
+| NSG(계획 변경) | 게이트웨이는 `Running`·백엔드 `Healthy`였지만 인터넷에서 80/443이 시간 초과됐다. 테넌트 정책이 붙인 NSG(GatewayManager만 허용)가 원인이라 `ad1a49b`로 `nsg-appgw`를 직접 소유했다. 정책이 만든 연결 안 된 NSG는 이후 삭제했다. |
+| 프로비저닝 | 2차 `window open` 1468초(프로비저닝 24분 16초, App Gateway 생성 포함), NSG 반영 7분 43초, `window close` 333초. |
+| 인증서·백엔드 | 암호 없는 PFX + 버전 없는 비밀 ID 정상, ACA 내부 기본 인증서 신뢰 정상(헬스 프로브 200). |
+| `ops deploy console` | 콘솔 코드 변경이 없어 생략했다(§6 4단계). |
+| 접근 확인 | 운영자 IP `GET /` 200, HTTP→HTTPS 301, 창을 닫은 뒤에도 200. 출구 IP가 바뀐 동안 `allowOperatorOnly`가 403으로 막은 기록(`AGWFirewallLogs`)으로 비운영자 차단을 확인했다. |
+| WAF 오탐 | 롤아웃 동안 DRS 2.1 관리 규칙 탐지 0건. 제외 규칙은 두지 않았다. |
+| 테스트·리뷰 | 전체 1950개 통과(`RUN_INFRA_TESTS=1`). 브랜치 최종 리뷰 승인(Critical·Important 0). |
