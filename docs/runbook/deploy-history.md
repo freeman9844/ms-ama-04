@@ -805,3 +805,15 @@ python -m ops smoke
 - **원인**: Flex Consumption은 트리거 그룹별로 0에서 확장해 officer_decision 큐 트리거가 콜드 스타트했고, 한가한 인스턴스는 큐를 최대 60초(Durable 큐 30초) 간격으로 확인합니다.
 - **조치**(`a68a9a0`): `host.json`의 `queues.maxPollingInterval`과 `durableTask.storageProvider.maxQueuePollingInterval`을 2초로, `durable`·`function:officer_decision`·`function:start_application` 그룹에 always ready 1개씩(월 약 $62). `ops window open` → `ops deploy orchestrator` → `ops window close`.
 - **측정**(app-20261105-bc8e70, 콘솔 경유): 승인 POST 후 상태 반영 **2.6초**, 사후 모니터링 링크 5.2초.
+
+## 2026-11-06 App Gateway WAF v2 진입점
+
+- **바꾼 것**: `ca-console`을 지우고(24초) `cae-web-amalend` 환경을 지웠습니다(1218초). 콘솔은 internal `cae-int`로 옮겼고, 앞단에 `agw-amalend`(WAF_v2, 자동 확장 최소 0)·`waf-amalend`(Prevention, DRS 2.1, `allowOperatorOnly` 사용자 지정 규칙)·`pip-agw-amalend`·`nsg-appgw`를 새로 만들었습니다. 콘솔 자체 서명 인증서는 `ops window open`이 Key Vault에 넣습니다.
+- **1차 `window open`(632초, 실패)**: 첫 프로비저닝·인증서 저장은 성공했지만 두 번째 프로비저닝이 `ApplicationGatewayNetworkIsolationRequiresSubnetDelegation`으로 실패했습니다. 이 구독은 App Gateway 네트워크 격리 기능이 등록돼 있어 게이트웨이 서브넷을 `Microsoft.Network/applicationGateways`로 위임해야 합니다. `fad9181`에서 `snet-appgw`를 위임했습니다.
+- **2차 `window open`(1468초, 프로비저닝 24분 16초)**: 게이트웨이 `Running`, 백엔드 상태 `Healthy`("Received 200 status code"). 버전 없는 비밀 ID의 PFX와 ACA 내부 기본 인증서 신뢰 모두 문제없었습니다.
+- **인터넷에서 80/443 시간 초과**: 테넌트 정책이 NSG 없는 서브넷에 `vnet-amalend-snet-appgw-nsg-koreacentral`(GatewayManager만 허용)을 붙여 기본 규칙이 인터넷 인바운드를 막았습니다. 임시 허용 규칙으로 원인을 확인한 뒤(`/healthz` 200, HTTP→HTTPS 301) `ad1a49b`에서 `nsg-appgw`(GatewayManager·AzureLoadBalancer·Internet 80/443)를 직접 소유하게 바꿨습니다. 3차 `window open` 479초(프로비저닝 7분 43초). 임시 규칙은 지웠고 정책이 만든 NSG는 서브넷에서 떨어진 채 남아 있습니다.
+- **smoke**: 성공(콘솔 관문: 데모 모드, 운영자 IP에서 App Gateway로 열림). 콘솔 코드는 바뀌지 않아 `ops deploy console`은 건너뛰었습니다.
+- **403 확인**: 모바일 회선 출구 IP가 `window open` 뒤 같은 /16 안에서 바뀌어 콘솔이 403을 돌려줬습니다. `AGWFirewallLogs`에 `allowOperatorOnly` Blocked 5건이 남아 비운영자 차단이 403(시간 초과 아님)으로 동작함을 확인했습니다. `azd env set CONSOLE_IP <새 IP>`와 WAF 정책 `matchValues` 갱신으로 바로 200이 됐습니다(다음 프로비저닝도 같은 값을 씁니다).
+- **WAF 로그**: 이 기간 DRS 2.1 관리 규칙 탐지 0건(오탐 없음), 사용자 지정 규칙 차단 5건. `AGWAccessLogs`는 200 4건·301 2건·403 5건.
+- **`window close`**: 333초. 닫은 뒤에도 콘솔 `GET /` 200.
+- **참고**: `/applications`는 POST 전용이라 GET은 405가 정상입니다. 콘솔 첫 화면은 `https://<APPGW_FQDN>/`입니다.
