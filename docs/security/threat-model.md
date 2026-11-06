@@ -18,17 +18,18 @@
 
 ## 신뢰 경계
 
-인터넷(운영자 공인 IP 1개만 허용) → 외부 콘솔(`cae-web`, WAF 없음) → VNet 내부(Functions·`cae-int`·Private Endpoint 리소스) → Foundry(Global Standard 추론, 처리 리전 비보장, [ADR-002](../adr/ADR-002-model-deployment.md)) 순으로 신뢰 경계가 놓인다.
+인터넷(운영자 공인 IP 1개만 허용) → Application Gateway WAF v2(Prevention, OWASP DRS 2.1, 운영자 IP 규칙 fail-closed) → 내부 콘솔(`cae-int`의 `ca-console`) → VNet 내부(Functions·Private Endpoint 리소스) → Foundry(Global Standard 추론, 처리 리전 비보장, [ADR-002](../adr/ADR-002-model-deployment.md)) 순으로 신뢰 경계가 놓인다.
 
 ```mermaid
 flowchart TB
   subgraph NET["인터넷"]
-    OP["운영자 PC\n공인 IP 허용목록(/32)"]
+    OP["운영자 PC\n공인 IP(/32, CONSOLE_IP)"]
   end
-  subgraph WEB["경계: 외부 (cae-web, 운영자 IP 허용목록·데모는 Easy Auth 꺼짐)"]
-    CONSOLE["콘솔 ca-console"]
+  subgraph WEB["경계: 진입 (App Gateway WAF v2, snet-appgw)"]
+    AGW["WAF 정책\nPrevention·DRS 2.1·운영자 IP만"]
   end
   subgraph VNET["경계: VNet 내부 (무키·Private Endpoint)"]
+    CONSOLE["콘솔 ca-console\n(cae-int, 데모는 Easy Auth 꺼짐)"]
     FUNC["Functions\n오케스트레이터·Mock API\n(배포 창에만 공개)"]
     INT["cae-int (internal)\n평가·운영 Job"]
     PE["Private Endpoint 리소스\nCosmos·Blob·Key Vault·Search·Service Bus"]
@@ -36,7 +37,8 @@ flowchart TB
   subgraph EXT["경계: 외부 모델 평면"]
     FOUNDRY["Foundry 추론\nGlobal Standard (ADR-002)"]
   end
-  OP -->|HTTPS + IP 허용목록| CONSOLE
+  OP -->|HTTPS| AGW
+  AGW -->|HTTPS, 운영자 IP만| CONSOLE
   CONSOLE -->|큐 명령만| FUNC
   CONSOLE -->|판단 기록·실명 복원 조회| PE
   FUNC --> PE
@@ -45,7 +47,7 @@ flowchart TB
   INT -->|가명화 payload| FOUNDRY
 ```
 
-경계 근거: 콘솔은 `cae-web` 외부 환경(`infra/resources.bicep:463`)에 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 두고, 데모 모드에서는 Easy Auth를 꺼 고정 주체로 동작한다(`infra/resources.bicep:609` `CONSOLE_AUTH_MODE=demo`, [ADR-007](../adr/ADR-007-demo-auth-mode.md); 운영은 Entra Easy Auth 복원). 내부 Job은 `cae-int`(`infra/resources.bicep:441`), Functions의 공개 접근은 배포 창에만 연다(`infra/modules/functions.bicep:43`). 저장 리소스는 Private Endpoint로만 닿지만 콘솔은 실명 복원을 위해 Cosmos·Blob을 직접 읽는다(`src/console/adapters.py:5`).
+경계 근거: 콘솔은 internal 환경 `cae-int`에 있어 VNet 밖에서 직접 닿지 않고, 인터넷 진입은 공용 IP의 Application Gateway WAF v2뿐이다(`infra/modules/appgw.bicep`, [ADR-011](../adr/ADR-011-appgw-waf-entry.md)). WAF 사용자 지정 규칙 `allowOperatorOnly`는 `CONSOLE_IP` 밖의 요청을 막고, 비어 있으면 `192.0.2.0/32`만 허용해 fail-closed다. 데모 모드에서는 Easy Auth를 꺼 고정 주체로 동작한다(`infra/resources.bicep:609` `CONSOLE_AUTH_MODE=demo`, [ADR-007](../adr/ADR-007-demo-auth-mode.md); 운영은 Entra Easy Auth 복원). 내부 Job은 `cae-int`(`infra/resources.bicep:441`), Functions의 공개 접근은 배포 창에만 연다(`infra/modules/functions.bicep:43`). 저장 리소스는 Private Endpoint로만 닿지만 콘솔은 실명 복원을 위해 Cosmos·Blob을 직접 읽는다(`src/console/adapters.py:5`).
 
 ## 자산
 
@@ -56,7 +58,8 @@ flowchart TB
 | 동의·삭제 증명 | Cosmos `consents`·`deletion_proofs` | 중간 | manifest·sha256·항목별 검증, 장기 보존 |
 | 비밀 | 없음(관리 ID)·Key Vault 소수 | 높음 | 무키 인증, Key Vault·Cosmos·Storage 로컬 인증 끔, 단 AI Search는 키 인증 유지(`infra/modules/search.bicep:20`) |
 | 모델 프롬프트·트레이스 | Foundry(`genAIContent`) | 높음 | 입력은 가명화 값, 대화는 삭제, 트레이스 잔존은 잔여 위험 |
-| 실명(복원값) | 콘솔 런타임(Blob에서 복원) | 높음 | 허용목록 안 데모 역할이 상세 화면에서 조회(`src/console/adapters.py:5`) — 잔여 위험 |
+| 실명(복원값) | 콘솔 런타임(Blob에서 복원) | 높음 | WAF 운영자 IP 규칙 안의 데모 역할이 상세 화면에서 조회(`src/console/adapters.py:5`) — 잔여 위험 |
+| 게이트웨이 TLS 인증서 | Key Vault 비밀 `appgw-console`(PFX) | 높음(개인 키 포함) | 제어면 PUT으로만 쓰고 게이트웨이 ID는 Secrets User만, 만료 30일 전 갱신 |
 
 ## STRIDE
 
@@ -64,7 +67,8 @@ flowchart TB
 
 | ID | 범주 | 위협 | 대상 | 통제 | 증거 | 상태 |
 |---|---|---|---|---|---|---|
-| S1 | Spoofing | 운영자 신원 위조로 콘솔 접근 | 콘솔 | 운영은 Entra Easy Auth, 데모는 Easy Auth를 꺼 고정 주체 `demo-operator`로 동작, 외부 노출은 운영자 IP `/32` 하나 | `src/console/adapters.py:229`, `infra/resources.bicep:599`, `infra/resources.bicep:609`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
+| S1 | Spoofing | 운영자 신원 위조로 콘솔 접근 | 콘솔 | 운영은 Entra Easy Auth, 데모는 Easy Auth를 꺼 고정 주체 `demo-operator`로 동작, 외부 노출은 WAF 운영자 IP 규칙(`/32` 하나, fail-closed) | `src/console/adapters.py:229`, `infra/modules/appgw.bicep`, `infra/resources.bicep:609`, [ADR-007](../adr/ADR-007-demo-auth-mode.md), [ADR-011](../adr/ADR-011-appgw-waf-entry.md) | 데모 완화 |
+| S3 | Spoofing | 자체 서명 인증서로 브라우저 경고에 익숙해져 가짜 게이트웨이를 신뢰 | 게이트웨이 TLS | 운영자만 접속하는 데모라 경고를 넘기도록 안내하고, 운영 전환 시 공인 CA 인증서·사용자 도메인으로 교체([ADR-011](../adr/ADR-011-appgw-waf-entry.md)). `console_gate`의 TLS 검증 생략은 스모크에만 쓴다 | `src/ops/appgw_cert.py`, `src/ops/console_gate.py` | 데모 완화 |
 | S2 | Spoofing | 동의 토큰 위조·도용 | Mock API | HMAC 서명 토큰에 범위·만료를 넣고 검증(만료·철회·범위 거부) | `src/mockapis/consent.py:52-67`, `tests/mockapis/test_app.py:82`, `tests/mockapis/test_app.py:90`, `tests/mockapis/test_app.py:98` | 검증 |
 | T1 | Tampering | 간접 프롬프트 주입으로 심사 왜곡(적요에 명령문) | 심사 에이전트 | LLM 출력은 추천일 뿐, 결정론적 정책·심사역이 판정. 평가셋 주입 4건 중 판별 가능 2건에서 지시 따름 0건 | `tests/mockapis/test_app.py:70`, `eval/reports/job-eval-9imbutm/report.md:68-74`, `src/orchestrator/journey/validation.py` | 검증 |
 | T2 | Tampering | 정책 한도를 넘는 승인으로 결정 변조 | 콘솔 결정 경로 | `validate_officer_decision`이 정책 한도 밖 승인을 거부(`amount_exceeds_policy`). 정책 거절·결과 없음 건은 확인 팝업 후 `policy_override`+사유가 있어야 승인(`override_required`), 상한은 상품 최대 1,000만 원(P9 정책 v2). 조건부 승인은 P9에서 폐지(`conditional_retired`). 결정은 큐 메시지로만 전달되고 오케스트레이터가 다시 검증 | `src/orchestrator/journey/validation.py`, `src/console/app.py:290-294`, `tests/orchestrator/test_validation.py` | 검증 |
@@ -73,10 +77,12 @@ flowchart TB
 | I1 | Information Disclosure | 모델 전송 중 PII 유출 | Foundry 입력 | 상호·대표자명·계좌·사업자번호를 토큰으로 가명화 후 전송, 응답 복원, PII 스캔 0/341 | `src/shared/pseudonymize.py:69`, `eval/reports/job-eval-9imbutm/report.md:88` | 검증 |
 | I2 | Information Disclosure | 로그·지표에 적요·오류 원문 노출 | App Insights·KQL | 오류 메시지 `safe_detail`로 정리, 지표는 라벨 묶음(`target_label`/`relabel`)으로 집계 | `src/orchestrator/journey/metering.py:30`, `src/ops/kql.py:28`, `src/ops/kql.py:43` | 구현 |
 | I3 | Information Disclosure | 저장 데이터의 네트워크·키 노출 | Cosmos·Blob·KV·Search·Foundry | Cosmos·Blob·Key Vault는 공용 접근·로컬 인증 차단(PE 전용). AI Search는 PE지만 키 인증 유지, Foundry·Functions는 배포 창 동안만 공용 접근 | `infra/modules/cosmos.bicep:24-26`, `infra/modules/search.bicep:20`, `infra/modules/foundry/account.bicep:30` | 구현 |
-| I4 | Information Disclosure | 허용목록 안 데모 역할이 실명(복원값) 열람 | 콘솔 상세 화면 | 데모는 IP 허용목록만으로 접근하는 고정 `CreditOfficer`가 Blob에서 실명을 복원해 상세에 표시 — 실제 신원·세분 권한 없음 | `src/console/adapters.py:5`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
+| I4 | Information Disclosure | WAF 운영자 IP 규칙 안의 데모 역할이 실명(복원값) 열람 | 콘솔 상세 화면 | 데모는 운영자 IP 규칙만으로 접근하는 고정 `CreditOfficer`가 Blob에서 실명을 복원해 상세에 표시 — 실제 신원·세분 권한 없음 | `src/console/adapters.py:5`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
+| I5 | Information Disclosure | 게이트웨이 인증서 개인 키(PFX) 노출 | Key Vault 비밀 `appgw-console` | PFX는 메모리에서만 만들고 제어면 ARM PUT으로 Key Vault에 쓴다(데이터 평면은 공용 접근 차단). 요청 본문 임시 파일은 바로 지운다. Bicep 파라미터·배포 기록에 PFX를 싣지 않는다. 게이트웨이 사용자 할당 ID는 Key Vault Secrets User만 가진다 | `src/ops/appgw_cert.py`, `infra/modules/appgw.bicep`, [ADR-011](../adr/ADR-011-appgw-waf-entry.md) | 구현 |
 | D1 | Denial of Service | Policy Engine 장애가 심사 전체로 전파 | 오케스트레이터 | 서킷 브레이커가 `circuit_open`을 올리고 fail-closed로 자동 승인 없음(심사역 예외 승인만 가능) | `src/orchestrator/journey/adapters.py:96`, `src/orchestrator/journey/orchestration.py:198-201`, `tests/orchestrator/test_circuit.py:73` | 검증 |
-| D2 | Denial of Service | 공개 진입점 폭주 | Functions·콘솔 | Functions 공개 접근은 배포 창에만, 그 외 Deny 기본값, 콘솔은 IP 허용목록 | `infra/modules/functions.bicep:43`, `infra/modules/functions.bicep:47-49`, `infra/modules/container-app.bicep:46-50` | 구현 |
-| E1 | Elevation of Privilege | 고정 역할로 권한 획득 | 콘솔 역할 | 운영은 Entra 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`), 데모는 IP 허용목록만으로 `CreditOfficer` 고정 | `src/console/adapters.py:226-229`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
+| D2 | Denial of Service | 공개 진입점 폭주·L7 공격 | Functions·콘솔 | Functions 공개 접근은 배포 창에만, 그 외 Deny 기본값. 콘솔은 WAF(Prevention, OWASP DRS 2.1)와 운영자 IP 규칙이 앞단에서 막고, 진입·WAF 로그(`AGWAccessLogs`, `AGWFirewallLogs`)를 Log Analytics에 남긴다 | `infra/modules/functions.bicep:43`, `infra/modules/functions.bicep:47-49`, `infra/modules/appgw.bicep`, `tests/infra/test_appgw.py` | 구현 |
+| D3 | Denial of Service | WAF 오탐이 정당한 콘솔 요청을 막음 | 게이트웨이 WAF | 방화벽 로그로 차단 규칙을 확인한 뒤 해당 규칙만 정책에서 제외한다. 현재는 오탐 조정을 하지 않았다([ADR-011](../adr/ADR-011-appgw-waf-entry.md) 재검토 조건) | `infra/modules/appgw.bicep` | 부분 완화 |
+| E1 | Elevation of Privilege | 고정 역할로 권한 획득 | 콘솔 역할 | 운영은 Entra 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`), 데모는 WAF 운영자 IP 규칙만으로 `CreditOfficer` 고정 | `src/console/adapters.py:226-229`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
 | E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 역할별로 범위를 나눔: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). 전 경로 스모크용 `id-smoke`는 가장 넓어 엄밀한 최소 권한은 아니다 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
 | E3 | Elevation of Privilege | 에이전트가 허용 밖 도구 호출 | 에이전트 런타임 | 도구 allowlist(`unknown_tool` 반환), 추심은 스크립트 ID enum만 발송 | `src/agents/runtime.py:163`, `src/agents/collections.py:70`, `tests/agents/test_runtime.py:133` | 검증 |
 
@@ -134,7 +140,9 @@ flowchart TB
 
 ## 잔여 위험
 
-- **데모 인증:** 외부 콘솔이 WAF 없이 운영자 IP 허용목록에만 기대고(데모는 Easy Auth 꺼짐, `infra/resources.bicep:609`; 운영은 Entra 로그인 복원), 데모 모드는 `CreditOfficer`를 고정 주체 `demo-operator`로 둬 감사 추적에 실제 신원이 없다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
+- **데모 인증:** 콘솔은 WAF의 운영자 IP 규칙에만 기대고(데모는 Easy Auth 꺼짐, `infra/resources.bicep:609`; 운영은 Entra 로그인 복원), 데모 모드는 `CreditOfficer`를 고정 주체 `demo-operator`로 둬 감사 추적에 실제 신원이 없다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
+- **자체 서명 인증서:** 브라우저 경고가 뜨고, 운영 전환 시 공인 CA 인증서로 바꿔야 한다. 인증서 개인 키는 Key Vault 비밀로만 있다([ADR-011](../adr/ADR-011-appgw-waf-entry.md)).
+- **WAF 오탐 미조정:** DRS 2.1 오탐 조정은 하지 않았다. 차단되면 방화벽 로그로 규칙을 찾아 해당 규칙만 제외한다.
 - **Foundry 트레이스 잔존:** 대화는 삭제하지만 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 입력이 가명화 값뿐이라는 원칙에 기댄다(`docs/runbook/deploy-history.md:606`).
 - **Durable 실행 기록:** 신청 진행 상태는 Durable Task 저장소에 남고 삭제하지 않는다. 활동 입력의 동의 토큰도 함께 남는다([한계](../limitations.md#동의삭제이의제기)).
 - **서킷 인스턴스별:** 서킷 브레이커는 프로세스·인스턴스별이라 전역 상태를 공유하지 않는다(`src/orchestrator/journey/adapters.py:96`).

@@ -5,6 +5,12 @@ import pytest
 from ops.azcli import OpsError
 from ops.cli import main
 
+
+@pytest.fixture(autouse=True)
+def _cert_already_current(monkeypatch):
+    # 인증서 확인은 test_appgw_cert.py가 다룹니다. 여기서는 "바뀐 것 없음"으로 둡니다.
+    monkeypatch.setattr("ops.window.ensure_console_cert", lambda runner: False)
+
 ENV = {"AZURE_RESOURCE_GROUP": "rg-amalend", "AI_ACCOUNT_NAME": "ais-x", "OPERATOR_IP": "closed"}
 
 

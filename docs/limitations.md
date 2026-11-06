@@ -7,24 +7,29 @@
 ## 요약
 
 - 실데이터·실사용자 대신 **모의 API와 합성 데이터**로 전 구간을 돌린 데모다(마이데이터·홈택스·PG는 Mock API).
-- 콘솔 인증은 **데모 모드**(Easy Auth 꺼짐, 운영자 IP 허용목록만)이고 심사역 ID가 고정 값이라 감사 추적에 실제 신원이 없다([ADR-007](adr/ADR-007-demo-auth-mode.md)).
+- 콘솔 인증은 **데모 모드**(Easy Auth 꺼짐, WAF 운영자 IP 규칙만)이고 심사역 ID가 고정 값이라 감사 추적에 실제 신원이 없다([ADR-007](adr/ADR-007-demo-auth-mode.md)).
 - 측정 표본이 작아(SLO 24건, 평가 케이스 소수) 수치는 경향으로만 읽고, 공정성 경보 하나는 표본 잡음일 수 있다.
 - 동의·삭제·이의제기 수명주기는 구현했으나 갱신·재조정·회신은 기록·시뮬레이션에 그치고, 데모 시나리오에 동의 철회 장면은 없다.
-- 운영 전환 과제(Entra 복원·App Gateway WAF·분산 서킷·다중 리전·모델 처리 위치)는 아래 체크리스트와 [아키텍처#운영 아키텍처](architecture.md#운영-아키텍처)에 모았다.
+- 운영 전환 과제(Entra 복원·공인 인증서·분산 서킷·다중 리전·모델 처리 위치)는 아래 체크리스트와 [아키텍처#운영 아키텍처](architecture.md#운영-아키텍처)에 모았다.
 - 모든 LLM 호출은 SLA 없는 APIM Developer(AI 게이트웨이)를 지나고, 1만 자 초과 프롬프트에는 Prompt Shields가 적용되지 않는다. 직접 호출 대비 건당 AI 비용이 약 59% 늘었다([ADR-010](adr/ADR-010-ai-gateway.md)).
 
 ## 인증·접근
 
-- 콘솔은 WAF 없이 external Container Apps 환경에 둔다(운영자 IP 허용 + Entra 인증). 운영 설계는 App Gateway WAF다. (P2)
+- 콘솔은 App Gateway WAF v2(Prevention, OWASP DRS 2.1) 뒤 internal 환경 `cae-int`에 있고 운영자 IP 규칙으로만 열린다([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 남는 한계는 다음과 같다.
+  - TLS는 자체 서명 인증서라 브라우저 경고가 뜬다. 공인 CA 인증서·사용자 도메인은 운영 전환 과제다.
+  - 운영자 IP 규칙은 단일 `CONSOLE_IP`(`/32`)다. 다른 IP는 `window open --ip` 또는 WAF 규칙 조건 추가로만 허용하고, 다음 프로비저닝이 Bicep 정의로 되돌린다.
+  - DRS 2.1 오탐은 조정하지 않았다. 차단되면 방화벽 로그로 규칙을 찾아 해당 규칙만 제외해야 한다.
+  - 게이트웨이는 첫 `window open`에서 프로비저닝 → 인증서 → 두 번째 프로비저닝으로 만들어져 더 오래 걸린다.
+  - 게이트웨이는 상시 비용이 든다(월 약 $370, [비용 모델](cost-model.md)).
 - 배포 창 동안에는 운영자 IP에서 데이터 평면에 접근할 수 있다. `window status`로 확인하고 작업 후 바로 닫는다. (P2)
 - 테넌트 정책(MCAPS)의 Modify 정책이 Key Vault·Cosmos·Storage의 `publicNetworkAccess`를 Disabled로, 로컬 인증을 끈다. 배포 창이 실제로 여는 것은 Foundry 계정·ACR·Functions뿐이고, 닫힌 서비스의 데이터 작업은 VNet 안 Job으로 한다(정책 우회 없음). (P2)
 - 앱 비밀은 운영자 PC의 azd `.env`에 평문으로 있다. 운영 설계는 Key Vault 참조와 정기 교체다. (P3)
-- Easy Auth는 클라이언트 비밀 없이 id_token(암시적 흐름)만 쓴다. 운영 설계는 인증 코드 흐름과 internal 환경 + Application Gateway WAF다. (P4b)
-- 데모 모드(`CONSOLE_AUTH_ENABLED=false`)에서는 IP 허용 목록만 진입을 막고, 결정 기록의 심사역 ID는 고정 값 `demo-operator`다. (P4b)
-- 데모 인증(Easy Auth 꺼짐 + IP 허용목록만)은 모든 결정을 고정 주체 `demo-operator`로 기록해 감사 추적에 실제 신원이 없다. 복원은 환경 변수로 끝나지 않고 `window open` → `deploy console` → `window close` 재배포(실측 약 12분, `docs/runbook/deploy-history.md:250`)와 테넌트 관리자 동의가 선행돼야 한다([ADR-007](adr/ADR-007-demo-auth-mode.md), `src/console/adapters.py:229`).
+- Easy Auth는 클라이언트 비밀 없이 id_token(암시적 흐름)만 쓴다. 운영 설계는 인증 코드 흐름이다. (P4b)
+- 데모 모드(`CONSOLE_AUTH_ENABLED=false`)에서는 WAF 운영자 IP 규칙만 진입을 막고, 결정 기록의 심사역 ID는 고정 값 `demo-operator`다. (P4b)
+- 데모 인증(Easy Auth 꺼짐 + WAF 운영자 IP 규칙만)은 모든 결정을 고정 주체 `demo-operator`로 기록해 감사 추적에 실제 신원이 없다. 복원은 환경 변수로 끝나지 않고 `window open` → `deploy console` → `window close` 재배포(실측 약 12분, `docs/runbook/deploy-history.md:250`)와 테넌트 관리자 동의가 선행돼야 한다([ADR-007](adr/ADR-007-demo-auth-mode.md), `src/console/adapters.py:229`).
 - AI Search는 키 인증을 유지하고(`disableLocalAuth: false`, `infra/modules/search.bicep:20`), Foundry·Functions는 배포 창 동안만 공용 접근을 연다(`docs/security/threat-model.md:75`).
 - 운영 Job의 광범위 읽기는 `id-smoke`에 한정돼 있어 엄격한 최소 권한은 아니다(`docs/security/threat-model.md:80`, [ADR-008](adr/ADR-008-vnet-jobs-for-eval-ops.md)).
-- 고객 신청 페이지(`/apply`)는 콘솔 역할 없이 같은 진입 통제(데모 모드면 IP 허용 목록)만 받는다. 고객 본인 인증·사업자 실명 확인은 범위 밖이라 데모 셀러 20곳만 고를 수 있고, 진행 현황(`/apply/{id}`)은 신청번호만 알면 누구나 본다(고객 신청 건만, 내부 근거 없이). 운영 설계는 고객용 Entra External ID와 신청-사용자 바인딩이다. (P9)
+- 고객 신청 페이지(`/apply`)는 콘솔 역할 없이 같은 진입 통제(WAF 운영자 IP 규칙)만 받는다. 고객 본인 인증·사업자 실명 확인은 범위 밖이라 데모 셀러 20곳만 고를 수 있고, 진행 현황(`/apply/{id}`)은 신청번호만 알면 누구나 본다(고객 신청 건만, 내부 근거 없이). 운영 설계는 고객용 Entra External ID와 신청-사용자 바인딩이다. (P9)
 
 ## 데이터·외부 연동
 
@@ -108,7 +113,7 @@
 - P6b 검토에서 발견한 I1 수정(Policy 앱의 ASGI `http send`/`http receive` 스팬이 App Insights에서 제외되지 않던 문제 — 제외용 환경변수가 동작하지 않던 설정)은 Azure에 배포됐고 반영을 확인했다. 2026-11-03 리허설에서 최근 45분 Policy 요청 2건(라이브 리허설 건 포함) 중 ` http send`/` http receive` 스팬이 0건이었다([리허설 기록](demo/rehearsal.md)). 표본이 2건이라 경향 확인 수준이다.
 - Service Bus 모드 사후 재생은 2026-11-03 리허설 전까지 라이브에서 검증되지 않았고(그전 재생 실측은 모두 인라인 모드), 리허설에서 구독 규칙 결함을 발견해 고쳤다. Bicep이 `$Default` 이름으로 CorrelationFilter를 PUT하면 규칙이 남지 않고 자동 `1=1` 규칙도 사라져 두 구독(`flow.updated/early-warning`, `alert.raised/collections`)의 규칙이 0개가 되어 재생 메시지가 모두 버려졌다. `subject-label` 규칙을 추가한 수정(커밋 `8cfe7d1`) 뒤 첫 라이브 재생이 약 3.1분에 성공했다(인라인 모드 참고 실측 132초보다 김). 재개·프로비저닝 뒤 규칙 확인은 [배포](runbook/deploy.md#service-bus-구독-규칙-확인)에 있다.
 - 재생 버튼을 두 번 누르면 `replay_in_progress` 확인이 원자적이지 않아 두 실행이 통과해 모니터링 동의가 2개 생기던 경쟁 조건은 `start_replay`의 ETag 조건부 대출 선점으로 고쳤다(커밋 `6c003a5`). 선점에 실패한 요청은 "동시 재생 요청 무시"로 끝난다. 그래도 데모에서는 재생 버튼을 한 번만 누른다.
-- 운영자 공인 IP는 회사 NAT처럼 출구 IP가 여러 개로 회전할 수 있어(2026-11-03 하루 4개 관측) 바뀔 때마다 console ingress와 Functions에 `/32` 임시 규칙을 하나씩 더해야 하고, 프로비저닝(`window open` 등)은 Functions의 임시 규칙을 지우므로 다시 추가해야 한다([배포](runbook/deploy.md#운영자-ip가-바뀔-때)). 모바일 회선에서는 App Service(Functions 주 사이트·SCM)로 가는 트래픽이 `api.ipify`가 알려 주는 IP와 다른 통신사 NAT 출구 IP(관측 3개, 서로 다른 /24)로 나가 창이 열려 있어도 `ops deploy orchestrator`가 403이었다. 이때는 임시 진단 설정으로 실제 출구 IP를 찾아 허용한다(같은 절 "App Service 출구 IP가 다를 때").
+- 운영자 공인 IP는 회사 NAT처럼 출구 IP가 여러 개로 회전할 수 있어(2026-11-03 하루 4개 관측) 바뀔 때마다 콘솔은 `window open --ip`로 `CONSOLE_IP`를 갱신하거나 WAF 규칙에 `<추가 IP>/32` 조건을 더하고, Functions에는 `/32` 임시 규칙을 하나씩 더해야 하고, 프로비저닝(`window open` 등)은 Functions의 임시 규칙을 지우므로 다시 추가해야 한다([배포](runbook/deploy.md#운영자-ip가-바뀔-때)). 모바일 회선에서는 App Service(Functions 주 사이트·SCM)로 가는 트래픽이 `api.ipify`가 알려 주는 IP와 다른 통신사 NAT 출구 IP(관측 3개, 서로 다른 /24)로 나가 창이 열려 있어도 `ops deploy orchestrator`가 403이었다. 이때는 임시 진단 설정으로 실제 출구 IP를 찾아 허용한다(같은 절 "App Service 출구 IP가 다를 때").
 - 2분 데모 리허설은 1회(2026-11-03) 실시했으나 탐색 위주였고 2분 대본 시간 측정은 하지 못했다. 대본은 그 결과로 보완했고 2회차 리허설은 하지 않았다([리허설 기록](demo/rehearsal.md)).
 
 ## 상위 Spec 위험(§7)
@@ -122,7 +127,7 @@
 | Decision-1 한국어 적요 분류 품질·배포 가능 여부 | 배포·호출 확인, 단 공개 단가 미확인으로 비용은 호출 수만 집계 |
 | 전체 비공개 네트워크 배포 복잡도 | 배포 창 토글로 운영, 실행 기록은 [deploy-history](runbook/deploy-history.md) |
 | 배포 창 동안 PaaS public access 일시 허용 | 운영자 IP만 허용하고 작업 후 닫음, Foundry·Functions만 열림(`docs/security/threat-model.md:75`) |
-| 콘솔 외부 ingress(App Gateway 없음) | 운영자 IP 허용목록으로 완화(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원), App Gateway WAF는 문서로만 기술(운영 전환 과제) |
+| 콘솔 외부 진입 | App Gateway WAF v2(Prevention, DRS 2.1)와 운영자 IP 규칙으로 구축([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 데모 모드는 Easy Auth 꺼짐([ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 자체 서명 인증서·오탐 미조정은 위 "인증·접근"의 한계 |
 | Decision-1 APAC 배포 문서·CLI 불일치 | 배포 SKU를 파라미터로 두고 배포 성공 |
 | Foundry caphost 삭제 후 서브넷 점유 | teardown 스크립트가 순서·대기 처리 |
 | Durable + 비공개 스토리지 조합 | 검증된 Durable 1.x Python + Azure Storage 백엔드로 배포 |
@@ -132,7 +137,7 @@
 ## 운영 전환 체크리스트
 
 - [ ] Entra 로그인 복원: `CONSOLE_AUTH_ENABLED=true` + 재배포 + 앱 등록 + 테넌트 관리자 동의, 암시적 id_token 대신 인증 코드 흐름([ADR-007](adr/ADR-007-demo-auth-mode.md)).
-- [ ] internal 환경 앞 Application Gateway(WAF v2) + Entra 단일 진입(월 약 $365, 상위 Spec §2.2).
+- [ ] 공인 CA 인증서·사용자 도메인으로 게이트웨이 TLS 교체(자체 서명 경고 제거), WAF 운영자 IP 규칙 대신 Entra 단일 진입, DRS 오탐 조정([ADR-011](adr/ADR-011-appgw-waf-entry.md)).
 - [ ] 모델 처리 위치: Global Standard → Data Zone 또는 PTU 전환([ADR-002](adr/ADR-002-model-deployment.md)).
 - [ ] 분산 서킷 브레이커(인스턴스별 → 공유 상태).
 - [ ] 다중 리전 DR(현재 단일 리전).

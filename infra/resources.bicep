@@ -19,9 +19,9 @@ param mockapiImage string
 param consoleImage string
 @description('평가 Job 이미지. 비면 자리표시 이미지(ops deploy eval 전).')
 param evalImage string
-@description('콘솔에 접속할 운영자 공인 IPv4. 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
+@description('콘솔에 접속할 운영자 공인 IPv4(App Gateway WAF 사용자 지정 규칙). 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
 param consoleIp string
-@description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(IP 허용 목록만 남음, 데모 전용).')
+@description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(WAF 운영자 IP 규칙만 남음, 데모 전용).')
 param consoleAuthEnabled bool
 @description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
 param consoleDemoRole string
@@ -29,6 +29,9 @@ param consoleDemoRole string
 param opsAlertEmail string = ''
 @description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다(AI_GATEWAY=apim). false면 직접 호출(롤백).')
 param aiGatewayRouting bool
+@description('콘솔 TLS 인증서의 Key Vault 비밀 ID(ops window open이 설정). 비면 App Gateway 공용 IP만 만듭니다.')
+#disable-next-line secure-secrets-in-params // 비밀 값이 아니라 Key Vault 비밀의 URI입니다.
+param appGwCertSecretId string
 
 var sfx = uniqueString(subscription().id, resourceGroup().id, environmentName)
 
@@ -48,7 +51,6 @@ var names = {
   sb: 'sb-${sfx}'
   acr: 'acr${sfx}'
   caeInt: 'cae-int-${environmentName}'
-  caeWeb: 'cae-web-${environmentName}'
   plan: 'plan-${environmentName}'
   func: 'func-${sfx}'
   idOrchestrator: 'id-orch-${environmentName}'
@@ -57,6 +59,7 @@ var names = {
   idConsole: 'id-console-${environmentName}'
   idEval: 'id-eval-${environmentName}'
   idOps: 'id-ops-${environmentName}'
+  idAppgw: 'id-appgw-${environmentName}'
   smokeJob: 'job-smoke'
   evalJob: 'job-eval'
   opsJob: 'job-ops'
@@ -65,6 +68,9 @@ var names = {
   caConsole: 'ca-console'
   consoleApp: 'amalend-console-${environmentName}-${sfx}'
   apim: 'apim-${sfx}'
+  agw: 'agw-${environmentName}'
+  waf: 'waf-${environmentName}'
+  pipAgw: 'pip-agw-${environmentName}'
 }
 
 var storageSuffix = environment().suffixes.storage
@@ -145,6 +151,7 @@ module identities 'modules/identities.bicep' = {
       console: names.idConsole
       eval: names.idEval
       ops: names.idOps
+      appgw: names.idAppgw
     }
     location: location
     tags: tags
@@ -179,6 +186,7 @@ module keyVault 'modules/keyvault.bicep' = {
       { principalId: identities.outputs.appsPrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.smokePrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.kvValueReader, principalType: sp }
+      { principalId: identities.outputs.appgwPrincipalId, roleId: role.kvValueReader, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.kvValueAdmin, principalType: 'User' }
     ] : [])
@@ -458,25 +466,11 @@ module acaIntDns 'modules/aca-dns.bicep' = {
   }
 }
 
-module acaWeb 'modules/aca-env.bicep' = {
-  name: 'aca-web'
-  params: {
-    name: names.caeWeb
-    location: location
-    tags: tags
-    subnetId: subnetId['snet-apps-web']
-    internal: false
-    lawName: monitoring.outputs.lawName
-  }
-}
-
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output ACR_NAME string = acr.outputs.name
 output CONTAINER_APPS_INT_ENVIRONMENT_ID string = acaInt.outputs.id
 output CONTAINER_APPS_INT_ENVIRONMENT_NAME string = acaInt.outputs.name
 output CONTAINER_APPS_INT_DOMAIN string = acaInt.outputs.defaultDomain
-output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = acaWeb.outputs.id
-output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = acaWeb.outputs.name
 
 // ── 앱 런타임: 정책 엔진·Mock API (P3) ──────────────────────────────────
 var acaIntDomain = acaInt.outputs.defaultDomain
@@ -577,16 +571,16 @@ module functions 'modules/functions.bicep' = {
 output FUNCTION_APP_NAME string = functions.outputs.name
 
 // ── 심사역 콘솔 (P4b) ──────────────────────────────────────────────────
-// 외부 Container Apps 환경(snet-apps-web, 같은 VNet이라 Private Endpoint DNS가 풀립니다).
-// 진입은 운영자 IP 허용 목록 + Entra 로그인(앱 역할)으로 막습니다.
-var consoleFqdn = '${names.caConsole}.${acaWeb.outputs.defaultDomain}'
+// 내부 Container Apps 환경(cae-int)에서 돌고, 인터넷 진입은 App Gateway WAF v2 하나뿐입니다.
+// 진입은 WAF 운영자 IP 규칙 + Entra 로그인(앱 역할)으로 막습니다.
+var consoleFqdn = '${names.caConsole}.${acaIntDomain}'
 
 module consoleAuth 'modules/console-auth.bicep' = {
   name: 'console-auth'
   params: {
     uniqueName: names.consoleApp
     displayName: 'AMA Lending 심사 콘솔 (${environmentName})'
-    redirectUri: 'https://${consoleFqdn}/.auth/login/aad/callback'
+    redirectUri: 'https://${appGwFqdn}/.auth/login/aad/callback'
     operatorPrincipalId: operatorPrincipalId
   }
 }
@@ -598,12 +592,11 @@ module caConsole 'modules/container-app.bicep' = {
     location: location
     tags: tags
     serviceName: 'console'
-    environmentId: acaWeb.outputs.id
+    environmentId: acaInt.outputs.id
     identityId: identities.outputs.consoleId
     identityClientId: identities.outputs.consoleClientId
     registryServer: acr.outputs.loginServer
     image: consoleImage
-    ipAllowList: [ empty(consoleIp) ? '192.0.2.0/32' : '${consoleIp}/32' ]
     authClientId: consoleAuth.outputs.clientId
     authEnabled: consoleAuthEnabled
     envVars: concat([
@@ -620,8 +613,36 @@ module caConsole 'modules/container-app.bicep' = {
 }
 
 output CONSOLE_APP_NAME string = caConsole.outputs.name
-output CONSOLE_URL string = 'https://${consoleFqdn}'
+output CONSOLE_URL string = 'https://${appGwFqdn}'
 output CONSOLE_CLIENT_ID string = consoleAuth.outputs.clientId
+
+// ── 콘솔 진입점: Application Gateway WAF v2 ─────────────────────────────
+// FQDN은 공용 IP 출력 대신 계산합니다. 첫 프로비저닝 직후 ops가 이 이름으로 인증서를 만들고, 펼침 테스트도 결정적입니다.
+var appGwDnsLabel = '${environmentName}-${sfx}'
+var appGwFqdn = '${appGwDnsLabel}.${location}.cloudapp.azure.com'
+
+module appGateway 'modules/appgw.bicep' = {
+  name: 'appgw'
+  params: {
+    name: names.agw
+    policyName: names.waf
+    pipName: names.pipAgw
+    dnsLabel: appGwDnsLabel
+    location: location
+    tags: tags
+    subnetId: subnetId['snet-appgw']
+    identityId: identities.outputs.appgwId
+    certSecretId: appGwCertSecretId
+    backendFqdn: consoleFqdn
+    allowedIp: consoleIp
+    lawId: monitoring.outputs.lawId
+  }
+  // 인증서 읽기 역할, 내부 도메인 DNS, 백엔드 앱이 먼저 있어야 게이트웨이가 정상 기동합니다.
+  dependsOn: [ keyVault, acaIntDns, caConsole ]
+}
+
+output APPGW_NAME string = names.agw
+output APPGW_FQDN string = appGwFqdn
 
 // ── VNet 안 smoke Job (T8) ─────────────────────────────────────────────
 // Private Endpoint가 있는 모든 호스트. VNet 안에서 사설 IP로 해석되어야 합니다.

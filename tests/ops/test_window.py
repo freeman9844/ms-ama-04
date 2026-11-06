@@ -4,6 +4,12 @@ from ops.azcli import OpsError
 from ops.azdenv import parse_env_values
 from ops.window import close_window, open_window, validate_operator_ip, window_status
 
+
+@pytest.fixture(autouse=True)
+def _cert_already_current(monkeypatch):
+    # 인증서 확인은 test_appgw_cert.py가 다룹니다. 여기서는 "바뀐 것 없음"으로 둡니다.
+    monkeypatch.setattr("ops.window.ensure_console_cert", lambda runner: False)
+
 PROVISIONED = {"AZURE_RESOURCE_GROUP": "rg-amalend", "AI_ACCOUNT_NAME": "ais-x", "OPERATOR_IP": "closed"}
 
 
@@ -75,3 +81,20 @@ def test_status_closed_has_no_warning(fake_runner):
     assert status.open is False
     assert status.allowed_ip is None
     assert status.warning is None
+
+
+def test_open_window_checks_console_cert_after_provision(fake_runner, monkeypatch):
+    runner = fake_runner(PROVISIONED)
+    provisions_seen = []
+    monkeypatch.setattr("ops.window.ensure_console_cert",
+                        lambda r: provisions_seen.append(len(r.commands("azd", "provision"))) or False)
+    open_window(runner, "20.30.40.50")
+    assert provisions_seen == [1]  # 첫 프로비저닝이 APPGW_FQDN을 만든 뒤에 확인합니다.
+    assert len(runner.commands("azd", "provision")) == 1
+
+
+def test_open_window_reprovisions_after_new_cert(fake_runner, monkeypatch):
+    runner = fake_runner(PROVISIONED)
+    monkeypatch.setattr("ops.window.ensure_console_cert", lambda r: True)
+    open_window(runner, "20.30.40.50")
+    assert len(runner.commands("azd", "provision")) == 2

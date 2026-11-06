@@ -53,10 +53,10 @@ param consoleImage string = ''
 @description('평가 Job 이미지. 비면 자리표시 이미지(ops deploy eval 전).')
 param evalImage string = ''
 
-@description('심사역 콘솔 접속 허용 IPv4(ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
+@description('심사역 콘솔 접속 허용 IPv4(App Gateway WAF 규칙, ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
 param consoleIp string = ''
 
-@description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). IP 허용 목록은 그대로입니다.')
+@description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). WAF 운영자 IP 규칙은 그대로입니다.')
 param consoleAuthEnabled bool = true
 
 @description('데모 모드의 고정 사용자 역할(azd env CONSOLE_DEMO_ROLE). Auditor면 가명 읽기 전용 데모입니다.')
@@ -68,6 +68,9 @@ param opsAlertEmail string = ''
 
 @description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다. 롤백은 false로 다시 프로비저닝.')
 param aiGatewayRouting bool = true
+@description('콘솔 TLS 인증서의 Key Vault 비밀 ID(azd env APPGW_CERT_SECRET_ID, ops window open이 설정). 비면 App Gateway 공용 IP만 만듭니다.')
+#disable-next-line secure-secrets-in-params // 비밀 값이 아니라 Key Vault 비밀의 URI입니다.
+param appGwCertSecretId string = ''
 
 var tags = {
   'azd-env-name': environmentName
@@ -115,6 +118,7 @@ module resources 'resources.bicep' = {
     consoleDemoRole: consoleDemoRole
     opsAlertEmail: opsAlertEmail
     aiGatewayRouting: aiGatewayRouting
+    appGwCertSecretId: appGwCertSecretId
   }
 }
 
@@ -149,8 +153,6 @@ output ACR_NAME string = resources.outputs.ACR_NAME
 output CONTAINER_APPS_INT_ENVIRONMENT_ID string = resources.outputs.CONTAINER_APPS_INT_ENVIRONMENT_ID
 output CONTAINER_APPS_INT_ENVIRONMENT_NAME string = resources.outputs.CONTAINER_APPS_INT_ENVIRONMENT_NAME
 output CONTAINER_APPS_INT_DOMAIN string = resources.outputs.CONTAINER_APPS_INT_DOMAIN
-output CONTAINER_APPS_WEB_ENVIRONMENT_ID string = resources.outputs.CONTAINER_APPS_WEB_ENVIRONMENT_ID
-output CONTAINER_APPS_WEB_ENVIRONMENT_NAME string = resources.outputs.CONTAINER_APPS_WEB_ENVIRONMENT_NAME
 
 output POLICY_APP_NAME string = resources.outputs.POLICY_APP_NAME
 output MOCKAPI_APP_NAME string = resources.outputs.MOCKAPI_APP_NAME
@@ -167,3 +169,5 @@ output EVAL_REPORTS_CONTAINER string = resources.outputs.EVAL_REPORTS_CONTAINER
 output CONSOLE_APP_NAME string = resources.outputs.CONSOLE_APP_NAME
 output CONSOLE_URL string = resources.outputs.CONSOLE_URL
 output CONSOLE_CLIENT_ID string = resources.outputs.CONSOLE_CLIENT_ID
+output APPGW_NAME string = resources.outputs.APPGW_NAME
+output APPGW_FQDN string = resources.outputs.APPGW_FQDN

@@ -22,6 +22,7 @@ dev = [
   "azure-functions==1.25.0",
   "azure-functions-durable==1.7.0",
   "azure-identity==1.27.0",
+  "cryptography>=42",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -1,4 +1,4 @@
-"""배포 창: 운영자 IP 하나만 PaaS public access를 잠시 허용합니다(스펙 §2.2)."""
+"""배포 창: 운영자 IP 하나만 PaaS public access를 잠시 허용합니다(스펙 §2.2). 콘솔 App Gateway 인증서도 여기서 맞춥니다."""
 from __future__ import annotations
 
 import ipaddress
@@ -6,6 +6,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Callable
 
+from ops.appgw_cert import ensure_console_cert
 from ops.azcli import OpsError, Runner
 from ops.azdenv import get_env, provision, set_env
 
@@ -44,6 +45,9 @@ def open_window(runner: Runner, ip: str, *, acr: bool = False) -> str:
     set_env(runner, "CONSOLE_IP", ip)
     set_env(runner, "ACR_PUBLIC", "true" if acr else "false")
     provision(runner)
+    # 첫 프로비저닝이 App Gateway DNS 이름(APPGW_FQDN)을 만듭니다. 인증서 비밀 ID가 새로 생기면 한 번 더 돌려 게이트웨이를 만듭니다.
+    if ensure_console_cert(runner):
+        provision(runner)
     return ip
 
 

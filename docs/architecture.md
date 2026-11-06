@@ -1,6 +1,6 @@
 # 아키텍처
 
-동의 기반 합성 데이터로 SME 현금흐름 대출을 심사·모니터링·추심하는 에이전트 시스템의 as-built 아키텍처다. 신청 건별 흐름은 Durable Functions 오케스트레이터가 결정론적 상태 그래프로 관리하고, 각 단계 안에서 Foundry 프롬프트 에이전트가 도구를 써서 자율 판단한다. 신용 규칙은 LLM 밖의 결정론적 Policy Engine이 판정하고, 최종 결정은 심사역이 콘솔에서 내린다. 데이터·제어 평면은 VNet 격리 + Private Endpoint로 닫혀 있고 무키(managed identity) 인증을 쓰며, 외부로 열린 진입점은 운영자 IP 허용목록을 건 콘솔뿐이다(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원).
+동의 기반 합성 데이터로 SME 현금흐름 대출을 심사·모니터링·추심하는 에이전트 시스템의 as-built 아키텍처다. 신청 건별 흐름은 Durable Functions 오케스트레이터가 결정론적 상태 그래프로 관리하고, 각 단계 안에서 Foundry 프롬프트 에이전트가 도구를 써서 자율 판단한다. 신용 규칙은 LLM 밖의 결정론적 Policy Engine이 판정하고, 최종 결정은 심사역이 콘솔에서 내린다. 데이터·제어 평면은 VNet 격리 + Private Endpoint로 닫혀 있고 무키(managed identity) 인증을 쓰며, 외부로 열린 진입점은 Application Gateway WAF v2 앞단의 콘솔뿐이고 WAF가 운영자 IP가 아닌 요청을 막는다([ADR-011](adr/ADR-011-appgw-waf-entry.md); 데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원).
 
 > **합성 데이터 기준.** 실제 마이데이터·홈택스·PG API 대신 합성 데이터와 Mock API를 쓴다. 실측 수치는 `ops/reports/load-20261102110233/report.md`, `eval/reports/job-eval-9imbutm/report.md`에서 인용하며, 배포·운영 실행 기록은 [runbook/deploy-history.md](runbook/deploy-history.md)에 있다.
 
@@ -24,7 +24,7 @@ flowchart LR
   customer -->|/apply: 데이터 3종 동의·금액·기간| console
   borrower -->|동의 철회·이의제기| console
   officer -->|로그인 / 승인·거절| console
-  operator -->|상시: 운영자 IP 허용, 데모는 Easy Auth 꺼짐| console
+  operator -->|상시: App Gateway WAF(운영자 IP만), 데모는 Easy Auth 꺼짐| console
   operator -.->|배포 창: 데이터 평면 작업| orch
   console --> orch
   orch <--> foundry
@@ -32,19 +32,18 @@ flowchart LR
   orch <--> mock
 ```
 
-고객(마켓플레이스 셀러)은 콘솔의 고객 신청 페이지(`/apply`)에서 은행·세무·PG 데이터 3종에 모두 동의하고 금액(50만~1,000만 원)·기간(1~12개월)을 넣어 신청한다(`src/console/customer.py`). 이 신청은 심사역 콘솔과 같은 접수 큐로 들어가 같은 흐름을 탄다. 심사역·운영자는 콘솔로 들어온다. 콘솔은 상시 external이지만 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막는다(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
+고객(마켓플레이스 셀러)은 콘솔의 고객 신청 페이지(`/apply`)에서 은행·세무·PG 데이터 3종에 모두 동의하고 금액(50만~1,000만 원)·기간(1~12개월)을 넣어 신청한다(`src/console/customer.py`). 이 신청은 심사역 콘솔과 같은 접수 큐로 들어가 같은 흐름을 탄다. 심사역·운영자는 콘솔로 들어온다. 콘솔 앱은 internal 환경 `cae-int`에 있고, 인터넷에서는 공용 IP → Application Gateway WAF v2(`snet-appgw`)를 거쳐서만 닿는다. WAF 사용자 지정 규칙이 운영자 공인 IP(`CONSOLE_IP`)가 아닌 요청을 403으로 막는다([ADR-011](adr/ADR-011-appgw-waf-entry.md); 데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
 
 ## 컨테이너
 
 ```mermaid
 flowchart TB
-  subgraph web["external 환경 cae-web (snet-apps-web)"]
-    console["Officer Console<br/>FastAPI + HTMX"]
-  end
+  agw["Application Gateway WAF v2<br/>(snet-appgw, 공용 IP)"]
   subgraph fn["Azure Functions Flex (snet-functions)"]
     orch["Journey Orchestrator<br/>Durable Functions"]
   end
   subgraph int["internal 환경 cae-int (snet-apps-int)"]
+    console["Officer Console<br/>FastAPI + HTMX"]
     policy["Policy Engine"]
     mock["Mock API"]
     smoke["smoke / eval / ops Job"]
@@ -58,8 +57,10 @@ flowchart TB
   queues["Storage Queues"]
   sb["Service Bus (Premium)"]
   kv["Key Vault"]
-  obs["App Insights / Log Analytics"]
+  obs["App Insights / Log Analytics<br/>(+ AGWAccessLogs·AGWFirewallLogs)"]
 
+  agw -->|HTTPS, 운영자 IP만| console
+  agw -.->|진입·WAF 로그| obs
   console -->|읽기| cosmos
   console -->|명령| queues
   queues --> orch
@@ -84,7 +85,8 @@ flowchart TB
 
 | 구성요소 | 호스팅 | 책임 | 데이터 | 인증 | 코드 경로 |
 |---|---|---|---|---|---|
-| Officer Console | Container Apps external `cae-web` | 고객 신청 페이지(`/apply`), 신청 목록·탭형 상세 근거 열람, 승인/거절, 사후 재생(재조정 대기 시 정지·재개)·4주 잔고 전망, 공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra) + 운영자 IP 허용. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
+| Officer Console | Container Apps internal `cae-int`(진입은 Application Gateway WAF v2) | 고객 신청 페이지(`/apply`), 신청 목록·탭형 상세 근거 열람, 승인/거절, 사후 재생(재조정 대기 시 정지·재개)·4주 잔고 전망, 공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra, 리디렉션 URI는 게이트웨이 이름). 운영자 IP 제한은 WAF 규칙. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
+| Application Gateway WAF v2 | `snet-appgw`, 공용 IP `pip-agw-*`(DNS 레이블), WAF_v2 자동 확장 0–2 | HTTPS 종단(Key Vault 자체 서명 인증서), HTTP→HTTPS 영구 리디렉션, WAF 정책(Prevention, OWASP DRS 2.1, `allowOperatorOnly`), 백엔드 HTTPS·`/healthz` 프로브 | 없음 | 사용자 할당 ID `id-appgw-*`(Key Vault Secrets User) | `infra/modules/appgw.bicep`, `src/ops/appgw_cert.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
 | Mock API | Container Apps internal `cae-int` | 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정) 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | 합성 데이터(프로세스 내 생성) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
@@ -109,28 +111,28 @@ flowchart TB
     agents["snet-agents 192.168.0.0/24<br/>Foundry Agent"]
     pe["snet-pe 192.168.1.0/24<br/>Private Endpoint"]
     fn["snet-functions 192.168.2.0/26<br/>Functions Flex"]
-    appsint["snet-apps-int 192.168.4.0/24<br/>cae-int (internal)"]
-    appsweb["snet-apps-web 192.168.5.0/24<br/>cae-web (external)"]
+    appsint["snet-apps-int 192.168.4.0/24<br/>cae-int (internal, 콘솔 포함)"]
+    appgwnet["snet-appgw 192.168.7.0/24<br/>Application Gateway WAF v2"]
     apimnet["snet-apim 192.168.6.0/27<br/>APIM (internal)"]
   end
   operator["운영자 IP"]
   pe -->|Private DNS| data["Foundry·Cosmos·Storage·Search·KV·Service Bus·ACR·Functions"]
-  operator -->|상시: 운영자 IP 허용, 데모는 Easy Auth 꺼짐| appsweb
+  operator -->|상시: HTTPS, WAF가 운영자 IP만 통과, 데모는 Easy Auth 꺼짐| appgwnet
   operator -.->|배포 창: public 허용| fn
-  appsweb --> appsint
+  appgwnet --> appsint
   fn --> appsint
   agents --> apimnet
 ```
 
-평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 external 환경이지만 상시 운영자 IP 허용목록(`infra/resources.bicep:599`, `infra/modules/container-app.bicep:46-50`)으로 막으며(데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원), 배포 창 토글과 무관하게 열려 있다. internal 환경 앱 앞의 Application Gateway(WAF v2)는 운영 아키텍처 문서에만 둔다.
+평상시 모든 PaaS 리소스의 public network access는 꺼져 있고 Private Endpoint로만 접근한다. 운영자 데이터 평면 작업(배포·시드)에는 `operatorIp` 파라미터로 Functions·Foundry·ACR(빌드)의 public access를 잠시 켜고 기본 거부 + 운영자 IP 허용을 적용한 뒤 작업이 끝나면 다시 끈다(`infra/modules/functions.bicep`: `publicNetworkAccess`는 `operatorIp`가 있을 때만 `Enabled`). 콘솔은 internal 환경 `cae-int`에 있어 VNet 밖에서 직접 닿지 않는다. 인터넷 진입은 공용 IP의 Application Gateway WAF v2 하나뿐이고(상시, 배포 창 토글과 무관), WAF 사용자 지정 규칙 `allowOperatorOnly`가 `CONSOLE_IP`(`window open`이 설정) 밖의 요청을 막는다. 비어 있으면 `192.0.2.0/32`만 허용해 fail-closed다. 게이트웨이는 Key Vault의 자체 서명 인증서(비밀 `appgw-console`)를 사용자 할당 ID로 읽고, 백엔드는 콘솔 FQDN으로 HTTPS 연결한다([ADR-011](adr/ADR-011-appgw-waf-entry.md); 데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 진입·WAF 로그(`AGWAccessLogs`, `AGWFirewallLogs`)는 Log Analytics로 간다.
 
 | 서브넷 | 주소 | 위임 | 용도 |
 |---|---|---|---|
 | `snet-agents` | `192.168.0.0/24` | 예 | Foundry Agent Service 전용 |
 | `snet-pe` | `192.168.1.0/24` | 아니오 | Private Endpoint |
 | `snet-functions` | `192.168.2.0/26` | 예 | Functions Flex Consumption VNet 통합 |
-| `snet-apps-int` | `192.168.4.0/24` | 예 | internal Container Apps 환경(Policy·Mock·Job) |
-| `snet-apps-web` | `192.168.5.0/24` | 예 | external Container Apps 환경(콘솔만) |
+| `snet-apps-int` | `192.168.4.0/24` | 예 | internal Container Apps 환경(콘솔·Policy·Mock·Job) |
+| `snet-appgw` | `192.168.7.0/24` | 예 | Application Gateway WAF v2(`Microsoft.Network/applicationGateways` 위임(네트워크 격리 필수), `nsg-appgw`(GatewayManager·AzureLoadBalancer·Internet 80/443 허용; IP 제한은 WAF 사용자 지정 규칙)) |
 | `snet-apim` | `192.168.6.0/27` | 아니오 | APIM 내부 모드(게이트웨이 사설 IP, 공인 IP 없음) |
 
 주소·프리픽스는 `infra/modules/network.bicep`의 템플릿 값이다. Private Endpoint·DNS zone은 `infra/modules/pe.bicep`와 `infra/modules/dns.bicep`로 리소스별(`infra/resources.bicep` 호출부)에 붙는다: Key Vault, Storage(blob/queue/table), Cosmos, AI Search, Foundry 계정, Service Bus, ACR, Functions.
@@ -230,15 +232,15 @@ flowchart LR
 
 ## 운영 아키텍처
 
-이 절은 데모에 포함하지 않은 운영 전환 과제(미구축)다.
+이 절은 데모와 운영의 차이로 남은 운영 전환 과제다.
 
 | 항목 | 데모 | 운영 전환 시 |
 |---|---|---|
-| 외부 진입 | 콘솔만 external, 운영자 IP 허용목록(데모: Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md)) | internal 환경 앞 Application Gateway(WAF v2) + Entra 단일 진입(월 약 $365, 상위 Spec §2.2) |
+| 외부 진입 | Application Gateway WAF v2(Prevention, DRS 2.1, 운영자 IP만), 자체 서명 인증서([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 데모: Easy Auth 꺼짐([ADR-007](adr/ADR-007-demo-auth-mode.md)) | 공인 CA 인증서·사용자 도메인, 운영자 IP 규칙 대신 Entra 단일 진입 |
 | 심사역 인증 | Easy Auth implicit id_token, `consoleAuthEnabled=false` 시 데모 역할 | Entra 로그인 복원(비밀 또는 FIC 기반 인증 코드 흐름, [ADR-007](adr/ADR-007-demo-auth-mode.md)) |
 | 서킷 브레이커 | 프로세스(Flex 인스턴스) 단위 | 분산 서킷(공유 상태) |
 | 가용성 | 단일 리전 | 다중 리전 DR |
 | 모델 배포 | Global Standard | Data Zone / PTU([ADR-002](adr/ADR-002-model-deployment.md)) |
 | 입력 방어 | AI 게이트웨이(APIM)의 Prompt Shields·유해 카테고리 검사([ADR-010](adr/ADR-010-ai-gateway.md)). 프롬프트 1만 자 초과는 카테고리 검사 + 모델 필터 `Microsoft.DefaultV2`만, Decision-1에는 미적용 | 프롬프트 길이 제한에 걸리지 않는 입력 방어 보강, Standard v2 이상에서 게이트웨이 SLA 확보 |
 
-모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)·[ADR-010](adr/ADR-010-ai-gateway.md)과 연결된다. 이 과제들의 운영 전환 체크리스트는 [한계와 운영 전환](limitations.md)에 있다.
+모든 아키텍처 결정은 [ADR 색인](adr/README.md)에 정리되어 있다. 위 표의 결정은 [ADR-001](adr/ADR-001-orchestration.md)·[ADR-002](adr/ADR-002-model-deployment.md)·[ADR-007](adr/ADR-007-demo-auth-mode.md)·[ADR-010](adr/ADR-010-ai-gateway.md)·[ADR-011](adr/ADR-011-appgw-waf-entry.md)과 연결된다. 이 과제들의 운영 전환 체크리스트는 [한계와 운영 전환](limitations.md)에 있다.

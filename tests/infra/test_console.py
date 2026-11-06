@@ -1,4 +1,4 @@
-"""심사역 콘솔(P4b) IaC: 외부 환경 Container App, IP 허용 목록, Easy Auth, Graph 앱 등록, 최소 권한."""
+"""심사역 콘솔(P4b) IaC: 내부 환경 Container App(App Gateway WAF 뒤), Easy Auth, Graph 앱 등록, 최소 권한."""
 import json
 import re
 import shutil
@@ -29,9 +29,9 @@ def _resources(template: dict) -> list[dict]:
     return list(res.values()) if isinstance(res, dict) else res
 
 
-def test_console_runs_in_web_environment_with_own_identity(closed):
+def test_console_runs_in_internal_environment_with_own_identity(closed):
     app = closed.one(CA, "ca-console")
-    assert app["properties"]["environmentId"].endswith("/managedEnvironments/cae-web-amatest")
+    assert app["properties"]["environmentId"].endswith("/managedEnvironments/cae-int-amatest")
     assert list(app["identity"]["userAssignedIdentities"]) == [
         next(i["id"] for i in closed.of_type("Microsoft.ManagedIdentity/userAssignedIdentities")
              if i["name"] == "id-console-amatest")]
@@ -46,12 +46,11 @@ def test_console_runs_in_web_environment_with_own_identity(closed):
     assert re.fullmatch(r"https://stfn[0-9a-z]+\.queue\.core\.windows\.net/", queue)
 
 
-def test_console_ip_allow_list_fails_closed(closed, opened):
-    # 운영자 IP가 없으면 TEST-NET 주소만 허용해 아무도 들어오지 못하게 합니다.
-    rules = closed.one(CA, "ca-console")["properties"]["configuration"]["ingress"]["ipSecurityRestrictions"]
-    assert rules == [{"name": "allow-0", "ipAddressRange": "192.0.2.0/32", "action": "Allow"}]
-    rules = opened.one(CA, "ca-console")["properties"]["configuration"]["ingress"]["ipSecurityRestrictions"]
-    assert rules == [{"name": "allow-0", "ipAddressRange": "20.30.40.50/32", "action": "Allow"}]
+def test_console_has_no_ingress_ip_rules_behind_gateway(closed, opened):
+    # 콘솔은 내부 환경이라 VNet 밖에서 닿지 않습니다. 운영자 IP 제한은 App Gateway WAF 사용자 지정 규칙이 맡습니다.
+    for exp in (closed, opened):
+        ingress = exp.one(CA, "ca-console")["properties"]["configuration"]["ingress"]
+        assert ingress.get("ipSecurityRestrictions") in (None, [])
 
 
 def test_vnet_only_apps_have_no_ip_rules_or_auth(closed):
@@ -68,9 +67,9 @@ def test_console_image_param(closed, variant):
 
 def test_console_auth_registration_wiring(closed):
     params = _deployment(closed, "console-auth")
-    # PSRule은 환경 기본 도메인을 모르므로 앞뒤만 확인합니다.
-    assert params["redirectUri"].startswith("https://ca-console.")
-    assert params["redirectUri"].endswith("/.auth/login/aad/callback")
+    # 로그인 콜백은 App Gateway 공개 이름으로 돌아옵니다(내부 환경 도메인은 브라우저에서 안 풀림).
+    assert re.fullmatch(r"https://amatest-[0-9a-z]{13}\.koreacentral\.cloudapp\.azure\.com/\.auth/login/aad/callback",
+                        params["redirectUri"])
     assert params["operatorPrincipalId"] == "11111111-1111-1111-1111-111111111111"
 
 
@@ -86,6 +85,10 @@ def test_console_easy_auth_requires_entra_login(console_app):
     assert aad["registration"]["openIdIssuer"].endswith("/v2.0")
     assert "clientSecretSettingName" not in aad["registration"]  # ID 토큰만(비밀 없음)
     assert aad["validation"]["allowedAudiences"] == ["22222222-2222-2222-2222-222222222222"]
+    # App Gateway가 원래 호스트를 X-Original-Host로 넘기므로 Easy Auth가 리디렉션 URL을 게이트웨이 이름으로 만듭니다.
+    assert props["httpSettings"]["forwardProxy"] == {"convention": "Custom",
+                                                     "customHostHeaderName": "X-Original-Host",
+                                                     "customProtoHeaderName": "X-Forwarded-Proto"}
 
 
 def test_console_app_registration_defines_roles_and_requires_assignment():
@@ -132,6 +135,11 @@ def test_console_identity_grants_are_least_privilege(closed):
 @pytest.mark.parametrize("output", ["CONSOLE_URL", "CONSOLE_CLIENT_ID", "CONSOLE_APP_NAME"])
 def test_console_outputs_exposed_to_azd(output):
     assert output in _compile(INFRA / "main.bicep")["outputs"]
+
+
+def test_console_url_is_gateway_name():
+    url = _compile(INFRA / "resources.bicep")["outputs"]["CONSOLE_URL"]["value"]
+    assert "appGwFqdn" in url
 
 
 def test_console_easy_auth_can_be_switched_off_for_demo(console_app_noauth, expand_azd):

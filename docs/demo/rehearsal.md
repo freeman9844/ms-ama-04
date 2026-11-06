@@ -68,7 +68,7 @@ print(subprocess.run(
 ### 5. 정리
 
 ```powershell
-# operator-alt* 규칙을 추가했다면 console ingress와 Functions 양쪽에서 모두 제거(deploy 문서의 절차 4)
+# operator-alt* 규칙을 추가했다면 Functions에서 제거(deploy 문서의 절차 4). 콘솔에 WAF 규칙 조건을 더했다면 다음 프로비저닝이 되돌린다
 python -m ops window close
 # close 뒤 Service Bus 구독 규칙이 subject-label인지 확인(선택, deploy 문서의 "Service Bus 구독 규칙 확인")
 python -m ops fault status                  # source: off, policy: off

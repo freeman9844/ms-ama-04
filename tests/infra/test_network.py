@@ -29,15 +29,34 @@ def test_vnet_uses_class_c_private_range(closed):
 
 def test_subnets_and_delegations(closed):
     subnets = _subnets(closed)
-    assert set(subnets) == {"snet-agents", "snet-pe", "snet-functions",     "snet-apps-int", "snet-apps-web", "snet-apim"}
-    for name in ("snet-agents", "snet-functions", "snet-apps-int", "snet-apps-web"):
+    assert set(subnets) == {"snet-agents", "snet-pe", "snet-functions", "snet-apps-int", "snet-appgw", "snet-apim"}
+    for name in ("snet-agents", "snet-functions", "snet-apps-int"):
         services = [d["properties"]["serviceName"] for d in subnets[name]["delegations"]]
         assert services == ["Microsoft.App/environments"], name
     assert subnets["snet-pe"]["delegations"] == []
+    # App Gateway 네트워크 격리 기능이 켜진 구독은 게이트웨이 서브넷 위임이 필수입니다. NSG는 테넌트 정책이 붙이는 기본 거부 NSG 대신 nsg-appgw를 직접 둡니다.
+    appgw_services = [d["properties"]["serviceName"] for d in subnets["snet-appgw"]["delegations"]]
+    assert appgw_services == ["Microsoft.Network/applicationGateways"]
+    assert "nsg-appgw" in subnets["snet-appgw"]["networkSecurityGroup"]["id"]
+    assert "nsg-apim" in subnets["snet-apim"]["networkSecurityGroup"]["id"]
     assert subnets["snet-agents"]["addressPrefix"] == "192.168.0.0/24"
     assert subnets["snet-functions"]["addressPrefix"] == "192.168.2.0/26"
     assert subnets["snet-apps-int"]["addressPrefix"] == "192.168.4.0/24"
-    assert subnets["snet-apps-web"]["addressPrefix"] == "192.168.5.0/24"
+    assert subnets["snet-appgw"]["addressPrefix"] == "192.168.7.0/24"
+
+
+def test_appgw_nsg_allows_web_and_platform(closed):
+    nsg = closed.one("Microsoft.Network/networkSecurityGroups", "nsg-appgw")
+    rules = {r["name"]: r["properties"] for r in nsg["properties"]["securityRules"]}
+    assert set(rules) == {"allow-gateway-manager", "allow-azure-lb", "allow-internet-web"}
+    gm = rules["allow-gateway-manager"]
+    assert (gm["sourceAddressPrefix"], gm["destinationPortRange"], gm["priority"]) == ("GatewayManager", "65200-65535", 100)
+    lb = rules["allow-azure-lb"]
+    assert (lb["sourceAddressPrefix"], lb["destinationPortRange"], lb["protocol"]) == ("AzureLoadBalancer", "*", "*")
+    web = rules["allow-internet-web"]
+    assert web["sourceAddressPrefix"] == "Internet"
+    assert web["destinationPortRanges"] == ["80", "443"]
+    assert all(r["direction"] == "Inbound" and r["access"] == "Allow" for r in rules.values())
 
 
 def test_all_private_dns_zones_exist_and_are_linked(closed):

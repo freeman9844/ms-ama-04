@@ -21,7 +21,7 @@
 
 - [ ] `python -m ops resume` 완료. Service Bus를 지워 둔 상태였다면 복구에 몇 분 걸립니다(실측 4.5~4.7분, `docs/runbook/operate.md`). 이미 있으면 그대로 둡니다.
 - [ ] `python -m ops smoke` 통과. VNet 안 점검 항목과 콘솔 로그인 관문을 함께 확인합니다([operate](../runbook/operate.md#smoke)).
-- [ ] 콘솔 접속. 주소는 `azd env get-values`의 `CONSOLE_URL`입니다. 접속이 403이면 운영자 공인 IP가 console ingress 허용 목록과 달라진 것입니다(`python -m ops window status`로 확인). 이때는 `operator-alt` 규칙으로 현재 IP를 임시 허용하고 데모 뒤 지웁니다 — [deploy](../runbook/deploy.md#운영자-ip가-바뀔-때)의 절차를 그대로 따릅니다. 회사 NAT처럼 출구 IP가 여러 개로 돌면 403이 반복될 수 있으니, 바뀔 때마다 같은 절차로 `/32` 임시 규칙(`operator-alt2`, `operator-alt3` …)을 하나씩 추가합니다.
+- [ ] 콘솔 접속. 주소는 `azd env get-value APPGW_FQDN`의 `https://` 주소(또는 `CONSOLE_URL`)입니다. 자체 서명 인증서라 브라우저 경고가 뜨면 넘기고 진행합니다. 접속이 403이면 WAF가 막은 것입니다. 운영자 공인 IP가 `CONSOLE_IP`와 달라진 것이니(`python -m ops window status`로 확인) `python -m ops window open --ip <현재 IP>`로 `CONSOLE_IP`를 갱신합니다 — [deploy](../runbook/deploy.md#운영자-ip가-바뀔-때)의 절차를 따릅니다. 회사 NAT처럼 출구 IP가 여러 개로 돌면 403이 반복될 수 있으니, 같은 문서의 WAF 규칙 조건 추가로 `/32` IP를 하나씩 더합니다.
 - [ ] 라이브 신청 ID를 메모할 곳(종이·메모장)을 준비합니다.
 - [ ] `python -m ops fault status`가 `source: off`, `policy: off`로 둘 다 꺼져 있음. 켜져 있으면 `python -m ops fault source off` / `python -m ops fault policy off`로 끕니다(`source`가 `flaky`이면 사후 재생이 실패합니다).
 - [ ] 사전 건 A·B·C의 확인 방법(위 표)을 한 번씩 통과.
