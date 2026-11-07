@@ -2,6 +2,32 @@
 {% import "_seller.html" as sl %}
 {% set nav = "loans" %}
 {% import "_charts.html" as ch %}
+{% macro collections_block(c) -%}
+<h3>추심 에이전트 <small>{{ c.decision }}</small></h3>
+<p>{{ c.reason }}</p>
+{% if c.contacts %}<table>
+  <thead><tr><th>일자</th><th>스크립트</th><th>상태</th><th>사유</th></tr></thead>
+  <tbody>{% for x in c.contacts %}<tr><td>{{ x.at }}</td><td>{{ x.script_id }}</td><td>{{ x.status }}</td><td>{{ x.reason or "" }}</td></tr>{% endfor %}</tbody>
+</table>{% endif %}
+{%- endmacro %}
+{% macro restructure_block(doc_id, rs, decidable) -%}
+<h3>재조정 상담 요청 <small>{{ rs.status }}</small></h3>
+<p>{{ rs.category }} · {{ rs.note }}</p>
+{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason }}</p>{% endif %}
+{% if decidable and user.can_decide and replay_blocked %}
+<p><small>재생이 끝나면 재조정 결정을 내릴 수 있습니다.</small></p>
+{% elif decidable and user.can_decide %}
+<form method="post" action="/loans/{{ v.loan.id|path }}/alerts/{{ doc_id|path }}/restructure" class="decision">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset><legend>재조정 결정</legend>
+    <label><input type="radio" name="decision" value="approve" checked> 승인</label>
+    <label><input type="radio" name="decision" value="decline"> 거절</label>
+  </fieldset>
+  <label>사유 <textarea name="reason" rows="2"></textarea></label>
+  <button type="submit">결정 보내기</button>
+</form>
+{% endif %}
+{%- endmacro %}
 {% set l = v.loan %}{% set m = v.monitoring %}
 {% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ watch_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
@@ -27,7 +53,7 @@
 {% if m.status == "paused" %}
 <section class="card resume-card" aria-label="재생 일시정지">
   <h2>재조정 요청으로 재생을 멈췄습니다</h2>
-  <p>{{ m.paused_week }}주차 경보에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 경보에서 재조정을 승인하거나 거절하면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
+  <p>{{ m.paused_week }}주차 미납 추심 건에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 추심 건에서 재조정을 승인하거나 거절하면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
 </section>
 {% elif m.status == "awaiting_resume" %}
 <section class="card resume-card" aria-label="재생 재개 확인">
@@ -48,7 +74,8 @@
 </section>
 {% endif %}
 <div class="grid-4">
-  {{ ch.kpi("대출", l.amount_krw|krw, l.tenor_months ~ "개월 · " ~ l.decision, "neutral") }}
+  {% set rp = ui.repayment %}
+  {{ ch.kpi("대출", l.amount_krw|krw, l.tenor_months ~ "개월 · " ~ l.decision ~ ((" · 상환 " ~ rp.paid ~ "/" ~ rp.total ~ "회" ~ (" · 미납 " ~ rp.missed if rp.missed else "")) if rp else ""), "red" if rp and rp.missed else "neutral") }}
   {% call ch.kpi("재생 진행", ui.processed ~ "/" ~ ui.weeks_total ~ "주", m.mode or "재생 전", "blue") %}{{ ch.progress(ui.progress_pct, "재생 진행률") }}{% endcall %}
   {{ ch.kpi("경보", ui.alerts ~ "건", "높음 " ~ ui.severity.high ~ " · 중간 " ~ ui.severity.medium ~ " · 낮음 " ~ ui.severity.low, "red" if ui.severity.high else ("amber" if ui.alerts else "neutral")) }}
   {{ ch.kpi("최저 현금 버퍼", "-" if ui.min_buffer is none else ui.min_buffer ~ "일", ("" if ui.min_buffer_week is none else ui.min_buffer_week ~ "주차 · ") ~ "기준 " ~ ("-" if ui.baseline_buffer is none else ui.baseline_buffer ~ "일"), "purple") }}
@@ -84,13 +111,33 @@
   <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
   <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ r.shortfall_date }} 부족)</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
-  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}</td>
+  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}{% if w.case_id %} · <a href="#{{ w.case_id }}">미납</a>{% endif %}</td>
 </tr>
 {% endfor %}
   </tbody>
 </table>
 <p><small>노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.</small></p>
 </section>
+{% if l.repayment %}
+<section class="card">
+<h2>상환 원장</h2>
+<p class="note">상환일 당일 <code>에이엠에이렌딩 대출상환</code> 출금이 있으면 납부로 봅니다. 안내는 상환일 3일 전에 자동 발송하고, 야간·주말이면 보류합니다. 미납이면 추심 건이 생겨 추심 에이전트가 연락합니다.</p>
+<table>
+  <thead><tr><th>회차</th><th>상환일</th><th>금액</th><th>상태</th><th>안내일</th><th>출금 거래</th><th>추심 건</th></tr></thead>
+  <tbody>
+{% for s in l.repayment.schedule %}
+<tr>
+  <td>{{ s.no }}</td><td>{{ s.due_on }}</td><td>{{ l.repayment.installment_krw|krw }}</td>
+  <td class="r-{{ s.status }}">{{ s.status|repayment_label }}</td>
+  <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} (보류){% endif %}</td>
+  <td>{{ s.txn_id or "-" }}</td>
+  <td>{% if s.case_id %}<a href="#{{ s.case_id }}">{{ s.case_id }}</a>{% else %}-{% endif %}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+</section>
+{% endif %}
 {% if ui.expected_chart %}
 <section class="card">
 <h2>기대 입금 대비 실제</h2>
@@ -133,32 +180,21 @@
 {% endfor %}
 </ul>
 <p class="review">조사 모델: {% for role, model in a.models|dictsort %}{{ role }}={{ model }} {% endfor %}{% if a.event_error %} · <span class="error">이벤트 발행 실패: {{ a.event_error }}</span>{% endif %}</p>
-{% if a.collections %}{% set c = a.collections %}
-<h3>추심 에이전트 <small>{{ c.decision }}</small></h3>
-<p>{{ c.reason }}</p>
-{% if c.contacts %}<table>
-  <thead><tr><th>일자</th><th>스크립트</th><th>상태</th><th>사유</th></tr></thead>
-  <tbody>{% for x in c.contacts %}<tr><td>{{ x.at }}</td><td>{{ x.script_id }}</td><td>{{ x.status }}</td><td>{{ x.reason or "" }}</td></tr>{% endfor %}</tbody>
-</table>{% endif %}
-{% elif a.status == "open" %}<p>추심 에이전트 처리 대기 중.</p>{% endif %}
-{% if a.restructure %}{% set rs = a.restructure %}
-<h3>재조정 상담 요청 <small>{{ rs.status }}</small></h3>
-<p>{{ rs.category }} · {{ rs.note }}</p>
-{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason }}</p>{% endif %}
-{% if a.decidable and user.can_decide and replay_blocked %}
-<p><small>재생이 끝나면 재조정 결정을 내릴 수 있습니다.</small></p>
-{% elif a.decidable and user.can_decide %}
-<form method="post" action="/loans/{{ l.id|path }}/alerts/{{ a.alert_id|path }}/restructure" class="decision">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <fieldset><legend>재조정 결정</legend>
-    <label><input type="radio" name="decision" value="approve" checked> 승인</label>
-    <label><input type="radio" name="decision" value="decline"> 거절</label>
-  </fieldset>
-  <label>사유 <textarea name="reason" rows="2"></textarea></label>
-  <button type="submit">결정 보내기</button>
-</form>
-{% endif %}
-{% endif %}
+{% if a.collections %}{{ collections_block(a.collections) }}
+{% elif not a.restructure %}<p class="note">심사역 검토 대상 · 차주 연락 없음</p>{% endif %}
+{% if a.restructure %}{{ restructure_block(a.id, a.restructure, a.decidable) }}{% endif %}
+</section>
+{% endfor %}
+
+{% for c in v.cases %}{% set inst = c.installment %}
+<section id="{{ c.case_id }}" class="card alert-card">
+<h2>{{ inst.no }}회차 미납 · {{ inst.due_on }} · {{ inst.amount_krw|krw }} <small>누적 미납 {{ c.missed_count }}회 · {{ c.status }}</small></h2>
+{% if ui.case_steps[c.case_id] %}{{ ch.stepper(ui.case_steps[c.case_id], "미납 추심 단계", compact=true) }}{% endif %}
+{% if c.recent_alert %}<p>최근 경보: <a href="#{{ c.recent_alert.alert_id }}">{{ c.recent_alert.week }}주차 {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary }}</p>
+{% else %}<p class="note">이번 재생에 앞선 경보 없음.</p>{% endif %}
+{% if c.event_error %}<p class="error">이벤트 발행 실패: {{ c.event_error }}</p>{% endif %}
+{% if c.collections %}{{ collections_block(c.collections) }}{% else %}<p>추심 에이전트 처리 대기 중.</p>{% endif %}
+{% if c.restructure %}{{ restructure_block(c.id, c.restructure, c.decidable) }}{% endif %}
 </section>
 {% endfor %}
 

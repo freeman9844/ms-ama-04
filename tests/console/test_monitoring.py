@@ -41,17 +41,25 @@ def make_loan(status="completed", started_at=NOW - timedelta(hours=1), replay_id
         "weeks": [{"week": 1, "row": ROW, "triggers": ["new_debt"], "new_triggers": ["new_debt"],
                    "classification": None, "investigation": {"decision": "alert", "reason": "r", "record": {}},
                    "alert_id": "ew-rp-1-w01"}],
-        "alert_ids": ["ew-rp-1-w01"], "error": None,
+        "alert_ids": ["ew-rp-1-w01"], "case_ids": ["rc-rp-1-i1"], "error": None,
     }
+    repayment = None if status is None else {"installment_krw": 1_779_000, "schedule": [
+        {"no": 1, "due_on": "2026-10-01", "status": "missed", "reminded_on": "2026-09-28", "reminder_status": "sent",
+         "txn_id": None, "case_id": "rc-rp-1-i1"},
+        {"no": 2, "due_on": "2026-10-31", "status": "paid", "reminded_on": "2026-10-28", "reminder_status": "deferred",
+         "txn_id": "t-pay-2", "case_id": None},
+        {"no": 3, "due_on": "2026-11-30", "status": "paid", "reminded_on": "2026-11-27", "reminder_status": "sent",
+         "txn_id": "t-pay-3", "case_id": None},
+    ]}
     return {
         "id": "app-1", "loan_id": "app-1", "application_id": "app-1", "applicant_id": "seller-dailylook-01",
         "industry": "카페", "underwriting_consent_id": "c-1", "decision": "approve", "amount_krw": 20_000_000,
         "tenor_months": 12, "approved_at": "2026-10-31T09:00:00+09:00", "baseline": BASELINE,
-        "monitoring": monitoring, "updated_at": NOW.isoformat(),
+        "monitoring": monitoring, "repayment": repayment, "updated_at": NOW.isoformat(),
     }
 
 
-def make_alert(mask, restructure_status="pending_officer"):
+def make_alert(mask):
     return {
         "id": "ew-rp-1-w01", "schema_version": "1", "alert_id": "ew-rp-1-w01", "loan_id": "app-1", "week": 1,
         "as_of": "2026-09-07", "severity": "high",
@@ -59,12 +67,24 @@ def make_alert(mask, restructure_status="pending_officer"):
         "signals": [{"kind": "new_debt", "text": mask("김대표 개인이체 뒤 고금리 상환 1건"),
                      "metric_ids": ["W:1:high_cost_count", "W:9:revenue"], "txn_ids": ["t2"]}],
         "recommended_action": "hardship_review", "triggers": ["new_debt"], "models": {"investigator": "gpt-5.4"},
-        "replay_id": "rp-1", "status": "restructure_pending", "created_at": NOW.isoformat(), "event_error": None,
+        "replay_id": "rp-1", "status": "open", "created_at": NOW.isoformat(), "event_error": None,
+        "collections": None, "restructure": None,
+    }
+
+
+def make_case(mask, restructure_status="pending_officer"):
+    return {
+        "id": "rc-rp-1-i1", "kind": "repayment_case", "case_id": "rc-rp-1-i1", "loan_id": "app-1", "replay_id": "rp-1",
+        "week": 5, "as_of": "2026-10-01", "installment": {"no": 1, "due_on": "2026-10-01", "amount_krw": 1_779_000},
+        "missed_count": 1,
+        "recent_alert": {"alert_id": "ew-rp-1-w01", "week": 1, "severity": "high",
+                         "summary": mask("김대표 개인이체와 고금리 상환이 겹쳤다")},
+        "status": "restructure_pending", "created_at": NOW.isoformat(), "event_error": None,
         "collections": {"decision": "routed", "reason": "상담 연결", "at": NOW.isoformat(),
-                        "contacts": [{"alert_id": "ew-rp-1-w01", "on": "2026-11-02", "at": NOW.isoformat(),
+                        "contacts": [{"ref": "rc-rp-1-i1", "on": "2026-10-01", "at": NOW.isoformat(),
                                       "script_id": "hardship_offer", "status": "sent", "reason": None,
-                                      "by": "collections-agent"}], "record": {}},
-        "restructure": {"request_id": "rs-ew-rp-1-w01", "category": "debt_overload",
+                                      "by": "agent"}], "record": {}},
+        "restructure": {"request_id": "rs-rc-rp-1-i1", "category": "debt_overload",
                         "note": mask("김대표 대출 중첩"), "status": restructure_status,
                         "created_at": NOW.isoformat()},
     }
@@ -103,7 +123,7 @@ class FakeQueue:
 def setup(fake_raw, raw_profile, raw_txns, key, mask):
     def build(loan=None, alerts=None, monitoring=True):
         raw = fake_raw({("consent-c-1", "profile.json"): raw_profile, ("consent-m-1", "flow.json"): raw_txns})
-        store = FakeMonitoring([loan or make_loan()], [make_alert(mask)] if alerts is None else alerts)
+        store = FakeMonitoring([loan or make_loan()], [make_alert(mask), make_case(mask)] if alerts is None else alerts)
         queue = FakeQueue()
         deps = ConsoleDeps(store=None, raw=raw, queue=queue, pseudonym_key=key, clock=lambda: NOW,
                            monitoring=store if monitoring else None)
@@ -137,7 +157,8 @@ def test_loan_page_restores_alert_text_and_shows_evidence_for_officer(setup, mas
     assert "W:1:high_cost_count = 1" in page
     assert "W:9:revenue = 없음" in page  # 없는 근거 ID는 경고 칩으로 드러낸다
     assert "김대표 개인이체" in page and "t2" in page  # 근거 거래(원문 적요)
-    assert "hardship_offer" in page and 'action="/loans/app-1/alerts/ew-rp-1-w01/restructure"' in page
+    assert "hardship_offer" in page and 'action="/loans/app-1/alerts/rc-rp-1-i1/restructure"' in page
+    assert "김대표 대출 중첩" in page and "/alerts/ew-rp-1-w01/restructure" not in page
     assert 'action="/loans/app-1/replay"' in page and "disabled" not in page
 
 
@@ -194,9 +215,9 @@ def test_replay_requires_decider_and_csrf(setup):
 def test_restructure_decision_uses_login_identity(setup):
     client, queue, *_ = setup()
     form = {"csrf": csrf(client), "decision": "approve", "reason": "3개월 유예", "officer_id": "someone-else"}
-    r = client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER)
+    r = client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data=form, headers=OFFICER)
     assert r.status_code == 202
-    assert queue.sent == [(RESTRUCTURE_QUEUE, {"loan_id": "app-1", "alert_id": "ew-rp-1-w01", "decision": "approve",
+    assert queue.sent == [(RESTRUCTURE_QUEUE, {"loan_id": "app-1", "alert_id": "rc-rp-1-i1", "decision": "approve",
                                                "officer_id": "oid-officer", "reason": "3개월 유예"})]
 
 
@@ -207,14 +228,14 @@ def test_restructure_decision_uses_login_identity(setup):
 ])
 def test_restructure_decision_validation(setup, fields, status):
     client, queue, *_ = setup()
-    r = client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data={"csrf": csrf(client)} | fields, headers=OFFICER)
+    r = client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data={"csrf": csrf(client)} | fields, headers=OFFICER)
     assert r.status_code == status and queue.sent == []
 
 
 def test_restructure_decision_needs_pending_request_of_current_replay(setup, mask):
-    client, queue, *_ = setup(alerts=[make_alert(mask, restructure_status="approved")])
+    client, queue, *_ = setup(alerts=[make_case(mask, restructure_status="approved")])
     token = csrf(client)
-    path = "/loans/app-1/alerts/ew-rp-1-w01/restructure"
+    path = "/loans/app-1/alerts/rc-rp-1-i1/restructure"
     assert client.post(path, data={"csrf": token, "decision": "approve", "reason": "x"}, headers=OFFICER).status_code == 409
     other, queue2, *_ = setup(loan=make_loan(replay_id="rp-2"))
     assert other.post(path, data={"csrf": csrf(other), "decision": "approve", "reason": "x"},
@@ -224,7 +245,7 @@ def test_restructure_decision_needs_pending_request_of_current_replay(setup, mas
 
 def held_loan(status, paused_week=2):
     loan = make_loan(status=status)
-    loan["monitoring"].update(processed_week=paused_week, paused_week=paused_week, pause_alert_id="ew-rp-1-w01",
+    loan["monitoring"].update(processed_week=paused_week, paused_week=paused_week, pause_case_id="rc-rp-1-i1",
                               resumed_at=[], stopped_at=None)
     return loan
 
@@ -239,14 +260,14 @@ def test_paused_replay_blocks_new_replay_and_opens_restructure_form(setup):
     r = client.post("/loans/app-1/replay", data={"csrf": csrf(client)}, headers=OFFICER)
     assert r.status_code == 409 and "재개 확인이 끝나야" in r.text
     form = {"csrf": csrf(client), "decision": "decline", "reason": "상환 여력 없음"}
-    sent = client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER)
+    sent = client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data=form, headers=OFFICER)
     assert sent.status_code == 202 and "재생을 이어갈지 선택하세요" in sent.text
     assert [q for q, _ in queue.sent] == [RESTRUCTURE_QUEUE]
 
 
 @pytest.mark.parametrize(("action", "text"), [("resume", "남은 11주 재생을 이어서"), ("stop", "종료하도록")])
 def test_awaiting_resume_offers_resume_and_stop(setup, mask, action, text):
-    client, queue, *_ = setup(loan=held_loan("awaiting_resume"), alerts=[make_alert(mask, "approved")])
+    client, queue, *_ = setup(loan=held_loan("awaiting_resume"), alerts=[make_case(mask, "approved")])
     page = client.get("/loans/app-1", headers=OFFICER).text
     assert "재개 확인 대기" in page and "남은 11주 재생을 이어갈까요?" in page
     assert 'action="/loans/app-1/replay/resume"' in page and 'action="/loans/app-1/replay/stop"' in page
@@ -297,10 +318,10 @@ def test_replay_sent_page_forwards_to_loan_until_the_replay_starts(setup):
 def test_restructure_sent_page_watches_alert_changes(setup, mask):
     client, _, store, _ = setup(loan=held_loan("paused"))
     form = {"csrf": csrf(client), "decision": "approve", "reason": "3개월 유예"}
-    sent = client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER)
+    sent = client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data=form, headers=OFFICER)
     url = re.search(r'content="1;url=(/loans/app-1\?since=[0-9a-f]{12})"', sent.text).group(1)
     assert "반영을 기다리는 중" in client.get(url, headers=OFFICER).text
-    store.alerts = [make_alert(mask, "approved")]
+    store.alerts = [make_alert(mask), make_case(mask, "approved")]
     assert "반영을 기다리는 중" not in client.get(url, headers=OFFICER).text
 
 
@@ -308,3 +329,24 @@ def test_loans_list_shows_business_name_to_deciders(setup):
     client, *_ = setup()
     assert "성수데일리룩" in client.get("/loans", headers=OFFICER).text
     assert "성수데일리룩" not in client.get("/loans", headers=AUDITOR_H).text
+
+
+def test_loan_page_shows_ledger_and_case(setup):
+    client, *_ = setup()
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "상환 원장" in page and 'class="r-missed"' in page and "t-pay-2" in page and "(보류)" in page
+    assert 'id="rc-rp-1-i1"' in page and "1회차 미납" in page and 'href="#ew-rp-1-w01"' in page
+    assert "상환 2/3회" in page and "미납 1" in page
+    assert "심사역 검토 대상 · 차주 연락 없음" in page  # 조기경보 카드는 연락하지 않는다
+
+
+def test_legacy_alert_with_restructure_still_decidable(setup, mask):
+    case = make_case(mask)
+    legacy = {**make_alert(mask), "status": "restructure_pending", "collections": case["collections"],
+              "restructure": {**case["restructure"], "request_id": "rs-ew-rp-1-w01"}}
+    client, queue, *_ = setup(alerts=[legacy])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert 'action="/loans/app-1/alerts/ew-rp-1-w01/restructure"' in page and "차주 연락 없음" not in page
+    form = {"csrf": csrf(client), "decision": "approve", "reason": "옛 경보"}
+    assert client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER).status_code == 202
+    assert queue.sent[0][1]["alert_id"] == "ew-rp-1-w01"

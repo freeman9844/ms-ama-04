@@ -91,6 +91,9 @@ details summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
 .m-completed { background: #dff6dd; color: var(--good); }
 .m-paused, .m-awaiting_resume { background: #efe6f8; color: #5c2e91; }
 .m-stopped { background: #edebe9; color: var(--muted); }
+.r-paid { color: var(--good); }
+.r-missed { color: var(--bad); font-weight: 600; }
+.r-scheduled { color: var(--muted); }
 .resume-card { border-left: 4px solid #8764b8; }
 .resume-card .actions { display: flex; gap: .5rem; }
 .badge-neutral { background: #edebe9; color: var(--muted); }

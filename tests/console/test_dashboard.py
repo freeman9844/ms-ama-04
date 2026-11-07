@@ -124,8 +124,10 @@ def test_alert_steps_branches():
     assert [(s["label"], s["state"], s["note"]) for s in full] == [
         ("탐지", "done", "1주차"), ("조기경보 조사", "done", "높음"), ("추심 에이전트", "done", "routed"),
         ("재조정 결정", "current", "심사역 대기")]
-    waiting = dashboard.alert_steps({"week": 4, "severity": "medium", "collections": None, "restructure": None})
-    assert [s["state"] for s in waiting] == ["done", "done", "current"]
+    # 미납 추심 뒤 경보는 심사역 검토용이다(차주 연락 없음). 위 두 경우는 옛 경보 문서.
+    review = dashboard.alert_steps({"week": 4, "severity": "medium", "collections": None, "restructure": None})
+    assert [(s["label"], s["state"], s["note"]) for s in review] == [
+        ("탐지", "done", "4주차"), ("조기경보 조사", "done", "중간"), ("심사역 검토", "done", "연락 없음")]
     done = dashboard.alert_steps({"week": 4, "severity": "low", "collections": {"decision": "x"},
                                   "restructure": {"status": "declined"}})
     assert (done[-1]["state"], done[-1]["note"]) == ("done", "거절")
@@ -157,6 +159,25 @@ def test_loan_summary_progress_severity_buffer_and_chart():
     assert len(s["line"]["segments"]) == 1 and len(s["line"]["points"]) == 2
     assert s["line"]["x"] == s["chart"]["x1"] and s["line"]["points"][0]["x"] == s["chart"]["groups"][0]["cx"]
     assert set(s["alert_steps"]) == {"ew-1", "ew-2"}
+    assert s["case_steps"] == {} and s["repayment"] is None
+
+
+def test_case_steps():
+    c = {"installment": {"no": 3, "due_on": "2027-01-29"}, "collections": {"decision": "routed"},
+         "restructure": {"status": "pending_officer"}}
+    steps = dashboard.case_steps(c)
+    assert [(s["label"], s["state"], s["note"]) for s in steps] == [
+        ("미납", "done", "3회차 2027-01-29"), ("추심 에이전트", "done", "routed"), ("재조정 결정", "current", "심사역 대기")]
+    waiting = dashboard.case_steps({**c, "collections": None, "restructure": None})
+    assert [s["state"] for s in waiting] == ["done", "current"]
+
+
+def test_loan_summary_repayment_and_cases():
+    schedule = [{"status": "paid"}, {"status": "paid"}, {"status": "missed"}]
+    case = {"case_id": "rc-1", "installment": {"no": 3, "due_on": "2027-01-29"}, "collections": None, "restructure": None}
+    s = dashboard.loan_summary({"loan": {"baseline": {}, "repayment": {"schedule": schedule}}, "monitoring": {},
+                                "weeks": [], "alerts": [], "cases": [case]})
+    assert s["repayment"] == {"paid": 2, "total": 3, "missed": 1} and list(s["case_steps"]) == ["rc-1"]
 
 
 def test_loan_summary_before_replay():

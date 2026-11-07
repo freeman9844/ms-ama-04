@@ -38,6 +38,7 @@ from console.dashboard import (
 from console.monitoring import (
     ACTION_LABELS,
     MONITORING_LABELS,
+    REPAYMENT_LABELS,
     SEVERITY_LABELS,
     TRIGGER_LABELS,
     MonitoringStore,
@@ -173,6 +174,7 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
     env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
     env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
+    env.filters["repayment_label"] = lambda s: REPAYMENT_LABELS.get(s or "", s or "-")
     env.filters["seller_label"] = seller_label
     env.filters["seller_name"] = seller_name
     env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
@@ -455,8 +457,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         user = decider(request)
         form = await checked_form(request, user)
         loan = loan_or_404(loan_id)
-        alerts = loan_alerts(loan)
-        alert = next((a for a in alerts if a.get("alert_id") == alert_id), None)
+        # 대상은 미납 추심 건(rc-) 또는 재조정 요청이 붙은 옛 경보 문서(ew-). 둘 다 문서 id로 찾는다.
+        alert = next((a for a in loan_alerts(loan) if a.get("id") == alert_id), None)
         if alert is None:
             raise HTTPException(404, "alert not found")
         if (alert.get("restructure") or {}).get("status") != "pending_officer":

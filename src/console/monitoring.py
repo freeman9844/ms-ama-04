@@ -33,7 +33,10 @@ TRIGGER_LABELS = {
     "new_debt": "신규 차입",
     "projected_shortfall": "잔고 부족 전망",
 }
+REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "missed": "미납"}
+# collections·restructure는 미납 추심 전환 전에 경보 문서에 붙던 필드다(옛 문서 표시용).
 _SHOWN_FIELDS = ("summary", "signals", "collections", "restructure")
+_CASE_FIELDS = ("recent_alert", "collections", "restructure")
 
 
 class MonitoringStore(Protocol):
@@ -64,8 +67,13 @@ def loan_view(
     rows = [w["row"] for w in weeks]
     catalog = evidence_catalog(rows, Baseline.from_dict(loan["baseline"]), loan.get("industry", "")) if rows else {}
     shown: list[dict[str, Any]] = []
+    cases: list[dict[str, Any]] = []
     wanted: dict[str, None] = {}
     for doc in sorted(alerts, key=lambda d: d.get("week", 0)):
+        if doc.get("kind") == "repayment_case":
+            text = _map_strings({k: doc.get(k) for k in _CASE_FIELDS}, model_text)
+            cases.append({**doc, **text, "decidable": _pending(text["restructure"])})
+            continue
         text = _map_strings({k: doc.get(k) for k in _SHOWN_FIELDS}, model_text)
         signals = []
         for s in text["signals"] or ():
@@ -85,7 +93,7 @@ def loan_view(
                 **doc,
                 **text,
                 "signals": signals,
-                "decidable": bool(restructure) and restructure.get("status") == "pending_officer",
+                "decidable": _pending(restructure),
             }
         )
     transactions = [
@@ -103,6 +111,11 @@ def loan_view(
         "monitoring": mon,
         "weeks": weeks,
         "alerts": shown,
+        "cases": cases,
         "transactions": transactions,
         "pii": pii,
     }
+
+
+def _pending(restructure: Mapping[str, Any] | None) -> bool:
+    return bool(restructure) and restructure.get("status") == "pending_officer"

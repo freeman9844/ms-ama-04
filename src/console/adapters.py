@@ -54,8 +54,10 @@ LOANS_QUERY = (
     "c.monitoring.status AS monitoring_status, ARRAY_LENGTH(c.monitoring.alert_ids) AS alerts "
     "FROM c ORDER BY c.updated_at DESC"
 )
-# 같은 파티션(loan_id)에 연락 기록 문서(contacts-*)도 있어 id 접두사로 경보만 고른다.
-ALERTS_QUERY = "SELECT * FROM c WHERE c.replay_id = @replay AND STARTSWITH(c.id, 'ew-')"
+# 같은 파티션(loan_id)에 연락 기록 문서(contacts-*)도 있어 id 접두사로 경보(ew-)와 미납 추심 건(rc-)만 고른다.
+ALERTS_QUERY = (
+    "SELECT * FROM c WHERE c.replay_id = @replay AND (STARTSWITH(c.id, 'ew-') OR STARTSWITH(c.id, 'rc-'))"
+)
 
 
 class CosmosMonitoring:

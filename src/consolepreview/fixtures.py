@@ -283,31 +283,50 @@ SIGNAL_METRIC = {"inflow_drop": "W:{w}:revenue", "new_debt": "W:{w}:high_cost_le
                  "buffer_drop": "W:{w}:buffer_days", "projected_shortfall": "F:{w}:projected_min_balance"}
 
 
-def _alert(loan_id: str, replay_id: str, week: int, severity: str, restructure: str | None) -> dict[str, Any]:
+def _alert(loan_id: str, replay_id: str, week: int, severity: str) -> dict[str, Any]:
     alert_id = f"ew-{replay_id}-w{week:02d}"
-    doc: dict[str, Any] = {
+    return {
         "id": alert_id, "schema_version": "1", "alert_id": alert_id, "loan_id": loan_id, "week": week,
         "as_of": _row(week)["end"], "severity": severity,
         "summary": f"{week}주차 매출이 기준 대비 크게 줄고 현금 버퍼가 감소했다(합성 예시).",
         "signals": [{"kind": t, "text": f"{week}주차 {t} 신호", "metric_ids": [SIGNAL_METRIC[t].format(w=week)],
                      "txn_ids": []} for t in TRIGGERS[week]],
-        "recommended_action": "hardship_review" if restructure else "monitor", "triggers": TRIGGERS[week],
-        "models": {"investigator": "gpt-5.4"}, "replay_id": replay_id,
-        "status": "restructure_pending" if restructure == "pending_officer" else "handled",
-        "created_at": NOW.isoformat(), "event_error": None,
-        "collections": {"decision": "routed" if restructure else "reminder", "reason": "합성 예시",
-                        "at": NOW.isoformat(),
-                        "contacts": [{"alert_id": alert_id, "on": _row(week)["end"], "at": NOW.isoformat(),
-                                      "script_id": "hardship_offer" if restructure else "soft_reminder",
-                                      "status": "sent", "reason": None, "by": "collections-agent"}],
-                        "record": {}},
-        "restructure": None,
+        "recommended_action": "hardship_review" if severity == "high" else "monitor", "triggers": TRIGGERS[week],
+        "models": {"investigator": "gpt-5.4"}, "replay_id": replay_id, "status": "open",
+        "created_at": NOW.isoformat(), "event_error": None, "collections": None, "restructure": None,
     }
-    if restructure:
-        doc["restructure"] = {"request_id": f"rs-{alert_id}", "category": "debt_overload",
-                              "note": "고금리 차입 중첩(합성 예시)", "status": restructure,
-                              "created_at": NOW.isoformat()}
-    return doc
+
+
+INSTALLMENT = 450_000
+DUES = ("2026-12-02", "2027-01-01", "2027-01-31")
+
+
+def _repayment(replay_id: str) -> dict[str, Any]:
+    """납부·납부·미납(3회차) 원장. 3회차는 13주차 추심 건으로 이어진다."""
+    statuses = ("paid", "paid", "missed")
+    return {"installment_krw": INSTALLMENT, "schedule": [
+        {"no": i, "due_on": due, "status": st, "reminded_on": (date.fromisoformat(due) - timedelta(days=3)).isoformat(),
+         "reminder_status": "sent", "txn_id": f"t-pay-{i}" if st == "paid" else None,
+         "case_id": f"rc-{replay_id}-i{i}" if st == "missed" else None}
+        for i, (due, st) in enumerate(zip(DUES, statuses, strict=True), start=1)]}
+
+
+def _case(loan_id: str, replay_id: str, recent: dict[str, Any]) -> dict[str, Any]:
+    case_id = f"rc-{replay_id}-i3"
+    return {
+        "id": case_id, "kind": "repayment_case", "case_id": case_id, "loan_id": loan_id, "replay_id": replay_id,
+        "week": 13, "as_of": DUES[2], "installment": {"no": 3, "due_on": DUES[2], "amount_krw": INSTALLMENT},
+        "missed_count": 1,
+        "recent_alert": {k: recent[k] for k in ("alert_id", "week", "severity", "summary")},
+        "status": "restructure_pending", "created_at": NOW.isoformat(), "event_error": None,
+        "collections": {"decision": "routed", "reason": "합성 예시", "at": NOW.isoformat(), "record": {},
+                        "contacts": [{"ref": case_id, "on": DUES[2], "at": NOW.isoformat(),
+                                      "script_id": "hardship_offer", "status": "sent", "reason": None,
+                                      "by": "agent"}]},
+        "restructure": {"request_id": f"rs-{case_id}", "category": "debt_overload",
+                        "note": "고금리 차입 중첩(합성 예시)", "status": "pending_officer",
+                        "created_at": NOW.isoformat()},
+    }
 
 
 def loans() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -319,8 +338,11 @@ def loans() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     running = _loan("app-20261103-p04", *who(4), 4_000_000,
                     _monitoring("rp-preview-2", "replaying", 4, NOW - timedelta(minutes=2)))
     idle = _loan("app-20261103-p11", *who(11), 3_000_000, None)
-    alerts = [_alert(done["id"], "rp-preview-1", 6, "medium", None),
-              _alert(done["id"], "rp-preview-1", 10, "high", "pending_officer")]
+    done["repayment"] = _repayment("rp-preview-1")
+    done["monitoring"]["case_ids"] = ["rc-rp-preview-1-i3"]
+    done["monitoring"]["weeks"][12]["case_id"] = "rc-rp-preview-1-i3"
+    alerts = [_alert(done["id"], "rp-preview-1", 6, "medium"), _alert(done["id"], "rp-preview-1", 10, "high")]
+    alerts.append(_case(done["id"], "rp-preview-1", alerts[1]))
     return [done, running, idle], alerts
 
 

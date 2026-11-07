@@ -272,6 +272,13 @@ def loans_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 def alert_steps(alert: Mapping[str, Any]) -> list[dict[str, Any]]:
     collections = alert.get("collections") or {}
+    if not collections and not alert.get("restructure"):
+        # 조기경보는 심사역 검토용이다. 차주 연락은 상환 원장의 미납 추심 건이 맡는다.
+        return [
+            _step("detect", "탐지", "done", f"{alert.get('week')}주차"),
+            _step("investigate", "조기경보 조사", "done", SEVERITY_LABELS.get(alert.get("severity") or "", "")),
+            _step("review", "심사역 검토", "done", "연락 없음"),
+        ]
     steps = [
         _step("detect", "탐지", "done", f"{alert.get('week')}주차"),
         _step("investigate", "조기경보 조사", "done", SEVERITY_LABELS.get(alert.get("severity") or "", "")),
@@ -283,6 +290,29 @@ def alert_steps(alert: Mapping[str, Any]) -> list[dict[str, Any]]:
         steps.append(_step("restructure", "재조정 결정", "current" if st == "pending_officer" else "done",
                            RESTRUCTURE_NOTES.get(st, st or "")))
     return steps
+
+
+def case_steps(case: Mapping[str, Any]) -> list[dict[str, Any]]:
+    inst = case.get("installment") or {}
+    collections = case.get("collections") or {}
+    steps = [
+        _step("missed", "미납", "done", f"{inst.get('no')}회차 {inst.get('due_on')}"),
+        _step("collections", "추심 에이전트", "done" if collections else "current", collections.get("decision") or ""),
+    ]
+    restructure = case.get("restructure")
+    if restructure:
+        st = restructure.get("status")
+        steps.append(_step("restructure", "재조정 결정", "current" if st == "pending_officer" else "done",
+                           RESTRUCTURE_NOTES.get(st, st or "")))
+    return steps
+
+
+def _repayment(loan: Mapping[str, Any]) -> dict[str, int] | None:
+    schedule = (loan.get("repayment") or {}).get("schedule")
+    if not schedule:
+        return None
+    statuses = [s.get("status") for s in schedule]
+    return {"paid": statuses.count("paid"), "total": len(statuses), "missed": statuses.count("missed")}
 
 
 def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
@@ -330,6 +360,8 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "markers": markers,
         "legend": [("매출", "blue"), ("트리거 주", "red"), ("기준 주매출", "neutral"), ("현금 버퍼(일, 오른쪽 축)", "purple")],
         "alert_steps": {a.get("alert_id"): alert_steps(a) for a in alerts},
+        "case_steps": {c.get("case_id"): case_steps(c) for c in view.get("cases") or ()},
+        "repayment": _repayment(loan),
         **_expected_vs_actual(weeks),
         "forecast": _forecast(weeks),
     }
