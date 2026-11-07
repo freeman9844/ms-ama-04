@@ -87,8 +87,8 @@ MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
 DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
-WATCH_SECONDS = 2
-WATCH_LIMIT = 30
+WATCH_SECONDS = 5
+WATCH_LIMIT = 12
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 # form-action은 넣지 않는다: Easy Auth 세션 만료 시 로그인 리디렉션(login.microsoftonline.com)을 막는다.
@@ -181,7 +181,8 @@ def _templates() -> Environment:
     env.filters["usd"] = lambda v: f"${v:,.4f}" if isinstance(v, int | float) else "-"
     env.filters["num"] = lambda v, d=1: f"{v:.{d}f}" if isinstance(v, int | float) else "-"
     env.globals.update(
-        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS
+        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS,
+        watch_seconds=WATCH_SECONDS,
     )
     return env
 

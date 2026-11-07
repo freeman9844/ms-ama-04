@@ -288,7 +288,7 @@ def test_replay_sent_page_forwards_to_loan_until_the_replay_starts(setup):
     m = re.search(r'http-equiv="refresh" content="1;url=(/loans/app-1\?since=[0-9a-f]{12})"', r.text)
     assert m, r.text
     waiting = client.get(m.group(1), headers=OFFICER).text
-    assert re.search(r'content="2;url=/loans/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
+    assert re.search(r'content="5;url=/loans/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
     store.loans["app-1"] = make_loan(status="replaying", started_at=NOW - timedelta(minutes=1), replay_id="rp-2")
     running = client.get(m.group(1), headers=OFFICER).text
     assert '<meta http-equiv="refresh" content="3">' in running and "3초마다" in running
