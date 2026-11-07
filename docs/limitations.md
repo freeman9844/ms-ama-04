@@ -52,7 +52,7 @@
 - 데모 데이터에서 규칙 미분류 적요는 공급업체 송금뿐이라 의미 분류가 특성을 바꾸지 않는다. (P4a)
 - 수치 근거 검사는 숫자 일치만 본다. 해석의 타당성은 검토 에이전트 판정에 의존한다. (P4a)
 - `demo-stress-003`은 고금리 대출이 감지되어도 정책상 eligible이고, 분석가는 이를 claim·counterfactual로 드러낸다. (P4a)
-- `agent_assessment_mismatch` 플래그가 측정 신청 24/24건(장애 신청 4/5건)에 붙었다. 데이터 조립 에이전트가 보고한 상태가 결정론 판정과 다르다는 뜻이다(`docs/runbook/deploy-history.md:600`). 2026-11-07에 원인(입력이 동의 범위와 원천 이름을 따로 줘 모델이 profile·transactions를 범위 밖으로 오해)을 찾아 고쳤고, 수정 뒤 신청 9건에서는 플래그가 없었다([에이전트](agents.md#데이터-수집)). 표본이 작아 재발 여부는 다음 부하 측정에서 다시 본다. 분류 모델 `decision-1`은 공개 단가를 확인하지 못해 비용에서 호출 수만 남고, 모델 처리 위치(Global Standard)는 [ADR-002](adr/ADR-002-model-deployment.md)에 정리했다. (P6b)
+- `agent_assessment_mismatch` 플래그가 측정 신청 24/24건(장애 신청 4/5건)에 붙었다. 데이터 조립 에이전트가 보고한 상태가 결정론 판정과 다르다는 뜻이다(`docs/runbook/deploy-history.md:600`). 2026-11-07에 원인(입력이 동의 범위와 원천 이름을 따로 줘 모델이 profile·transactions를 범위 밖으로 오해)을 찾아 고쳤고, 수정 뒤 신청 19건(smoke 1·부하 8·재측정 부하 10)에서는 플래그가 없었다([에이전트](agents.md#데이터-수집)). 표본이 작아 재발 여부는 다음 부하 측정에서 다시 본다. 분류 모델 `decision-1`은 공개 단가를 확인하지 못해 비용에서 호출 수만 남고, 모델 처리 위치(Global Standard)는 [ADR-002](adr/ADR-002-model-deployment.md)에 정리했다. (P6b)
 - Foundry 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 에이전트 입력이 가명화된 값뿐이라는 원칙에 기댄다. (P6b)
 - AI 게이트웨이(APIM Developer)는 SLA가 없는 단일 인스턴스라 게이트웨이가 멈추면 모든 LLM 호출이 실패한다. 복구는 `AI_GATEWAY_ROUTING=false` 재프로비저닝(직접 호출)이다. ([ADR-010](adr/ADR-010-ai-gateway.md))
 - Foundry 연결 범주 `ApiManagement`는 공식적으로 Standard v2·Premium 대상이고, Developer에서는 동작을 실측으로만 확인했다(2026-11-05). BYOM 연결은 프리뷰라 GA에서 바뀔 수 있다. (ADR-010)

@@ -41,7 +41,7 @@ flowchart LR
 |---|---|---|
 | SLO1: 접수 → 심사역 대기열 p95 | 1.2분(목표 ≤ 10분, n=24) | [load 보고서](ops/reports/load-20261102110233/report.md) 1장 |
 | SLO2: 에이전트 단계 성공률 | 100.0%(72/72, 목표 ≥ 99.0%) | [load 보고서](ops/reports/load-20261102110233/report.md) 1장 |
-| 건당 AI 비용 | $0.0423(캐시 할인 미반영 상한) | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
+| 건당 AI 비용 | $0.0423(캐시 할인 미반영 상한). AI 게이트웨이 경유·분석가 `gpt-5.6-sol` 재측정 $0.0738(n=10, `load-20261107122036`) | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
 | 월 고정비 | $304.73(Cost Management 하루치 × 30). 측정 뒤 추가: APIM 약 $51, Functions always ready 약 $62, App Gateway WAF v2 약 $370 | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
 | 건당 총비용(월 1,000건) | $0.35(정밀값 $0.3470) | [비용 모델](docs/cost-model.md), [load 보고서](ops/reports/load-20261102110233/report.md) 2장 |
 | 거래 분류: 규칙 선분류 비율 | 80.0%(전체 4,128건) | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |

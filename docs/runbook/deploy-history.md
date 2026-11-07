@@ -834,3 +834,15 @@ python -m ops smoke
 - **원인**: Foundry 트레이스(`invoke_agent data-assembly`, 이틀치 161건)에서 에이전트가 `complete`로 보고한 것은 17건뿐이었습니다. 입력이 "동의 범위: account, pg, tax. 수집 가능한 원천: profile, transactions, tax, pg."처럼 범위와 원천 이름을 따로 줘서 모델이 profile·transactions를 범위 밖으로 보고 건너뛰었습니다. 안전망이 마저 모아 코드 판정은 `complete`라 플래그가 붙었습니다. 결정에는 영향이 없었습니다.
 - **조치**(`246d321`): 입력을 원천별 동의로 바꿨습니다(`profile(account 동의), transactions(account 동의), …`, 모두 수집 지시). 콘솔 라벨은 "데이터 수집 에이전트 보고와 코드 검증 불일치".
 - **배포·확인**: `ops deploy orchestrator`·`ops deploy console`(`console:20261107072608`) → `ops smoke` 성공 → `ops load --count 8`(`load-20261107073503`, 8/8 도달). 배포 뒤 에이전트 최종 보고 7/7 `complete`(로그 수집 시점), 콘솔에서 smoke 1건·부하 8건 모두 플래그 없음. 이전 신청은 플래그가 그대로 남습니다(새 라벨로 표시).
+## 2026-11-07 분석가 `gpt-5.6-sol` 재측정
+
+부하 건수는 콘솔 목록에서 기존 건이 밀려나지 않도록 10건으로 줄였습니다.
+
+| 단계 | 결과 |
+|---|---|
+| `window open --acr` → `ops deploy eval` | `eval:20261107121520`(이전 이미지 `eval:20261105094318`은 `gpt-5.6-sol` 설정 전) |
+| `ops load --count 10` | `load-20261107122036`, Job `job-ops-fjlgjae`, 제출 10·도달 10. p95 0.9분(표본 부족), SLO2 100%(30/30), 건당 AI $0.0738(`gpt-5.6-sol` 43호출 $0.671, mini 70호출 $0.067). 콘솔에서 10건 모두 `agent_assessment_mismatch` 없음 |
+| `ops eval --suite underwriting` | `job-eval-ngrkucj`, $0.86, 실패 2건(모두 비교 구성 `gpt-5.4-mini`: 근거 1·검토 1). `gpt-5.6-sol` 1라운드 근거 100%·최종 100%·검토 100%·1.12라운드·평가서 건당 $0.0783 |
+
+- **비교**(게이트웨이 경로 `gpt-5.4`): 부하 `load-20261105120255` 건당 $0.0939(분석가 신청당 8.4호출), 평가 `job-eval-aqisk13` 1라운드 75.0%·검토 87.5%·2.00라운드·건당 $0.0984. 단가는 높지만 도구 라운드가 줄어 건당 비용이 내려갔습니다. 표본이 작고(부하 10건, 평가 8케이스 1회) 부하 격자가 달라 경향으로만 봅니다.
+- **`window close`** 완료.

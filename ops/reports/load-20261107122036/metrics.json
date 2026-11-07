@@ -1,0 +1,451 @@
+{
+  "run_id": "load-20261107122036",
+  "generated_at": "2026-11-07T12:28:46.337148+00:00",
+  "load": {
+    "run_id": "load-20261107122036",
+    "mode": "load",
+    "submitted": 10,
+    "reached": 10,
+    "unreached": [],
+    "aborted": false,
+    "guard": {
+      "sample": 3,
+      "per_application_usd": 0.07624308333333334,
+      "projected_usd": 0.7624308333333334,
+      "limit_usd": 8.0,
+      "unpriced_calls": 9
+    }
+  },
+  "summary": {
+    "basis": "합성 데이터 기준",
+    "applications": 10,
+    "latency": {
+      "n": 10,
+      "p50_min": 0.7373116166666667,
+      "p95_min": 0.8963590666666666,
+      "max_min": 0.8963590666666666,
+      "target_min": 10.0,
+      "met": true,
+      "insufficient": true,
+      "unreached": 0,
+      "received_only": 0
+    },
+    "agent_success": {
+      "total": 30,
+      "ok": 30,
+      "degraded": 0,
+      "failed": 0,
+      "rate": 1.0,
+      "degraded_rate": 0.0,
+      "target": 0.99,
+      "met": true,
+      "by_step": {
+        "assemble": {
+          "ok": 10,
+          "degraded": 0,
+          "failed": 0
+        },
+        "classify": {
+          "ok": 10,
+          "degraded": 0,
+          "failed": 0
+        },
+        "assess": {
+          "ok": 10,
+          "degraded": 0,
+          "failed": 0
+        }
+      }
+    },
+    "ai_cost": {
+      "by_model": {
+        "gpt-5.4-mini": {
+          "input_tokens": 56093,
+          "output_tokens": 5517,
+          "calls": 70,
+          "cost_usd": 0.06689624999999999
+        },
+        "decision-1": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 30,
+          "cost_usd": null
+        },
+        "gpt-5.6-sol": {
+          "input_tokens": 102968,
+          "output_tokens": 12971,
+          "calls": 43,
+          "cost_usd": 0.671292
+        }
+      },
+      "by_step": {
+        "assemble": {
+          "input_tokens": 39247,
+          "output_tokens": 1529,
+          "calls": 50,
+          "cost_usd": 0.03631575,
+          "unpriced_calls": 0
+        },
+        "classify": {
+          "input_tokens": 4559,
+          "output_tokens": 481,
+          "calls": 40,
+          "cost_usd": 0.00558375,
+          "unpriced_calls": 30
+        },
+        "assess": {
+          "input_tokens": 115255,
+          "output_tokens": 16478,
+          "calls": 53,
+          "cost_usd": 0.69628875,
+          "unpriced_calls": 0
+        }
+      },
+      "total_usd": 0.73818825,
+      "applications": 10,
+      "per_application_usd": 0.073818825,
+      "unpriced_calls": 30
+    },
+    "fixed": {
+      "monthly_usd": 327.1,
+      "source": "Cost Management 실측 2026-10-30~2026-11-05 일평균(5일) × 30, Foundry Models 제외"
+    },
+    "unit_economics": [
+      {
+        "volume": 100,
+        "ai_usd": 0.073818825,
+        "fixed_usd": 3.2710000000000004,
+        "total_usd": 3.344819,
+        "vs_manual": 0.0009556625714285715,
+        "vs_ticket": 0.0005574698333333333
+      },
+      {
+        "volume": 1000,
+        "ai_usd": 0.073818825,
+        "fixed_usd": 0.3271,
+        "total_usd": 0.400919,
+        "vs_manual": 0.00011454828571428573,
+        "vs_ticket": 6.681983333333334e-05
+      },
+      {
+        "volume": 10000,
+        "ai_usd": 0.073818825,
+        "fixed_usd": 0.03271,
+        "total_usd": 0.106529,
+        "vs_manual": 3.0436857142857144e-05,
+        "vs_ticket": 1.775483333333333e-05
+      }
+    ],
+    "fairness": {
+      "threshold_pp": 20.0,
+      "min_samples": 5,
+      "axes": {
+        "industry": {
+          "values": {
+            "디지털": {
+              "n": 1,
+              "assessed": 1,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 0,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "리빙": {
+              "n": 3,
+              "assessed": 3,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 2,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "뷰티": {
+              "n": 2,
+              "assessed": 2,
+              "approve_rate": 0.5,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 1,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 0
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "식품": {
+              "n": 3,
+              "assessed": 3,
+              "approve_rate": 0.6666666666666666,
+              "eligible_rate": 0.6666666666666666,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 0
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "패션의류": {
+              "n": 1,
+              "assessed": 1,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 0
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            }
+          },
+          "gap_pp": 0.0,
+          "eligible_gap_pp": 0.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 0.0,
+              "mismatch": 0.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 0.0
+          },
+          "policy_explained": false,
+          "alert": false
+        },
+        "region": {
+          "values": {
+            "경기": {
+              "n": 3,
+              "assessed": 3,
+              "approve_rate": 0.6666666666666666,
+              "eligible_rate": 0.6666666666666666,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 0
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "부산": {
+              "n": 3,
+              "assessed": 3,
+              "approve_rate": 0.3333333333333333,
+              "eligible_rate": 0.3333333333333333,
+              "recommendations": {
+                "approve": 1,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "서울": {
+              "n": 4,
+              "assessed": 4,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 3,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            }
+          },
+          "gap_pp": 0.0,
+          "eligible_gap_pp": 0.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 0.0,
+              "mismatch": 0.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 0.0
+          },
+          "policy_explained": false,
+          "alert": false
+        },
+        "business_age_band": {
+          "values": {
+            "1~3년": {
+              "n": 3,
+              "assessed": 3,
+              "approve_rate": 0.3333333333333333,
+              "eligible_rate": 0.3333333333333333,
+              "recommendations": {
+                "approve": 1,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "3년+": {
+              "n": 3,
+              "assessed": 3,
+              "approve_rate": 0.6666666666666666,
+              "eligible_rate": 0.6666666666666666,
+              "recommendations": {
+                "approve": 2,
+                "conditional": 0,
+                "refer": 1,
+                "decline": 0
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            },
+            "<1년": {
+              "n": 4,
+              "assessed": 4,
+              "approve_rate": 0.0,
+              "eligible_rate": 0.0,
+              "recommendations": {
+                "approve": 0,
+                "conditional": 0,
+                "refer": 3,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": true
+            }
+          },
+          "gap_pp": 0.0,
+          "eligible_gap_pp": 0.0,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 0.0,
+              "mismatch": 0.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 0.0
+          },
+          "policy_explained": true,
+          "alert": false
+        }
+      },
+      "alerts": []
+    },
+    "funnel": {
+      "policy": {
+        "eligible": 3,
+        "refer": 5,
+        "ineligible": 2
+      },
+      "recommendation": {
+        "approve": 3,
+        "refer": 5,
+        "decline": 2
+      },
+      "officer": {
+        "none": 10
+      },
+      "agreement": {
+        "compared": 0,
+        "agreed": 0,
+        "rate": null
+      },
+      "overrides": {
+        "count": 0,
+        "approved": 0,
+        "rate": null
+      }
+    },
+    "step_latency": {
+      "consent": {
+        "n": 10,
+        "p50_ms": 72.0,
+        "p95_ms": 217.0
+      },
+      "assemble": {
+        "n": 10,
+        "p50_ms": 10185.0,
+        "p95_ms": 21896.0
+      },
+      "classify": {
+        "n": 10,
+        "p50_ms": 2619.0,
+        "p95_ms": 7251.0
+      },
+      "underwrite": {
+        "n": 10,
+        "p50_ms": 2619.0,
+        "p95_ms": 7251.0
+      },
+      "policy": {
+        "n": 10,
+        "p50_ms": 24.0,
+        "p95_ms": 33.0
+      },
+      "assess": {
+        "n": 10,
+        "p50_ms": 24339.0,
+        "p95_ms": 29041.0
+      }
+    },
+    "reason_codes": [
+      {
+        "key": "R101",
+        "count": 5,
+        "message": "신고매출과 계좌매출 불일치"
+      },
+      {
+        "key": "R104",
+        "count": 4,
+        "message": "업력 12개월 미만"
+      },
+      {
+        "key": "R001",
+        "count": 2,
+        "message": "거래 이력 6개월 미만"
+      }
+    ],
+    "flags": [
+      {
+        "key": "high_cost_lender_detected",
+        "count": 2
+      }
+    ],
+    "throughput": {
+      "bucket_min": 10,
+      "buckets": [
+        {
+          "start": "2026-11-07T12:20:00+00:00",
+          "received": 10,
+          "reached": 10
+        }
+      ],
+      "earlier": {
+        "received": 0,
+        "reached": 0
+      }
+    },
+    "sla": {
+      "awaiting": 10,
+      "escalated": 0
+    }
+  },
+  "faults": []
+}

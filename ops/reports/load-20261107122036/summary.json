@@ -1,0 +1,1 @@
+{"run_id": "load-20261107122036", "mode": "load", "submitted": 10, "reached": 10, "unreached": [], "aborted": false, "guard": {"sample": 3, "per_application_usd": 0.07624308333333334, "projected_usd": 0.7624308333333334, "limit_usd": 8.0, "unpriced_calls": 9}}

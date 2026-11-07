@@ -52,6 +52,7 @@
 - **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 3장(검토자 `gpt-5.4-mini` 고정) — 분석가 `gpt-5.4`는 1라운드 근거 통과 100.0%·검토 통과 87.5%·건당 $0.0631, `gpt-5.4-mini`는 62.5%·62.5%·$0.0199. 품질 차이 때문에 분석가는 `gpt-5.4`, 검토자는 `gpt-5.4-mini`로 두었다.
 - **모델 변경(2026-11-06):** 분석가를 `gpt-6.1-sol`(GlobalStandard 150K TPM, 단가 입력 $2·출력 $10/1M 토큰으로 `gpt-5.4`의 $2.5·$15보다 낮음)로 바꿨다(`ANALYST_MODEL`). 검토자는 그대로 `gpt-5.4-mini`. 평가 Job의 full 구성(`EVAL_FULL_MODEL`)은 `gpt-5.6-sol`이다. 변경 뒤 라이브 점검은 [배포 기록](runbook/deploy-history.md)에 있다.
 - **모델 재변경(2026-11-07):** `gpt-6.1-sol`은 게이트웨이 연결(Agent Service → APIM, chat completions)에서 함수 도구와 추론을 함께 쓰면 400("Function tools with reasoning_effort are not supported … in /v1/chat/completions")으로 거부한다. `reasoning.effort=none`은 이 모델이 지원하지 않는다(low·medium·high만). 그 사이 들어온 신청 2건은 평가 없이 심사역 대기로 넘어갔다. 분석가를 게이트웨이에서 함수 도구가 동작하는 `gpt-5.6-sol`(입력 $4·출력 $20/1M 토큰, 배포 150K TPM, 평가 Job과 공유)로 옮겼다. 이제 분석가와 평가 full 구성이 같은 모델이다. `gpt-6.1-sol` 배포(50K)는 보유만 한다.
+- **재측정(2026-11-07, 게이트웨이 경로, 심사 8케이스):** `eval/reports/job-eval-ngrkucj/report.md` 3장 — `gpt-5.6-sol`은 1라운드 근거 통과 100%·최종 100%·검토 통과 100%·평균 1.12라운드·평가서 건당 $0.0783이다. 같은 경로의 `gpt-5.4`(`eval/reports/job-eval-aqisk13/report.md`)는 75.0%·100%·87.5%·2.00라운드·$0.0984였다. 정책 일치·세무 불일치 탐지는 둘 다 100%, 판정자 G/R/C는 3.88/4.75/4.62 대 3.75/5.00/4.62. 대신 호출 p95 지연이 11.7초로 길다(mini 4.6초). 단일 실행이라 LLM 변동 범위 안일 수 있다.
 
 ## 조기경보
 
