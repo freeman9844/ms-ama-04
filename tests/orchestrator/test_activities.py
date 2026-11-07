@@ -396,7 +396,7 @@ def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps):
     runner = UnderwritingRunner()
     result = assess_credit(with_deps(deps, agents=runner), payload)
     a = result["assessment"]
-    assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-5.4")
+    assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-6.1-sol")
     assert result["flags"] == [] and result["record"]["rounds"][0]["grounding_issues"] == []
     assert runner.names == [ANALYST_AGENT, REVIEWER_AGENT] and runner.deleted == ["cntr_1"]
     doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])

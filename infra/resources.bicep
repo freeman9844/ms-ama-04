@@ -544,7 +544,7 @@ module functions 'modules/functions.bicep' = {
       DATA_ASSEMBLY_MODEL: 'gpt-5.4-mini'
       AI_ACCOUNT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com'
       DECISION_DEPLOYMENT: 'decision-1'
-      ANALYST_MODEL: 'gpt-5.4'
+      ANALYST_MODEL: 'gpt-6.1-sol'
       REVIEWER_MODEL: 'gpt-5.4-mini'
       CLASSIFIER_MODEL: 'gpt-5.4-mini'
       EW_MODEL: 'gpt-5.4'
@@ -727,7 +727,7 @@ module evalJob 'modules/eval-job.bicep' = {
       { name: 'AI_PROJECT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}' }
       { name: 'AI_ACCOUNT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com' }
       { name: 'DECISION_DEPLOYMENT', value: 'decision-1' }
-      { name: 'EVAL_FULL_MODEL', value: 'gpt-5.4' }
+      { name: 'EVAL_FULL_MODEL', value: 'gpt-5.6-sol' }
       { name: 'EVAL_MINI_MODEL', value: 'gpt-5.4-mini' }
       { name: 'REVIEWER_MODEL', value: 'gpt-5.4-mini' }
       { name: 'EVAL_JUDGE_MODEL', value: 'gpt-5.4' }
@@ -770,7 +770,7 @@ module opsJob 'modules/eval-job.bicep' = {
 
 // ── AI 게이트웨이(APIM) ────────────────────────────────────────────────
 // 에이전트마다 제품·구독·Foundry 연결 하나. TPM은 Task 11 실측(운영 부하+평가) 피크 기준입니다.
-// gpt-5.4를 주로 쓰는 gw-analyst + gw-early-warning 합(200K)은 GlobalStandard gpt-5.4 배포 용량(main.bicep)과 같습니다.
+// gw-analyst 150K는 GlobalStandard gpt-6.1-sol 배포 용량, gw-early-warning 50K는 gpt-5.4 배포 용량(main.bicep) 안에 듭니다.
 // DataZoneStandard는 배포 용량이 100K라 APIM TPM보다 배포 한도가 먼저 걸립니다.
 // src/agents/gateway.py CONNECTIONS와 이름이 같아야 합니다(테스트가 교차 확인).
 var gateways = [

@@ -39,9 +39,9 @@ class CachedToken:
 
 @dataclass(frozen=True)
 class Models:
-    """운영 기본값(infra/resources.bicep 오케스트레이터 환경변수)과 같게 둔다."""
+    """평가 Job 기본값(infra/resources.bicep 평가 Job 환경변수)과 같게 둔다."""
 
-    full: str = "gpt-5.4"
+    full: str = "gpt-5.6-sol"
     mini: str = "gpt-5.4-mini"
     decision: str = "decision-1"
     reviewer: str = "gpt-5.4-mini"

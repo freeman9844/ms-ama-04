@@ -36,7 +36,7 @@ def test_eval_job_pulls_image_with_eval_identity_and_measures_production_models(
     env = {e["name"]: e["value"] for e in container["env"]}
     assert env["AI_PROJECT_ENDPOINT"].endswith("/api/projects/proj-lending")
     assert (env["EVAL_FULL_MODEL"], env["EVAL_MINI_MODEL"], env["REVIEWER_MODEL"], env["DECISION_DEPLOYMENT"]) == (
-        "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-mini", "decision-1")
+        "gpt-5.6-sol", "gpt-5.4-mini", "gpt-5.4-mini", "decision-1")
     assert env["EVAL_BUDGET_USD"] == "5" and env["EVAL_EMIT_LOGS"] == "1"
     assert env["EVAL_BLOB_CONTAINER"] == "eval-reports"
 

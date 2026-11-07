@@ -13,7 +13,7 @@ ROLE_COSMOS_OPERATOR = "230815da-be43-4aae-9cb4-875f7bd000aa"
 ROLE_SEARCH_INDEX_CONTRIBUTOR = "8ebe5a00-799e-43f5-93ac-243d3dce84a7"
 ROLE_SEARCH_SERVICE_CONTRIBUTOR = "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
 COSMOS_CONTRIBUTOR = "00000000-0000-0000-0000-000000000002"
-MODELS = {"gpt-5.4", "gpt-5.4-mini", "decision-1"}
+MODELS = {"gpt-5.4", "gpt-5.4-mini", "gpt-6.1-sol", "gpt-5.6-sol", "decision-1"}
 
 
 def _deployments(exp) -> dict[str, dict]:
@@ -46,6 +46,10 @@ def test_model_deployments_default_to_global_standard(closed):
     assert deployments["decision-1"]["properties"]["model"]["name"] == "Microsoft-Decision-1"
     assert deployments["gpt-5.4"]["properties"]["model"]["version"] == "2026-03-05"
     assert deployments["gpt-5.4"]["sku"]["capacity"] == 200
+    assert deployments["gpt-6.1-sol"]["properties"]["model"]["version"] == "2026-09-29"
+    assert deployments["gpt-6.1-sol"]["sku"]["capacity"] == 150
+    assert deployments["gpt-5.6-sol"]["properties"]["model"]["version"] == "2026-07-09"
+    assert deployments["gpt-5.6-sol"]["sku"]["capacity"] == 50
 
 
 def test_model_deployment_names_avoid_reserved_words(closed):
@@ -69,8 +73,9 @@ def test_account_private_endpoint_waits_for_model_deployments():
 def test_model_sku_parameters_switch_to_data_zone(variant):
     deployments = _deployments(variant)
     assert {d["sku"]["name"] for d in deployments.values()} == {"DataZoneStandard"}
-    # DataZoneStandard gpt-5.4 쿼터(100K)를 넘지 않아야 합니다(ADR-002).
+    # DataZoneStandard 쿼터(모델당 100K)를 넘지 않아야 합니다(ADR-002).
     assert deployments["gpt-5.4"]["sku"]["capacity"] == 100
+    assert deployments["gpt-6.1-sol"]["sku"]["capacity"] == 100
 
 
 def test_account_data_plane_roles(closed):

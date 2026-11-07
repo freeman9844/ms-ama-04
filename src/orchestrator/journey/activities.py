@@ -21,7 +21,7 @@ from shared.contracts import ApplicantProfile, TaxFiling, Transaction
 
 CONTAINERS = ("applications", "consents")
 CLASSIFICATION_CONTAINER = "classifications"
-ANALYST_MODEL = "gpt-5.4"
+ANALYST_MODEL = "gpt-6.1-sol"
 REVIEWER_MODEL = "gpt-5.4-mini"
 CLASSIFIER_MODEL = "gpt-5.4-mini"
 EW_MODEL = "gpt-5.4"

@@ -176,7 +176,7 @@ def test_gateway_connections(closed):
         assert meta["inferenceAPIVersion"] == "2025-04-01-preview"
         # PSRule은 '['로 시작하는 문자열을 ARM 리터럴 이스케이프('[[')로 펼칩니다.
         models = meta["models"].removeprefix("[") if meta["models"].startswith("[[") else meta["models"]
-        assert {m["name"] for m in json.loads(models)} == {"gpt-5.4", "gpt-5.4-mini"}
+        assert {m["name"] for m in json.loads(models)} == {"gpt-5.4", "gpt-5.4-mini", "gpt-6.1-sol", "gpt-5.6-sol"}
 
 
 def test_connection_keys_from_list_secrets():

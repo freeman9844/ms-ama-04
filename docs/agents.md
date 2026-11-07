@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|---|---|
 | `data-assembly` | 데이터 수집 | L3 | `gpt-5.4-mini` | `fetch_source` | 없음(읽기) | 안전망 수집 + `agent_fallback` 플래그 | `src/agents/data_assembly.py` |
 | `txn-classifier` | 거래 분류 | L2 | `gpt-5.4-mini`(폴백), `decision-1`(주) | 없음(구조화 출력) | 없음 | 규칙 분류만으로 심사 계속 | `src/agents/txn_classify.py`, `src/agents/classify.py` |
-| `underwriting-analyst` | 신용 평가 | L2 | `gpt-5.4` | `get_metrics`, `get_monthly_series`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 | `src/agents/underwriting.py` |
+| `underwriting-analyst` | 신용 평가 | L2 | `gpt-6.1-sol` | `get_metrics`, `get_monthly_series`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 | `src/agents/underwriting.py` |
 | `underwriting-reviewer` | 신용 평가 | L2 | `gpt-5.4-mini` | 없음 | 없음 | 3라운드 초과 시 "검토 미통과" | `src/agents/underwriting.py` |
 | `early-warning-investigator` | 사후 조기경보 | L4 | `gpt-5.4` | `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `query_transactions`, `raise_alert` | 경보(`raise_alert`) | 탐지기 단독 medium 경보(fail-safe) | `src/agents/early_warning.py` |
 | `collections-agent` | 사후 추심 | L3 | `gpt-5.4-mini` | `get_alert`, `get_contact_history`, `list_scripts`, `send_script`, `route_hardship` | 스크립트 발송·재조정 요청 | severity로 스크립트 선택, 재조정 없음 | `src/agents/collections.py` |
@@ -48,7 +48,8 @@
 - **반성 패턴:** 결정적 grounding 검사(`check_grounding` + `src/agents/grounding.py`의 숫자 대조, 허용 오차 2%) → 통과 시 검토자 → 지적 사항을 다음 라운드 입력으로, 최대 `MAX_ROUNDS=3`회. 3회 초과 시 `review_not_passed`로 심사역에게 넘긴다.
 - **가드레일:** 모델로 가는 모든 문자열은 가명처리. Code Interpreter 컨테이너는 실행마다 즉시 삭제(`delete_container`). 근거 목록에 없는 숫자(직접 계산 포함) 사용 금지. 정책이 ineligible이면 추천은 decline/refer만. 제안 구조의 기간은 1~12개월(`check_grounding`의 구조 검사, P9). 권고 `conditional`은 남아 있지만 심사역 결정에는 조건부 승인이 없으므로 콘솔은 "승인 권고(조건 제안)"로 표시한다.
 - **알려진 한계:** 평가에서 1라운드 근거 통과율이 모델에 민감하다. 어떤 실패도 예외로 올리지 않고(1라운드 실패면 평가 없음, 이후 실패면 직전 초안을 미통과로) `assessment_unavailable` 플래그로 남긴다.
-- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 3장(검토자 `gpt-5.4-mini` 고정) — 분석가 `gpt-5.4`는 1라운드 근거 통과 100.0%·검토 통과 87.5%·건당 $0.0631, `gpt-5.4-mini`는 62.5%·62.5%·$0.0199. 품질 차이 때문에 분석가는 `gpt-5.4`, 검토자는 `gpt-5.4-mini`로 둔다.
+- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 3장(검토자 `gpt-5.4-mini` 고정) — 분석가 `gpt-5.4`는 1라운드 근거 통과 100.0%·검토 통과 87.5%·건당 $0.0631, `gpt-5.4-mini`는 62.5%·62.5%·$0.0199. 품질 차이 때문에 분석가는 `gpt-5.4`, 검토자는 `gpt-5.4-mini`로 두었다.
+- **모델 변경(2026-11-06):** 분석가를 `gpt-6.1-sol`(GlobalStandard 150K TPM, 단가 입력 $2·출력 $10/1M 토큰으로 `gpt-5.4`의 $2.5·$15보다 낮음)로 바꿨다(`ANALYST_MODEL`). 검토자는 그대로 `gpt-5.4-mini`. 평가 Job의 full 구성(`EVAL_FULL_MODEL`)은 `gpt-5.6-sol`이라 위 3장 수치는 `gpt-6.1-sol` 분석가를 직접 잰 값이 아니다. 변경 뒤 라이브 점검은 [배포 기록](runbook/deploy-history.md)에 있다.
 
 ## 조기경보
 
