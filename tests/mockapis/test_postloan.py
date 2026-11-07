@@ -5,9 +5,17 @@ import pytest
 from agents.classify import Category, classify
 from mockapis.demo import build_demo_cases
 from mockapis.demo import build_load_cases
-from mockapis.postloan import INSURANCE_UNPAID_FROM_DAY, STACKING_ONSET_DAY, FlowScenario, generate_postloan
+from mockapis.postloan import (
+    INSTALLMENT_KRW,
+    INSURANCE_UNPAID_FROM_DAY,
+    POSTLOAN_DAYS,
+    STACKING_ONSET_DAY,
+    FlowScenario,
+    generate_postloan,
+)
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, TxnCategory, generate_case
+from shared.repayment import LENDER_DEBIT, due_dates
 
 AS_OF = date(2026, 11, 2)
 
@@ -55,6 +63,24 @@ def test_stacking_defaults_late_enough_for_a_60_day_warning(as_of, seed, seller)
     assert flow.stacking_onset == as_of + timedelta(days=STACKING_ONSET_DAY)
     assert 60 <= (flow.default_on - first_debt).days
     assert 70 <= (flow.default_on - as_of).days <= 90
+
+
+@pytest.mark.parametrize("as_of", [date(2026, 11, 2), date(2026, 5, 4), date(2027, 2, 1), date(2026, 8, 3)])
+@pytest.mark.parametrize("seed", range(6))
+@pytest.mark.parametrize("seller", [None, *DEMO_PERSONAS])
+@pytest.mark.parametrize("scenario", list(FlowScenario))
+def test_installments_follow_shared_due_dates(as_of, seed, seller, scenario):
+    persona = DEMO_PERSONAS[seller] if seller else None
+    case = generate_case(f"x{seed}", Archetype.HEALTHY_SEASONAL, as_of, seed, persona=persona)
+    flow = generate_postloan(case, scenario, as_of, seed)
+    dues = due_dates(as_of, POSTLOAN_DAYS)
+    paid = [t for t in flow.transactions if t.description == LENDER_DEBIT]
+    assert all(t.amount_krw == -INSTALLMENT_KRW and t.balance_after_krw >= 0 for t in paid)
+    assert sorted([t.booked_on for t in paid] + list(flow.missed_installments)) == dues
+    if scenario is FlowScenario.STABLE:
+        assert flow.missed_installments == ()
+    else:
+        assert flow.missed_installments[-1] == dues[-1]
 
 
 def test_stacking_hides_some_lenders_from_the_rules(cafe):

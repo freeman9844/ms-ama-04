@@ -7,6 +7,8 @@
   일부 대부·캐피탈 적요는 규칙 분류기가 못 잡도록 만들어 의미 분류의 몫을 남긴다.
   선매입은 잔고를 CAPEX_FLOOR_RATIO까지 끌어내리고, 외상 잔금(매주 수요일)은 첫 부도일이 DEFAULT_WINDOW
   안에 오도록 고른다. 그래서 계절·셀러 규모와 무관하게 첫 고금리 차입부터 60일 넘게 사전 감지 여유가 있다.
+- 상환: 30일 주기 상환일(`shared.repayment.due_dates`)에 자동이체. 잔고가 모자라면 출금 없이 missed_installments에
+  남고, STACKING은 마지막 상환일을 미납으로 둔다(추심 재생용).
 - default_on: 처음으로 일말 잔고가 0 미만이 된 날(부도 대리 지표, P6 평가의 사전 감지 일수 기준).
 labels(정답 분류)·default_on은 평가 전용이며 API로 노출하지 않는다.
 """
@@ -21,6 +23,7 @@ from mockapis.sellerdata.engine import simulate
 from mockapis.synth import SyntheticCase, TxnCategory
 from shared.contracts import Transaction, TxnTypeCode
 from shared.krcalendar import next_business_day
+from shared.repayment import LENDER_DEBIT, due_dates
 
 POSTLOAN_DAYS = 91
 STACKING_ONSET_DAY = 7
@@ -30,7 +33,6 @@ CAPEX_FLOOR_RATIO = 0.08  # 월 주문액 대비, 선매입 뒤 2주 안에 남�
 BALANCE_DUE_FROM_DAY = 14  # 선매입 외상 잔금을 3주차 수요일부터 매주 낸다
 DEFAULT_WINDOW = (70, 80)  # 첫 부도일 목표 범위(일). 앞선 저점 때문에 잔금을 깎으면 며칠 늦어질 수 있다
 INSTALLMENT_KRW = 287_000  # 330만 원·12개월·연 8% 원리금균등
-INSTALLMENT_DAY = 15
 PROCEEDS_KRW = 1_500_000
 REPAYMENT_PER_LOAN_KRW = 70_000
 PAYROLL_DELAY_FROM_DAY = 28
@@ -62,6 +64,7 @@ class PostLoanFlow:
     labels: dict[str, TxnCategory]
     stacking_onset: date | None
     default_on: date | None
+    missed_installments: tuple[date, ...] = ()
 
 
 def _revenue_factor(day: int) -> float:
@@ -71,15 +74,10 @@ def _revenue_factor(day: int) -> float:
     return 1.0 - (1.0 - REVENUE_FLOOR) * progress
 
 
-def _installments(start: date, end: date) -> list[Event]:
-    out = []
-    y, m = start.year, start.month
-    while date(y, m, 1) < end:
-        d = next_business_day(date(y, m, INSTALLMENT_DAY))
-        if start <= d < end:
-            out.append(Event(d, -INSTALLMENT_KRW, f"{LENDER} 대출상환", "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT))
-        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-    return out
+def _installments(start: date, days: int) -> list[Event]:
+    return [
+        Event(d, -INSTALLMENT_KRW, LENDER_DEBIT, "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT) for d in due_dates(start, days)
+    ]
 
 
 def _stacking_loans(onset: date, end: date) -> list[Event]:
@@ -173,7 +171,7 @@ def generate_postloan(
         persona, start, end, rng,
         sales_factor=lambda d: _revenue_factor((d - start).days) if stacking else 1.0,
         payroll_day=lambda y, m: 20 if late(date(y, m, 20)) else 10,
-        extra=[*_installments(start, end), *(_stacking_loans(onset, end) if onset else ())],
+        extra=[*_installments(start, days), *(_stacking_loans(onset, end) if onset else ())],
     )
     events = list(ledger.events)
     if stacking:
@@ -193,9 +191,17 @@ def generate_postloan(
     labels: dict[str, TxnCategory] = {}
     default_on: date | None = None
     prefix = f"{case.profile.applicant_id}-P"
-    for i, e in enumerate(events):
+    dues = due_dates(start, days)
+    missed: list[date] = []
+    for e in events:
+        # 잔고가 모자라면 자동이체가 처리되지 않는다. STACKING은 마지막 상환일을 시나리오상 미납으로 둔다.
+        if e.description == LENDER_DEBIT and e.amount_krw < 0 and (
+            balance < -e.amount_krw or (stacking and e.booked_on == dues[-1])
+        ):
+            missed.append(e.booked_on)
+            continue
         balance += e.amount_krw
-        txn_id = f"{prefix}{i:05d}"
+        txn_id = f"{prefix}{len(transactions):05d}"
         transactions.append(
             Transaction(txn_id=txn_id, booked_on=e.booked_on, amount_krw=e.amount_krw, balance_after_krw=balance,
                         description=e.description, txn_type_code=e.code)
@@ -215,4 +221,5 @@ def generate_postloan(
         labels=labels,
         stacking_onset=onset,
         default_on=default_on,
+        missed_installments=tuple(missed),
     )
