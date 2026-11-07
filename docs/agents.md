@@ -60,7 +60,7 @@
 - **도구 allowlist(`src/agents/early_warning.py`):** `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `query_transactions`, `raise_alert`. `raise_alert`는 결정적 grounding 검사를 통과해야 `accepted=true`이고, 첫 성공만 유효하다.
 - **가드레일:** 모델 입력 가명처리. 근거 검사 실패 시 `issues`를 돌려줘 같은 실행에서 고치게 한다.
 - **실패 시 동작:** 에이전트를 쓸 수 없으면 탐지기 결과만으로 medium 경보를 올린다(fail-safe: 사람이 본다).
-- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 4장 — `gpt-5.4`/`gpt-5.4-mini` 모두 양성 경로 precision·recall 1.000, 탐지기 단독은 precision 0.500(FP 3). 리드 타임은 평균 약 70일로, 부도 60~90일 전 조기경보 목표에 부합. 기본 `gpt-5.4`(`EW_MODEL`).
+- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 4장 — `gpt-5.4`/`gpt-5.4-mini` 모두 양성 경로 precision·recall 1.000, 탐지기 단독은 precision 0.500(FP 3). 리드 타임은 합성 경로에서 평균 약 70일(양성 2~3건)로 원문의 60~90일 범위 안이었다. 연체가 나도록 설계한 합성 시나리오라 실제 부도 이력으로 검증한 것은 아니다([비즈니스 케이스](business-case.md)). 기본 `gpt-5.4`(`EW_MODEL`).
 
 ## 추심
 
