@@ -86,6 +86,7 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN>/
 | [비용 모델](docs/cost-model.md) | 건당 AI 비용·월 고정비·월 물량별 건당 총비용 |
 | [한계와 운영 전환](docs/limitations.md) | as-built 한계, 상위 Spec 위험 현황, 운영 전환 체크리스트 |
 | [증거 색인](docs/evidence.md) | 평가 루브릭 기준별 주장과 증거, 실측 보고서 목록 |
+| [사고 리더십 초안](docs/thought-leadership.md) | 구축·측정에서 얻은 7가지 설계 원칙과 체크리스트(발행 전 초안, 영역 D) |
 | [데모 대본](docs/demo/demo-script.md) | 2분 데모 장면 구성 |
 | [데모 대비책](docs/demo/fallback.md) | 장애 시 대체 경로와 사전 건 |
 | [데모 리허설](docs/demo/rehearsal.md) | 리허설 절차와 기록표(2026-11-03 실시, 기록은 rehearsal.md) |
