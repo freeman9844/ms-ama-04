@@ -8,11 +8,12 @@ from agents.collections import (
     SCRIPTS,
     CollectionsContext,
     CollectionsOutput,
+    RepaymentCase,
     act,
     fair_check,
+    remind,
 )
 from agents.runtime import AgentError, AgentRun, ToolCall
-from shared.contracts import AlertSignal, EarlyWarningAlert
 
 KST = timezone(timedelta(hours=9))
 DAY = datetime(2026, 11, 10, 14, 0, tzinfo=KST)
@@ -21,23 +22,17 @@ ON = date(2026, 11, 15)
 MODEL = "gpt-5.4-mini"
 
 
-def alert(severity="high", action="contact_borrower", summary="신규 고금리 상환이 나타났다."):
-    return EarlyWarningAlert(
-        alert_id="ew-loan-1-2",
-        loan_id="loan-1",
-        week=2,
-        as_of=ON,
-        severity=severity,
-        summary=summary,
-        signals=(AlertSignal(kind="loan_stacking", text="고금리 상환", metric_ids=("W:2:high_cost_lender",), txn_ids=()),),
-        recommended_action=action,
-        triggers=("new_debt",),
-        models={"investigator": "gpt-5.4"},
-    )
+def case(recent=None, missed_count=1):
+    return RepaymentCase(case_id="rc-loan-1-i1", loan_id="loan-1", installment_no=1, due_on=ON,
+                         amount_krw=287_000, missed_count=missed_count, recent_alert=recent)
 
 
-def ctx(a=None, contacts=(), now=DAY, mask=lambda s: s):
-    return CollectionsContext(alert=a or alert(), contacts=list(contacts), now=now, mask=mask)
+def recent_alert(severity="high", summary="신규 고금리 상환이 나타났다."):
+    return {"alert_id": "ew-loan-1-w02", "week": 2, "severity": severity, "summary": summary}
+
+
+def ctx(c=None, contacts=(), now=DAY, mask=lambda s: s):
+    return CollectionsContext(case=c or case(), contacts=list(contacts), now=now, mask=mask)
 
 
 def sent(on, status="sent"):
@@ -90,6 +85,7 @@ def test_send_once_then_already_sent():
     assert c.send_script({"script_id": "hardship_offer"})["error"] == "already_sent"
     assert c.send_script({"script_id": "nope"})["error"] == "unknown_script"
     assert len(c.added) == 1 and c.added[0]["on"] == ON.isoformat() and c.added[0]["by"] == "agent"
+    assert c.added[0]["ref"] == "rc-loan-1-i1"
 
 
 def test_night_send_is_deferred_not_sent():
@@ -101,15 +97,28 @@ def test_route_hardship_masks_and_bounds_note():
     c = ctx(mask=lambda s: s.replace("홍길동", "[[PERSON_1]]"))
     assert c.route_hardship({"category": "none", "note": "x"}) == {"error": "invalid_category"}
     out = c.route_hardship({"category": "debt_overload", "note": "홍길동 " + "가" * 500})
-    assert out == {"status": "pending_officer", "request_id": "rs-ew-loan-1-2"}
+    assert out == {"status": "pending_officer", "request_id": "rs-rc-loan-1-i1"}
     assert c.restructure["note"].startswith("[[PERSON_1]]") and len(c.restructure["note"]) == 300
     assert c.route_hardship({"category": "revenue_shock", "note": ""})["error"] == "already_routed"
 
 
 def test_tool_outputs_are_masked():
-    c = ctx(a=alert(summary="홍길동 매출 급감"), mask=lambda s: s.replace("홍길동", "[[PERSON_1]]"))
-    assert "홍길동" not in str(c.get_alert({})) and set(c.list_scripts({})["scripts"][0]) >= {"script_id", "text"}
+    c = ctx(c=case(recent=recent_alert(summary="홍길동 매출 급감")), mask=lambda s: s.replace("홍길동", "[[PERSON_1]]"))
+    got = c.get_case({})
+    assert got["case_id"] == "rc-loan-1-i1" and got["installment_no"] == 1 and got["due_on"] == ON.isoformat()
+    assert got["missed_count"] == 1 and got["amount_krw"] == 287_000
+    assert "홍길동" not in str(got) and got["recent_alert"]["severity"] == "high"
+    assert ctx().get_case({})["recent_alert"] is None
+    assert set(c.list_scripts({})["scripts"][0]) >= {"script_id", "text"}
     assert c.get_contact_history({})["remaining_this_week"] == MAX_CONTACTS_PER_7_DAYS
+
+
+def test_from_doc():
+    doc = {"case_id": "rc-r-i2", "loan_id": "loan-1", "missed_count": 2, "recent_alert": None,
+           "installment": {"no": 2, "due_on": "2027-01-04", "amount_krw": 287_000}}
+    c = RepaymentCase.from_doc(doc)
+    assert (c.case_id, c.installment_no, c.due_on, c.amount_krw, c.missed_count) == (
+        "rc-r-i2", 2, date(2027, 1, 4), 287_000, 2)
 
 
 def test_agent_routes_and_decision_comes_from_tools():
@@ -124,22 +133,41 @@ def test_agent_routes_and_decision_comes_from_tools():
     assert runner.specs[0].name == COLLECTIONS_AGENT and runner.specs[0].model == MODEL
 
 
-@pytest.mark.parametrize("action", ["monitor", "officer_review"])
-def test_no_automatic_contact_without_contact_action(action):
-    runner = FakeRunner()
-    result = act(ctx(a=alert(severity="medium", action=action)), runner=runner, model=MODEL)
-    assert result.decision == "none" and result.contacts == [] and runner.specs == []
-
-
 @pytest.mark.parametrize(
-    "severity, script, decision",
-    [("high", "hardship_offer", "contacted"), ("medium", "check_in", "contacted"), ("low", None, "none")],
+    "recent, script",
+    [(recent_alert("high"), "hardship_offer"), (recent_alert("medium"), "missed_payment"), (None, "missed_payment")],
 )
-def test_fallback_by_severity(severity, script, decision):
-    result = act(ctx(a=alert(severity=severity)), runner=None, model=MODEL)
-    assert result.decision == decision and result.restructure is None
-    assert [c["script_id"] for c in result.contacts] == ([script] if script else [])
-    assert all(c["by"] == "fallback" for c in result.contacts)
+def test_fallback_always_contacts_on_missed_payment(recent, script):
+    result = act(ctx(c=case(recent=recent)), runner=None, model=MODEL)
+    assert result.decision == "contacted" and result.restructure is None
+    assert [c["script_id"] for c in result.contacts] == [script]
+    assert all(c["by"] == "fallback" and c["ref"] == "rc-loan-1-i1" for c in result.contacts)
+
+
+def test_agent_prompt_names_the_missed_installment():
+    runner = FakeRunner(script=[("send_script", {"script_id": "missed_payment"})])
+    seen = []
+    orig = runner.run
+    runner.run = lambda spec, text, handlers: (seen.append(text), orig(spec, text, handlers))[1]
+    act(ctx(), runner=runner, model=MODEL)
+    assert seen == ["미납 건 rc-loan-1-i1(1회차)를 처리하라."]
+    assert "get_case" in str(runner.specs[0].tools) and "get_alert" not in str(runner.specs[0].tools)
+
+
+def test_remind_sends_in_daytime():
+    assert remind("rp-1-i1", [], ON, DAY) == {
+        "ref": "rp-1-i1", "on": ON.isoformat(), "at": DAY.isoformat(), "script_id": "payment_reminder",
+        "status": "sent", "reason": None, "by": "reminder"}
+
+
+def test_remind_defers_at_night():
+    out = remind("rp-1-i1", [], ON, NIGHT)
+    assert (out["status"], out["reason"]) == ("deferred", "contact_hours")
+
+
+def test_remind_respects_weekly_limit():
+    full = [sent(ON - timedelta(days=i % 7)) for i in range(MAX_CONTACTS_PER_7_DAYS)]
+    assert remind("rp-1-i1", full, ON, DAY)["reason"] == "weekly_limit"
 
 
 def test_agent_error_keeps_tool_effects_and_does_not_double_send():
