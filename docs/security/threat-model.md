@@ -84,7 +84,7 @@ flowchart TB
 | D3 | Denial of Service | WAF 오탐이 정당한 콘솔 요청을 막음 | 게이트웨이 WAF | 방화벽 로그로 차단 규칙을 확인한 뒤 해당 규칙만 정책에서 제외한다. 현재는 오탐 조정을 하지 않았다([ADR-011](../adr/ADR-011-appgw-waf-entry.md) 재검토 조건) | `infra/modules/appgw.bicep` | 부분 완화 |
 | E1 | Elevation of Privilege | 고정 역할로 권한 획득 | 콘솔 역할 | 운영은 Entra 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`), 데모는 WAF 운영자 IP 규칙만으로 `CreditOfficer` 고정 | `src/console/adapters.py:226-229`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
 | E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 역할별로 범위를 나눔: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). 전 경로 스모크용 `id-smoke`는 가장 넓어 엄밀한 최소 권한은 아니다 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
-| E3 | Elevation of Privilege | 에이전트가 허용 밖 도구 호출 | 에이전트 런타임 | 도구 allowlist(`unknown_tool` 반환), 추심은 스크립트 ID enum만 발송 | `src/agents/runtime.py:163`, `src/agents/collections.py:70`, `tests/agents/test_runtime.py:133` | 검증 |
+| E3 | Elevation of Privilege | 에이전트가 허용 밖 도구 호출 | 에이전트 런타임 | 도구 allowlist(`unknown_tool` 반환), 추심은 스크립트 ID enum만 발송 | `src/agents/runtime.py:163`, `src/agents/collections.py:68`, `tests/agents/test_runtime.py:133` | 검증 |
 
 ## AI 위험
 
@@ -98,7 +98,7 @@ flowchart TB
 | AI4 | PII 유출(모델 전송) | 가명화 누락으로 원문 PII 전송 | Foundry 입력 | 전송 전 가명화·응답 후 복원, payload PII 스캔 0/341 | `src/shared/pseudonymize.py:69`, `eval/reports/job-eval-9imbutm/report.md:88` | 검증 |
 | AI5 | PII 유출(트레이스) | Foundry 대화·트레이스에 입력 잔존 | Foundry | 실행 후 대화 삭제, 입력은 가명화 값 원칙 — 트레이스 `genAIContent`에 프롬프트는 남음(잔여 위험) | `src/agents/runtime.py:201`, `docs/runbook/deploy-history.md:606` | 데모 완화 |
 | AI6 | PII 유출(보고서) | 평가·운영 보고서에 원문 유출 | 보고서 | 값은 기록하지 않고 종류만 남김, 오류는 `safe_detail` | `eval/reports/job-eval-9imbutm/report.md:88`, `src/orchestrator/journey/metering.py:30` | 검증 |
-| AI7 | 과도한 자율성 | 에이전트가 범위 밖 행동·자금 이동 | 에이전트 런타임 | 도구 allowlist, 추심은 승인 스크립트 ID만, 최종 신용 결정은 LLM 밖 Policy Engine | `src/agents/runtime.py:163`, `src/agents/collections.py:70`, [ADR-003](../adr/ADR-003-deterministic-policy.md) | 검증 |
+| AI7 | 과도한 자율성 | 에이전트가 범위 밖 행동·자금 이동 | 에이전트 런타임 | 도구 allowlist, 추심은 승인 스크립트 ID만, 최종 신용 결정은 LLM 밖 Policy Engine | `src/agents/runtime.py:163`, `src/agents/collections.py:68`, [ADR-003](../adr/ADR-003-deterministic-policy.md) | 검증 |
 | AI8 | 주입 방어 공백 | Content Safety Prompt Shields 적용 범위 제한 | 모델 입력 | APIM AI 게이트웨이가 라우팅된 에이전트 호출에 Prompt Shields 적용(프롬프트 10,000자 이하일 때만, 초과 시 카테고리 검사 + 모델 배포 필터 `Microsoft.DefaultV2`만). Decision-1 decision API와 quality-judge(직접 호출)에는 미적용. 그 밖에는 설계상 "출력은 추천, 판정은 정책·심사역"에 의존([ADR-010](../adr/ADR-010-ai-gateway.md)) | `infra/modules/apim.bicep`, `src/agents/gateway.py` | 부분 완화 |
 | AI9 | 모델 처리 위치 | Global Standard 추론이 국외 리전에서 처리 | Foundry 추론 | 처리 범위 비보장, 가명화·최소 전송·국내 저장으로 완화, SKU는 Bicep 파라미터 | [ADR-002](../adr/ADR-002-model-deployment.md), `src/shared/pseudonymize.py:69` | 데모 완화 |
 

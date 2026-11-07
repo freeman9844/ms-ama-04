@@ -183,7 +183,7 @@ python -m ops window close
 az servicebus topic subscription rule list -g <resource-group> --namespace-name <servicebus-namespace> `
   --topic-name flow.updated --subscription-name early-warning --query "[].name" -o tsv
 az servicebus topic subscription rule list -g <resource-group> --namespace-name <servicebus-namespace> `
-  --topic-name alert.raised --subscription-name collections --query "[].name" -o tsv
+  --topic-name repayment.updated --subscription-name collections --query "[].name" -o tsv
 ```
 
 기대값은 두 명령 모두 `subject-label` 한 줄입니다. 규칙이 비어 있으면 재생이 시작돼도 메시지가 전달되지 않으니 `ops deploy`나 프로비저닝을 다시 확인합니다.

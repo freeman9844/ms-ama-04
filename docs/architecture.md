@@ -99,7 +99,7 @@ flowchart TB
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
 | Container Registry | Azure Container Registry + PE | 콘솔·Policy·Mock·Job 컨테이너 이미지 | 이미지 | MI `AcrPull`, 배포 창에 운영자 push | `infra/modules/acr.bicep` |
 | smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | id-eval: Blob `eval-reports`(쓰기)·Foundry/OpenAI; id-ops: Cosmos(읽기)·큐; id-smoke: Cosmos·Blob(읽기)·큐·Service Bus(송신)·Key Vault·Foundry(전 경로 점검) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
-| Service Bus | Service Bus Premium + PE | `consent`·`flow.updated`·`alert.raised`·`grievance` 토픽. 평상시 pause(삭제) | 없음 | Managed Identity | `infra/modules/servicebus.bicep`, `src/ops/lifecycle.py` |
+| Service Bus | Service Bus Premium + PE | `consent`·`flow.updated`·`alert.raised`·`repayment.updated`·`grievance` 토픽. 평상시 pause(삭제) | 없음 | Managed Identity | `infra/modules/servicebus.bicep`, `src/ops/lifecycle.py` |
 | 데이터 저장소 | Cosmos DB(NoSQL), Blob Storage | 신청·동의·분류·대출·경보·삭제 증명·이의, 원천 데이터·리포트 | — | Cosmos SQL RBAC, Storage Entra RBAC | `infra/modules/cosmos.bicep`, `infra/modules/storage.bicep` |
 | 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics | 비밀·무키 인증·관측성 | — | RBAC | `infra/modules/keyvault.bicep`, `infra/modules/identities.bicep`, `infra/modules/monitoring.bicep` |
 
@@ -190,12 +190,17 @@ sequenceDiagram
 flowchart LR
   replay["monitoring-replay 큐<br/>(시간 압축 재생)"]
   ew["early-warning-investigator (L4)"]
-  alert["alert.raised"]
+  alert["alert.raised<br/>(심사역 검토, 구독 없음)"]
+  ledger["상환 원장<br/>(안내 D-3 · 납부/미납 대조)"]
+  repay["repayment.updated"]
   col["collections-agent (L3)"]
   hardship["restructure-decisions 큐<br/>(재조정은 심사역)"]
   replay --> ew
   ew -->|raise_alert| alert
-  alert --> col
+  replay --> ledger
+  ledger -->|미납| repay
+  repay --> col
+  alert -.->|최근 경보 요약| col
   col -->|route_hardship| hardship
 
   subgraph consent["동의 수명주기 (consent_lifecycle 오케스트레이션)"]
@@ -204,7 +209,7 @@ flowchart LR
   grv["grievances 큐"] --> reply["grievance-reply-agent"]
 ```
 
-조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 `alert.raised`로 Collections에 전달된다. 주차는 한 주씩 발행되고(앞 주차와 추심이 끝난 뒤 다음 주차), Collections가 재조정 요청을 만들면 재생이 멈췄다가 심사역 결정 뒤 재개·종료를 고른다(`_after_week`, `src/orchestrator/journey/monitoring.py`). 매주 `agents.forecast`가 심사 시점 정산 프로필(채널별 정산 지연·수수료)과 최근 3개월 고정 지출 일정(임대료·급여·4대보험·원천세·부가세·대표자 인출·기존/이번 대출 원리금, 매출 비례 운영비)으로 다음 28일 잔고를 전망하고(`project`), 0원 아래로 내려가면 `projected_shortfall` 트리거를 건다. 경보 근거는 `F:<주차>:projected_min_balance`처럼 전망 지표를 인용할 수 있다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
+조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 심사역 검토용이다. `alert.raised`는 발행하지만 현재 구독자가 없다. 같은 주차 처리에서 상환 원장이 상환일 3일 전 안내(LLM 없음)를 보내고, 상환일 당일 대출상환 출금이 없으면 미납 추심 건(`rc-`)을 만들어 `repayment.updated`로 Collections를 부른다(추심 에이전트는 최근 경보 요약을 참고만 한다). 주차는 한 주씩 발행되고(앞 주차와 추심이 끝난 뒤 다음 주차), Collections가 재조정 요청을 만들면 재생이 멈췄다가 심사역 결정 뒤 재개·종료를 고른다(`_after_week`, `src/orchestrator/journey/monitoring.py`). 매주 `agents.forecast`가 심사 시점 정산 프로필(채널별 정산 지연·수수료)과 최근 3개월 고정 지출 일정(임대료·급여·4대보험·원천세·부가세·대표자 인출·기존/이번 대출 원리금, 매출 비례 운영비)으로 다음 28일 잔고를 전망하고(`project`), 0원 아래로 내려가면 `projected_shortfall` 트리거를 건다. 경보 근거는 `F:<주차>:projected_min_balance`처럼 전망 지표를 인용할 수 있다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
 
 ## 구성요소 계약
 
