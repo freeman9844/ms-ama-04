@@ -59,6 +59,14 @@ def test_projection_adds_installment_and_repeats_high_cost_weekly():
     assert out["path"][-1]["balance"] == 1_000_000 + out["totals"]["inflow"] - 287_000 - 280_000
 
 
+def test_projection_uses_given_installment_dates():
+    schedule = {"items": [], "variable_ratio": 0.0}
+    inside = project(_profile(schedule), [_row(1_000_000)], [], 287_000, installment_due=[date(2026, 11, 20)])
+    assert inside["totals"]["installment"] == -287_000  # 15일 규칙이면 11/16
+    outside = project(_profile(schedule), [_row(1_000_000)], [], 287_000, installment_due=[date(2027, 3, 2)])
+    assert "installment" not in outside["totals"]
+
+
 def test_projection_discounts_inflow_by_recent_attainment():
     schedule = {"items": [], "variable_ratio": 0.5}
     full = project(_profile(schedule), [_row(0)], [], 0)

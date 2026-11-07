@@ -23,7 +23,7 @@ from shared.krcalendar import month_add, next_business_day
 
 HORIZON_DAYS = 28
 ATTAINMENT_WEEKS = 4
-INSTALLMENT_DAY = 15  # 이번 대출 상환일(매월 15일, 공휴일이면 다음 영업일)
+INSTALLMENT_DAY = 15  # 상환 원장이 없는 옛 대출의 상환일(매월 15일, 공휴일이면 다음 영업일)
 WINDOW_MONTHS = 3
 MIN_MONTHS = 2
 VAT_MONTHS = (1, 4, 7, 10)
@@ -126,9 +126,10 @@ def project(
     rows: Sequence[Mapping[str, Any]],
     high_cost: Sequence[Transaction],
     installment_krw: int,
+    installment_due: Sequence[date] | None = None,
 ) -> dict[str, Any] | None:
     """마지막 주차 다음 날부터 HORIZON_DAYS일의 일말 전망 잔고(path)와 항목별 합계(totals, OUTFLOW_LABELS 키 + inflow).
-    정산 프로필·예정 출금이 없으면 None."""
+    installment_due는 상환 원장의 상환일이다(없으면 옛 대출용 매월 INSTALLMENT_DAY). 정산 프로필·예정 출금이 없으면 None."""
     if not settlement or not settlement.get("outflows") or not rows:
         return None
     schedule = settlement["outflows"]
@@ -145,7 +146,12 @@ def project(
         for d in _due(item["day"], lo, hi, item.get("months")):
             flows[d][item["key"]] -= item["amount_krw"]
     if installment_krw:
-        for d in _due(INSTALLMENT_DAY, lo, hi):
+        dates = (
+            [d for d in installment_due if lo <= d <= hi]
+            if installment_due is not None
+            else _due(INSTALLMENT_DAY, lo, hi)
+        )
+        for d in dates:
             flows[d]["installment"] -= installment_krw
     for t in high_cost:
         d = t.booked_on + timedelta(days=7)

@@ -162,6 +162,7 @@ def projection(
     transactions: Sequence[Transaction],
     categories: Mapping[str, Category],
     baseline: Baseline,
+    installment_due: Sequence[date] | None = None,
 ) -> dict[str, Any] | None:
     """마지막 주차 행 다음 4주 잔고 전망. 그 주 고금리 상환은 매주 같은 요일에 이어진다고 본다."""
     if not rows:
@@ -169,7 +170,7 @@ def projection(
     lo, hi = date.fromisoformat(rows[-1]["start"]), date.fromisoformat(rows[-1]["end"])
     high_cost = [t for t in transactions
                  if lo <= t.booked_on <= hi and categories[t.txn_id] is Category.HIGH_COST_LENDER]
-    return project(baseline.settlement, rows, high_cost, baseline.installment_krw)
+    return project(baseline.settlement, rows, high_cost, baseline.installment_krw, installment_due)
 
 
 def weekly_series(
