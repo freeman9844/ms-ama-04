@@ -17,7 +17,7 @@ def test_service_bus_is_premium_keyless_and_private(closed):
 
 def test_service_bus_topics(closed):
     topics = {t["name"].split("/")[-1] for t in closed.of_type(f"{SB}/topics")}
-    assert topics == {"consent", "flow.updated", "alert.raised", "grievance"}
+    assert topics == {"consent", "flow.updated", "alert.raised", "repayment.updated", "grievance"}
 
 
 def test_service_bus_roles(closed):
@@ -31,7 +31,7 @@ def test_paused_environment_has_no_service_bus(variant):
 
 def test_monitoring_subscriptions_are_session_ordered_and_filtered(closed):
     subs = {"/".join(s["name"].split("/")[-2:]): s for s in closed.of_type(f"{SB}/topics/subscriptions")}
-    assert set(subs) == {"flow.updated/early-warning", "alert.raised/collections"}
+    assert set(subs) == {"flow.updated/early-warning", "repayment.updated/collections"}
     for sub in subs.values():
         props = sub["properties"]
         assert props["requiresSession"] is True and props["lockDuration"] == "PT5M"
@@ -41,7 +41,7 @@ def test_monitoring_subscriptions_are_session_ordered_and_filtered(closed):
     by_name = {"/".join(r["name"].split("/")[-3:]): r["properties"] for r in all_rules}
     assert set(by_name) == {
         f"{sub}/{rule}"
-        for sub in ("flow.updated/early-warning", "alert.raised/collections")
+        for sub in ("flow.updated/early-warning", "repayment.updated/collections")
         for rule in ("$Default", "subject-label")
     }
     assert len(all_rules) == 4
@@ -50,7 +50,7 @@ def test_monitoring_subscriptions_are_session_ordered_and_filtered(closed):
         "filterType": "CorrelationFilter",
         "correlationFilter": {"label": "flow.updated"},
     }
-    assert by_name["alert.raised/collections/subject-label"] == {
+    assert by_name["repayment.updated/collections/subject-label"] == {
         "filterType": "CorrelationFilter",
-        "correlationFilter": {"label": "alert.raised"},
+        "correlationFilter": {"label": "repayment.updated"},
     }

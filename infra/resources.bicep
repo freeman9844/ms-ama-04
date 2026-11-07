@@ -404,11 +404,11 @@ module serviceBus 'modules/servicebus.bicep' = if (serviceBusEnabled) {
     tags: tags
     peSubnetId: subnetId['snet-pe']
     zoneId: zoneId['privatelink.servicebus.windows.net']
-    topics: [ 'consent', 'flow.updated', 'alert.raised', 'grievance' ]
+    topics: [ 'consent', 'flow.updated', 'alert.raised', 'repayment.updated', 'grievance' ]
     // 대출별 세션으로 주차 순서를 지키고, subject(label) 필터로 스모크 메시지를 거릅니다.
     subscriptions: [
       { topic: 'flow.updated', name: 'early-warning' }
-      { topic: 'alert.raised', name: 'collections' }
+      { topic: 'repayment.updated', name: 'collections' }
     ]
     roleAssignments: [
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.sbSender, principalType: sp }
