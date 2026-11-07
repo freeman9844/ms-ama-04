@@ -228,7 +228,7 @@ flowchart LR
 
 | 장애 도메인 | 영향 | 격리·대응(as-built) | 실측 증거 |
 |---|---|---|---|
-| Foundry 에이전트·모델 | 심사 단계 지연·실패 | 평가 활동은 예외를 올리지 않고 `assessment_unavailable` 플래그만 남긴 채 심사역 단계로 넘김(결정 권한 없음). 안전망·템플릿 폴백 | 에이전트 단계 성공률 100.0%(ok 72/72) `ops/reports/load-20261102110233/report.md` |
+| Foundry 에이전트·모델 | 심사 단계 지연·실패 | 평가가 없으면 오케스트레이터가 한 번 더 시도하고(`ASSESS_ATTEMPTS=2`), 그래도 없으면 `assessment_unavailable` 플래그와 함께 `failed`(오류 단계 `assess_credit`)로 끝낸다. 심사역은 에이전트 평가를 근거로 결정하므로 평가 없는 건을 심사역 대기로 넘기지 않는다(2026-11-07 변경, 이전에는 플래그만 남기고 넘겼다). 데이터 부족·정책 장애는 평가를 만들 근거가 없어 기존대로 심사역에게 간다(fail-closed) | 에이전트 단계 성공률 100.0%(ok 72/72) `ops/reports/load-20261102110233/report.md` |
 | Mock API | 데이터 수집 실패 | 동의 범위 안 재시도 + 안전망 수집. 불완전이면 "데이터 불완전"으로 심사역에게 넘김 | source-flaky 회복: mockapi 호출 일부 실패에도 전 신청 `awaiting_officer` 복귀(`ops/reports/fault-20261102111447/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Policy Engine | 판정 불가 | fail-closed: 판정 없이 진행 안 함. `policy_unavailable`+`assessment_unavailable` 플래그, 심사역 판단으로 넘김. 호출에 프로세스 단위 서킷(`src/orchestrator/journey/circuit.py`) | policy-down: 3건 모두 `policy:failed`로 멈추고 `awaiting_officer`(`ops/reports/fault-20261102111750/`) — `ops/reports/load-20261102110233/report.md` 4장 |
 | Service Bus | L4 이벤트 지연 | 세션 구독(`requiresSession`)·중복 감지(멱등 지원)·만료 dead-letter. 평상시 pause 시 `monitoring-replay` 큐 인라인 처리 | 세션·중복 감지·`deadLetteringOnMessageExpiration` 설정 `infra/modules/servicebus.bicep` |
@@ -242,7 +242,7 @@ flowchart LR
 |---|---|---|
 | 처리량 | Functions Flex `maximumInstanceCount: 40`, Container Apps 수평 확장 | 인스턴스 상한 상향, 동시성 조정 |
 | 데이터 | Cosmos DB 기본 RU | 컨테이너별 RU 상향·자동 확장 |
-| 모델 | Global Standard, 배포 `gpt-5.4`/`gpt-5.4-mini`/`gpt-6.1-sol`(분석가)/`gpt-5.6-sol`(평가)/`decision-1` | TPM 쿼터 상향 |
+| 모델 | Global Standard, 배포 `gpt-5.4`/`gpt-5.4-mini`/`gpt-5.6-sol`(분석가·평가)/`gpt-6.1-sol`(보유만)/`decision-1` | TPM 쿼터 상향 |
 | 분류 비용 | 규칙(classify-v1) 선분류 + 정규화·중복 제거 + 캐시 + Decision-1, 폴백만 mini LLM | 규칙 커버리지 80.0%·캐시 적중 25.0%. `decision-1+mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. `decision-1+mini` 구성의 분류 호출은 신청당 8.375회(Decision-1 7.5회 + mini 폴백)지만 Decision-1 단가 미확인이라 총비용 효과는 미검증(`eval/reports/job-eval-9imbutm/report.md` 2장) |
 | 지연·단가 | Global Standard | PTU 전환(예측 가능 지연·단가, [ADR-002](adr/ADR-002-model-deployment.md)) |
 | 가용성 | 단일 리전(Korea Central) | 다중 리전 DR(문서만) |

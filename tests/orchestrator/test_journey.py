@@ -166,17 +166,46 @@ def test_assessment_flags_are_recorded(run_journey):
     assert "review_not_passed" in ctx.saved[-1]["flags"] and "assessed" in statuses(ctx)
 
 
-@pytest.mark.parametrize(
-    "assess",
-    [boom, lambda _: {"assessment": None, "flags": [FLAG_ASSESSMENT_UNAVAILABLE], "record": {"rounds": []}}],
-)
-def test_assessment_failure_does_not_block_officer(run_journey, assess):
+UNAVAILABLE = {"assessment": None, "flags": [FLAG_ASSESSMENT_UNAVAILABLE],
+               "record": {"rounds": [{"round": 1, "analyst_error": "AgentError: HTTP 400 tools not supported"}]}}
+
+
+def sequence(*results):
+    """호출마다 다음 결과를 낸다(예외 함수면 호출)."""
+    it = iter(results)
+
+    def act(payload):
+        r = next(it)
+        return r(payload) if callable(r) else r
+
+    return act
+
+
+@pytest.mark.parametrize("assess", [boom, lambda _: UNAVAILABLE])
+def test_assessment_failure_retries_once_then_fails_without_officer(run_journey, assess):
     result, ctx = run_journey(START, acts(assess_credit=assess), [("event", APPROVE)])
     doc = ctx.saved[-1]
+    assert result["status"] == "failed"
+    assert len(ctx.called("assess_credit")) == 2
+    assert "assessed" not in statuses(ctx) and "awaiting_officer" not in statuses(ctx)
+    assert not ctx.timers and doc["officer_decision"] is None
+    assert doc["assessment"] is None and doc["flags"].count(FLAG_ASSESSMENT_UNAVAILABLE) == 1
+    assert doc["error"]["stage"] == "assess_credit"
+
+
+def test_assessment_failure_message_keeps_agent_error(run_journey):
+    _, ctx = run_journey(START, acts(assess_credit=lambda _: UNAVAILABLE), [])
+    message = ctx.saved[-1]["error"]["message"]
+    assert "에이전트 평가 없음" in message and "HTTP 400 tools not supported" in message
+
+
+def test_assessment_retry_recovers_and_reaches_officer(run_journey):
+    result, ctx = run_journey(START, acts(assess_credit=sequence(UNAVAILABLE, ASSESSED)), [("event", APPROVE)])
+    doc = ctx.saved[-1]
     assert result["status"] == "approved"
-    assert "assessed" not in statuses(ctx)
-    assert doc["assessment"] is None
-    assert doc["flags"].count(FLAG_ASSESSMENT_UNAVAILABLE) == 1
+    assert len(ctx.called("assess_credit")) == 2 and "assessed" in statuses(ctx)
+    assert doc["assessment"] == ASSESSMENT and FLAG_ASSESSMENT_UNAVAILABLE not in doc["flags"]
+    assert [s["outcome"] for s in doc["steps"] if s["step"] == "assess"] == ["failed", "ok"]
 
 
 def test_incomplete_data_skips_underwriting_and_waits_for_officer(run_journey):

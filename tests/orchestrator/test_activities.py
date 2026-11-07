@@ -264,7 +264,8 @@ START = {
 
 def test_full_journey_approved_end_to_end(deps, run_journey):
     approve = {"decision": "approve", "officer_id": "officer-1", "amount_krw": 3_300_000}
-    result, ctx = run_journey(START, journey_activities(deps), [("event", approve)])
+    result, ctx = run_journey(START, journey_activities(with_deps(deps, agents=UnderwritingRunner())),
+                              [("event", approve)])
     assert result == {"application_id": "app-1", "status": "approved"}
     called = {c.name for c in ctx.calls}
     assert called == set(ACTIVITIES)
@@ -272,7 +273,7 @@ def test_full_journey_approved_end_to_end(deps, run_journey):
     assert final["policy"]["decision"] == "eligible"
     assert final["assembly"]["status"] == "complete"
     assert final["consent"]["consent_id"] in {doc["consent_id"] for (c, _), doc in deps.store.docs.items() if c == "consents"}
-    assert "token" not in json.dumps(ctx.saved)
+    assert '"token":' not in json.dumps(ctx.saved)
 
 
 def test_full_journey_sources_down_goes_incomplete(deps, mock_client, run_journey):
@@ -396,7 +397,7 @@ def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps):
     runner = UnderwritingRunner()
     result = assess_credit(with_deps(deps, agents=runner), payload)
     a = result["assessment"]
-    assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-6.1-sol")
+    assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-5.6-sol")
     assert result["flags"] == [] and result["record"]["rounds"][0]["grounding_issues"] == []
     assert runner.names == [ANALYST_AGENT, REVIEWER_AGENT] and runner.deleted == ["cntr_1"]
     doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])

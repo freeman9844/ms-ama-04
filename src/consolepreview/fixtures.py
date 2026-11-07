@@ -109,7 +109,7 @@ def _assessment(app_id: str, rec: str, uw: dict[str, Any], policy: dict[str, Any
              "explanation": "현금 버퍼가 30일 이상이면 한도 여유가 커진다"},
         ],
         "review": {"passed": True, "rounds": 2, "issues": []},
-        "models": {"analyst": "gpt-6.1-sol", "reviewer": "gpt-5.4-mini"},
+        "models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.4-mini"},
     }
 
 

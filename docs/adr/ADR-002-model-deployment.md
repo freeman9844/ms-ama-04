@@ -25,11 +25,13 @@
 - 대가: 추론 처리 위치가 국내로 보장되지 않는다(상위 Spec의 국내 처리 제약 미충족, as-built 잔여 위험). abuse monitoring 데이터 처리 조건 확인이 남는다.
 - as-built 차이: gpt-5.4의 GlobalStandard 배포 용량은 AI 게이트웨이(ADR-010) 도입 이후 200K TPM이고, DataZoneStandard일 때는 쿼터에 맞춰 100K다(`infra/main.bicep`).
 - as-built 차이(2026-11-06): 분석 에이전트를 `gpt-6.1-sol`(v2026-09-29, GlobalStandard 150K TPM, DataZoneStandard 100K)로, 평가 Job full 구성을 `gpt-5.6-sol`(v2026-07-09, 50K)로 옮겼다. 두 모델도 같은 `chatModelSku`를 따르고 가명화 경로는 그대로다. 쿼터(GlobalStandard)는 두 모델 모두 250K, DataZoneStandard는 100K다.
+- as-built 차이(2026-11-07): `gpt-6.1-sol`은 게이트웨이 연결(chat completions)에서 함수 도구 + 추론을 거부해(400, `reasoning.effort=none` 미지원) 분석가를 `gpt-5.6-sol`로 다시 옮겼다. `gpt-5.6-sol` 배포는 GlobalStandard 150K(분석가 `gw-analyst` 150K, 평가 Job과 공유 — 구독의 다른 리소스가 쿼터 100을 써서 이 배포의 최대치), DataZoneStandard 100K이고 `gpt-6.1-sol`은 50K로 줄여 보유만 한다. 게이트웨이를 거치지 않는 직접 호출(`/responses`)에서는 `gpt-6.1-sol`도 함수 도구가 동작한다(실측).
 - as-built 차이: `Microsoft-Decision-1`은 APAC Global Standard 지원이 문서·CLI에서 엇갈려, 실패 시 `DataZoneStandard`로 전환하도록 `decisionModelSku`를 별도로 둔다(`infra/main.bicep`, [../runbook/troubleshooting.md](../runbook/troubleshooting.md)).
 
 ## 재검토 조건
 - 실데이터·실고객이 들어오면 즉시 Korea Central regional 또는 PTU로 전환(그 전 단계로 Data Zone Standard APAC).
-- gpt-5.4·gpt-6.1-sol TPM 쿼터가 상한에 닿아 처리량 보장이 필요할 때.
+- 게이트웨이 연결이 Responses API를 지원해 `gpt-6.1-sol`을 함수 도구와 함께 쓸 수 있을 때.
+- gpt-5.4·gpt-5.6-sol TPM 쿼터가 상한에 닿아 처리량 보장이 필요할 때.
 - 규제 검토에서 국내 처리가 필수로 확정될 때.
 
 ## 근거

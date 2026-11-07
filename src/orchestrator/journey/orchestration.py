@@ -22,6 +22,7 @@ EVENT_OFFICER_DECISION = "officer_decision"
 FLAG_DATA_INCOMPLETE = "data_incomplete"
 FLAG_POLICY_UNAVAILABLE = "policy_unavailable"
 FLAG_MONITORING_UNAVAILABLE = "monitoring_unavailable"
+ASSESS_ATTEMPTS = 2
 _FINAL = {
     "approve": Status.APPROVED,
     "conditional": Status.CONDITIONALLY_APPROVED,
@@ -201,41 +202,59 @@ def journey(ctx: Any, retry: Any) -> Steps:
             doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
         else:
             doc["policy"] = _metered(doc, "policy", result, started, _now(ctx))
-            yield from _assess(ctx, retry, doc, consent["consent_id"], underwriting, tags)
+            error = yield from _assess(ctx, retry, doc, consent["consent_id"], underwriting, tags)
+            if error is not None:
+                # 심사역은 에이전트 평가를 근거로 결정한다. 평가 없이 심사역 대기로 넘기지 않는다.
+                return (yield from _fail(ctx, retry, doc, "assess_credit", RuntimeError(error)))
 
     return (yield from _await_officer(ctx, retry, doc, req.sla_hours))
 
 
+def _run_error(record: Any) -> str:
+    """평가 기록에서 마지막 에이전트 오류를 꺼낸다. 없으면 빈 문자열."""
+    rounds = record.get("rounds") if isinstance(record, dict) else None
+    for entry in reversed(rounds or []):
+        for key in ("analyst_error", "reviewer_error"):
+            if isinstance(entry, dict) and entry.get(key):
+                return str(entry[key])
+    return str(record.get("error") or "") if isinstance(record, dict) else ""
+
+
 def _assess(
     ctx: Any, retry: Any, doc: dict[str, Any], consent_id: str, underwriting: dict[str, Any], tags: dict[str, str]
-) -> Steps:
-    """정책 결과를 근거로 분석·검토 에이전트를 돌린다. 실패해도 심사역 단계로 넘어간다(결정 권한 없음)."""
-    started = _now(ctx)
-    try:
-        # 에이전트 실행은 비용이 들고 반성 루프가 안에 있으므로 활동 재시도를 걸지 않는다.
-        result = yield ctx.call_activity(
-            "assess_credit",
-            _tagged(
-                {
-                    "application_id": doc["application_id"],
-                    "consent_id": consent_id,
-                    "underwriting": underwriting,
-                    "policy": doc["policy"],
-                },
-                tags,
-            ),
-        )
-    except Exception as e:  # noqa: BLE001
-        doc["steps"].append(failed_record("assess", started, _now(ctx), e))
-        doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
-        return None
-    result = _metered(doc, "assess", result, started, _now(ctx))
-    doc["assessment"] = result.get("assessment")
-    doc["assessment_run"] = result.get("record")
-    doc["flags"].extend(result.get("flags", []))
-    if doc["assessment"] is not None:
-        yield from _advance(ctx, retry, doc, Status.ASSESSED)
-    return None
+) -> Generator[Any, Any, str | None]:
+    """정책 결과를 근거로 분석·검토 에이전트를 돌린다. 평가가 없으면 한 번 더 시도하고, 그래도 없으면 오류 문구를 돌려준다."""
+    error = ""
+    for _ in range(ASSESS_ATTEMPTS):
+        started = _now(ctx)
+        try:
+            # 활동 재시도 정책 대신 여기서 센다: 반성 루프가 활동 안에 있고, 결과가 '평가 없음'인 경우도 다시 시도한다.
+            result = yield ctx.call_activity(
+                "assess_credit",
+                _tagged(
+                    {
+                        "application_id": doc["application_id"],
+                        "consent_id": consent_id,
+                        "underwriting": underwriting,
+                        "policy": doc["policy"],
+                    },
+                    tags,
+                ),
+            )
+        except Exception as e:  # noqa: BLE001
+            doc["steps"].append(failed_record("assess", started, _now(ctx), e))
+            error = str(e)
+            continue
+        result = _metered(doc, "assess", result, started, _now(ctx))
+        doc["assessment"] = result.get("assessment")
+        doc["assessment_run"] = result.get("record")
+        if doc["assessment"] is not None:
+            doc["flags"].extend(f for f in result.get("flags", []) if f != FLAG_ASSESSMENT_UNAVAILABLE)
+            yield from _advance(ctx, retry, doc, Status.ASSESSED)
+            return None
+        error = _run_error(result.get("record"))
+    doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
+    return f"에이전트 평가 없음({ASSESS_ATTEMPTS}회 시도): {error or '원인 미상'}"
 
 
 def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) -> Steps:

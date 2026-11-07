@@ -34,6 +34,7 @@
 
 - `decision`이 401/403: Function·smoke 관리 ID에 Foundry 계정 `Cognitive Services User` 역할이 필요할 수 있습니다
   (운영자 계정은 `Azure AI User`로 동작 확인). 역할을 추가하고 5분 뒤 다시 실행합니다. (P4a)
+- 신청이 `failed`(오류 `assess_credit: 에이전트 평가 없음(2회 시도): …`): 평가가 두 번 모두 비었다. 오류 문구에 마지막 에이전트 오류가 남는다. `HTTP 400 … Function tools with reasoning_effort are not supported`면 그 모델은 게이트웨이(chat completions)에서 함수 도구를 못 쓴다 — `ANALYST_MODEL`을 게이트웨이에서 동작하는 모델로 바꾼다(2026-11-07 `gpt-6.1-sol` 사례).
 - `journey`가 "심사 에이전트 결과 없음": 결과의 `flags`에 `assessment_unavailable`이 있으면 App Insights `traces`에서
   `assess_credit` 오류를 찾습니다. 근거 검사·검토를 3라운드 안에 통과하지 못하면 `assessment`는 남지만
   `review.passed=false`이고 `review_not_passed` 플래그가 붙습니다(smoke는 통과, 출력에 "not passed"). (P4a)

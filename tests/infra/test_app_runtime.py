@@ -112,7 +112,7 @@ def test_function_app_settings_point_to_runtime(closed, variant):
     assert settings["DATA_ASSEMBLY_MODEL"] == "gpt-5.4-mini"
     assert settings["AI_ACCOUNT_ENDPOINT"].endswith(".services.ai.azure.com")
     assert settings["DECISION_DEPLOYMENT"] == "decision-1"
-    assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-6.1-sol", "gpt-5.4-mini")
+    assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.6-sol", "gpt-5.4-mini")
     assert settings["CLASSIFIER_MODEL"] == "gpt-5.4-mini"
     assert (settings["EW_MODEL"], settings["COLLECTIONS_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
     assert (settings["NOTICE_MODEL"], settings["GRIEVANCE_MODEL"]) == ("gpt-5.4-mini", "gpt-5.4-mini")
