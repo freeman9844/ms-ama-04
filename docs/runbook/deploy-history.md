@@ -817,3 +817,10 @@ python -m ops smoke
 - **WAF 로그**: 이 기간 DRS 2.1 관리 규칙 탐지 0건(오탐 없음), 사용자 지정 규칙 차단 5건. `AGWAccessLogs`는 200 4건·301 2건·403 5건.
 - **`window close`**: 333초. 닫은 뒤에도 콘솔 `GET /` 200.
 - **참고**: `/applications`는 POST 전용이라 GET은 405가 정상입니다. 콘솔 첫 화면은 `https://<APPGW_FQDN>/`입니다.
+## 2026-11-07 에이전트 평가 없이 심사역 대기로 넘어간 신청
+
+- **증상**: 분석가를 `gpt-6.1-sol`로 바꾼 뒤 들어온 app-20261107-9d2785(04:57Z)·app-20261107-a49a8a(05:02Z)가 심사역 대기인데 콘솔에 "에이전트 평가가 아직 없습니다". `assess_credit`이 2~4초 만에 끝났습니다.
+- **원인**: `AppExceptions`에 HTTP 400 "Function tools with reasoning_effort are not supported for gpt-6.1-sol in /v1/chat/completions". 에이전트가 게이트웨이 연결(`gw-analyst`, chat completions)로 모델을 부르는데 이 경로에서 `gpt-6.1-sol`은 함수 도구 + 추론을 거부합니다. 실측: `reasoning.effort=none`은 `gpt-6.1-sol`·`gpt-5.6-sol`·`gpt-5.4` 모두 미지원, 기본 추론으로 `gpt-5.6-sol`·`gpt-5.4`는 성공, 게이트웨이 없이 `/responses`로 직접 부르면 `gpt-6.1-sol`도 성공. 당시 설계는 평가가 없어도 `assessment_unavailable` 플래그만 남기고 심사역에게 넘겼습니다.
+- **조치**(`4359b75`): 분석가를 `gpt-5.6-sol`로(`ANALYST_MODEL`). 평가가 없으면 한 번 더 시도하고 그래도 없으면 신청을 `failed`(오류 단계 `assess_credit`, 마지막 에이전트 오류 포함)로 끝내 심사역 대기로 넘기지 않습니다. 데이터 부족·정책 장애 경로는 그대로 심사역에게 갑니다. 기존 2건은 그대로 두었습니다.
+- **용량**: 첫 `window open`(240초)이 `InsufficientQuota`로 실패했습니다. 구독의 다른 리소스가 `gpt-5.6-sol` GlobalStandard 쿼터 250 중 100을 써서 이 배포는 최대 150입니다. 배포를 200 → 150(분석가 150K, 평가 Job 공유)으로 고쳐 두 번째 `window open` 250초(프로비저닝 4분)에 성공했습니다. `gpt-6.1-sol` 배포는 50으로 줄여 보유만 합니다.
+- **배포·확인**: `ops deploy orchestrator` 366초. `ops smoke` 성공(159초, `assess_credit` 28.5초로 실제 평가 생성), 이후 20분간 `AppExceptions` 0건. 조사용 Foundry 에이전트 `probe-effort`는 지웠습니다.
