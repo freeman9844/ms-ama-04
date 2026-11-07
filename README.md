@@ -14,7 +14,7 @@ flowchart LR
     foundry["Foundry 에이전트 + 모델"]
     apim["API Management<br/>AI 게이트웨이(내부 모드)"]
     policy["Policy Engine<br/>결정론적 규칙"]
-    mock["Mock MyData/세무/PG API"]
+    mock["Mock MyData/세무/PG API<br/>(외부 기관 대역)"]
     data["Cosmos / Blob / 큐"]
   end
   officer -->|HTTPS| gw

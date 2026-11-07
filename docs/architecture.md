@@ -19,17 +19,21 @@ flowchart LR
     orch["Journey Orchestrator"]
     foundry["Foundry 에이전트 + 모델"]
     policy["Policy Engine"]
-    mock["Mock MyData/세무/PG API"]
+    subgraph ext["외부 데이터 제공자 대역 (데모)"]
+      mock["Mock MyData/세무/PG API"]
+    end
   end
+  real["운영: 마이데이터 사업자·홈택스·PG사"]
   customer -->|/apply: 데이터 3종 동의·금액·기간| console
   borrower -->|동의 철회·이의제기| console
   officer -->|로그인 / 승인·거절| console
-  operator -->|상시: App Gateway WAF(운영자 IP만), 데모는 Easy Auth 꺼짐| console
+  operator -->|"상시: App Gateway WAF(운영자 IP만), 데모는 Easy Auth 꺼짐"| console
   operator -.->|배포 창: 데이터 평면 작업| orch
   console --> orch
   orch <--> foundry
   orch <--> policy
-  orch <--> mock
+  orch <-->|동의 발급, 토큰으로 원천 조회| mock
+  mock -.->|운영 전환 시 대체| real
 ```
 
 고객(마켓플레이스 셀러)은 콘솔의 고객 신청 페이지(`/apply`)에서 은행·세무·PG 데이터 3종에 모두 동의하고 금액(50만~1,000만 원)·기간(1~12개월)을 넣어 신청한다(`src/console/customer.py`). 이 신청은 심사역 콘솔과 같은 접수 큐로 들어가 같은 흐름을 탄다. 심사역·운영자는 콘솔로 들어온다. 콘솔 앱은 internal 환경 `cae-int`에 있고, 인터넷에서는 공용 IP → Application Gateway WAF v2(`snet-appgw`)를 거쳐서만 닿는다. WAF 사용자 지정 규칙이 운영자 공인 IP(`CONSOLE_IP`)가 아닌 요청을 403으로 막는다([ADR-011](adr/ADR-011-appgw-waf-entry.md); 데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
@@ -45,7 +49,7 @@ flowchart TB
   subgraph int["internal 환경 cae-int (snet-apps-int)"]
     console["Officer Console<br/>FastAPI + HTMX"]
     policy["Policy Engine"]
-    mock["Mock API"]
+    mock["Mock API<br/>(외부 기관 대역, 복제본 1)"]
     smoke["smoke / eval / ops Job"]
   end
   foundry["Foundry Agent Service<br/>프롬프트 에이전트 + 모델"]
@@ -70,7 +74,7 @@ flowchart TB
   apim -->|MI 인증, 모델 배포| foundry
   foundry -.->|벡터 저장소| search
   orch --> policy
-  orch --> mock
+  orch -->|동의 발급, Bearer 토큰 조회| mock
   orch --> cosmos
   orch --> blob
   orch -.->|이벤트, 활성 시| sb
@@ -89,7 +93,7 @@ flowchart TB
 | Application Gateway WAF v2 | `snet-appgw`, 공용 IP `pip-agw-*`(DNS 레이블), WAF_v2 자동 확장 0–2 | HTTPS 종단(Key Vault 자체 서명 인증서), HTTP→HTTPS 영구 리디렉션, WAF 정책(Prevention, OWASP DRS 2.1, `allowOperatorOnly`), 백엔드 HTTPS·`/healthz` 프로브 | 없음 | 사용자 할당 ID `id-appgw-*`(Key Vault Secrets User) | `infra/modules/appgw.bicep`, `src/ops/appgw_cert.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
-| Mock API | Container Apps internal `cae-int` | 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정) 제공, 범위·만료 동의 토큰 검증, 흐름 재생 | 합성 데이터(프로세스 내 생성) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
+| Mock API | Container Apps internal `cae-int`(복제본 1) | 외부 데이터 제공자 대역. 동의 발급·철회(HMAC 서명 토큰), 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정) 제공, 범위·만료 동의 토큰 검증, 대출 후 흐름 재생, 장애 주입(`FAULT_MODE`) | 합성 데이터(시드로 프로세스 내 결정적 생성), 동의 레지스트리(메모리) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
 | AI 게이트웨이 | API Management Developer, 내부 VNet 모드(`snet-apim`) | 에이전트별 TPM 한도, 콘텐츠 안전(Prompt Shields), 토큰 지표(agent·model) | 없음(본문 미기록) | 에이전트별 구독 키(Foundry 연결) → APIM MI로 Foundry 호출 | `infra/modules/apim.bicep`, `infra/modules/foundry/gateway-connections.bicep`, `src/agents/gateway.py` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
@@ -101,6 +105,19 @@ flowchart TB
 
 **경계 원칙:** 구성요소 사이에는 `src/shared/contracts.py`의 버전드 Pydantic 계약만 오간다. 에이전트는 서로 직접 호출하지 않고, handoff는 오케스트레이터나 이벤트로만 일어난다. 사내 도구(Mock API·Policy·데이터 조회)는 Foundry가 아니라 VNet 안 오케스트레이터가 실행해 감사 로그에 남긴다.
 
+### 외부 데이터 제공자 경계 (Mock API)
+
+Mock API는 우리 시스템 구성요소가 아니라 **외부 기관의 대역**이다. 데모라서 VNet 안 Container App으로 띄웠지만, 오케스트레이터는 외부 API를 부르듯 동의를 받고 그 토큰으로만 원천을 조회한다(`src/orchestrator/journey/adapters.py`의 `HttpMockApi`). 그래서 운영 전환 때는 이 어댑터와 연결 대상만 바뀌고 여정·에이전트·계약은 그대로다.
+
+| 엔드포인트 | 대역 대상 | 운영 전환 시 |
+|---|---|---|
+| `POST /consents`, `POST /consents/{id}/revoke` | 제공기관의 동의·토큰 발급과 철회 | 제공기관 표준 인증·동의 절차와 토큰 수명 관리 |
+| `/mydata/profile`, `/mydata/transactions`, `/mydata/flow` | 마이데이터 사업자(은행 계좌 프로필·거래, 대출 후 거래) | 마이데이터 표준 API |
+| `/tax/filings` | 홈택스(세금 신고) | 세무 데이터 제공 경로 |
+| `/pg/settlements` | PG사(카드·간편결제 정산) | PG사 정산 API |
+| `/admin/faults`, `FAULT_MODE` | 제공기관 장애(503 전부·원천별 첫 요청) | 없음(시연·장애 시나리오 전용) |
+
+동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 Mock API의 메모리 레지스트리로, 외부 기관 내부를 흉내 낸 것이라 영속화하지 않았다. 토큰은 HMAC 서명과 만료를 스스로 담아 재시작 뒤에도 유효하지만 철회 목록은 사라진다. 그래서 복제본을 1개로 고정하고, 재시작 뒤 철회는 `absent`로 기록한다([ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md)).
 > 상위 Spec 대비: Spec §2.3은 Service Bus Premium을 상시 가정하지만, 비용 때문에 평상시 pause(네임스페이스 삭제)한다. 이때 `SERVICEBUS_FQDN`이 비어 트리거를 등록하지 않고, `src/orchestrator/journey/monitoring.py`의 `handle_replay`가 `monitoring-replay` 큐로 같은 처리를 인라인 수행한다.
 
 ## 네트워크
