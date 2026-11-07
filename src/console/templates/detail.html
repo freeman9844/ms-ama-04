@@ -152,36 +152,116 @@
 
 <section id="tab-opinion" class="tab-panel" role="tabpanel" aria-labelledby="tab-opinion-tab">
 <h2 class="tab-title">에이전트 의견</h2>
-{% if v.assessment %}
-{% set a = v.assessment %}
+{% if v.assessment and op %}
+{% set a = v.assessment %}{% set r = op.recommendation %}
 <section class="card">
-<h3>에이전트 평가 <small>권고: {{ a.recommendation|recommendation_label }}</small></h3>
+<h3>에이전트 평가 <span class="badge badge-{{ r.tone }}">{{ r.label }}</span> <small>정책 판정 {{ r.policy }}</small></h3>
+<div class="grid-4">
+  {{ ch.kpi("에이전트 권고", r.label, "정책 판정: " ~ r.policy, r.tone) }}
+  {{ ch.kpi("근거 확인 주장", op.kpi.grounded, "근거 값이 모두 확인된 주장", op.kpi.grounded_tone) }}
+  {{ ch.kpi("검토 에이전트", op.kpi.review, op.kpi.review_sub, op.kpi.review_tone) }}
+  {{ ch.kpi("사용 토큰", op.kpi.tokens, op.kpi.tokens_sub, "purple") }}
+</div>
+{% if r.meaning %}<p><strong>권고의 의미</strong> — {{ r.meaning }}</p>{% endif %}
+{% if r.aligned %}<p class="ok">{{ r.relation }}</p>{% else %}<p class="warn">{{ r.relation }}</p>{% endif %}
 {% if ui.review %}{{ ch.stepper(ui.review, "에이전트 검토 단계", compact=true) }}{% endif %}
+<h4>에이전트 요약</h4>
 <p class="summary">{{ a.summary }}</p>
-<h3>주장과 근거</h3>
-<ul class="claims">
-{% for c in v.claims %}{% set chk = p.claims[loop.index0] %}
-  <li><span class="claim-mark {{ 'ok' if chk.ok else 'missing' }}" title="{{ '근거 모두 확인' if chk.ok else '근거 없음 ' ~ chk.missing|join(', ') }}">{{ "✓" if chk.ok else "⚠" }}</span> {{ c.text }}
-    <div>{% for id, val in c.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else "없음" }}</span>{% endfor %}
-    {% for t in c.txn_ids %}<a class="chip txn" href="#tab-evidence">{{ t }}</a>{% endfor %}</div>
-  </li>
-{% endfor %}
-</ul>
-{% if a.proposed_structure %}{% set st = a.proposed_structure %}
-<h3>제안 구조</h3>
-<p>{{ st.amount_krw|krw }} · {{ st.tenor_months }}개월 · {{ st.schedule }}{% if st.reduced_payment_months %} · 감액 월 {{ st.reduced_payment_months|join(", ") }}{% endif %}</p>
-<p>{{ st.rationale }}</p>
-{% endif %}
-{% if a.counterfactuals %}
-<h3>개선 조건(반사실)</h3>
-<ul class="counterfactuals">{% for cf in ui.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation }}
-  {% if cf.bar %}{{ ch.hbars(cf.bar, cf.metric_id ~ " 현재와 목표", "") }}{% endif %}</li>{% endfor %}</ul>
-{% endif %}
-{% if a.review %}<p class="review">검토 에이전트: {{ "통과" if a.review.passed else "미통과" }} ({{ a.review.rounds }}회){% for i in a.review.issues %} · {{ i }}{% endfor %}</p>{% endif %}
-</section>
-{% else %}<p class="note">에이전트 평가가 아직 없습니다.</p>{% endif %}
 </section>
 
+<section class="card">
+<h3>주장과 근거 <small>주장마다 에이전트가 인용한 지표·거래와 실제 값</small></h3>
+<div class="opinion-claims">
+<table class="claims-table">
+  <thead><tr><th>#</th><th>확인</th><th>주장</th><th>근거 지표(실제 값)</th><th>근거 거래</th></tr></thead>
+  <tbody>
+  {% for c in op.claims %}
+  <tr>
+    <td>{{ c.n }}</td>
+    <td><span class="claim-mark {{ 'ok' if c.ok else 'missing' }}" title="{{ '근거 모두 확인' if c.ok else '근거 값을 찾지 못한 항목이 있습니다' }}">{{ "✓" if c.ok else "⚠" }}</span></td>
+    <td>{{ c.text }}</td>
+    <td>{% for e in c.evidence %}<span class="chip{% if e.missing %} warn{% endif %}" title="{{ e.id }}">{{ e.label }} = {{ e.value }}</span>{% else %}-{% endfor %}</td>
+    <td>{% for t in c.txn_ids %}<a class="chip txn" href="#tab-evidence">{{ t }}</a>{% else %}-{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if op.mix %}
+<div class="chart-row">
+{{ ch.donut(op.mix.donut, "주장 근거 출처 구성") }}
+{{ ch.legend(op.mix.legend) }}
+</div>
+{% endif %}
+</div>
+<p class="note">✓ 인용한 근거 값이 모두 심사 지표·정책 결과에 있음 · ⚠ 일부 근거를 찾지 못함(심사역이 직접 확인). 거래 ID를 누르면 근거 거래 탭으로 갑니다.</p>
+</section>
+
+{% if op.structure %}{% set st = op.structure %}
+<section class="card">
+<h3>제안 구조</h3>
+<div class="grid-2">
+<div>
+<table class="kv">{% for k, val in st.rows %}<tr><th>{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
+{% if st.rationale %}<p><strong>근거</strong> — {{ st.rationale }}</p>{% endif %}
+</div>
+<div>
+{% if st.bars %}<h4>신청액·정책 한도·제안 금액</h4>{{ ch.hbars(st.bars, "신청액 정책 한도 제안 금액 비교", "만 원") }}{% endif %}
+</div>
+</div>
+{% if st.season %}
+<h4>월별 매출 지수와 감액 월 <small>평균 = 1.0</small></h4>
+{{ ch.columns(st.season.chart, "월별 매출 지수") }}
+{{ ch.legend(st.season.legend) }}
+{% endif %}
+</section>
+{% endif %}
+
+{% if op.counterfactuals %}
+<section class="card">
+<h3>개선 조건(반사실) <small>이 지표가 목표에 닿으면 판단이 나아집니다</small></h3>
+<table>
+  <thead><tr><th>지표</th><th>현재</th><th>목표</th><th>변화</th><th>방향</th><th>설명</th></tr></thead>
+  <tbody>{% for cf in op.counterfactuals %}<tr><td title="{{ cf.id }}">{{ cf.label }}</td><td>{{ cf.current }}</td><td>{{ cf.target }}</td><td>{{ cf.change }} ({{ cf.pct }})</td><td>{{ cf.direction }}</td><td>{{ cf.explanation }}</td></tr>{% endfor %}</tbody>
+</table>
+<ul class="counterfactuals">{% for cf in ui.counterfactuals %}{% if cf.bar %}<li>{{ op.counterfactuals[loop.index0].label }}{{ ch.hbars(cf.bar, cf.metric_id ~ " 현재와 목표", "") }}</li>{% endif %}{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="card">
+<h3>반성 루프 <small>분석 → 근거 검사 → 검토, 최대 3라운드</small></h3>
+{% if a.review %}<p class="review">검토 에이전트: <strong>{{ "통과" if a.review.passed else "미통과" }}</strong> ({{ a.review.rounds }}회){% if not a.review.passed %} — 마지막 초안을 그대로 보여 줍니다. 아래 지적 사항을 심사역이 확인하세요.{% endif %}</p>
+{% if a.review.issues %}<ul class="cons">{% for i in a.review.issues %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}{% endif %}
+{% if op.loop %}
+<table>
+  <thead><tr><th>라운드</th><th>도구 호출</th><th>토큰</th><th>근거 검사</th><th>검토 에이전트</th><th>결과</th></tr></thead>
+  <tbody>{% for rd in op.loop.rows %}<tr><td>{{ rd.n }}</td><td>{{ rd.tools }}회</td><td>{{ "{:,}".format(rd.tokens) }}</td><td>{{ "통과" if not rd.grounding else "문제 " ~ rd.grounding ~ "건" }}</td><td>{{ rd.reviewer }}</td><td><span class="badge badge-{{ rd.tone }}">{{ rd.outcome }}</span></td></tr>{% endfor %}</tbody>
+</table>
+{% set issues = op.loop.rows|map(attribute="issues")|sum(start=[]) %}
+{% if issues %}<details><summary>라운드별 지적 사항 {{ issues|length }}건</summary>
+<ul>{% for rd in op.loop.rows %}{% for kind, text in rd.issues %}<li><strong>{{ rd.n }}라운드 {{ kind }}</strong> — {{ text }}</li>{% endfor %}{% endfor %}</ul>
+</details>{% endif %}
+<div class="grid-2">
+{% if op.loop.tools %}<div><h4>분석 에이전트 도구 호출</h4>{{ ch.hbars(op.loop.tools, "도구별 호출 수", "회") }}</div>{% endif %}
+{% if op.loop.issues_chart %}<div><h4>라운드별 지적 수</h4>{{ ch.columns(op.loop.issues_chart, "라운드별 지적 수") }}
+{{ ch.legend((("근거 검사 문제", "amber"), ("검토 지적", "red"))) }}</div>{% endif %}
+</div>
+{% else %}<p class="note">반성 루프 기록이 없습니다.</p>{% endif %}
+</section>
+
+{% if op.usage %}
+<section class="card">
+<h3>모델 사용 <small>에이전트 평가 단계{% if op.usage.seconds is not none %} · {{ op.usage.seconds }}초{% endif %}</small></h3>
+<div class="grid-2">
+<table>
+  <thead><tr><th>모델</th><th>역할</th><th>호출</th><th>입력 토큰</th><th>출력 토큰</th></tr></thead>
+  <tbody>{% for u in op.usage.rows %}<tr><td>{{ u.model }}</td><td>{{ u.role }}</td><td>{{ u.calls }}</td><td>{{ "{:,}".format(u.input) }}</td><td>{{ "{:,}".format(u.output) }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if op.usage.bars %}<div>{{ ch.hbars(op.usage.bars, "모델별 토큰", "") }}</div>{% endif %}
+</div>
+</section>
+{% endif %}
+{% else %}<p class="note">에이전트 평가가 아직 없습니다.</p>{% endif %}
+</section>
 <section id="tab-evidence" class="tab-panel" role="tabpanel" aria-labelledby="tab-evidence-tab">
 <h2 class="tab-title">근거 거래</h2>
 {% if v.transactions %}

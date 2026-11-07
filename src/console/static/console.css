@@ -286,3 +286,12 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
 p.warn { background: #fff4ce; border-left: 4px solid var(--c-amber); padding: .5rem .75rem; color: var(--warn); }
 @media (max-width: 900px) { .signal { grid-template-columns: 14px 1fr; } .signal .chart, .signal-text { grid-column: 2; } }
 .applicant-id { color: var(--muted); font-size: .8em; }
+/* 에이전트 의견 탭 */
+.badge-green { background: #dff6dd; color: var(--good); }
+.badge-amber { background: #fff4ce; color: var(--warn); }
+.badge-purple { background: #efe6f8; color: #5c2e91; }
+.opinion-claims { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 1rem; align-items: start; }
+.opinion-claims .chart-row { flex-direction: column; align-items: flex-start; gap: .5rem; }
+.claims-table td:first-child, .claims-table td:nth-child(2) { width: 2rem; text-align: center; }
+h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
+@media (max-width: 900px) { .opinion-claims { grid-template-columns: 1fr; } }

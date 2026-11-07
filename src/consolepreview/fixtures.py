@@ -133,8 +133,26 @@ def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "policy
     if rec is not None and doc["policy"] is not None:
         rec = REC_OF[doc["policy"]["decision"]] if rec == "policy" else rec
         doc["assessment"] = _assessment(app_id, rec, doc["underwriting"], doc["policy"], amount)
+        doc["assessment_run"] = _assessment_run()
+        doc["steps"] = [{"step": "assess", "outcome": "ok", "agent": True, "duration_ms": 31_400, "usage": [
+            {"model": "gpt-5.6-sol", "input_tokens": 18_200, "output_tokens": 2_900, "calls": 5},
+            {"model": "gpt-5.4-mini", "input_tokens": 4_100, "output_tokens": 380, "calls": 1}]}]
     doc.update(overrides)
     return doc
+
+
+def _assessment_run() -> dict[str, Any]:
+    """반성 루프 기록 예시: 1라운드는 근거 검사에서 돌려보내고 2라운드에 검토를 통과한다(도구 인자는 비움)."""
+    def calls(*names: str) -> list[dict[str, Any]]:
+        return [{"name": n, "arguments": {}, "error": None} for n in names]
+
+    return {"models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.4-mini"}, "rounds": [
+        {"round": 1, "analyst": {"total_tokens": 11_800, "tool_calls": calls(
+            "get_metrics", "get_monthly_series", "query_transactions", "code_interpreter")},
+         "grounding_issues": ["claim 3: 근거 목록에 없는 숫자 4.7"]},
+        {"round": 2, "analyst": {"total_tokens": 9_300, "tool_calls": calls("get_metrics")}, "grounding_issues": [],
+         "reviewer": {"total_tokens": 4_480, "tool_calls": []}, "review_issues": []},
+    ]}
 
 
 def _start(minutes_ago: int) -> datetime:

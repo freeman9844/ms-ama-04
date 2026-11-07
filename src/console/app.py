@@ -44,6 +44,7 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
+from console.opinion import opinion_panel
 from console.ops import (
     AXIS_LABELS,
     RECENT_RUN,
@@ -256,7 +257,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
         return render("detail.html", user, status_code, v=view, ui=detail_summary(view), panels=assessment_panels(view),
-                      in_progress=in_progress,
+                      op=opinion_panel(view), in_progress=in_progress,
                       consents=consents, **ctx)
 
     @app.get("/healthz")

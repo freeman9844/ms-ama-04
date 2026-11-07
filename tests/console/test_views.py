@@ -28,6 +28,16 @@ def test_restore_shows_real_names_in_assessment_and_transactions(raw, make_doc, 
     ]
 
 
+def test_assessment_run_issues_follow_the_same_pii_view(raw, make_doc, key, mask):
+    run = {"rounds": [{"round": 1, "review_issues": [mask("김대표 인출 근거 부족")]}]}
+    doc = make_doc(assessment_run=run)
+    restored = detail_view(doc, load_raw(raw, doc), key, restore=True)["assessment_run"]
+    masked = detail_view(doc, load_raw(raw, doc), key, restore=False)["assessment_run"]
+    assert restored["rounds"][0]["review_issues"] == ["김대표 인출 근거 부족"]
+    assert "김대표" not in str(masked) and "[[PERSON_" in str(masked)
+    assert detail_view(make_doc(), None, key, restore=True)["assessment_run"] is None
+
+
 def test_without_restore_everything_stays_pseudonymized(raw, make_doc, key):
     view = detail_view(make_doc(), load_raw(raw, make_doc()), key, restore=False)
     assert view["pii"] == "masked"

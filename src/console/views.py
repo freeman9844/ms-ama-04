@@ -84,6 +84,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         else {}
     )
     assessment = _map_strings(doc["assessment"], model_text) if doc.get("assessment") else None
+    assessment_run = _map_strings(doc["assessment_run"], model_text) if doc.get("assessment_run") else None
     claims = [
         {
             "text": c["text"],
@@ -107,6 +108,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "doc": doc,
         "pii": pii,
         "assessment": assessment,
+        "assessment_run": assessment_run,
         "claims": claims,
         "transactions": transactions,
         "features": uw.get("features") or {},

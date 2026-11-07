@@ -82,6 +82,9 @@ def test_detail_tabs_and_assessment_panels(client):
     assert 'class="chart gauge"' in html and 'class="chart donut"' in html and 'class="signals"' in html
     assert "한도 산정" in html and "상환 여력" in html and "지출 구성" in html and "남는 돈" in html
     assert 'class="claim-mark ok"' in html and 'class="claim-mark missing"' in html
+    for text in ("권고의 의미", "근거 확인 주장", "반성 루프", "분석 에이전트 도구 호출", "모델 사용", "gpt-5.6-sol"):
+        assert text in html, text
+    assert 'class="claims-table"' in html and 'aria-label="주장 근거 출처 구성"' in html
     assert client.get("/static/tabs.js").status_code == 200
 
 
