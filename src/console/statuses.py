@@ -24,6 +24,6 @@ FLAG_LABELS = {
     "assessment_unavailable": "에이전트 평가 없음",
     "review_not_passed": "검토 에이전트 미통과",
     "agent_fallback": "에이전트 대체 경로 사용",
-    "agent_assessment_mismatch": "에이전트 권고와 정책 판정 불일치",
+    "agent_assessment_mismatch": "데이터 수집 에이전트 보고와 코드 검증 불일치",
     "monitoring_unavailable": "사후 모니터링 시작 실패",
 }

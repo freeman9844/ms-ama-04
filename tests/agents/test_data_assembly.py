@@ -148,6 +148,22 @@ def test_unconsented_source_is_refused_and_not_missing(cases):
     assert r["sources"]["tax"]["consented"] is False
 
 
+def test_agent_input_maps_each_collectable_source_to_its_scope(cases):
+    # 실측(2026-11-07): 범위 이름(account)만 주면 모델이 profile·transactions가 범위 밖이라 보고 건너뛰어
+    # agent_assessment_mismatch가 거의 모든 신청에 붙었다. 원천별로 어느 동의에 속하는지 적어 준다.
+    agent = ScriptedAgent([])
+    run_assembly(cases["seller-dailylook-01"], agent=agent)
+    text = agent.inputs[0]
+    for source, scope in (("profile", "account"), ("transactions", "account"), ("tax", "tax"), ("pg", "pg")):
+        assert f"{source}({scope} 동의)" in text
+    assert "모두 수집" in text
+
+    agent = ScriptedAgent([])
+    run_assembly(cases["seller-dailylook-01"], agent=agent, scopes=("account",))
+    assert "profile(account 동의)" in agent.inputs[0]
+    assert "tax(" not in agent.inputs[0] and "pg(" not in agent.inputs[0]
+
+
 def test_unavailable_source_is_retried_within_budget_then_missing(cases):
     agent = ScriptedAgent(["pg", "pg", "pg", "pg"])
     result, api = run_assembly(cases["seller-dailylook-01"], agent=agent, failures={"pg": [503, 503, 503]})

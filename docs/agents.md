@@ -25,7 +25,8 @@
 - **도구 allowlist:** `fetch_source`(`src/agents/data_assembly.py`). 핸들러는 `AssemblySession.fetch_source`로, 동의 범위 밖 원천은 `scope_not_consented`를 돌려주고, `unavailable`은 최대 `MAX_ATTEMPTS=3`회 재시도한다.
 - **가드레일:** 원본은 세션에 남고 LLM에는 가명처리한 요약만 간다(`build_pseudonymizer`로 상호·대표자·사업자번호·적요 속 이름을 토큰화). 적요 안 "지시처럼 보이는 문장"은 따르지 않고 anomalies에 기록. 승인·한도·금리는 판단·언급 금지.
 - **완결성은 코드가 계산:** `status`(complete/incomplete)와 `missing_sources`는 결정적으로 산출한다. 에이전트 판단은 `agent_assessment`로만 남는다.
-- **알려진 한계:** 에이전트가 빠뜨린 원천은 안전망(`safety_net`)이 동의 범위 안에서 마저 모은다. 에이전트의 `status`가 코드 산출과 다르면 `agent_assessment_mismatch` 플래그를 남긴다(결정에는 영향 없음, 사람이 본다). 러너가 없거나 실패하면 `agent_fallback`.
+- **알려진 한계:** 에이전트가 빠뜨린 원천은 안전망(`safety_net`)이 동의 범위 안에서 마저 모은다. 에이전트의 `status`가 코드 산출과 다르면 `agent_assessment_mismatch` 플래그를 남긴다(결정에는 영향 없음, 사람이 본다, 콘솔 라벨 "데이터 수집 에이전트 보고와 코드 검증 불일치"). 러너가 없거나 실패하면 `agent_fallback`.
+- **불일치 원인(2026-11-07 분석):** 예전 입력은 동의 범위 이름(`account, pg, tax`)과 원천 이름(`profile, transactions, tax, pg`)을 따로 줬다. 모델은 profile·transactions가 동의 범위 밖이라고 보고 건너뛴 뒤 `incomplete`로 보고했고, 안전망이 마저 모아 코드 판정은 `complete`가 되어 플래그가 거의 모든 신청에 붙었다(Foundry 트레이스 2일치: 161건 중 `complete` 보고 17건). 이제 입력은 원천마다 속한 동의를 `profile(account 동의)` 형식으로 적고 모두 수집하라고 지시한다(`_agent_input`).
 - **모델 근거:** 데이터 수집은 평가 suite 대상이 아니며 저비용 `gpt-5.4-mini`를 쓴다.
 
 ## 거래 분류
