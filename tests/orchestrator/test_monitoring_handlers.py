@@ -21,20 +21,23 @@ from journey.monitoring import (
     OutOfOrder,
     TOPIC_ALERT,
     TOPIC_FLOW,
-    handle_alert_raised,
+    TOPIC_REPAYMENT,
     handle_flow_update,
     handle_replay,
     handle_restructure_decision,
+    handle_repayment_updated,
     process_week,
 )
 from mockapis.app import create_app as create_mock_app
 from mockapis.demo import build_demo_cases, build_postloan_flows
+from shared.repayment import LENDER_DEBIT, due_dates
 
 AS_OF = date(2026, 11, 2)
 SECRET = b"s" * 32
 KEY = b"k" * 32
 NOW = datetime(2026, 11, 2, 9, 0, tzinfo=KST)
 LOAN = "app-1"
+FIRST_DUE = due_dates(AS_OF, WEEKS * 7)[0]  # 2026-12-02, 5주차
 
 
 class MemoryStore:
@@ -187,15 +190,15 @@ def replay(deps, **fields):
     return handle_replay(deps, json.dumps({"loan_id": LOAN} | fields))
 
 
-def pump(deps, outbox, topics=(TOPIC_FLOW, TOPIC_ALERT)):
+def pump(deps, outbox, topics=(TOPIC_FLOW, TOPIC_REPAYMENT)):
     """Service Bus 흉내: 아직 전달하지 않은 메시지를 발행 순서대로 전달한다(처리 중 새로 발행된 메시지 포함)."""
     while outbox.delivered < len(outbox.sent):
         topic, message, _, _ = outbox.sent[outbox.delivered]
         outbox.delivered += 1
         if topic == TOPIC_FLOW and topic in topics:
             handle_flow_update(deps, json.dumps(message))
-        elif topic == TOPIC_ALERT and topic in topics:
-            handle_alert_raised(deps, json.dumps(message))
+        elif topic == TOPIC_REPAYMENT and topic in topics:
+            handle_repayment_updated(deps, json.dumps(message))
 
 
 def flows(outbox):
@@ -207,7 +210,7 @@ def resume_until_done(deps, replay_id, deliver=lambda: None):
     pauses = 0
     while (mon := loan(deps)["monitoring"])["status"] == "paused":
         pauses += 1
-        assert decide_restructure(deps, mon["pause_alert_id"]) is True
+        assert decide_restructure(deps, mon["pause_case_id"]) is True
         assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == mon["paused_week"] + 1
         deliver()
     return pauses
@@ -224,6 +227,35 @@ def loan(deps):
 
 def alerts(deps):
     return [d for (c, i), d in deps.store.docs.items() if c == ALERTS and i.startswith("ew-")]
+
+
+def cases(deps):
+    return sorted((d for (c, i), d in deps.store.docs.items() if c == ALERTS and i.startswith("rc-")),
+                  key=lambda d: d["week"])
+
+
+def contacts(deps, replay_id):
+    return (deps.store.read(ALERTS, f"contacts-{replay_id}", LOAN) or {"contacts": []})["contacts"]
+
+
+class DropDebits:
+    """상환일 출금을 흐름에서 빼 미납을 만든다(데모 셀러는 마지막 회차만 미납이라 앞 회차 미납을 흉내 낸다)."""
+
+    def __init__(self, inner, dates):
+        self.inner, self.dates = inner, {d.isoformat() for d in dates}
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def fetch(self, kind, token):
+        out = self.inner.fetch(kind, token)
+        if kind != "flow":
+            return out
+        return [t for t in out if not (t["description"] == LENDER_DEBIT and t["booked_on"] in self.dates)]
+
+
+def missing_first_due(deps):
+    return replace(deps, mock=DropDebits(deps.mock, [FIRST_DUE]))
 
 
 def test_register_monitoring_builds_baseline_and_keeps_replay_state(mock_app):
@@ -253,8 +285,26 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     assert "new_debt" in week2["new_triggers"] and week2["alert_id"]
     found = alerts(deps)
     assert found and all(a["models"] == {"investigator": "detector_only"} for a in found)
-    # officer_review 경보는 자동 연락하지 않는다.
-    assert all(a["collections"]["decision"] == "none" and a["collections"]["contacts"] == [] for a in found)
+    # 조기경보는 심사역 검토용이다. 추심은 미납(데모 셀러는 13주차 3회차)에서만 돈다.
+    assert all(a["collections"] is None for a in found)
+    schedule = loan(deps)["repayment"]["schedule"]
+    assert [s["due_on"] for s in schedule] == [d.isoformat() for d in due_dates(AS_OF, WEEKS * 7)]
+    assert schedule[-1]["status"] == "missed" and schedule[-1]["case_id"] == f"rc-{mon['replay_id']}-i3"
+    assert all(s["status"] == "paid" and s["txn_id"] for s in schedule[:-1])
+    (case,) = cases(deps)
+    assert case["week"] == WEEKS and case["installment"]["no"] == 3 and case["missed_count"] == 1
+    assert case["recent_alert"]["alert_id"] == mon["alert_ids"][-1]
+    assert [c["by"] for c in case["collections"]["contacts"]] == ["fallback"]
+    assert case["collections"]["contacts"][0]["script_id"] == "missed_payment"  # 탐지기 경보는 medium
+    sent = contacts(deps, mon["replay_id"])
+    assert [c["by"] for c in sent] == ["reminder"] * 3 + ["fallback"]
+    assert [c["on"] for c in sent[:3]] == ["2026-11-29", "2027-01-01", "2027-01-26"]
+    assert mon["weeks"][WEEKS - 1]["case_id"] == case["case_id"]
+    assert mon["weeks"][3]["repayment"] == {"reminders": [1], "paid": [], "missed": []}
+    assert mon["weeks"][4]["repayment"]["paid"] == [1]
+    # 전망은 원장 상환일로 이번 대출 원리금을 뺀다: 4주차 창(11/30~12/27)엔 12/2, 5주차 창(12/7~1/3)엔 없다.
+    assert mon["weeks"][3]["projection"]["totals"]["installment"] == -loan(deps)["repayment"]["installment_krw"]
+    assert mon["weeks"][4]["projection"]["totals"].get("installment", 0) == 0
     # 트리거 종류마다 한 번만 조사한다.
     new = [t for w in mon["weeks"] for t in w["new_triggers"]]
     assert len(new) == len(set(new))
@@ -268,7 +318,7 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
 
 def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
     outbox = Outbox()
-    deps = make_deps(mock_app, events=outbox, agents=ScriptedAgents())
+    deps = missing_first_due(make_deps(mock_app, events=outbox, agents=ScriptedAgents()))
     approved_loan(deps)
     started = replay(deps)
     replay_id = started["replay_id"]
@@ -287,15 +337,19 @@ def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
     assert handle_flow_update(deps, json.dumps({"type": "smoke"})) is None
     pump(deps, outbox)
     mon = loan(deps)["monitoring"]
-    # 2주차 경보 → 추심이 재조정 요청 → 재생이 멈춘다. 결정 후 이어서 재생한다.
-    assert mon["status"] == "paused" and mon["paused_week"] == 2 and mon["processed_week"] == 2
-    published = len(flows(outbox))
-    handle_alert_raised(deps, outbox.bodies(TOPIC_ALERT)[0])  # 재전달된 alert.raised는 멈춘 재생을 움직이지 않는다
+    # 2주차 경보는 추심을 부르지 않는다. 5주차 1회차 미납 → 추심이 재조정 요청 → 재생이 멈춘다. 결정 후 이어서 재생한다.
+    case_id = f"rc-{replay_id}-i1"
+    assert (mon["status"], mon["paused_week"], mon["processed_week"], mon["pause_case_id"]) == ("paused", 5, 5, case_id)
+    assert [json.loads(b)["case_id"] for b in outbox.bodies(TOPIC_REPAYMENT)] == [case_id]
+    assert [m for m in outbox.sent if m[0] == TOPIC_REPAYMENT][0][2:] == (f"repayment.updated:{case_id}", LOAN)
+    published, sent_before = len(flows(outbox)), contacts(deps, replay_id)
+    assert handle_repayment_updated(deps, outbox.bodies(TOPIC_REPAYMENT)[0]) is None  # 재전달은 다시 연락하지 않는다
     assert len(flows(outbox)) == published and loan(deps)["monitoring"]["status"] == "paused"
-    assert decide_restructure(deps, mon["pause_alert_id"]) is True
+    assert contacts(deps, replay_id) == sent_before
+    assert decide_restructure(deps, mon["pause_case_id"]) is True
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
-    assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == 3
-    assert flows(outbox)[-1][1]["week"] == 3
+    assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == 6
+    assert flows(outbox)[-1][1]["week"] == 6
     pump(deps, outbox)
     pauses = resume_until_done(deps, replay_id, lambda: pump(deps, outbox))
     assert sorted({m[1]["week"] for m in flows(outbox)}) == list(range(1, WEEKS + 1))
@@ -306,7 +360,11 @@ def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
     assert [m[1]["alert_id"] for m in raised] == mon["alert_ids"] and all(m[3] == LOAN for m in raised)
     alert = deps.store.read(ALERTS, mon["alert_ids"][0], LOAN)
     assert alert["severity"] == "high" and alert["models"] == {"investigator": "gpt-5.4"}
-    assert alert["replay_id"] == started["replay_id"]
+    assert alert["replay_id"] == started["replay_id"] and alert["collections"] is None
+    # 13주차 미납은 재생을 멈추지 않는다. 재생은 끝나고 재조정 요청은 결정을 기다린다.
+    last = cases(deps)[-1]
+    assert last["week"] == WEEKS and last["restructure"]["status"] == "pending_officer"
+    assert mon["case_ids"] == [c["case_id"] for c in cases(deps)]
 
 
 def test_stale_replay_messages_are_ignored(mock_app):
@@ -411,24 +469,25 @@ def test_failure_after_claim_is_recorded_and_not_blocking(mock_app):
     assert replay(deps)["replay_id"] != mon["replay_id"]  # failed는 가드에 걸리지 않는다
 
 
-def test_alert_raised_runs_collections_once(mock_app):
+def test_repayment_updated_runs_collections_once(mock_app):
     outbox = Outbox()
     agents = ScriptedAgents()
-    deps = make_deps(mock_app, events=outbox, agents=agents)
+    deps = missing_first_due(make_deps(mock_app, events=outbox, agents=agents))
     approved_loan(deps)
     replay(deps)
     pump(deps, outbox, topics=(TOPIC_FLOW,))
-    body = outbox.bodies(TOPIC_ALERT)[0]
-    result = handle_alert_raised(deps, body)
+    assert loan(deps)["monitoring"]["processed_week"] == 5  # 추심이 끝나야 다음 주차를 낸다
+    body = outbox.bodies(TOPIC_REPAYMENT)[0]
+    result = handle_repayment_updated(deps, body)
     assert result["decision"] == "routed" and result["contacts"][0]["script_id"] == "hardship_offer"
-    assert handle_alert_raised(deps, body) is None
+    assert handle_repayment_updated(deps, body) is None
     assert agents.calls.count(COLLECTIONS_AGENT) == 1
-    alert_id = json.loads(body)["alert_id"]
-    doc = deps.store.read(ALERTS, alert_id, LOAN)
+    case_id = json.loads(body)["case_id"]
+    doc = deps.store.read(ALERTS, case_id, LOAN)
     assert doc["status"] == "restructure_pending" and doc["restructure"]["status"] == "pending_officer"
+    assert doc["restructure"]["request_id"] == f"rs-{case_id}"
     replay_id = loan(deps)["monitoring"]["replay_id"]
-    contacts = deps.store.read(ALERTS, f"contacts-{replay_id}", LOAN)
-    assert [c["status"] for c in contacts["contacts"]] == ["sent"]
+    assert [(c["by"], c["status"]) for c in contacts(deps, replay_id)] == [("reminder", "sent"), ("agent", "sent")]
     consent_id = loan(deps)["monitoring"]["consent_id"]
     monitoring_runs = [c for c in agents.calls if c in (EW_AGENT, COLLECTIONS_AGENT)]
     assert len(deps.store.read("consents", consent_id, consent_id)["foundry_conversations"]) == len(monitoring_runs)
@@ -436,41 +495,108 @@ def test_alert_raised_runs_collections_once(mock_app):
 
 def test_restructure_decision_requires_pending_request(mock_app):
     outbox = Outbox()
-    deps = make_deps(mock_app, events=outbox, agents=ScriptedAgents())
+    deps = missing_first_due(make_deps(mock_app, events=outbox, agents=ScriptedAgents()))
     approved_loan(deps)
     replay(deps)
     pump(deps, outbox, topics=(TOPIC_FLOW,))
-    alert_id = json.loads(outbox.bodies(TOPIC_ALERT)[0])["alert_id"]
-    decision = {"loan_id": LOAN, "alert_id": alert_id, "decision": "approve", "officer_id": "officer-1", "reason": "3개월 유예"}
+    case_id = json.loads(outbox.bodies(TOPIC_REPAYMENT)[0])["case_id"]
+    decision = {"loan_id": LOAN, "alert_id": case_id, "decision": "approve", "officer_id": "officer-1", "reason": "3개월 유예"}
     assert handle_restructure_decision(deps, json.dumps(decision)) is False  # 아직 Collections 전
     assert loan(deps)["monitoring"]["status"] == "replaying"  # 추심 전에는 멈추지도 다음 주차를 내지도 않는다
-    handle_alert_raised(deps, outbox.bodies(TOPIC_ALERT)[0])
+    handle_repayment_updated(deps, outbox.bodies(TOPIC_REPAYMENT)[0])
     assert loan(deps)["monitoring"]["status"] == "paused"
     assert handle_restructure_decision(deps, json.dumps(decision)) is True
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
     assert handle_restructure_decision(deps, json.dumps(decision)) is False
     assert handle_restructure_decision(deps, json.dumps({**decision, "decision": "maybe"})) is False
-    doc = deps.store.read(ALERTS, alert_id, LOAN)
+    doc = deps.store.read(ALERTS, case_id, LOAN)
     assert doc["status"] == "restructure_approved"
     assert doc["restructure"]["officer_id"] == "officer-1" and doc["restructure"]["reason"] == "3개월 유예"
 
 
-def test_alert_publish_failure_is_recorded(mock_app):
-    outbox = Outbox(fail_topics={TOPIC_ALERT})
-    deps = make_deps(mock_app, events=outbox, agents=ScriptedAgents())
+@pytest.mark.parametrize("topic", [TOPIC_REPAYMENT, TOPIC_ALERT])
+def test_publish_failure_is_recorded_and_replay_continues(mock_app, topic):
+    outbox = Outbox(fail_topics={topic})
+    deps = missing_first_due(make_deps(mock_app, events=outbox, agents=ScriptedAgents()))
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    pump(deps, outbox)
+    # 미납 발행이 실패하면 주차 핸들러가 직접 추심을 돌리고 잇는다(재조정 요청이면 멈춘다).
+    resume_until_done(deps, replay_id, lambda: pump(deps, outbox))
+    assert loan(deps)["monitoring"]["status"] == "completed"
+    docs = cases(deps) if topic == TOPIC_REPAYMENT else alerts(deps)
+    assert docs and all("sb down" in d["event_error"] for d in docs)
+    assert all(c["collections"] is not None for c in cases(deps))
+
+
+def test_week13_case_is_decidable_after_completion(mock_app):
+    deps = make_deps(mock_app, agents=ScriptedAgents())
     approved_loan(deps)
     replay(deps)
-    pump(deps, outbox)
     mon = loan(deps)["monitoring"]
-    assert mon["status"] == "completed"  # 경보 발행이 실패하면 추심을 기다리지 않고 다음 주차로 간다
-    assert all("sb down" in deps.store.read(ALERTS, a, LOAN)["event_error"] for a in mon["alert_ids"])
+    last = cases(deps)[-1]
+    assert mon["status"] == "completed" and mon["paused_week"] is None
+    assert last["week"] == WEEKS and last["restructure"]["status"] == "pending_officer"
+    assert decide_restructure(deps, last["case_id"]) is True
+    assert deps.store.read(ALERTS, last["case_id"], LOAN)["restructure"]["status"] == "approved"
+    assert loan(deps)["monitoring"]["status"] == "completed"
+
+
+def test_legacy_pause_alert_id_still_promotes(mock_app):
+    # 배포 전에 멈춘 대출 문서는 옛 키(pause_alert_id)를 쓴다. 결정 뒤 재개 대기로 올라가야 한다.
+    deps, replay_id = paused_inline(mock_app)
+    doc = loan(deps)
+    case_id = doc["monitoring"].pop("pause_case_id")
+    doc["monitoring"]["pause_alert_id"] = case_id
+    deps.store.upsert(LOANS, doc)
+    assert decide_restructure(deps, case_id, "decline") is True
+    assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+def test_new_replay_rebuilds_the_ledger(mock_app):
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    first = replay(deps)["replay_id"]
+    second = replay(deps)["replay_id"]
+    assert second != first
+    schedule = loan(deps)["repayment"]["schedule"]
+    assert schedule[-1]["case_id"] == f"rc-{second}-i3" and all(s["status"] != "scheduled" for s in schedule)
+    assert [c["by"] for c in contacts(deps, second)] == ["reminder"] * 3 + ["fallback"]
+
+
+def test_reminder_is_not_resent_when_a_week_is_retried(mock_app):
+    # 연락 기록을 쓴 뒤 대출 문서를 쓰기 전에 실패하면 같은 주차가 다시 온다. 안내를 두 번 보내지 않는다.
+    deps = make_deps(mock_app, events=Outbox())
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    for week in (1, 2, 3, 4):
+        process_week(deps, LOAN, replay_id, week)
+    doc = loan(deps)
+    doc["monitoring"]["processed_week"] = 3
+    doc["monitoring"]["weeks"].pop()
+    doc["repayment"]["schedule"][0].update(reminded_on=None, reminder_status=None)
+    deps.store.upsert(LOANS, doc)
+    assert process_week(deps, LOAN, replay_id, 4)["repayment"]["reminders"] == [1]
+    assert [c["ref"] for c in contacts(deps, replay_id)] == [f"{replay_id}-i1"]
+    assert loan(deps)["repayment"]["schedule"][0]["reminded_on"] == "2026-11-29"
+
+
+def test_reminder_at_night_is_deferred(mock_app):
+    deps = make_deps(mock_app)
+    deps = replace(deps, clock=lambda: NOW.replace(hour=23))
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    first = contacts(deps, replay_id)[0]
+    assert (first["by"], first["status"], first["reason"]) == ("reminder", "deferred", "contact_hours")
+    assert loan(deps)["repayment"]["schedule"][0]["reminder_status"] == "deferred"
 
 
 def test_unknown_loan_and_bad_messages(mock_app):
     deps = make_deps(mock_app)
     assert handle_replay(deps, json.dumps({"loan_id": "nope-1"})) is None
     assert handle_replay(deps, "not json") is None
-    assert handle_alert_raised(deps, json.dumps({"type": "alert.raised", "loan_id": LOAN, "alert_id": "x"})) is None
+    assert handle_repayment_updated(deps, json.dumps({"type": "repayment.updated", "loan_id": LOAN, "case_id": "x"})) is None
+    assert handle_repayment_updated(deps, json.dumps({"type": "alert.raised", "loan_id": LOAN, "alert_id": "x"})) is None
     assert process_week(deps, LOAN, "rp-x", 1) is None
 
 
@@ -494,25 +620,26 @@ def test_replay_refused_after_underwriting_consent_ended(mock_app):
 
 
 def paused_inline(mock_app):
-    deps = make_deps(mock_app, agents=ScriptedAgents())
+    deps = missing_first_due(make_deps(mock_app, agents=ScriptedAgents()))
     approved_loan(deps)
     started = replay(deps)
+    assert loan(deps)["monitoring"]["flow_start"] == AS_OF.isoformat()  # 상환일은 흐름 시작일(=심사 기준일) 기준
     return deps, started["replay_id"]
 
 
 def test_inline_replay_pauses_on_restructure_request_and_resumes(mock_app):
     deps, replay_id = paused_inline(mock_app)
     mon = loan(deps)["monitoring"]
-    assert mon["status"] == "paused" and mon["paused_week"] == mon["processed_week"] == 2
-    assert mon["pause_alert_id"] == f"ew-{replay_id}-w02" and len(mon["weeks"]) == 2
+    assert mon["status"] == "paused" and mon["paused_week"] == mon["processed_week"] == 5
+    assert mon["pause_case_id"] == f"rc-{replay_id}-i1" and len(mon["weeks"]) == 5
     assert replay(deps) is None  # 멈춘 재생을 새 재생이 덮지 않는다
     assert replay(deps, action="resume", replay_id=replay_id) is None  # 결정 전에는 재개할 수 없다
-    assert process_week(deps, LOAN, replay_id, 3) is None  # 멈춘 동안 들어온 주차 메시지는 무시
-    assert decide_restructure(deps, mon["pause_alert_id"], "decline") is True
+    assert process_week(deps, LOAN, replay_id, 6) is None  # 멈춘 동안 들어온 주차 메시지는 무시
+    assert decide_restructure(deps, mon["pause_case_id"], "decline") is True
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
     assert replay(deps, action="resume", replay_id="rp-other") is None
     resumed = replay(deps, action="resume", replay_id=replay_id)
-    assert resumed["from_week"] == 3 and resumed["replay_id"] == replay_id
+    assert resumed["from_week"] == 6 and resumed["replay_id"] == replay_id
     pauses = resume_until_done(deps, replay_id)
     mon = loan(deps)["monitoring"]
     assert mon["status"] == "completed" and mon["processed_week"] == WEEKS and len(mon["weeks"]) == WEEKS
@@ -524,10 +651,10 @@ def test_inline_replay_pauses_on_restructure_request_and_resumes(mock_app):
 def test_stop_ends_paused_replay_and_allows_a_new_one(mock_app):
     deps, replay_id = paused_inline(mock_app)
     assert replay(deps, action="stop", replay_id=replay_id) is None  # 결정 전에는 끝낼 수 없다
-    decide_restructure(deps, loan(deps)["monitoring"]["pause_alert_id"])
+    decide_restructure(deps, loan(deps)["monitoring"]["pause_case_id"])
     assert replay(deps, action="stop", replay_id=replay_id) == {"loan_id": LOAN, "replay_id": replay_id, "status": "stopped"}
     mon = loan(deps)["monitoring"]
-    assert mon["status"] == "stopped" and mon["stopped_at"] == NOW.isoformat() and mon["processed_week"] == 2
+    assert mon["status"] == "stopped" and mon["stopped_at"] == NOW.isoformat() and mon["processed_week"] == 5
     assert replay(deps, action="resume", replay_id=replay_id) is None
     assert replay(deps)["replay_id"] != replay_id  # 종료한 뒤에는 새 재생을 시작할 수 있다
 
@@ -537,7 +664,7 @@ def test_resume_after_underwriting_consent_ended_stops_with_reason(mock_app, end
     # 재조정을 기다리는 사이 심사 동의가 끝나면 원천 프로필이 지워져 남은 주차를 처리할 수 없다.
     # Service Bus 모드에서 재개를 받아 주면 주차 메시지가 계속 실패해 '재생 중'에 멈추므로 재개 전에 끝낸다.
     deps, replay_id = paused_inline(mock_app)
-    decide_restructure(deps, loan(deps)["monitoring"]["pause_alert_id"])
+    decide_restructure(deps, loan(deps)["monitoring"]["pause_case_id"])
     cid = loan(deps)["underwriting_consent_id"]
     consent = deps.store.read("consents", cid, cid)
     consent["status"] = ended
@@ -554,7 +681,7 @@ def test_resume_after_underwriting_consent_ended_stops_with_reason(mock_app, end
 def test_resume_after_monitoring_consent_ended_stops_with_reason(mock_app, ended):
     # 사후 동의가 끝나면 flow.json이 지워져 남은 주차를 읽을 수 없다. 재개 전에 이유를 남기고 끝낸다.
     deps, replay_id = paused_inline(mock_app)
-    decide_restructure(deps, loan(deps)["monitoring"]["pause_alert_id"])
+    decide_restructure(deps, loan(deps)["monitoring"]["pause_case_id"])
     cid = loan(deps)["monitoring"]["consent_id"]
     consent = deps.store.read("consents", cid, cid)
     consent["status"] = ended
@@ -570,33 +697,33 @@ def test_decision_landing_between_pause_check_and_pause_write_still_awaits_resum
     # 재개 대기로 올리지 않는다. 뒤이어 멈춤을 쓰면 결정이 끝났는데도 '멈춤'에 영영 남는다.
     deps, replay_id = paused_inline(mock_app)
     doc = loan(deps)
-    alert_id = doc["monitoring"]["pause_alert_id"]
-    doc["monitoring"].update(status="replaying", paused_week=None, pause_alert_id=None)
+    case_id = doc["monitoring"]["pause_case_id"]
+    doc["monitoring"].update(status="replaying", paused_week=None, pause_case_id=None)
     deps.store.upsert(LOANS, doc)
     read = deps.store.read
 
     def racing_read(container, item_id, partition_key):
         got = read(container, item_id, partition_key)
-        if container == ALERTS and item_id == alert_id and deps.store.read is racing_read:
+        if container == ALERTS and item_id == case_id and deps.store.read is racing_read:
             deps.store.read = read
-            assert decide_restructure(deps, alert_id) is True
+            assert decide_restructure(deps, case_id) is True
         return got
 
     deps.store.read = racing_read
     week = doc["monitoring"]["processed_week"]
-    assert monitoring_module._after_week(deps, LOAN, replay_id, week, alert_id) == "paused"
+    assert monitoring_module._after_week(deps, LOAN, replay_id, week, case_id) == "paused"
     mon = loan(deps)["monitoring"]
-    assert (mon["status"], mon["pause_alert_id"]) == ("awaiting_resume", alert_id)
+    assert (mon["status"], mon["pause_case_id"]) == ("awaiting_resume", case_id)
     assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == week + 1
 
 
 def test_restructure_decision_for_other_alert_does_not_unpause(mock_app):
     deps, _ = paused_inline(mock_app)
     doc = loan(deps)
-    doc["monitoring"]["pause_alert_id"] = "ew-elsewhere"
+    doc["monitoring"]["pause_case_id"] = "rc-elsewhere"
     deps.store.upsert(LOANS, doc)
-    alert_id = alerts(deps)[0]["id"]
-    assert decide_restructure(deps, alert_id) is True
+    case_id = cases(deps)[0]["id"]
+    assert decide_restructure(deps, case_id) is True
     assert loan(deps)["monitoring"]["status"] == "paused"
 
 

@@ -152,6 +152,16 @@ class AlertRaised(BaseModel):
     alert_id: str = Field(min_length=1, max_length=128)
 
 
+class RepaymentUpdated(BaseModel):
+    """repayment.updated 토픽 메시지(세션 = loan_id). 상환일 미납으로 추심 건이 열렸다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["repayment.updated"]
+    loan_id: str = Field(pattern=LOAN_ID_PATTERN)
+    case_id: str = Field(min_length=1, max_length=128)
+
+
 class RestructureDecision(BaseModel):
     """restructure-decisions 큐 메시지. 재조정 상담 요청에 대한 심사역 결정."""
 

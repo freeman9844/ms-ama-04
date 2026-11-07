@@ -140,7 +140,7 @@ def test_function_app_registers_triggers(monkeypatch):
 def test_servicebus_triggers_only_when_enabled(monkeypatch):
     app = load_app(monkeypatch, "sb-x.servicebus.windows.net")
     functions = {f.get_function_name(): f for f in app.get_functions()}
-    expected = {"flow_updated": ("flow.updated", "early-warning"), "alert_raised": ("alert.raised", "collections")}
+    expected = {"flow_updated": ("flow.updated", "early-warning"), "repayment_updated": ("repayment.updated", "collections")}
     for name, (topic, subscription) in expected.items():
         binding = json.loads(functions[name].get_function_json())["bindings"][0]
         assert binding["type"] == "serviceBusTrigger"

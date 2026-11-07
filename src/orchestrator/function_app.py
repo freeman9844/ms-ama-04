@@ -13,11 +13,11 @@ from journey.entry import handle_decision, handle_start
 from journey.grievance import handle_grievance, handle_grievance_decision
 from journey.metering import run_metered
 from journey.monitoring import (
-    TOPIC_ALERT,
     TOPIC_FLOW,
-    handle_alert_raised,
+    TOPIC_REPAYMENT,
     handle_flow_update,
     handle_replay,
+    handle_repayment_updated,
     handle_restructure_decision,
 )
 from journey.orchestration import journey
@@ -160,9 +160,9 @@ if os.environ.get("SERVICEBUS_FQDN"):
     @app.service_bus_topic_trigger(
         arg_name="msg",
         connection=SB_CONNECTION,
-        topic_name=TOPIC_ALERT,
+        topic_name=TOPIC_REPAYMENT,
         subscription_name="collections",
         is_sessions_enabled=True,
     )
-    def alert_raised(msg: func.ServiceBusMessage) -> None:
-        handle_alert_raised(deps(), msg.get_body().decode("utf-8"))
+    def repayment_updated(msg: func.ServiceBusMessage) -> None:
+        handle_repayment_updated(deps(), msg.get_body().decode("utf-8"))
