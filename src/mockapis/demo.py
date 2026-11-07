@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from mockapis.postloan import FlowScenario, PostLoanFlow, generate_postloan
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, SyntheticCase, generate_case, load_persona
+from shared.krcalendar import next_business_day
 from shared.segments import LOAD_GRID
 
 KST = timezone(timedelta(hours=9), "KST")
@@ -78,11 +79,13 @@ POSTLOAN_SEED_OFFSET = 1000
 def build_postloan_flows(cases: Mapping[str, SyntheticCase], as_of: date) -> dict[str, PostLoanFlow]:
     seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
     seeds.update({a.applicant_id: a.seed for a in LOAD_GRID})
+    # 대출은 영업일에 실행된다. 오케스트레이터가 첫 거래일로 상환 원장을 만들므로 시작일에 거래가 있어야 상환일이 맞는다.
+    start = next_business_day(as_of)
     return {
         applicant_id: generate_postloan(
             case,
             FlowScenario.STACKING if applicant_id in STACKING_APPLICANTS else FlowScenario.STABLE,
-            as_of,
+            start,
             seeds.get(applicant_id, 0) + POSTLOAN_SEED_OFFSET,
         )
         for applicant_id, case in cases.items()

@@ -147,3 +147,16 @@ def test_seller_name_matches_generated_business_names():
     cases = {**build_demo_cases(as_of), **build_load_cases(as_of)}
     assert {k: seller_name(k) for k in cases} == {k: c.persona.business_name for k, c in cases.items()}
     assert seller_name("someone-else") is None
+
+def test_postloan_ledger_start_matches_mock_dues_on_weekend_as_of():
+    # 오케스트레이터는 첫 거래일로 원장을 만든다. 주말 as_of에서도 Mock 상환일과 같아야 납부 건이 미납이 되지 않는다.
+    from mockapis.demo import build_postloan_flows
+    from mockapis.postloan import POSTLOAN_DAYS
+    from shared.repayment import LENDER_DEBIT, due_dates
+
+    saturday = date(2026, 11, 7)
+    flows = build_postloan_flows(build_demo_cases(saturday), saturday)
+    for applicant_id, flow in flows.items():
+        flow_start = min(t.booked_on for t in flow.transactions)
+        debits = {t.booked_on for t in flow.transactions if t.description == LENDER_DEBIT}
+        assert debits | set(flow.missed_installments) == set(due_dates(flow_start, POSTLOAN_DAYS)), applicant_id
