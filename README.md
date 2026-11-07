@@ -12,6 +12,7 @@ flowchart LR
     console["Officer Console<br/>internal cae-int, 데모 인증"]
     orch["Journey Orchestrator<br/>Durable Functions"]
     foundry["Foundry 에이전트 + 모델"]
+    apim["API Management<br/>AI 게이트웨이(내부 모드)"]
     policy["Policy Engine<br/>결정론적 규칙"]
     mock["Mock MyData/세무/PG API"]
     data["Cosmos / Blob / 큐"]
@@ -21,6 +22,9 @@ flowchart LR
   console -->|명령 큐| orch
   console -->|읽기| data
   orch <--> foundry
+  foundry -->|모델 호출, 에이전트별 TPM| apim
+  orch -->|거래 분류 Decision-1| apim
+  apim -->|관리 ID 인증| foundry
   orch <--> policy
   orch <--> mock
   orch --> data
@@ -38,7 +42,7 @@ flowchart LR
 | SLO1: 접수 → 심사역 대기열 p95 | 1.2분(목표 ≤ 10분, n=24) | [load 보고서](ops/reports/load-20261102110233/report.md) 1장 |
 | SLO2: 에이전트 단계 성공률 | 100.0%(72/72, 목표 ≥ 99.0%) | [load 보고서](ops/reports/load-20261102110233/report.md) 1장 |
 | 건당 AI 비용 | $0.0423(캐시 할인 미반영 상한) | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
-| 월 고정비 | $304.73(Cost Management 하루치 × 30) | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
+| 월 고정비 | $304.73(Cost Management 하루치 × 30). 측정 뒤 추가: APIM 약 $51, Functions always ready 약 $62, App Gateway WAF v2 약 $370 | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
 | 건당 총비용(월 1,000건) | $0.35(정밀값 $0.3470) | [비용 모델](docs/cost-model.md), [load 보고서](ops/reports/load-20261102110233/report.md) 2장 |
 | 거래 분류: 규칙 선분류 비율 | 80.0%(전체 4,128건) | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |
 | 거래 분류: 범용 LLM 폴백 비율 | decision-1+mini 25.0% (mini 단독 100.0%), 두 구성 모두 macro F1 1.000 | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |
@@ -65,10 +69,10 @@ python -m ops window open --acr           # 배포 창: 운영자 IP만 잠시 �
 python -m ops smoke                       # Private Endpoint 경로 + 콘솔 관문 검증(게이트웨이가 있어야 함)
 python -m ops deploy all                  # 이미지 4종 + Functions 코드
 python -m ops window close                # 작업 뒤 반드시 닫기
-azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN> (자체 서명 인증서 경고는 넘긴다)
+azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN>/ (자체 서명 인증서 경고는 넘긴다)
 ```
 
-콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서·게이트웨이를 만들려고 두 번 프로비저닝하므로 smoke는 그 뒤에 실행한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)).
+콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서·게이트웨이를 만들려고 두 번 프로비저닝하므로 smoke는 그 뒤에 실행한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)). 게이트웨이 서브넷은 `Microsoft.Network/applicationGateways`로 위임하고 NSG `nsg-appgw`(인터넷 80/443 허용)를 둔다. IP 제한은 WAF 규칙이 맡는다. 모바일 회선 등으로 공인 IP가 바뀌어 콘솔이 403이면 `CONSOLE_IP`를 갱신한다([deploy](docs/runbook/deploy.md#콘솔-waf-운영자-ip-규칙)).
 
 ## 문서 지도
 
@@ -88,7 +92,7 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN> 
 | [배포](docs/runbook/deploy.md) | 배포 창, 구성요소별 배포, 운영자 IP 변경 대응 |
 | [운영](docs/runbook/operate.md) | 일시 정지·재개, smoke, 평가, 운영 지표·장애 주입, 비용 관리 |
 | [문제 해결](docs/runbook/troubleshooting.md) | 증상별 원인과 대응 |
-| [운영 실행 기록](docs/runbook/deploy-history.md) | P2~P6b 배포·실측 원문 기록(이전 README 본문 보존) |
+| [운영 실행 기록](docs/runbook/deploy-history.md) | P2~App Gateway WAF 배포·실측 원문 기록(이전 README 본문 보존) |
 
 ## 알려진 한계(요약)
 
@@ -113,4 +117,10 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN> 
 | P5b | 동의 수명주기·이의제기 | [Plan](docs/superpowers/plans/2026-11-01-p5b-consent-lifecycle-grievance.md) |
 | P6a | 평가 하네스 | [Spec](docs/superpowers/specs/2026-11-01-p6a-eval-harness-design.md) · [Plan](docs/superpowers/plans/2026-11-01-p6a-eval-harness.md) |
 | P6b | 운영 지표·SLO·비용·장애 주입 | [Spec](docs/superpowers/specs/2026-11-02-p6b-ops-metrics-design.md) · [Plan](docs/superpowers/plans/2026-11-02-p6b-ops-metrics.md) |
-| P6c | 문서·데모(진행 중, 리허설 2026-11-03 실시) | [Spec](docs/superpowers/specs/2026-11-02-p6c-docs-demo-design.md) · [Plan](docs/superpowers/plans/2026-11-02-p6c-docs-demo.md) |
+| P6c | 문서·데모(리허설 2026-11-03 실시) | [Spec](docs/superpowers/specs/2026-11-02-p6c-docs-demo-design.md) · [Plan](docs/superpowers/plans/2026-11-02-p6c-docs-demo.md) |
+| P7 | 심사 콘솔 UI 고도화 | [Spec](docs/superpowers/specs/2026-11-03-p7-console-ui-design.md) · [Plan](docs/superpowers/plans/2026-11-03-p7-console-ui.md) |
+| P8 | 소액 대출·온라인 셀러 데이터 | [Spec](docs/superpowers/specs/2026-11-03-p8-small-loan-sellers-design.md) · [Plan](docs/superpowers/plans/2026-11-03-p8-small-loan-sellers.md) |
+| P9 | 고객 신청 채널·재생 정지/재개·심사 화면 개선 | [Spec](docs/superpowers/specs/2026-11-04-p9-customer-intake-and-officer-ux-design.md) · [Plan](docs/superpowers/plans/2026-11-04-p9-customer-intake-and-officer-ux.md) |
+| AI 게이트웨이 | 모든 LLM 호출을 APIM으로(에이전트별 TPM·Prompt Shields·토큰 지표) | [Spec](docs/superpowers/specs/2026-11-05-ai-gateway-apim-design.md) · [Plan](docs/superpowers/plans/2026-11-05-ai-gateway-apim.md) |
+| 결정 반영 단축 | 심사역 결정 반영 약 11초 → 2.6초(큐 폴링 2초·always ready) | [기록](docs/runbook/deploy-history.md#2026-11-05-심사역-결정-반영-지연-단축) |
+| App Gateway WAF | 콘솔 단일 진입점 App Gateway WAF v2(DRS 2.1, 운영자 IP), `cae-web` 제거 | [Spec](docs/superpowers/specs/2026-11-06-appgw-waf-design.md) · [Plan](docs/superpowers/plans/2026-11-06-appgw-waf.md) |
