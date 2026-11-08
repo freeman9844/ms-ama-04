@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from console import charts
-from console.dashboard import EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, krw_text, man
+from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, krw_text, man
 from console.statuses import FLAG_LABELS
 
 PRODUCT_MAX_KRW = 10_000_000
@@ -40,10 +40,6 @@ SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
 SIGNAL_TONES = {"pass": "green", "refer": "amber", "knockout": "red", "unknown": "grey"}
 SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "knockout": "위반(거절 기준)", "unknown": "값 없음"}
 RECOMMENDATION_TONES = {"approve": "green", "conditional": "blue", "refer": "purple", "decline": "red"}
-EXPENSE_COLORS = {
-    "supplier": "blue", "rent": "purple", "payroll": "amber", "tax_insurance": "teal", "other_operating": "orange",
-    "debt_service": "red", "owner_draw": "pink", "unclassified": "grey",
-}
 LEFTOVER = ("leftover", "남는 돈", "green")
 
 

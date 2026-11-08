@@ -89,7 +89,7 @@ def test_expense_donut_adds_leftover_and_falls_back_to_monthly(make_doc):
     ex = assessment_panels(doc_view)["expenses"]
     assert ex["source"] == "breakdown" and ex["leftover"] == 4_000_000
     assert [(a["label"], a["value"], a["color"]) for a in ex["donut"]["arcs"]] == [
-        ("거래처·물류", 600, "blue"), ("남는 돈", 400, "green")]
+        ("거래처·물류", 600, "neutral"), ("남는 돈", 400, "green")]
     fallback = assessment_panels(view(make_doc, STRONG))["expenses"]
     assert fallback["source"] == "monthly" and fallback["leftover"] == 8_000_000
     assert [a["label"] for a in fallback["donut"]["arcs"]] == ["운영비", "상환", "대표자 인출", "남는 돈"]

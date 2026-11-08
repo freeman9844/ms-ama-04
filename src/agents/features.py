@@ -69,6 +69,7 @@ class Underwriting:
     monthly: list[dict[str, int | str]]
     categories: dict[str, Category]
     expense_breakdown: list[dict[str, int | str]] = field(default_factory=list)
+    expense_monthly: list[dict[str, int | str]] = field(default_factory=list)
 
 
 def monthly_installment(principal: int, tenor_months: int, annual_rate: float = ANNUAL_RATE) -> float:
@@ -214,7 +215,27 @@ def compute_underwriting(
         monthly=adjusted.monthly,
         categories=adjusted.categories,
         expense_breakdown=expense_breakdown(transactions, adjusted.categories, semantic_labels or {}, as_of),
+        expense_monthly=expense_monthly(transactions, adjusted.categories, semantic_labels or {}, as_of),
     )
+
+
+def expense_monthly(
+    transactions: Sequence[Transaction],
+    categories: Mapping[str, Category],
+    labels: Mapping[str, str],
+    as_of: date,
+) -> list[dict[str, int | str]]:
+    """완결 월마다 출금(양수 원)을 EXPENSE_GROUPS로 나눈다. 월 목록은 `monthly`와 같다(거래가 있는 완결 월)."""
+    current = _month(as_of)
+    months = sorted({_month(t.booked_on) for t in transactions if _month(t.booked_on) < current})
+    sums = {m: dict.fromkeys((g for g, _ in EXPENSE_GROUPS), 0) for m in months}
+    for t in transactions:
+        m = _month(t.booked_on)
+        if t.amount_krw >= 0 or m >= current:
+            continue
+        group = _RULE_GROUP.get(categories[t.txn_id]) or _LABEL_GROUP.get(labels.get(t.txn_id, ""), "unclassified")
+        sums[m][group] -= t.amount_krw
+    return [{"month": f"{y:04d}-{mo:02d}", **sums[(y, mo)]} for y, mo in months]
 
 
 def expense_breakdown(
@@ -224,15 +245,10 @@ def expense_breakdown(
     as_of: date,
 ) -> list[dict[str, int | str]]:
     """완결 월 평균 출금(양수 원)을 EXPENSE_GROUPS 순서로 낸다."""
-    current = _month(as_of)
-    n = len({_month(t.booked_on) for t in transactions if _month(t.booked_on) < current})
-    sums = dict.fromkeys((g for g, _ in EXPENSE_GROUPS), 0)
-    for t in transactions:
-        if t.amount_krw >= 0 or _month(t.booked_on) >= current:
-            continue
-        group = _RULE_GROUP.get(categories[t.txn_id]) or _LABEL_GROUP.get(labels.get(t.txn_id, ""), "unclassified")
-        sums[group] -= t.amount_krw
-    return [{"group": g, "label": label, "monthly_avg_krw": round(sums[g] / n) if n else 0} for g, label in EXPENSE_GROUPS]
+    rows = expense_monthly(transactions, categories, labels, as_of)
+    n = len(rows)
+    return [{"group": g, "label": label, "monthly_avg_krw": round(sum(r[g] for r in rows) / n) if n else 0}
+            for g, label in EXPENSE_GROUPS]
 
 
 def _conservative(base: CashFlowFeatures, adjusted: CashFlowFeatures) -> CashFlowFeatures:

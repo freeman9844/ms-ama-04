@@ -54,9 +54,9 @@
 </svg>
 {%- endmacro %}
 
-{% macro line_overlay(l, label, color="purple", axis=true) -%}
+{% macro line_overlay(l, label, color="purple", axis=true, unit="") -%}
 {% for d in l.segments %}<path class="line stroke-{{ color }}" d="{{ d }}" pathLength="100"></path>{% endfor %}
-{% for p in l.points %}<circle class="dot fill-{{ color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {{ p.value }}</title></circle>{% endfor %}
+{% for p in l.points %}<circle class="dot fill-{{ 'red' if p.negative else color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {% if unit %}{{ "{:,.0f}".format(p.value) }}{{ unit }}{% else %}{{ p.value }}{% endif %}</title></circle>{% endfor %}
 {% if axis %}{% for t in l.ticks %}<text class="axis-label" x="{{ l.x + 6 }}" y="{{ t.y + 4 }}">{{ t.text }}</text>{% endfor %}{% endif %}
 {%- endmacro %}
 

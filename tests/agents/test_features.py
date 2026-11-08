@@ -175,6 +175,19 @@ def test_expense_breakdown_groups_sum_to_average_outflow(cases):
     assert abs(sum(_expenses(uw).values()) - outflow) <= len(EXPENSE_GROUPS)
 
 
+def test_expense_monthly_splits_each_complete_month_into_groups(cases):
+    case = cases["seller-dailylook-01"]
+    uw = _underwrite(cases, "seller-dailylook-01")
+    groups = [g for g, _ in EXPENSE_GROUPS]
+    assert [r["month"] for r in uw.expense_monthly] == [m["month"] for m in uw.monthly]
+    for row in uw.expense_monthly:
+        out = -sum(t.amount_krw for t in case.transactions
+                   if t.amount_krw < 0 and t.booked_on.strftime("%Y-%m") == row["month"])
+        assert set(row) == {"month", *groups} and sum(row[g] for g in groups) == out
+    n = len(uw.expense_monthly)
+    assert {g: round(sum(r[g] for r in uw.expense_monthly) / n) for g in groups} == _expenses(uw)
+
+
 def test_semantic_labels_move_unclassified_into_groups(cases):
     case = cases["seller-dailylook-01"]
     rules_only = _expenses(_underwrite(cases, "seller-dailylook-01"))

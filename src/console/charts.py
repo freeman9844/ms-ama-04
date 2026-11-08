@@ -116,7 +116,7 @@ def line(values: Sequence[Any], width: int = 640, height: int = 240, vmax: Any =
             runs.append([])
             continue
         x, y = _r(x0 + slot * (i + 0.5)), _r(base - plot_h * min(_pos(v) / top, 1.0))
-        points.append({"i": i, "x": x, "y": y, "value": v})
+        points.append({"i": i, "x": x, "y": y, "value": v, "negative": v < 0})
         runs[-1].append((x, y))
     segments = ["M " + " L ".join(f"{x} {y}" for x, y in run) for run in runs if run]
     return {"vmax": top, "x": x1, "segments": segments, "points": points,

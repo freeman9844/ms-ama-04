@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from agents.features import EXPENSE_GROUPS
 from agents.forecast import OUTFLOW_LABELS
 from console import charts
 from console.monitoring import SEVERITY_LABELS, TRIGGER_LABELS
@@ -61,6 +62,12 @@ STEP_OF = {
 }
 STEP_NOTES = {"data_incomplete": "데이터 부족", "escalated": "SLA 초과"}
 EXPENSES = (("operating_out", "운영비", "amber"), ("debt_service", "상환", "red"), ("owner_draw", "대표자 인출", "purple"))
+# 지출 세부 그룹 색. 월별 현금흐름의 매출(파랑)·순현금흐름(초록)과 겹치지 않게 거래처·물류는 짙은 회색이다.
+EXPENSE_COLORS = {
+    "supplier": "neutral", "rent": "purple", "payroll": "amber", "tax_insurance": "teal", "other_operating": "orange",
+    "debt_service": "red", "owner_draw": "pink", "unclassified": "grey",
+}
+NET_LABEL = "순현금흐름(매출−지출)"
 RESTRUCTURE_NOTES = {"pending_officer": "심사역 대기", "approved": "승인", "declined": "거절"}
 REPLAY_WEEKS = 13
 LOAN_CHART = {"width": 960, "height": 300}  # 13주 막대와 버퍼 선이 같은 칸을 쓰도록 크기를 맞춘다.
@@ -219,13 +226,22 @@ def gateway_blocks(doc: Mapping[str, Any]) -> list[str]:
 
 def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
-    monthly = [m for m in (doc.get("underwriting") or {}).get("monthly") or [] if isinstance(m, Mapping)]
-    groups = []
+    uw = doc.get("underwriting") or {}
+    monthly = [m for m in uw.get("monthly") or [] if isinstance(m, Mapping)]
+    # 세부 그룹(expense_monthly)은 2026-11-08 이후 심사분에만 있다. 한 달이라도 없으면 3구분으로 그린다.
+    by_month = {r.get("month"): r for r in uw.get("expense_monthly") or [] if isinstance(r, Mapping)}
+    detailed = bool(monthly) and all(m.get("month") in by_month for m in monthly)
+    spec = [(g, label, EXPENSE_COLORS[g]) for g, label in EXPENSE_GROUPS] if detailed else EXPENSES
+    groups, net = [], []
     for m in monthly:
         month = str(m.get("month") or "")
+        src = by_month[m.get("month")] if detailed else m
         revenue = [("revenue", m.get("revenue"), "blue", f"{month} 매출 {krw_text(m.get('revenue'))}")]
-        expenses = [(k, m.get(k), color, f"{month} {label} {krw_text(m.get(k))}") for k, label, color in EXPENSES]
+        expenses = [(k, src.get(k), color, f"{month} {label} {krw_text(src.get(k))}") for k, label, color in spec]
         groups.append((month[2:] if len(month) == 7 else month, [revenue, expenses]))
+        rev = m.get("revenue")
+        net.append(rev - sum(v for _, v, _, _ in expenses if charts.is_num(v)) if charts.is_num(rev) else None)
+    monthly_chart = charts.columns(groups, tick_fmt=man) if groups else None
     markers = []
     for r in (view.get("policy") or {}).get("reason_codes") or []:
         bar = charts.marker_bar(r.get("observed"), r.get("threshold"))
@@ -250,8 +266,9 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         ]
     return {
         "steps": journey_steps(doc),
-        "monthly": charts.columns(groups, tick_fmt=man) if groups else None,
-        "monthly_legend": [("매출", "blue")] + [(label, color) for _, label, color in EXPENSES],
+        "monthly": monthly_chart,
+        "monthly_net": charts.line(net, vmax=monthly_chart["vmax"], tick_fmt=man) if monthly_chart else None,
+        "monthly_legend": [("매출", "blue")] + [(label, color) for _, label, color in spec] + [(NET_LABEL, "green")],
         "markers": markers,
         "counterfactuals": counterfactuals,
         "review": review,

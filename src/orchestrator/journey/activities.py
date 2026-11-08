@@ -349,6 +349,7 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         "flags": result.flags,
         "monthly": result.monthly,
         "expense_breakdown": result.expense_breakdown,
+        "expense_monthly": result.expense_monthly,
         "settlement_profile": settlement_for(txns, overrides, as_of, profile.industry),
         "classification": classification,
         "category_overrides": {k: v.value for k, v in overrides.items()},

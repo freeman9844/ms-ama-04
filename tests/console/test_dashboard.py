@@ -100,16 +100,42 @@ def test_detail_summary_monthly_markers_counterfactuals_and_review(make_doc):
     group = s["monthly"]["groups"][0]
     assert group["label"] == "26-09" and [len(b["parts"]) for b in group["bars"]] == [1, 3]
     assert group["bars"][0]["parts"][0]["tip"] == "2026-09 매출 40,000,000원"
+    assert [(p["value"], p["negative"]) for p in s["monthly_net"]["points"]] == [(8_000_000, False)]
+    assert [label for label, _ in s["monthly_legend"]] == ["매출", "운영비", "상환", "대표자 인출", "순현금흐름(매출−지출)"]
     assert [m["code"] for m in s["markers"]] == ["R101"] and s["markers"][0]["bar"] == {"fill": 80.0, "mark": 55.56}
     assert s["counterfactuals"][0]["bar"]["bars"][1]["w"] == 204.0 and s["counterfactuals"][1]["bar"] is None
     assert [(r["label"], r["state"], r["note"]) for r in s["review"]] == [
         ("분석 에이전트", "done", "gpt-5.4"), ("검토 에이전트", "done", "1회")]
 
 
+def test_detail_summary_splits_expenses_into_groups_with_net_line(make_doc):
+    doc = make_doc()
+    uw = doc["underwriting"]
+    uw["monthly"].append({"month": "2026-10", "revenue": 1_000_000, "operating_out": 2_000_000, "debt_service": 0,
+                          "owner_draw": 0})
+    zero = dict.fromkeys(("supplier", "rent", "payroll", "tax_insurance", "other_operating", "debt_service",
+                          "owner_draw", "unclassified"), 0)
+    uw["expense_monthly"] = [
+        {**zero, "month": "2026-09", "supplier": 20_000_000, "rent": 3_000_000, "payroll": 5_000_000,
+         "tax_insurance": 1_000_000, "other_operating": 500_000, "debt_service": 1_000_000, "owner_draw": 1_000_000,
+         "unclassified": 500_000},
+        {**zero, "month": "2026-10", "supplier": 2_000_000}]
+    s = dashboard.detail_summary({"doc": doc, "policy": None, "assessment": None})
+    bars = s["monthly"]["groups"][0]["bars"]
+    assert [p["color"] for p in bars[1]["parts"]] == ["neutral", "purple", "amber", "teal", "orange", "red", "pink", "grey"]
+    assert bars[1]["parts"][0]["tip"] == "2026-09 거래처·물류 20,000,000원"
+    assert [(p["value"], p["negative"]) for p in s["monthly_net"]["points"]] == [(8_000_000, False), (-1_000_000, True)]
+    assert s["monthly_net"]["vmax"] == s["monthly"]["vmax"]
+    assert [label for label, _ in s["monthly_legend"]] == [
+        "매출", "거래처·물류", "임대료", "인건비", "세금·4대보험", "기타 운영비", "기존 상환", "대표자 인출", "미분류",
+        "순현금흐름(매출−지출)"]
+
+
 def test_detail_summary_without_underwriting_or_assessment(make_doc):
     s = dashboard.detail_summary({"doc": make_doc("received", underwriting=None, assessment=None), "policy": None,
                                   "assessment": None})
     assert s["monthly"] is None and s["markers"] == [] and s["counterfactuals"] == [] and s["review"] is None
+    assert s["monthly_net"] is None
 
 
 def test_loans_summary_counts():

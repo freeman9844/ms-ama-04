@@ -79,8 +79,8 @@
 {% if ui.monthly or p.signals %}
 {% if ui.monthly %}
 <section class="card">
-<h3>월별 현금흐름</h3>
-{{ ch.columns(ui.monthly, "월별 매출과 지출") }}
+<h3>월별 현금흐름 <small>달마다 왼쪽 매출, 오른쪽 지출 구성 · 선은 순현금흐름(0 아래인 달은 빨간 점)</small></h3>
+{% call ch.columns(ui.monthly, "월별 매출과 지출") %}{{ ch.line_overlay(ui.monthly_net, "순현금흐름", "green", axis=false, unit="원") }}{% endcall %}
 {{ ch.legend(ui.monthly_legend) }}
 </section>
 {% endif %}

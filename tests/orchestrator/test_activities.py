@@ -219,6 +219,7 @@ def test_underwrite_and_policy_on_real_apps(deps):
     assert result["signals"]["classification_rules"]
     assert {c["payer"] for c in result["settlement_profile"]["channels"]} >= {"네이버파이낸셜", "토스페이먼츠"}
     assert [e["group"] for e in result["expense_breakdown"]][0] == "supplier" and len(result["expense_breakdown"]) == 8
+    assert [r["month"] for r in result["expense_monthly"]] == [m["month"] for m in result["monthly"]]
     decision = evaluate_policy(deps, result["features"])
     assert decision["decision"] == "eligible"
     assert decision["max_amount_krw"] == 3_300_000

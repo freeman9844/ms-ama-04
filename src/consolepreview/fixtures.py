@@ -58,7 +58,7 @@ def _underwriting(app_id: str, case: SyntheticCase, amount: int) -> tuple[dict[s
                               requested_amount_krw=amount, requested_tenor_months=TENOR, semantic_labels=labels)
     underwriting = {
         "features": uw.features.model_dump(mode="json"), "signals": uw.signals, "flags": uw.flags,
-        "monthly": uw.monthly, "expense_breakdown": uw.expense_breakdown,
+        "monthly": uw.monthly, "expense_breakdown": uw.expense_breakdown, "expense_monthly": uw.expense_monthly,
         "settlement_profile": settlement_for(case.transactions, {}, AS_OF, case.profile.industry),
         "classification": None, "category_overrides": {},
     }
