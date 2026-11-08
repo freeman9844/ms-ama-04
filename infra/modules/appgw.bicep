@@ -109,7 +109,8 @@ resource gateway 'Microsoft.Network/applicationGateways@2024-05-01' = if (deploy
           protocol: 'Https'
           cookieBasedAffinity: 'Disabled'
           pickHostNameFromBackendAddress: true
-          requestTimeout: 60
+          // 심사역 채팅: 429 지수 백오프 5회 + Foundry 호출 시간(최대 3회 x 60초)을 담도록 180초로 둡니다.
+          requestTimeout: 180
           probe: { id: resourceId('${gatewayType}/probes', name, 'console-health') }
         }
       }

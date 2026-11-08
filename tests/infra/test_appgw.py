@@ -93,6 +93,7 @@ def test_gateway_routes_https_to_console_and_redirects_http(opened):
     settings = _by_name(props["backendHttpSettingsCollection"])["console-https"]
     assert (settings["port"], settings["protocol"]) == (443, "Https")
     assert settings["pickHostNameFromBackendAddress"] is True
+    assert settings["requestTimeout"] == 180  # 심사역 채팅(429 백오프 재시도) 응답을 기다립니다.
     assert settings["probe"]["id"].endswith("/probes/console-health")
     probe = _by_name(props["probes"])["console-health"]
     assert (probe["protocol"], probe["path"]) == ("Https", "/healthz")
