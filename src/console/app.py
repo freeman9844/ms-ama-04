@@ -90,9 +90,10 @@ MAX_FORM_BYTES = 16 * 1024
 LIST_LIMIT = 50
 DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
-WATCH_SECONDS = 5
 # 신청 상세(/applications/{id})의 모든 자동 새로 고침 주기.
 DETAIL_REFRESH_SECONDS = 10
+# 사후 모니터링(/loans/{id})의 모든 자동 새로 고침 주기(재생 진행·요청 반영 대기).
+MONITORING_REFRESH_SECONDS = 7
 WATCH_LIMIT = 12
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
@@ -188,7 +189,7 @@ def _templates() -> Environment:
     env.filters["num"] = lambda v, d=1: f"{v:.{d}f}" if isinstance(v, int | float) else "-"
     env.globals.update(
         htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS,
-        watch_seconds=WATCH_SECONDS, detail_refresh_seconds=DETAIL_REFRESH_SECONDS,
+        monitoring_refresh_seconds=MONITORING_REFRESH_SECONDS, detail_refresh_seconds=DETAIL_REFRESH_SECONDS,
     )
     return env
 
