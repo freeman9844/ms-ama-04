@@ -298,3 +298,15 @@ p.warn { background: #fff4ce; border-left: 4px solid var(--c-amber); padding: .5
 .claims-table td:first-child, .claims-table td:nth-child(2) { width: 2rem; text-align: center; }
 h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
 @media (max-width: 900px) { .opinion-claims { grid-template-columns: 1fr; } }
+
+/* 심사역 결정 탭: 왼쪽 결정 폼, 오른쪽 심사 도우미 채팅 */
+.decision-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 960px) { .decision-layout { grid-template-columns: 1fr; } }
+.officer-chat h3 { margin-top: 0; }
+.chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; margin: 8px 0; }
+.chat-msg { max-width: 90%; padding: 8px 10px; border-radius: 6px; white-space: pre-wrap; }
+.chat-user { align-self: flex-end; background: #deecf9; }
+.chat-assistant { align-self: flex-start; background: var(--bg); }
+.chat-system { align-self: flex-start; color: var(--bad); font-size: 13px; }
+.chat-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chat-form textarea { width: 100%; box-sizing: border-box; }

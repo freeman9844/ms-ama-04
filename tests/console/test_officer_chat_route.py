@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from agents.officer_chat import ChatAnswer
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.app import ConsoleDeps, create_app
 from console.auth import csrf_token
+from console.officer_chat import CHAT_SUGGESTIONS
 from tests.console.test_app import AUDITOR_H, NO_ROLE, OFFICER, FakeQueue, FakeStore
 
 
@@ -118,3 +120,33 @@ def test_chat_log_has_metadata_only(make_doc, raw, key, caplog):
     assert "application_id=app-1" in text and "result=ok" in text and "result=throttled" in text
     assert "input_tokens=120" in text
     assert "비밀 질문" not in text and "두번째 질문" not in text and "eligible입니다" not in text
+
+
+def test_decision_tab_renders_chat_panel(make_doc, raw, key):
+    page = _client(make_doc, raw, key, FakeChat()).get("/applications/app-1", headers=OFFICER).text
+    assert 'class="decision-layout"' in page and "data-officer-chat" in page
+    assert 'data-url="/applications/app-1/chat"' in page
+    assert re.search(r'data-csrf="([0-9a-f]{64})"', page).group(1) == _token(key)
+    assert '<script src="/static/officer_chat.js" defer></script>' in page
+    for q in CHAT_SUGGESTIONS:
+        assert f">{q}</button>" in page
+    assert 'maxlength="500"' in page
+    assert 'name="decision"' in page  # 결정 폼은 그대로
+
+
+def test_chat_panel_disabled_notice(make_doc, raw, key):
+    page = _client(make_doc, raw, key, None).get("/applications/app-1", headers=OFFICER).text
+    assert "채팅을 쓸 수 없습니다." in page and "officer_chat.js" not in page
+
+
+def test_chat_panel_hidden_without_policy(make_doc, raw, key):
+    deps = ConsoleDeps(store=FakeStore([make_doc(status="assessing", policy=None, assessment=None)]), raw=raw,
+                       queue=FakeQueue(), pseudonym_key=key, chat=FakeChat())
+    page = TestClient(create_app(deps)).get("/applications/app-1", headers=OFFICER).text
+    assert "심사 도우미" not in page
+
+
+def test_chat_script_is_static_and_keeps_history_in_memory(make_doc, raw, key):
+    r = _client(make_doc, raw, key, FakeChat()).get("/static/officer_chat.js")
+    assert r.status_code == 200
+    assert "X-CSRF-Token" in r.text and "localStorage" not in r.text and "sessionStorage" not in r.text

@@ -49,7 +49,7 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
-from console.officer_chat import CHAT_ERRORS, build_snapshot, clean_history, validate_question
+from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
 from console.opinion import opinion_panel
 from console.ops import (
     AXIS_LABELS,
@@ -300,7 +300,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
         return render("detail.html", user, status_code, v=view, ui=detail_summary(view), panels=assessment_panels(view),
                       op=opinion_panel(view), in_progress=in_progress,
-                      consents=consents, **ctx)
+                      consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
+                      **ctx)
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
