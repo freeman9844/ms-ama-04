@@ -294,18 +294,19 @@ python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 2
    주간 지표·기준선·업종 집단 계절 지수·거래 조회 도구로 계절성(예: 1월 카페 비수기)을 걸러 내고, 경보를 내면
    모든 문장의 수치가 근거 ID(`W:<주차>:<지표>`, `B:<기준선>`)와 맞아야 합니다(코드 검사). 실패하면 탐지기만으로 만든
    `officer_review` 경보가 남습니다(자동 연락 없음).
-4. **추심 에이전트**(`collections-agent`, gpt-5.4-mini): 권고가 `contact_borrower`·`hardship_review`인 경보만 처리합니다.
+4. **추심 에이전트**(`collections-agent`, gpt-5.4-mini): 2026-11-08부터 경보가 아니라 **상환 원장의 미납 회차**만 처리합니다
+   (추심 건 `rc-<재생 ID>-i<회차>`, 최근 경보 요약·신호 종류는 참고). 상환일 3일 전 안내는 LLM 없이 보냅니다.
    승인된 스크립트만 보낼 수 있고(자유 문장 발송 없음), 공정 추심 규칙(KST 08~21시, 7일 7회)을 코드가 막으며,
    상환 곤란이면 재조정 상담 요청(`pending_officer`)을 만듭니다. 재조정 승인·거절은 심사역이 콘솔에서 합니다(`restructure-decisions` 큐).
 
 | 저장 위치 | 내용 |
 |---|---|
 | `loans`(파티션 `/loan_id`) | 대출·기준선·`monitoring`(재생 ID, 진행 주차, 주차별 지표·트리거·조사 결과) |
-| `alerts`(파티션 `/loan_id`) | 경보(`ew-<재생 ID>-wNN`: 근거 신호, 추심 결과, 재조정 요청), 재생별 연락 기록(`contacts-<재생 ID>`) |
+| `alerts`(파티션 `/loan_id`) | 경보(`ew-<재생 ID>-wNN`: 근거 신호, 심사역 검토용), 미납 추심 건(`rc-<재생 ID>-iN`: 추심 결과, 재조정 요청), 재생별 연락 기록(`contacts-<재생 ID>`, 상환 안내 포함) |
 | 모니터링 동의 문서 | 조기경보·추심 에이전트의 Foundry 대화 ID(`foundry_conversations`) |
 
-- Service Bus가 켜져 있으면 주차 메시지를 `flow.updated` 토픽(세션 = 대출 ID, 구독 `early-warning`)으로, 경보를 `alert.raised`
-  (구독 `collections`)로 보냅니다. 꺼져 있으면(`ops pause` 상태) 같은 처리를 큐 트리거 안에서 순서대로 직접 합니다(`mode: inline`).
+- Service Bus가 켜져 있으면 주차 메시지를 `flow.updated` 토픽(세션 = 대출 ID, 구독 `early-warning`)으로, 미납 추심 건을
+  `repayment.updated`(구독 `collections`)로 보냅니다. `alert.raised`는 발행만 하고 구독자가 없습니다(2026-11-08). 꺼져 있으면(`ops pause` 상태) 같은 처리를 큐 트리거 안에서 순서대로 직접 합니다(`mode: inline`).
 - 같은 대출의 재생은 30분 안에 한 번만 시작됩니다(진행 중이면 콘솔 버튼이 꺼지고 큐 메시지도 무시). 멈춘 재생은 30분 뒤 다시 시작할 수 있습니다.
 - smoke `journey`는 승인 뒤 `loans` 문서 등록까지 확인합니다(재생은 LLM 비용 때문에 돌리지 않음).
 
@@ -845,4 +846,14 @@ python -m ops smoke
 | `ops eval --suite underwriting` | `job-eval-ngrkucj`, $0.86, 실패 2건(모두 비교 구성 `gpt-5.4-mini`: 근거 1·검토 1). `gpt-5.6-sol` 1라운드 근거 100%·최종 100%·검토 100%·1.12라운드·평가서 건당 $0.0783 |
 
 - **비교**(게이트웨이 경로 `gpt-5.4`): 부하 `load-20261105120255` 건당 $0.0939(분석가 신청당 8.4호출), 평가 `job-eval-aqisk13` 1라운드 75.0%·검토 87.5%·2.00라운드·건당 $0.0984. 단가는 높지만 도구 라운드가 줄어 건당 비용이 내려갔습니다. 표본이 작고(부하 10건, 평가 8케이스 1회) 부하 격자가 달라 경향으로만 봅니다.
+- **`window close`** 완료.
+## 2026-11-08 상환 기반 미납 추심 배포
+
+- **변경**: 추심을 조기경보가 아니라 상환 원장의 미납 회차로 시작합니다(`029374d`~`39e7c25`, 계획 `docs/superpowers/plans/2026-11-07-repayment-collections.md`). 이미지 `mockapi:20261108004332`, `console:20261108005535`, Functions `func-gaz7yh2zic7zc`. Service Bus는 일시 정지 상태라 `repayment.updated` 토픽은 다음 `ops resume` 때 생깁니다.
+- **smoke 콘솔 관문 시간 초과**: `agw-amalend`가 `Stopped`였습니다(외부 자동화로 추정, 2026-11-06과 같은 증상). `az network application-gateway start` 약 6분 뒤 `ops smoke` 성공.
+- **1차 검증** `app-20261108-ef4d8f`(`seller-dailylook-01`, 500만 원·6개월): 심사역 대기 42초, 재생 371초. 원장 1·2회차 납부(`P00083`·`P00169`), 3회차 미납 → `rc-rp-caec686c32-i3`, 안내 3건, 경보 카드 "차주 연락 없음", `재생 완료`. 그러나 추심 에이전트가 `contacted`(missed_payment)로 끝나 재조정 요청이 없었습니다.
+- **원인**: 재생이 경보에서 멈추지 않아 13주 조사가 몇 분 안에 몰려 `gw-early-warning`(50K)에서 429 16건(78회 중)이 났고 12주차 조사가 `detector_only`로 폴백했습니다. 폴백 경보 요약에는 근거가 없어 추심 에이전트가 고금리 중첩·매출 급감을 보지 못했습니다.
+- **조치**: `63cb146` 추심 건 `recent_alert`에 신호 종류(`signals`)를 넣고 지시문이 이를 근거로 씁니다. TPM 50K → 100K. 2차 검증 `app-20261108-4922b2`(재생 240초)에서 429는 1건으로 줄고 추심은 `routed`(hardship_offer, `debt_overload`)였지만 1분 피크 85.9K로 429 1건이 남아 `1d15822`에서 150K로 올렸습니다(`gpt-5.4` 배포 200K 안).
+- **3차 검증** `app-20261108-d0b4b0`(재생 234초): EW 429 0건, 1분 피크 103.8K. 원장 납부 2·미납 1, 마지막 추심 건 `routed` → `재조정 상담 요청`(`pending_officer`)과 `재조정 결정` 폼. 결정하지 않고 데모 B로 둡니다.
+- **남은 문제**: 2·3차 모두 7주차(트리거 `inflow_drop`·`buffer_drop`·`loan_stacking`) 조사가 HTTP 오류·429 없이 `agent_error`로 폴백했습니다. 오류 문구는 비공개 Cosmos의 `monitoring.weeks[].investigation.record.error`에만 있어 확인하지 못했습니다(도구 라운드 한도 또는 출력 스키마 불일치로 추정). 폴백 경보도 심사역 검토 대상으로 남고 추심 판단은 신호 종류로 동작합니다.
 - **`window close`** 완료.
