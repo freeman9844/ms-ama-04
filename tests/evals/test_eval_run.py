@@ -81,7 +81,7 @@ def test_fake_run_writes_all_suites_and_cleans_up(tmp_path):
     assert not summary["partial"] and summary["errors"] == []
     assert summary["suites"]["safety"]["pii"]["calls_with_pii"] == 0
     assert summary["cleanup"]["deleted"] > 0 and summary["cleanup"]["failed"] == 0
-    decision = summary["suites"]["classify"]["configs"]["decision-1+gpt-5.4-mini"]
+    decision = summary["suites"]["classify"]["configs"]["decision-1+gpt-5.6-luna"]
     assert decision["unpriced_calls"] > 0 and decision["threshold_curve"]
     ew = summary["suites"]["early_warning"]
     # 기대 입금 탐지기(P9)는 계절 변동 경로에 울리지 않고 돌려막기 경로는 잡는다.

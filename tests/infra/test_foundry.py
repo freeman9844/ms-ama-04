@@ -13,7 +13,7 @@ ROLE_COSMOS_OPERATOR = "230815da-be43-4aae-9cb4-875f7bd000aa"
 ROLE_SEARCH_INDEX_CONTRIBUTOR = "8ebe5a00-799e-43f5-93ac-243d3dce84a7"
 ROLE_SEARCH_SERVICE_CONTRIBUTOR = "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
 COSMOS_CONTRIBUTOR = "00000000-0000-0000-0000-000000000002"
-MODELS = {"gpt-5.4", "gpt-5.4-mini", "gpt-6.1-sol", "gpt-5.6-sol", "decision-1"}
+MODELS = {"gpt-5.4", "gpt-5.6-luna", "gpt-6.1-sol", "gpt-5.6-sol", "decision-1"}
 
 
 def _deployments(exp) -> dict[str, dict]:

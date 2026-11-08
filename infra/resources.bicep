@@ -541,16 +541,16 @@ module functions 'modules/functions.bicep' = {
       COSMOS_DATABASE: cosmos.outputs.databaseName
       DATA_BLOB_ENDPOINT: stData.outputs.blobEndpoint
       AI_PROJECT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
-      DATA_ASSEMBLY_MODEL: 'gpt-5.4-mini'
+      DATA_ASSEMBLY_MODEL: 'gpt-5.6-luna'
       AI_ACCOUNT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com'
       DECISION_DEPLOYMENT: 'decision-1'
       ANALYST_MODEL: 'gpt-5.6-sol'
-      REVIEWER_MODEL: 'gpt-5.4-mini'
-      CLASSIFIER_MODEL: 'gpt-5.4-mini'
+      REVIEWER_MODEL: 'gpt-5.6-luna'
+      CLASSIFIER_MODEL: 'gpt-5.6-luna'
       EW_MODEL: 'gpt-5.4'
-      COLLECTIONS_MODEL: 'gpt-5.4-mini'
-      NOTICE_MODEL: 'gpt-5.4-mini'
-      GRIEVANCE_MODEL: 'gpt-5.4-mini'
+      COLLECTIONS_MODEL: 'gpt-5.6-luna'
+      NOTICE_MODEL: 'gpt-5.6-luna'
+      GRIEVANCE_MODEL: 'gpt-5.6-luna'
       // 동의 수명주기 예약(consent-lifecycle 큐). 오케스트레이터 ID가 함수 스토리지 큐 기여자입니다.
       QUEUE_ENDPOINT: 'https://${names.stFunc}.queue.${storageSuffix}/'
       POLICY_URL: policyUrl
@@ -681,7 +681,7 @@ module smokeJob 'modules/smoke-job.bicep' = {
       servicebus_host: serviceBusEnabled ? '${names.sb}.servicebus.windows.net' : ''
       servicebus_topic: 'flow.updated'
       chat_models: map(filter(modelDeployments, m => m.format == 'OpenAI'), m => m.name)
-      agent_model: 'gpt-5.4-mini'
+      agent_model: 'gpt-5.6-luna'
       private_hosts: smokePrivateHosts
       queue_host: '${names.stFunc}.queue.${storageSuffix}'
       start_queue: 'applications-start'
@@ -728,8 +728,8 @@ module evalJob 'modules/eval-job.bicep' = {
       { name: 'AI_ACCOUNT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com' }
       { name: 'DECISION_DEPLOYMENT', value: 'decision-1' }
       { name: 'EVAL_FULL_MODEL', value: 'gpt-5.6-sol' }
-      { name: 'EVAL_MINI_MODEL', value: 'gpt-5.4-mini' }
-      { name: 'REVIEWER_MODEL', value: 'gpt-5.4-mini' }
+      { name: 'EVAL_MINI_MODEL', value: 'gpt-5.6-luna' }
+      { name: 'REVIEWER_MODEL', value: 'gpt-5.6-luna' }
       { name: 'EVAL_JUDGE_MODEL', value: 'gpt-5.4' }
       { name: 'EVAL_BUDGET_USD', value: '5' }
       { name: 'EVAL_EMIT_LOGS', value: '1' }

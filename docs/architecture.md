@@ -247,7 +247,7 @@ flowchart LR
 |---|---|---|
 | 처리량 | Functions Flex `maximumInstanceCount: 40`, Container Apps 수평 확장 | 인스턴스 상한 상향, 동시성 조정 |
 | 데이터 | Cosmos DB 기본 RU | 컨테이너별 RU 상향·자동 확장 |
-| 모델 | Global Standard, 배포 `gpt-5.4`/`gpt-5.4-mini`/`gpt-5.6-sol`(분석가·평가)/`gpt-6.1-sol`(보유만)/`decision-1` | TPM 쿼터 상향 |
+| 모델 | Global Standard, 배포 `gpt-5.4`/`gpt-5.6-luna`(소형 에이전트, 2026-11-08 `gpt-5.4-mini`에서 변경)/`gpt-5.6-sol`(분석가·평가)/`gpt-6.1-sol`(보유만)/`decision-1` | TPM 쿼터 상향 |
 | 분류 비용 | 규칙(classify-v1) 선분류 + 정규화·중복 제거 + 캐시 + Decision-1, 폴백만 mini LLM | 규칙 커버리지 80.0%·캐시 적중 25.0%. `decision-1+mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. `decision-1+mini` 구성의 분류 호출은 신청당 8.375회(Decision-1 7.5회 + mini 폴백)지만 Decision-1 단가 미확인이라 총비용 효과는 미검증(`eval/reports/job-eval-9imbutm/report.md` 2장) |
 | 지연·단가 | Global Standard | PTU 전환(예측 가능 지연·단가, [ADR-002](adr/ADR-002-model-deployment.md)) |
 | 가용성 | 단일 리전(Korea Central) | 다중 리전 DR(문서만) |

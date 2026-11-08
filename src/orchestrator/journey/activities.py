@@ -22,12 +22,12 @@ from shared.contracts import ApplicantProfile, TaxFiling, Transaction
 CONTAINERS = ("applications", "consents")
 CLASSIFICATION_CONTAINER = "classifications"
 ANALYST_MODEL = "gpt-5.6-sol"
-REVIEWER_MODEL = "gpt-5.4-mini"
-CLASSIFIER_MODEL = "gpt-5.4-mini"
+REVIEWER_MODEL = "gpt-5.6-luna"
+CLASSIFIER_MODEL = "gpt-5.6-luna"
 EW_MODEL = "gpt-5.4"
-COLLECTIONS_MODEL = "gpt-5.4-mini"
-NOTICE_MODEL = "gpt-5.4-mini"
-GRIEVANCE_MODEL = "gpt-5.4-mini"
+COLLECTIONS_MODEL = "gpt-5.6-luna"
+NOTICE_MODEL = "gpt-5.6-luna"
+GRIEVANCE_MODEL = "gpt-5.6-luna"
 LIFECYCLE_QUEUE = "consent-lifecycle"
 ENDED_CONSENT = ("expired", "revoked")
 LOANS_CONTAINER = "loans"

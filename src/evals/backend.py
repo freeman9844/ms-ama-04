@@ -42,9 +42,9 @@ class Models:
     """평가 Job 기본값(infra/resources.bicep 평가 Job 환경변수)과 같게 둔다."""
 
     full: str = "gpt-5.6-sol"
-    mini: str = "gpt-5.4-mini"
+    mini: str = "gpt-5.6-luna"
     decision: str = "decision-1"
-    reviewer: str = "gpt-5.4-mini"
+    reviewer: str = "gpt-5.6-luna"
     judge: str = "gpt-5.4"
 
     @classmethod

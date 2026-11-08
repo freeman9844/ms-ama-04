@@ -1,7 +1,7 @@
 """평가용 에이전트 runner. 운영 에이전트 이름과 겹치지 않게 이름을 바꾸고, 출력과 대화를 기록·정리한다.
 
 운영 코드는 같은 이름의 최신 버전을 부른다. 평가가 다른 모델로 같은 이름의 버전을 만들면 운영 동작이 바뀌므로
-이름 앞에 eval-, 뒤에 모델명을 붙인다(예: eval-underwriting-analyst-gpt-5-4-mini).
+이름 앞에 eval-, 뒤에 모델명을 붙인다(예: eval-underwriting-analyst-gpt-5-6-luna).
 """
 
 import dataclasses

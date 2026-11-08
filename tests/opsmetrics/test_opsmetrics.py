@@ -188,7 +188,7 @@ def test_summary_has_basis_and_sections():
 
 def test_load_prices_skips_meta():
     prices = load_prices()
-    assert "_source" not in prices and "gpt-5.4-mini" in prices
+    assert "_source" not in prices and "gpt-5.4-mini" in prices and "gpt-5.6-luna" in prices
 
 
 @pytest.mark.parametrize(("raw", "expected"), [

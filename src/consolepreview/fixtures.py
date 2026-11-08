@@ -109,7 +109,7 @@ def _assessment(app_id: str, rec: str, uw: dict[str, Any], policy: dict[str, Any
              "explanation": "현금 버퍼가 30일 이상이면 한도 여유가 커진다"},
         ],
         "review": {"passed": True, "rounds": 2, "issues": []},
-        "models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.4-mini"},
+        "models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.6-luna"},
     }
 
 
@@ -136,7 +136,7 @@ def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "policy
         doc["assessment_run"] = _assessment_run()
         doc["steps"] = [{"step": "assess", "outcome": "ok", "agent": True, "duration_ms": 31_400, "usage": [
             {"model": "gpt-5.6-sol", "input_tokens": 18_200, "output_tokens": 2_900, "calls": 5},
-            {"model": "gpt-5.4-mini", "input_tokens": 4_100, "output_tokens": 380, "calls": 1}]}]
+            {"model": "gpt-5.6-luna", "input_tokens": 4_100, "output_tokens": 380, "calls": 1}]}]
     doc.update(overrides)
     return doc
 
@@ -146,7 +146,7 @@ def _assessment_run() -> dict[str, Any]:
     def calls(*names: str) -> list[dict[str, Any]]:
         return [{"name": n, "arguments": {}, "error": None} for n in names]
 
-    return {"models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.4-mini"}, "rounds": [
+    return {"models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.6-luna"}, "rounds": [
         {"round": 1, "analyst": {"total_tokens": 11_800, "tool_calls": calls(
             "get_metrics", "get_monthly_series", "query_transactions", "code_interpreter")},
          "grounding_issues": ["claim 3: 근거 목록에 없는 숫자 4.7"]},
@@ -348,7 +348,7 @@ def loans() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
 
 def _projected(i: int, industry: str, rec: str, region: str, age: str, outcomes: tuple[str, str]) -> dict:
     sub = DAY + timedelta(minutes=i)
-    usage = [{"model": "gpt-5.4-mini", "input_tokens": 1200, "output_tokens": 150, "calls": 1}]
+    usage = [{"model": "gpt-5.6-luna", "input_tokens": 1200, "output_tokens": 150, "calls": 1}]
     return {
         "application_id": f"r-{i:02d}", "applicant_id": f"load-healthy-{i:02d}", "status": "awaiting_officer",
         "submitted_at": sub.isoformat(), "received_at": sub.isoformat(), "source": "load", "run_id": RUN_ID,

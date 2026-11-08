@@ -434,9 +434,9 @@ def test_agent_settings_builds_agents_decider_and_models():
     settings = agent_settings(env, lambda scope: scopes.append(scope) or "t")
     assert isinstance(settings["decider"], DecisionClient)
     assert settings["agents"] is not None
-    assert (settings["analyst_model"], settings["reviewer_model"]) == ("gpt-x", "gpt-5.4-mini")
-    assert settings["classifier_model"] == "gpt-5.4-mini"
-    assert (settings["notice_model"], settings["grievance_model"]) == ("gpt-5.4-mini", "gpt-5.4-mini")
+    assert (settings["analyst_model"], settings["reviewer_model"]) == ("gpt-x", "gpt-5.6-luna")
+    assert settings["classifier_model"] == "gpt-5.6-luna"
+    assert (settings["notice_model"], settings["grievance_model"]) == ("gpt-5.6-luna", "gpt-5.6-luna")
 
 
 def test_agent_settings_routes_via_gateway():

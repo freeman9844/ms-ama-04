@@ -109,13 +109,13 @@ def test_function_app_settings_point_to_runtime(closed, variant):
     assert settings["MOCKAPI_URL"].startswith("https://ca-mockapi.")
     assert settings["COSMOS_DATABASE"] == "lending"
     assert settings["AI_PROJECT_ENDPOINT"].endswith("/api/projects/proj-lending")
-    assert settings["DATA_ASSEMBLY_MODEL"] == "gpt-5.4-mini"
+    assert settings["DATA_ASSEMBLY_MODEL"] == "gpt-5.6-luna"
     assert settings["AI_ACCOUNT_ENDPOINT"].endswith(".services.ai.azure.com")
     assert settings["DECISION_DEPLOYMENT"] == "decision-1"
-    assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.6-sol", "gpt-5.4-mini")
-    assert settings["CLASSIFIER_MODEL"] == "gpt-5.4-mini"
-    assert (settings["EW_MODEL"], settings["COLLECTIONS_MODEL"]) == ("gpt-5.4", "gpt-5.4-mini")
-    assert (settings["NOTICE_MODEL"], settings["GRIEVANCE_MODEL"]) == ("gpt-5.4-mini", "gpt-5.4-mini")
+    assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.6-sol", "gpt-5.6-luna")
+    assert settings["CLASSIFIER_MODEL"] == "gpt-5.6-luna"
+    assert (settings["EW_MODEL"], settings["COLLECTIONS_MODEL"]) == ("gpt-5.4", "gpt-5.6-luna")
+    assert (settings["NOTICE_MODEL"], settings["GRIEVANCE_MODEL"]) == ("gpt-5.6-luna", "gpt-5.6-luna")
     # 동의 수명주기 예약은 함수 호스트 스토리지의 큐로 보낸다(오케스트레이터 ID는 큐 기여자).
     assert settings["QUEUE_ENDPOINT"].startswith("https://stfn") and ".queue." in settings["QUEUE_ENDPOINT"]
     assert settings["SERVICEBUS_FQDN"].endswith(".servicebus.windows.net")

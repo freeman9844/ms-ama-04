@@ -19,7 +19,7 @@ from shared.contracts import ApplicantProfile, PgSettlement, TaxFiling, Transact
 from shared.pseudonymize import Pseudonymizer
 
 AGENT_NAME = "data-assembly"
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "gpt-5.6-luna"
 SOURCES = ("profile", "transactions", "tax", "pg")
 SOURCE_SCOPE = {"profile": "account", "transactions": "account", "tax": "tax", "pg": "pg"}
 REQUIRED = ("profile", "transactions")
