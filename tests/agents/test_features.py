@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -19,7 +19,7 @@ def cases():
     return build_demo_cases(AS_OF)
 
 
-def _underwrite(cases, applicant_id, transactions=None):
+def _underwrite(cases, applicant_id, transactions=None, pg=True):
     case = cases[applicant_id]
     return compute_underwriting(
         f"app-{applicant_id}",
@@ -29,6 +29,7 @@ def _underwrite(cases, applicant_id, transactions=None):
         as_of=AS_OF,
         requested_amount_krw=AMOUNT,
         requested_tenor_months=TENOR,
+        pg_settlements=case.pg_settlements if pg else None,
     )
 
 
@@ -111,6 +112,7 @@ def _with_overrides(cases, applicant_id, overrides):
         requested_amount_krw=AMOUNT,
         requested_tenor_months=TENOR,
         overrides=overrides,
+        pg_settlements=case.pg_settlements,
     )
 
 
@@ -203,3 +205,31 @@ def test_semantic_labels_move_unclassified_into_groups(cases):
     assert labelled["tax_insurance"] > rules_only["tax_insurance"]  # 국민연금·고용산재
     assert labelled["rent"] == rules_only["rent"] > 0
     assert sum(labelled.values()) == pytest.approx(sum(rules_only.values()), abs=len(EXPENSE_GROUPS))
+
+
+def test_revenue_trend_lower_for_stressed_and_none_for_short_history(cases):
+    healthy = _underwrite(cases, "seller-dailylook-01").features.revenue_trend_ratio
+    stressed = _underwrite(cases, "seller-glowlab-03").features.revenue_trend_ratio
+    assert healthy is not None and stressed is not None and stressed < 0.8 <= healthy
+    recent = [t for t in cases["seller-dailylook-01"].transactions if t.booked_on >= AS_OF - timedelta(days=100)]
+    assert _underwrite(cases, "seller-dailylook-01", transactions=recent).features.revenue_trend_ratio is None
+
+
+def test_high_cost_lender_count_matches_signal(cases):
+    uw = _underwrite(cases, "seller-glowlab-03")
+    assert uw.features.high_cost_lender_count == uw.signals["high_cost_lender_count"] > 0
+    assert _underwrite(cases, "seller-dailylook-01").features.high_cost_lender_count == 0
+
+
+def test_pg_features_and_ledger_detail(cases):
+    uw = _underwrite(cases, "seller-dailylook-01")
+    assert uw.pg_ledger["available"] is True
+    assert uw.features.pg_reconciliation_ratio == uw.pg_ledger["pg_reconciliation_ratio"] > 0.9
+    assert uw.features.pg_top_platform_share == uw.pg_ledger["pg_top_platform_share"]
+    assert uw.signals["pg_hhi"] == uw.pg_ledger["pg_hhi"]
+
+
+def test_pg_features_none_without_settlements(cases):
+    uw = _underwrite(cases, "seller-dailylook-01", pg=False)
+    assert uw.features.pg_reconciliation_ratio is None and uw.features.pg_top_platform_share is None
+    assert uw.pg_ledger == {"available": False} and "pg_hhi" not in uw.signals

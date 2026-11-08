@@ -121,6 +121,11 @@ class CashFlowFeatures(Contract):
     industry: str
     region: str
     business_age_months: int = Field(ge=0)
+    # 정책 v3(2026-11-08) 선택 지표. 옛 문서·자료 없음은 None이며 해당 규칙은 적용하지 않는다.
+    revenue_trend_ratio: NonNegFloat | None = None
+    high_cost_lender_count: int | None = Field(default=None, ge=0)
+    pg_reconciliation_ratio: Annotated[float, Field(ge=0, le=1)] | None = None
+    pg_top_platform_share: Annotated[float, Field(ge=0, le=1)] | None = None
 
 
 class Decision(StrEnum):

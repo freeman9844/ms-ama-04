@@ -300,3 +300,12 @@ def test_early_warning_alert_round_trip_and_invariants():
         _alert(severity="high", recommended_action="monitor")
     with pytest.raises(ValidationError):
         _alert(week=0)
+
+
+def test_cash_flow_features_v3_fields_optional_and_bounded():
+    f = _features()
+    assert (f.revenue_trend_ratio, f.high_cost_lender_count, f.pg_reconciliation_ratio, f.pg_top_platform_share) == (None,) * 4
+    with pytest.raises(ValidationError):
+        f.model_validate(f.model_dump() | {"pg_top_platform_share": 1.2})
+    with pytest.raises(ValidationError):
+        f.model_validate(f.model_dump() | {"high_cost_lender_count": -1})
