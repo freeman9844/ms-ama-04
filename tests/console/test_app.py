@@ -366,6 +366,18 @@ def test_decision_sent_page_forwards_to_detail_until_the_decision_lands(env, mak
     assert 'http-equiv="refresh"' not in landed and "반영을 기다리는 중" not in landed
 
 
+def test_decision_form_is_locked_while_the_sent_decision_is_pending(env):
+    client, _ = env
+    fresh = client.get("/applications/app-1", headers=OFFICER).text
+    assert '<button type="submit">결정 보내기</button>' in fresh and "data-decision-form" in fresh
+    assert '<script src="/static/decision.js" defer></script>' in fresh
+    resp = decide(client, OFFICER, csrf(client, OFFICER))
+    url = re.search(r'content="1;url=(/applications/app-1\?since=[0-9a-f]{12})"', resp.text).group(1)
+    waiting = client.get(url, headers=OFFICER).text
+    assert '<button type="submit" disabled>결정 반영 대기 중</button>' in waiting
+    assert '<textarea name="reason" rows="3" disabled>' in waiting and 'value="decline" disabled>' in waiting
+
+
 def test_application_detail_pages_refresh_every_ten_seconds(env, make_doc):
     client, _ = env
     client.app.state.deps.store.docs["app-1"] = make_doc(status="received")

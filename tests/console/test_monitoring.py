@@ -325,6 +325,19 @@ def test_restructure_sent_page_watches_alert_changes(setup, mask):
     assert "반영을 기다리는 중" not in client.get(url, headers=OFFICER).text
 
 
+def test_restructure_form_is_locked_while_the_decision_is_pending(setup):
+    client, *_ = setup(loan=held_loan("paused"))
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert '<button type="submit">결정 보내기</button>' in page and "data-decision-form" in page
+    assert '<script src="/static/decision.js" defer></script>' in page
+    form = {"csrf": csrf(client), "decision": "approve", "reason": "3개월 유예"}
+    sent = client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data=form, headers=OFFICER)
+    url = re.search(r'content="1;url=(/loans/app-1\?since=[0-9a-f]{12})"', sent.text).group(1)
+    waiting = client.get(url, headers=OFFICER).text
+    assert '<button type="submit" disabled>결정 반영 대기 중</button>' in waiting
+    assert '<textarea name="reason" rows="2" disabled>' in waiting
+
+
 def test_loans_list_shows_business_name_to_deciders(setup):
     client, *_ = setup()
     assert "성수데일리룩" in client.get("/loans", headers=OFFICER).text

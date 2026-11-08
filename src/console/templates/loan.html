@@ -17,19 +17,20 @@
 {% if decidable and user.can_decide and replay_blocked %}
 <p><small>재생이 끝나면 재조정 결정을 내릴 수 있습니다.</small></p>
 {% elif decidable and user.can_decide %}
-<form method="post" action="/loans/{{ v.loan.id|path }}/alerts/{{ doc_id|path }}/restructure" class="decision">
+{% set locked = " disabled" if watch_url else "" %}
+<form method="post" action="/loans/{{ v.loan.id|path }}/alerts/{{ doc_id|path }}/restructure" class="decision" data-decision-form>
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <fieldset><legend>재조정 결정</legend>
-    <label><input type="radio" name="decision" value="approve" checked> 승인</label>
-    <label><input type="radio" name="decision" value="decline"> 거절</label>
+    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> 승인</label>
+    <label><input type="radio" name="decision" value="decline"{{ locked }}> 거절</label>
   </fieldset>
-  <label>사유 <textarea name="reason" rows="2"></textarea></label>
-  <button type="submit">결정 보내기</button>
+  <label>사유 <textarea name="reason" rows="2"{{ locked }}></textarea></label>
+  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "결정 보내기" }}</button>
 </form>
 {% endif %}
 {%- endmacro %}
 {% set l = v.loan %}{% set m = v.monitoring %}
-{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ watch_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ watch_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="3">{% endif %}<script src="/static/decision.js" defer></script>{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
 <div class="page-head">
