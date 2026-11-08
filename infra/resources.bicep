@@ -774,6 +774,7 @@ module opsJob 'modules/eval-job.bicep' = {
 // luna를 쓰는 게이트웨이 합계: 조기경보 150K + 소형 에이전트 72K = 222K ≤ 240K.
 // 인라인 재생은 13주 조사를 몇 분 안에 연달아 돌려 429가 나기 쉽습니다(2026-11-08, gpt-5.4 1분 피크 85.9K).
 // 조기경보 조사는 429를 지수 백오프로 최대 5번 다시 보냅니다(src/agents/early_warning.py EW_THROTTLE_RETRIES).
+// gw-officer-chat 100K는 콘솔 심사역 채팅 전용 gpt-6-luna 배포 용량(100K, main.bicep)과 같습니다.
 // DataZoneStandard는 배포 용량이 100K라 APIM TPM보다 배포 한도가 먼저 걸립니다.
 // src/agents/gateway.py CONNECTIONS와 이름이 같아야 합니다(테스트가 교차 확인).
 var gateways = [
@@ -785,6 +786,7 @@ var gateways = [
   { name: 'gw-collections', tpm: 10000 }
   { name: 'gw-consent-notice', tpm: 5000 }
   { name: 'gw-grievance', tpm: 5000 }
+  { name: 'gw-officer-chat', tpm: 100000 }
   { name: 'gw-probe', tpm: 1000 }
 ]
 

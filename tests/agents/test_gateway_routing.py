@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agents import collections, data_assembly, early_warning, notices, txn_classify, underwriting
+from agents import collections, data_assembly, early_warning, notices, officer_chat, txn_classify, underwriting
 from agents.gateway import (
     CONNECTIONS,
     DIRECT_AGENTS,
@@ -103,7 +103,7 @@ def test_connections_cover_agent_constants():
     agents = {
         data_assembly.AGENT_NAME, underwriting.ANALYST_AGENT, underwriting.REVIEWER_AGENT, early_warning.EW_AGENT,
         txn_classify.FALLBACK_AGENT, collections.COLLECTIONS_AGENT, notices.CONSENT_NOTICE_AGENT,
-        notices.GRIEVANCE_AGENT,
+        notices.GRIEVANCE_AGENT, officer_chat.OFFICER_AGENT,
     }
     assert set(CONNECTIONS) == agents | {PROBE_AGENT}
     assert JUDGE_AGENT in DIRECT_AGENTS and JUDGE_AGENT not in CONNECTIONS

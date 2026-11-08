@@ -21,6 +21,7 @@ CONNECTIONS: dict[str, str] = {
     "collections-agent": "gw-collections",
     "consent-notice-agent": "gw-consent-notice",
     "grievance-reply-agent": "gw-grievance",
+    "officer-assistant": "gw-officer-chat",
     "gateway-probe": "gw-probe",
 }
 PROBE_AGENT = "gateway-probe"
