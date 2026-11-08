@@ -157,7 +157,7 @@ def settlement_profile(
                 "anchors": anchors,
                 "payouts_per_month": round(per_month, 1),
                 "monthly_avg_krw": int(monthly_avg),
-                "per_payout_krw": int(sum(t.amount_krw for t in txns) / len(paid_days)),
+                "per_payout_krw": int(sum(t.amount_krw for t in txns) / len(txns)),
             }
         )
     totals = _monthly_revenue(revenue, min(t.booked_on for t in transactions), as_of)

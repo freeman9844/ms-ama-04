@@ -13,6 +13,7 @@ from mockapis.sellerdata.categories import TxnCategory
 from mockapis.sellerdata.channels import CHANNELS, payouts
 from mockapis.sellerdata.costs import CostSchedule, Event
 from mockapis.sellerdata.personas import Persona
+from mockapis.sellerdata.receipts import bank_receipts
 from mockapis.sellerdata.seasonality import day_factor
 from shared.contracts import PgSettlement
 
@@ -60,24 +61,42 @@ def simulate(
     payroll_day: Callable[[int, int], int] = _ten,
     owner_draw_factor: Callable[[date], float] = _one,
     extra: Iterable[Event] = (),
+    receipt_rng: random.Random | None = None,
+    assigned_from: date | None = None,
 ) -> Ledger:
-    """[start, end) 기간의 거래 사건. 같은 날은 입금 먼저, 출금 나중."""
+    """[start, end) 기간의 거래 사건. 같은 날은 입금 먼저, 출금 나중.
+
+    receipt_rng가 있으면 정산 원장과 계좌 입금을 분리한다(receipts.bank_receipts: 시점 차이·상계·양도).
+    없으면 원장 그대로 입금한다(사후 재생).
+    """
     by_channel = daily_sales(persona, start - timedelta(days=WARMUP_DAYS), end, rng, sales_factor)
-    events: list[Event] = []
-    settlements: list[PgSettlement] = []
-    for channel, sales in by_channel.items():
-        for p in payouts(CHANNELS[channel], persona.industry, sales, rng):
-            if not start <= p.paid_on < end:
-                continue
-            events.append(Event(p.paid_on, p.net_krw, p.description, p.code, TxnCategory.REVENUE))
-            if p.code == "PG_SETTLE":
-                settlements.append(PgSettlement(settled_on=p.paid_on, platform=p.channel, gross_krw=p.gross_krw,
-                                                fee_krw=p.fee_krw, net_krw=p.net_krw))
+    paid = [p for channel, sales in by_channel.items() for p in payouts(CHANNELS[channel], persona.industry, sales, rng)
+            if p.paid_on < end]
+    if receipt_rng is None:
+        ledger = [p for p in paid if p.paid_on >= start]
+        events = [Event(p.paid_on, p.net_krw, p.description, p.code, TxnCategory.REVENUE) for p in ledger]
+    else:
+        # 시작일 직전 달 상계도 필요하다(첫 달 광고비 보정). 그래서 워밍업 지급까지 반영기에 넣고 기간 안만 남긴다.
+        r = bank_receipts(paid, end, receipt_rng, assigned_from=assigned_from)
+        all_ledger = list(r.payouts)
+        ledger = [p for p in all_ledger if p.paid_on >= start]
+        events = [e for e in r.events if start <= e.booked_on < end]
+    settlements = [
+        PgSettlement(settled_on=p.paid_on, platform=p.channel, gross_krw=p.gross_krw, fee_krw=p.fee_krw,
+                     deduction_krw=p.deduction_krw, net_krw=p.net_krw)
+        for p in ledger if p.code == "PG_SETTLE"
+    ]
     total: dict[date, int] = {}
     for sales in by_channel.values():
         for d, v in sales.items():
             total[d] = total.get(d, 0) + v
-    events += CostSchedule(persona, start, end, total, rng, payroll_day, owner_draw_factor).build()
+    ad_deductions: dict[tuple[int, int], int] | None = None
+    if receipt_rng is not None:
+        ad_deductions = {}
+        for p in all_ledger:
+            key = (p.paid_on.year, p.paid_on.month)
+            ad_deductions[key] = ad_deductions.get(key, 0) + p.deduction_krw
+    events += CostSchedule(persona, start, end, total, rng, payroll_day, owner_draw_factor, ad_deductions).build()
     events += [e for e in extra if start <= e.booked_on < end]
     events.sort(key=lambda e: (e.booked_on, e.amount_krw < 0))
     return Ledger(tuple(events), tuple(sorted(settlements, key=lambda s: s.settled_on)), total)

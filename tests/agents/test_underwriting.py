@@ -36,8 +36,8 @@ GOOD = {
     "recommendation": "approve",
     "summary": "영업현금흐름이 신규 상환액을 충분히 감당한다.",
     "claims": [
-        {"text": "DSCR은 4.106로 정책 하한을 크게 웃돈다.", "metric_ids": ["M:dscr"], "txn_ids": []},
-        {"text": "현금 완충일수는 22.7일이다.", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
+        {"text": "DSCR은 4.074로 정책 하한을 크게 웃돈다.", "metric_ids": ["M:dscr"], "txn_ids": []},
+        {"text": "현금 완충일수는 23.3일이다.", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
     ],
     "proposed_structure": {
         "amount_krw": 3_300_000,
@@ -47,7 +47,7 @@ GOOD = {
         "rationale": "요청 금액이 정책 한도 안이다.",
     },
     "counterfactuals": [
-        {"metric_id": "M:dscr", "current": 4.106, "target": 1.0, "explanation": "DSCR이 1.0 아래면 거절 사유가 된다."}
+        {"metric_id": "M:dscr", "current": 4.074, "target": 1.0, "explanation": "DSCR이 1.0 아래면 거절 사유가 된다."}
     ],
 }
 SUPPORTED = {
@@ -156,7 +156,7 @@ def test_specs_are_strict_with_tools_and_code_interpreter():
 def test_get_metrics_exposes_catalog_policy_and_classification(cases):
     ctx = context(cases)
     out = ctx.handlers()["get_metrics"]({})
-    assert out["metrics"]["M:dscr"] == 4.106 and out["metrics"]["P:max_amount_krw"] == AMOUNT
+    assert out["metrics"]["M:dscr"] == 4.074 and out["metrics"]["P:max_amount_krw"] == AMOUNT
     assert not [k for k in out["metrics"] if k.startswith("S:")]
     assert out["policy"]["decision"] == "eligible" and out["policy"]["reason_codes"] == []
     assert out["classification"] == {"unresolved": 0}
@@ -193,7 +193,7 @@ ALL_TOOLS = [
 def test_agents_never_see_pii(cases, applicant_id):
     case = cases[applicant_id]
     leaky = copy.deepcopy(GOOD)
-    leaky["claims"][0]["text"] = f"{case.profile.representative_name} 대표의 DSCR은 4.106다."
+    leaky["claims"][0]["text"] = f"{case.profile.representative_name} 대표의 DSCR은 4.074다."
     runner = FakeRunner([leaky, GOOD, GOOD], [SUPPORTED, SUPPORTED, SUPPORTED], tool_script=ALL_TOOLS)
     run_assess(context(cases, applicant_id), runner)
     seen = json.dumps({"inputs": [t for _, t in runner.calls], "tools": runner.tool_outputs}, ensure_ascii=False)

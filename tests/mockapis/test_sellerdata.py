@@ -1,5 +1,5 @@
 import random
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -113,3 +113,49 @@ def test_payout_net_subtracts_deduction():
     p = Payout(date(2026, 4, 6), "쿠팡", "쿠팡(주) 주정산", "PG_SETTLE", 1000, 100, 30)
     assert p.net_krw == 870
     assert Payout(date(2026, 4, 6), "쿠팡", "쿠팡(주) 주정산", "PG_SETTLE", 1000, 100).net_krw == 900
+
+
+def test_generated_case_ledger_and_bank_differ_only_by_timing_and_offset():
+    from mockapis.synth import Archetype, generate_case
+
+    case = generate_case("app-r", Archetype.HEALTHY_SEASONAL, date(2026, 11, 1), 7)
+    assert any(s.deduction_krw > 0 for s in case.pg_settlements)
+    for s in case.pg_settlements:
+        assert s.net_krw == s.gross_krw - s.fee_krw - s.deduction_krw
+    deposits = {(t.amount_krw) for t in case.transactions if t.txn_type_code == "PG_SETTLE"}
+    matched = [s for s in case.pg_settlements if s.net_krw in deposits]
+    assert len(matched) >= 0.97 * len(case.pg_settlements)  # 기준일 직후로 밀린 몇 건만 빠진다
+
+
+def test_simulate_without_receipt_rng_is_unchanged():
+    from mockapis.sellerdata.engine import simulate
+
+    persona = DEMO_PERSONAS["seller-dailylook-01"]
+    a = simulate(persona, date(2026, 1, 1), date(2026, 4, 1), random.Random(5))
+    assert all(s.deduction_krw == 0 for s in a.pg_settlements)
+    pg_deposits = sorted(e.amount_krw for e in a.events if e.code == "PG_SETTLE")
+    assert pg_deposits == sorted(s.net_krw for s in a.pg_settlements)
+
+
+def _ad_outflows(ad_deductions, month):
+    from mockapis.sellerdata.costs import CostSchedule
+
+    persona = DEMO_PERSONAS["seller-dailylook-01"]
+    sales = {date(2026, 1, 1) + timedelta(days=i): 1_000_000 for i in range(120)}
+    events = CostSchedule(persona, date(2026, 2, 1), date(2026, 5, 1), sales, random.Random(3),
+                          ad_deductions=ad_deductions).build()
+    ad = sum(-e.amount_krw for e in events if e.category is TxnCategory.ADVERTISING and e.booked_on.month == month)
+    card = sum(-e.amount_krw for e in events if e.category is TxnCategory.CARD_PAYMENT and e.booked_on.month == month)
+    return ad, card, events
+
+
+def test_ad_deductions_reduce_next_months_bank_paid_ads():
+    base_ad, base_card, base_events = _ad_outflows(None, 3)
+    assert _ad_outflows({}, 3)[2] == base_events
+    ad, card, _ = _ad_outflows({(2026, 2): 300_000}, 3)
+    assert 300_000 - 3 <= base_ad - ad <= 300_000 and card == base_card  # 충전 3건 정수 절삭
+    ad, card, _ = _ad_outflows({(2026, 2): base_ad + 50_000}, 3)
+    assert ad == 0 and 0 < base_card - card <= 50_000 + 1
+    ad, card, _ = _ad_outflows({(2026, 2): 10**9}, 3)
+    assert ad == 0 and card > 0
+    assert _ad_outflows({(2026, 3): 300_000}, 3)[:2] == (base_ad, base_card)  # 당월 상계는 다음 달에 반영

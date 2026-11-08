@@ -35,11 +35,11 @@ def _underwrite(cases, applicant_id, transactions=None):
 @pytest.mark.parametrize(
     ("applicant_id", "months", "inflow", "dscr", "buffer", "vol", "match"),
     [
-        ("seller-dailylook-01", 12, 27_925_932, 4.106, 22.7, 0.121, 0.972),
-        ("seller-mangwon-02", 12, 24_736_976, 4.22, 31.9, 0.066, 0.6),
-        ("seller-glowlab-03", 12, 25_062_551, 2.983, 37.6, 0.181, 0.972),
-        ("seller-knitroom-04", 4, 10_070_066, 3.267, 27.4, 0.068, 0.0),
-        ("seller-candle-05", 12, 16_400_357, 4.704, 47.9, 0.116, 0.976),
+        ("seller-dailylook-01", 12, 27_282_150, 4.074, 23.3, 0.128, 0.972),
+        ("seller-mangwon-02", 12, 24_372_970, 4.349, 33.2, 0.072, 0.6),
+        ("seller-glowlab-03", 12, 24_570_277, 2.998, 38.4, 0.181, 0.972),
+        ("seller-knitroom-04", 4, 9_885_958, 3.267, 27.6, 0.067, 0.0),
+        ("seller-candle-05", 12, 15_960_547, 4.681, 49.7, 0.119, 0.976),
     ],
 )
 def test_features_match_calibration(cases, applicant_id, months, inflow, dscr, buffer, vol, match):
@@ -71,7 +71,7 @@ def test_policy_outcomes_for_demo_applicants(cases, applicant_id, decision, code
 
 def test_signals_explain_dscr(cases):
     s = _underwrite(cases, "seller-dailylook-01").signals
-    assert s["avg_monthly_noi_krw"] == 2_674_318
+    assert s["avg_monthly_noi_krw"] == 2_653_409
     assert s["avg_monthly_debt_service_krw"] == 364_204
     assert s["new_installment_krw"] == 287_061
     assert s["avg_monthly_owner_draw_krw"] == 1_900_000

@@ -37,6 +37,7 @@ STRESS_PROCEEDS_RATIO = 0.05  # 월 주문액 대비 대부·P2P 1회 차입액
 STRESS_REPAYMENT_RATIO = 0.004  # 차입 1건의 주 상환액
 TAX_MISMATCH_RATIO = 0.6
 OPENING_BALANCE_RATIO = 0.5
+RECEIPT_SEED_OFFSET = 5000  # 계좌 반영기 전용 rng(기존 매출·비용 난수 순서를 보존)
 THIN_HISTORY_MONTHS = 4
 THIN_AGE_MONTHS = 8
 DEFAULT_AGE_MONTHS = 38
@@ -118,6 +119,7 @@ def generate_case(
         payroll_day=lambda y, m: STRESS_PAYROLL_DAY if stressed(date(y, m, 10)) else 10,
         owner_draw_factor=lambda d: STRESS_OWNER_DRAW if stressed(d) else 1.0,
         extra=stress_lending(persona, onset, as_of) if onset else (),
+        receipt_rng=random.Random(seed + RECEIPT_SEED_OFFSET),
     )
     events = list(ledger.events)
     if inject_prompt:

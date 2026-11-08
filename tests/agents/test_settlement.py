@@ -119,3 +119,16 @@ def test_no_revenue_means_no_profile(cases):
     case = cases["seller-dailylook-01"]
     out = [t for t in case.transactions if t.amount_krw < 0]
     assert settlement_profile(out, categorize(out, {}), AS_OF, FLAT) is None
+
+
+def test_deposits_merged_onto_one_day_still_count_as_payouts():
+    base = _daily(date(2026, 8, 1), date(2026, 10, 31), lambda d: 100_000)
+    extra = [Transaction(txn_id=f"x{i}", booked_on=base[i].booked_on, amount_krw=100_000, balance_after_krw=0,
+                         description="토스페이먼츠 정산", txn_type_code="PG_SETTLE") for i in (10, 40)]
+    out = {}
+    for txns in (base, base + extra):
+        profile = settlement_profile(txns, {t.txn_id: Category.REVENUE for t in txns}, AS_OF, FLAT)
+        out[len(txns)] = profile["channels"][0]
+    plain, merged = out[len(base)], out[len(base) + 2]
+    assert plain["per_payout_krw"] == merged["per_payout_krw"] == 100_000
+    assert (merged["cadence"], merged["payouts_per_month"]) == (plain["cadence"], plain["payouts_per_month"])

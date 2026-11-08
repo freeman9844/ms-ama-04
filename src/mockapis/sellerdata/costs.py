@@ -78,6 +78,7 @@ class CostSchedule:
     rng: random.Random
     payroll_day: Callable[[int, int], int] = _ten
     owner_draw_factor: Callable[[date], float] = _one
+    ad_deductions: Mapping[tuple[int, int], int] | None = None  # 정산 상계로 플랫폼이 먼저 가져간 광고비(지급 연·월별)
 
     def __post_init__(self) -> None:
         self.profile = INDUSTRY_COSTS.get(self.persona.industry, INDUSTRY_COSTS["리빙"])
@@ -150,10 +151,17 @@ class CostSchedule:
                  TxnCategory.SHIPPING)
 
         topup = round(prev_sales * prof.ad_ratio * AD_TRANSFER_SHARE / AD_TOPUPS_PER_MONTH / 1.1, -4) * 1.1
+        # 전월 정산에서 상계된 광고비만큼 계좌로 내는 광고비를 줄인다: 충전 → 카드 광고분 순
+        offset = float((self.ad_deductions or {}).get((py, pm), 0))
+        topup_cut = min(offset, topup * AD_TOPUPS_PER_MONTH)
+        topup -= topup_cut / AD_TOPUPS_PER_MONTH
+        card_ad = prev_sales * prof.ad_ratio * (1 - AD_TRANSFER_SHARE)
+        card_cut = min(offset - topup_cut, card_ad)
         for day in sorted(self.rng.sample(range(1, 28), AD_TOPUPS_PER_MONTH)):
             self.add(next_business_day(date(y, m, day)), topup, "네이버 검색광고 충전", "TRANSFER_OUT",
                      TxnCategory.ADVERTISING)
         card = prev_sales * (prof.ad_ratio * (1 - AD_TRANSFER_SHARE) + CARD_MISC_RATIO) * self.noise(0.1)
+        card = max(0.0, card - card_cut)
         self.add(next_business_day(date(y, m, 14)), card, "신한카드 결제대금", "AUTO_DEBIT", TxnCategory.CARD_PAYMENT)
 
         elapsed = (y - self.start.year) * 12 + m - self.start.month

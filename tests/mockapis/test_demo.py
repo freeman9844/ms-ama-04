@@ -13,11 +13,11 @@ from shared.segments import LOAD_GRID, SELLER_INDUSTRIES
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
 DIGESTS = {
-    "seller-dailylook-01": "3752ffee3b13680a",
-    "seller-mangwon-02": "25eb677ad3f511ce",
-    "seller-glowlab-03": "65dd1fbfd9b6c7e7",
-    "seller-knitroom-04": "345e3d631ddbe23c",
-    "seller-candle-05": "b435547c08c3772f",
+    "seller-dailylook-01": "b06a8640eb8f20d9",
+    "seller-mangwon-02": "ae3870c6f81ccba2",
+    "seller-glowlab-03": "36b9104863595af4",
+    "seller-knitroom-04": "49e83dda0da1fb34",
+    "seller-candle-05": "dcf8840448b8e826",
 }
 
 
