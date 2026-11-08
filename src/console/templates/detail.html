@@ -84,6 +84,24 @@
 {{ ch.legend(ui.monthly_legend) }}
 </section>
 {% endif %}
+<section class="card">
+<h3>정산 대사 <small>마켓플레이스 정산 원장과 계좌 입금 비교</small></h3>
+{% if ui.settlement.available %}
+<div class="grid-4">
+{% for k in ui.settlement.kpis %}  {{ ch.kpi(k.label, k.value, k.sub, k.tone) }}
+{% endfor %}</div>
+<div class="grid-2">
+<div>{{ ch.hbars(ui.settlement.platforms, "플랫폼별 정산 비중", "%") }}</div>
+<div>{{ ch.hbars(ui.settlement.take_rate, "월별 공제율(수수료+상계)", "%") }}</div>
+</div>
+{% if ui.settlement.unmatched %}
+<details><summary>계좌에 들어오지 않은 정산 {{ ui.settlement.unmatched_count }}건(최근 10건)</summary>
+<table class="kv">{% for u in ui.settlement.unmatched %}<tr><th>{{ u.settled_on }} {{ u.platform }}</th><td>{{ u.net_krw|krw }}</td></tr>{% endfor %}</table>
+</details>
+{% endif %}
+<p class="note">{{ ui.settlement.note }} · 지급일부터 3영업일 안의 같은 금액 입금을 짝지었습니다.</p>
+{% else %}<p class="note">정산 자료 없음 — 정산 원장이 없거나 2026-11-08 이전 심사분입니다.</p>{% endif %}
+</section>
 {% if p.signals %}
 <section class="card">
 <h3>지표 신호등 <small>초록 통과 · 주황 회부 기준 위반 · 빨강 거절 기준 위반 · 주황(참고) 참고 지표 주의</small></h3>

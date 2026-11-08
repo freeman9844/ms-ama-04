@@ -90,6 +90,19 @@ def test_detail_tabs_and_assessment_panels(client):
     assert client.get("/static/tabs.js").status_code == 200
 
 
+def test_detail_shows_settlement_card(client):
+    html = page(client, "/applications/app-20261103-p01")
+    assert "정산 대사" in html and "플랫폼별 정산 비중" in html and "월별 공제율(수수료+상계)" in html
+    assert "정산 자료 없음" not in html
+
+
+def test_detail_old_doc_shows_no_settlement():
+    deps = build_deps()
+    deps.store.docs["app-20261103-p01"]["underwriting"].pop("pg_ledger")
+    html = page(TestClient(create_app(deps), follow_redirects=False), "/applications/app-20261103-p01")
+    assert "정산 자료 없음" in html and "플랫폼별 정산 비중" not in html
+
+
 def test_detail_tabs_show_notices_when_empty(client):
     html = page(client, "/applications/app-20261103-p06")
     assert 'data-default-tab="tab-summary"' in html

@@ -326,3 +326,23 @@ def test_gateway_blocks_lists_blocked_steps_in_order():
     ]}
     assert dashboard.gateway_blocks(doc) == ["데이터 수집"]
     assert dashboard.gateway_blocks({}) == []
+
+
+LEDGER = {"available": True, "period": {"from": "2026-05-01", "to": "2026-11-01"}, "settlement_count": 120,
+          "pg_reconciliation_ratio": 0.62, "pg_top_platform_share": 0.56, "pg_hhi": 0.45, "pg_take_rate_trend_pp": 1.8,
+          "platforms": [{"platform": "쿠팡", "gross_krw": 60_000_000, "share": 0.56, "unpaid_krw": 21_000_000},
+                        {"platform": "스마트스토어", "gross_krw": 47_000_000, "share": 0.44, "unpaid_krw": 0}],
+          "monthly_take_rate": [{"month": "2026-05", "rate": 0.081}, {"month": "2026-10", "rate": 0.099}],
+          "unmatched_count": 30, "unmatched": [{"settled_on": "2026-10-27", "platform": "쿠팡", "net_krw": 512_000}]}
+
+
+def test_settlement_card_warns_low_reconciliation():
+    card = dashboard.settlement_card(LEDGER)
+    assert card["available"] and card["kpis"][0]["tone"] == "red" and card["kpis"][0]["value"] == "62%"
+    assert [b["label"] for b in card["platforms"]["bars"]][:1] == ["쿠팡"]
+    assert card["unmatched"][0]["net_krw"] == 512_000 and card["unmatched_count"] == 30
+
+
+def test_settlement_card_unavailable_for_old_docs():
+    assert dashboard.settlement_card(None) == {"available": False}
+    assert dashboard.settlement_card({"available": False}) == {"available": False}

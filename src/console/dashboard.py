@@ -224,6 +224,34 @@ def gateway_blocks(doc: Mapping[str, Any]) -> list[str]:
     return labels
 
 
+RECONCILIATION_WARN = 0.90
+TOP_SHARE_WARN = 0.80
+
+
+def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
+    """정산 원장 대사 카드. 옛 문서(pg_ledger 없음)·자료 없음은 available=False."""
+    if not isinstance(pg, Mapping) or not pg.get("available"):
+        return {"available": False}
+    recon, share, trend = pg.get("pg_reconciliation_ratio"), pg.get("pg_top_platform_share"), pg.get("pg_take_rate_trend_pp")
+    pct = lambda v: f"{round(v * 100)}%" if charts.is_num(v) else "—"  # noqa: E731
+    kpis = [
+        {"label": "정산금 계좌 입금", "value": pct(recon), "sub": "기준 90% 이상",
+         "tone": "red" if charts.is_num(recon) and recon < RECONCILIATION_WARN else "green"},
+        {"label": "최대 채널 비중", "value": pct(share), "sub": "기준 80% 이하",
+         "tone": "amber" if charts.is_num(share) and share > TOP_SHARE_WARN else "blue"},
+        {"label": "공제율 변화(6개월)", "value": f"{trend:+.1f}%p" if charts.is_num(trend) else "—",
+         "sub": "수수료+광고비 상계", "tone": "amber" if charts.is_num(trend) and trend >= 1.0 else "blue"},
+    ]
+    platforms = charts.hbars([(p["platform"], round(p["share"] * 100, 1), "blue") for p in pg.get("platforms") or ()],
+                             width=320, label_w=88)
+    take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple") for m in pg.get("monthly_take_rate") or ()],
+                        width=320, label_w=56)
+    period = pg.get("period") or {}
+    return {"available": True, "kpis": kpis, "platforms": platforms, "take_rate": take,
+            "unmatched": list(pg.get("unmatched") or ()), "unmatched_count": pg.get("unmatched_count", 0),
+            "note": f"{period.get('from', '')} ~ {period.get('to', '')} 정산 {pg.get('settlement_count', 0)}건"}
+
+
 def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
     uw = doc.get("underwriting") or {}
@@ -273,6 +301,7 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "counterfactuals": counterfactuals,
         "review": review,
         "gateway_blocks": gateway_blocks(doc),
+        "settlement": settlement_card(uw.get("pg_ledger")),
     }
 
 

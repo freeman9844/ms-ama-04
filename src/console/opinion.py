@@ -29,8 +29,11 @@ METRIC_LABELS = {
     "avg_monthly_noi_krw": "월평균 순영업이익", "avg_monthly_debt_service_krw": "월평균 기존 상환",
     "new_installment_krw": "이번 대출 월 상환액", "avg_monthly_owner_draw_krw": "월평균 대표자 인출",
     "dscr_after_owner_draw": "대표자 인출 후 DSCR", "unclassified_count": "미분류 거래 수",
-    "high_cost_lender_count": "고금리 대부 거래 수", "loan_proceeds_count": "대출금 입금 수",
+    "high_cost_lender_count": "고비용 대출 상환처 수", "loan_proceeds_count": "대출금 입금 수",
     "max_amount_krw": "정책 한도",
+    "pg_reconciliation_ratio": "정산금 계좌 입금 비율", "pg_top_platform_share": "최대 채널 비중",
+    "pg_hhi": "채널 집중도(HHI)", "pg_take_rate_trend_pp": "공제율 변화(%p)",
+    "revenue_trend_ratio": "최근 매출 추세",
 }
 MONTHLY_LABELS = {"revenue": "매출", "operating_out": "운영비", "debt_service": "상환", "owner_draw": "대표자 인출",
                   "index": "매출 지수"}
@@ -39,7 +42,7 @@ KRW_MONTHLY = frozenset({"revenue", "operating_out", "debt_service", "owner_draw
 SOURCES = (("M", "현금흐름 지표", "blue"), ("S", "월별 흐름", "teal"), ("P", "정책 결과", "purple"),
            ("txn", "근거 거래", "orange"), ("missing", "확인 안 됨", "red"))
 TOOL_LABELS = {"get_metrics": "지표 조회", "get_monthly_series": "월별 흐름 조회",
-               "get_settlement_summary": "정산 요약 조회",
+               "get_settlement_summary": "정산 원장 대사 조회",
                "query_transactions": "거래 조회", "code_interpreter": "코드 계산"}
 SCHEDULE_LABELS = {"level": "균등 상환", "seasonal": "계절 감액 상환"}
 INDEX_CHART = {"width": 480, "height": 220}
