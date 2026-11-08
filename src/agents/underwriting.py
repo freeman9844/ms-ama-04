@@ -262,6 +262,7 @@ class UnderwritingContext:
     transactions: Sequence[Transaction]
     categories: Mapping[str, str]
     mask: Callable[[str], str]
+    settlement: Mapping[str, Any] | None = None
     catalog: dict[str, int | float] = field(init=False)
     by_id: dict[str, Transaction] = field(init=False)
 

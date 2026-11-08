@@ -11,6 +11,7 @@ from agents.data_assembly import FLAG_AGENT_FALLBACK, SourceError
 from agents.gateway import GatewayRunner
 from agents.runtime import AgentError, AgentRun, FoundryAgents
 from agents.underwriting import ANALYST_AGENT, FLAG_ASSESSMENT_UNAVAILABLE, REVIEWER_AGENT
+from journey import activities
 from journey.activities import (
     ACTIVITIES,
     Deps,
@@ -230,6 +231,42 @@ def test_underwrite_flags_high_cost_lender(deps):
     assert "high_cost_lender_detected" in underwrite(deps, underwrite_input(consent["consent_id"]))["flags"]
 
 
+def test_underwrite_returns_pg_ledger(deps):
+    consent, _ = assembled(deps)
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["pg_ledger"]["available"] is True
+    assert result["features"]["pg_reconciliation_ratio"] == result["pg_ledger"]["pg_reconciliation_ratio"]
+
+
+def test_underwrite_without_pg_json_has_no_ledger(deps):
+    consent, _ = assembled(deps)
+    deps.raw.blobs.pop((f"consent-{consent['consent_id']}", "pg.json"))
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["pg_ledger"] == {"available": False} and "pg_ledger_unavailable" not in result["flags"]
+    assert result["features"]["pg_reconciliation_ratio"] is None
+
+
+def test_underwrite_with_corrupt_pg_json_flags(deps):
+    consent, _ = assembled(deps)
+    deps.raw.blobs[(f"consent-{consent['consent_id']}", "pg.json")] = [{"platform": ""}]
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["pg_ledger"] == {"available": False} and "pg_ledger_unavailable" in result["flags"]
+
+
+def test_underwrite_with_unparseable_pg_json_flags(deps, monkeypatch):
+    consent, _ = assembled(deps)
+    real_get = deps.raw.get_json
+
+    def broken(container, name):
+        if name == "pg.json":
+            raise json.JSONDecodeError("bad", "{", 1)
+        return real_get(container, name)
+
+    monkeypatch.setattr(deps.raw, "get_json", broken)
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["pg_ledger"] == {"available": False} and "pg_ledger_unavailable" in result["flags"]
+
+
 def test_underwrite_requires_raw_data(deps):
     with pytest.raises(RuntimeError, match="원천 데이터 없음"):
         underwrite(deps, underwrite_input("missing"))
@@ -393,13 +430,22 @@ def assess_input(deps, applicant_id="seller-dailylook-01"):
     return consent, json.loads(json.dumps(payload))
 
 
-def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps):
+def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps, monkeypatch):
     consent, payload = assess_input(deps)
     runner = UnderwritingRunner()
+    seen = {}
+    real = activities.UnderwritingContext
+
+    def spy(**kwargs):
+        seen.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(activities, "UnderwritingContext", spy)
     result = assess_credit(with_deps(deps, agents=runner), payload)
     a = result["assessment"]
     assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-5.6-sol")
     assert result["flags"] == [] and result["record"]["rounds"][0]["grounding_issues"] == []
+    assert seen["settlement"] == payload["underwriting"]["pg_ledger"]
     assert runner.names == [ANALYST_AGENT, REVIEWER_AGENT] and runner.deleted == ["cntr_1"]
     doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])
     assert doc["foundry_conversations"] == ["conv_1", "conv_2"]
