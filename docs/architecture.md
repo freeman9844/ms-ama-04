@@ -36,7 +36,7 @@ flowchart LR
   mock -.->|운영 전환 시 대체| real
 ```
 
-고객(마켓플레이스 셀러)은 콘솔의 고객 신청 페이지(`/apply`)에서 은행·세무·PG 데이터 3종에 모두 동의하고 금액(50만~1,000만 원)·기간(3~6개월, 기본 6개월)을 넣어 신청한다(`src/console/customer.py`). 이 신청은 심사역 콘솔과 같은 접수 큐로 들어가 같은 흐름을 탄다. 심사역·운영자는 콘솔로 들어온다. 콘솔 앱은 internal 환경 `cae-int`에 있고, 인터넷에서는 공용 IP → Application Gateway WAF v2(`snet-appgw`)를 거쳐서만 닿는다. WAF 사용자 지정 규칙이 운영자 공인 IP(`CONSOLE_IP`)가 아닌 요청을 403으로 막는다([ADR-011](adr/ADR-011-appgw-waf-entry.md); 데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)).
+고객(마켓플레이스 셀러)은 콘솔의 고객 신청 페이지(`/apply`)에서 은행·세무·PG 데이터 3종에 모두 동의하고 금액(50만~1,000만 원)·기간(3~6개월, 기본 6개월)을 넣어 신청한다(`src/console/customer.py`). 이 신청은 심사역 콘솔과 같은 접수 큐로 들어가 같은 흐름을 탄다. 심사역·운영자는 콘솔로 들어온다. 콘솔 앱은 internal 환경 `cae-int`에 있고, 인터넷에서는 공용 IP → Application Gateway WAF v2(`snet-appgw`)를 거쳐서만 닿는다. WAF 사용자 지정 규칙이 운영자 공인 IP(`CONSOLE_IP`)가 아닌 요청을 403으로 막는다([ADR-011](adr/ADR-011-appgw-waf-entry.md); 데모 모드는 Easy Auth 꺼짐, [ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 운영자 데이터 평면 작업(Functions·Foundry·ACR 빌드)만 배포 창에서 잠시 열린다(아래 [네트워크](#네트워크)). 결정 탭의 심사 도우미 채팅은 콘솔이 가명 스냅샷을 만들어 콘솔 관리 ID로 Foundry 에이전트 `officer-assistant`를 부르고, 모델 호출은 APIM 연결 `gw-officer-chat`(gpt-6-luna)을 거친다([에이전트](agents.md#심사역-결정-채팅)).
 
 ## 컨테이너
 

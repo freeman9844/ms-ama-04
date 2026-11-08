@@ -1,10 +1,10 @@
 # 에이전트
 
-8개 Foundry 프롬프트 에이전트가 신청·사후 단계 안에서 자율 판단한다. 흐름 자체는 Durable 오케스트레이터가 결정론적으로 관리하고(아래 [아키텍처](architecture.md) 참고), 에이전트는 설명·구조 제안·분류·안내문만 만든다. 신용 규칙과 최종 결정은 LLM 밖에 있다.
+9개 Foundry 프롬프트 에이전트가 신청·사후 단계와 심사역 콘솔에서 자율 판단한다. 흐름 자체는 Durable 오케스트레이터가 결정론적으로 관리하고(아래 [아키텍처](architecture.md) 참고), 에이전트는 설명·구조 제안·분류·안내문만 만든다. 신용 규칙과 최종 결정은 LLM 밖에 있다.
 
 > **합성 데이터 기준.** 모델 선택 근거 수치는 `eval/reports/job-eval-9imbutm/report.md`에서 인용한다. 같은 시드에서도 LLM 응답 변동이 있다.
 
-> 상위 Spec 대비: 설계 Spec §3은 에이전트를 5종으로 묶었으나, 구현은 `src/agents/`에 8개 `AgentSpec`으로 분리했다(분류·검토를 별도 에이전트로, 동의 안내와 이의 회신을 각각). 코드가 기준이다.
+> 상위 Spec 대비: 설계 Spec §3은 에이전트를 5종으로 묶었으나, 구현은 `src/agents/`에 9개 `AgentSpec`으로 분리했다(분류·검토를 별도 에이전트로, 동의 안내와 이의 회신을 각각, 콘솔 심사역 채팅을 추가). 코드가 기준이다.
 
 | 에이전트 | 단계 | 자율성 | 모델(기본) | 도구(handler) | 쓰기 권한 | 실패 시 동작 | 코드 |
 |---|---|---|---|---|---|---|---|
@@ -16,6 +16,7 @@
 | `collections-agent` | 사후 추심 | L3 | `gpt-5.6-luna` | `get_case`, `get_contact_history`, `list_scripts`, `send_script`, `route_hardship` | 스크립트 발송·재조정 요청 | 최근 경보 high면 `hardship_offer`, 아니면 `missed_payment`. 재조정 없음 | `src/agents/collections.py` |
 | `consent-notice-agent` | 동의 안내 | L4 | `gpt-5.6-luna` | 없음 | 없음 | 템플릿 문안 대체 | `src/agents/notices.py` |
 | `grievance-reply-agent` | 이의 회신 | L3 | `gpt-5.6-luna` | 없음 | 없음 | 템플릿 문안 대체 | `src/agents/notices.py` |
+| `officer-assistant` | 심사역 결정 채팅(콘솔) | L1 | `gpt-6-luna` | 없음(가명 스냅샷만) | 없음 | 안내 문구 반환(429·차단·실패 구분), 결정에는 영향 없음 | `src/agents/officer_chat.py`, `src/console/officer_chat.py` |
 
 자율성 등급은 상위 Spec §3.1 기준이다. 모델 이름은 `infra/resources.bicep`의 오케스트레이터 설정(`DATA_ASSEMBLY_MODEL` 등)과 `DECISION_DEPLOYMENT`에서 왔다.
 
@@ -100,6 +101,14 @@
 - **가드레일:** 입력에 없는 숫자·금리·약속 금지. 검사 미통과 시 템플릿 대체. 대화 즉시 삭제.
 - **모델 근거:** `gpt-5.6-luna`(`GRIEVANCE_MODEL`).
 
+## 심사역 결정 채팅
+
+- **목적:** 결정 탭에서 심사역이 현금흐름·정책 판정·에이전트 의견에 대해 자연어로 묻고 답을 받는다(L1, 결정 보조만).
+- **입력:** 콘솔이 신청 문서로 만든 가명 스냅샷(`build_snapshot`: 월별 현금흐름, 수치 특성·신호, 상환 여력, 정산 대사 요약, 정책 사유, 의견의 주장·근거 값·반사실, 심사역 결정 종류·금액)과 브라우저가 보낸 최근 6턴. 원천 Blob을 읽지 않으며 실명·사업자번호·심사역 ID·결정 사유·거래 원문은 넣지 않는다. 24,000자를 넘으면 주장 → 반사실 → 오래된 월 순으로 줄이고 `truncated`를 표시한다.
+- **가드레일:** 스냅샷 밖 내용은 "자료에 없음", 숫자에는 출처 표기, 승인·거절·금액을 결정하거나 지시하지 않는다. 대화는 답을 받은 뒤(실패해도) 바로 지운다. 대화 기록은 브라우저 메모리에만 있고 서버·Cosmos에 남기지 않는다. 로그는 신청 ID·결과·지연·토큰 수만.
+- **실패 시:** 429(5번 지수 백오프 뒤)·콘텐츠 차단·기타 실패를 안내 문구로 구분해 보여 준다. 결정 폼과 독립이다.
+- **모델 근거:** 전용 배포 `gpt-6-luna`(100K TPM, 쿼터 0/250에서 신설)로 조기경보의 `gpt-5.6-luna`와 용량을 나누지 않는다(`CHAT_MODEL`).
+
 ## 공통 런타임
 
 - **도구 호출 루프(`src/agents/runtime.py`):** 프롬프트 에이전트를 REST로 돌린다. 버전 생성(`POST /agents/{name}/versions`) → 대화 생성 → 응답 생성(`agent_reference` + conversation). `function_call`이 있으면 VNet 안에서 핸들러를 실행해 `function_call_output`으로 되돌리며, 최대 `max_rounds=6` 라운드(직접 호출 기본값. AI 게이트웨이를 거치는 에이전트는 아래 `GATEWAY_MAX_ROUNDS = 12`). 도구 예외 내용은 모델에 노출하지 않는다(`{"error": ...}`만 반환). 출력은 `output_model`로 스키마 검증한다.
@@ -117,6 +126,7 @@
   | `collections-agent` | `gw-collections` | 10,000 |
   | `consent-notice-agent` | `gw-consent-notice` | 5,000 |
   | `grievance-reply-agent` | `gw-grievance` | 5,000 |
+  | `officer-assistant` | `gw-officer-chat` | 100,000 |
   | (프로브 전용) | `gw-probe` | 1,000 |
 
 - **도구 라운드 상한:** 직접 호출은 `max_rounds=6`을 유지한다. 게이트웨이(chat completions) 경로에서는 모델이 턴당 도구 호출을 덜 해서 조기경보 조사가 모든 주차에서 6라운드 상한에 걸렸기 때문에, 라우팅되는 에이전트(`GatewayRunner`, 평가의 `EvalRunner`)에만 `GATEWAY_MAX_ROUNDS = 12`를 적용한다. 대가는 조사 한 번당 최대 2배의 라운드·토큰이다(건당 AI 비용 변화는 [비용 모델](cost-model.md#게이트웨이-경로-건당-ai-비용)).
