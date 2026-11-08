@@ -873,3 +873,4 @@ python -m ops smoke
 - `window open --acr`(프로비저닝 4분 13초) → `ops deploy orchestrator`(Functions 403 없음) → `ops smoke` 성공(`job-smoke-elvz75p`). Function 설정 `EW_MODEL=gpt-5.6-luna`, 배포 용량 150 확인.
 - **라이브 확인** `app-20261108-29c02d`(`seller-dailylook-01`, 500만 원·6개월, 재생 207초): 조사 5건(1·2·7·11·12주차) 모두 `investigator=gpt-5.6-luna`로 끝났고 폴백 0건입니다. 이전에 `agent_error`로 폴백하던 7주차도 정상 경보를 냈습니다. `gw-early-warning` 호출 43건·429 0건(같은 경로의 이전 `gpt-5.4` 재생은 56건).
 - **`window close`** 완료.
+- **luna 쿼터 증설 반영**: 구독의 다른 리소스가 쓰던 `gpt-5.6-luna` 쿼터가 100 → 10으로 줄어 이 배포를 150 → 240(쿼터 250/250)으로 올리고, `gw-early-warning` TPM을 75K → 150K(이전 `gpt-5.4`에서 429 0건을 확인한 값)로 되돌렸습니다. luna 게이트웨이 합 222K ≤ 240K. `window open` 프로비저닝 → 배포 용량 240·APIM 정책 `tokens-per-minute="150000"` 확인 → `ops smoke` 성공(`job-smoke-olmrsib`) → **`window close`** 완료.
