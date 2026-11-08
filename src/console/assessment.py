@@ -19,11 +19,18 @@ CAPACITY_CHART = {"width": 480, "height": 240}  # 반 폭 카드에서 글자가
 SIGNAL_RULES: dict[str, tuple[str, float]] = {
     "months_of_history": ("knockout", 6),
     "dscr": ("knockout", 1.0),
-    "tax_bank_match_ratio": ("refer", 0.7),
     "revenue_volatility": ("refer", 0.5),
     "cash_buffer_days": ("refer", 10),
     "business_age_months": ("refer", 12),
+    "high_cost_lender_count": ("refer", 0),
+    "revenue_trend_ratio": ("refer", 0.8),
+    "pg_top_platform_share": ("refer", 0.8),
+    "pg_reconciliation_ratio": ("refer", 0.9),
+    "tax_bank_match_ratio": ("watch", 0.7),  # 정책 v3에서 R101 삭제 — 참고 지표로만 표시
 }
+# 값이 없으면(정산 자료 없음, 옛 심사분) 신호등에 올리지 않는다.
+OPTIONAL_SIGNALS = frozenset({"high_cost_lender_count", "revenue_trend_ratio", "pg_top_platform_share",
+                              "pg_reconciliation_ratio"})
 # (지표, 이름, 방향, 강점 기준, 쉬운 설명). 설명의 {v}·{pct}·{t}는 관측값·백분율·정책 기준으로 채운다.
 SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
     ("dscr", "DSCR", "min", 1.5, "DSCR {v} — 벌어들이는 돈이 매달 갚을 돈의 {v}배입니다(기준 {t} 이상)."),
@@ -32,13 +39,22 @@ SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
     ("revenue_volatility", "매출 변동성", "max", 0.3,
      "매출 변동성 {v} — 월 매출이 평균에서 약 {pct}% 흔들립니다(기준 {t} 이하)."),
     ("tax_bank_match_ratio", "세금·계좌 일치율", "min", 0.9,
-     "세금·계좌 일치율 {v} — 신고 매출의 {pct}%가 계좌 입금으로 확인됩니다(기준 {t} 이상)."),
+     "세금·계좌 일치율 {v} — 신고 매출의 {pct}%가 계좌 입금으로 확인됩니다(참고 지표, {t} 이상 권장)."),
     ("business_age_months", "업력", "min", 24, "업력 {v}개월 — 사업을 {v}개월째 하고 있습니다(기준 {t}개월 이상)."),
     ("months_of_history", "거래 이력", "min", 12,
      "거래 이력 {v}개월 — 심사에 쓴 계좌 거래가 {v}개월치입니다(기준 {t}개월 이상)."),
+    ("revenue_trend_ratio", "최근 매출 추세", "min", 1.0,
+     "최근 매출 추세 {v} — 최근 60일 하루 매출이 그 전보다 {pct}% 수준입니다(기준 {t} 이상)."),
+    ("high_cost_lender_count", "고비용 대출 상환", "max", -1,
+     "고비용 대출 상환 {v}곳 — 대부업·고금리 대출 상환이 계좌에서 보입니다(기준 {t}곳)."),
+    ("pg_reconciliation_ratio", "정산금 계좌 입금", "min", 0.98,
+     "정산금 계좌 입금 {v} — 플랫폼 정산금의 {pct}%가 이 계좌로 들어왔습니다(기준 {t} 이상)."),
+    ("pg_top_platform_share", "최대 채널 비중", "max", 0.6,
+     "최대 채널 비중 {v} — 정산 매출의 {pct}%가 한 플랫폼에서 나옵니다(기준 {t} 이하)."),
 )
-SIGNAL_TONES = {"pass": "green", "refer": "amber", "knockout": "red", "unknown": "grey"}
-SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "knockout": "위반(거절 기준)", "unknown": "값 없음"}
+SIGNAL_TONES = {"pass": "green", "refer": "amber", "watch": "amber", "knockout": "red", "unknown": "grey"}
+SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "watch": "주의(참고 지표)",
+                       "knockout": "위반(거절 기준)", "unknown": "값 없음"}
 RECOMMENDATION_TONES = {"approve": "green", "conditional": "blue", "refer": "purple", "decline": "red"}
 LEFTOVER = ("leftover", "남는 돈", "green")
 
@@ -168,8 +184,8 @@ def _claims(claims: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 def _strengths_risks(signals: Sequence[Mapping[str, Any]], policy: Mapping[str, Any],
                      flags: Sequence[str]) -> tuple[list[str], list[str]]:
     strengths = [s["text"] for s in signals if s["strong"]]
-    risks = [f"{s['label']}: {s['text']}" for s in signals if s["state"] in ("knockout", "refer")]
-    covered = {s["field"] for s in signals if s["state"] in ("knockout", "refer")}
+    risks = [f"{s['label']}: {s['text']}" for s in signals if s["state"] in ("knockout", "refer", "watch")]
+    covered = {s["field"] for s in signals if s["state"] in ("knockout", "refer", "watch")}
     for r in policy.get("reason_codes") or []:
         if r.get("field") not in covered:
             risks.append(f"{r.get('code')} {r.get('message')}")
@@ -183,7 +199,8 @@ def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
     features = view.get("features") or uw.get("features") or {}
     policy = view.get("policy") or {}
     monthly = [m for m in uw.get("monthly") or [] if isinstance(m, Mapping)]
-    signals = [_signal(*s, features) for s in SIGNALS] if features else []
+    signals = [_signal(*s, features) for s in SIGNALS
+               if s[0] not in OPTIONAL_SIGNALS or charts.is_num(features.get(s[0]))] if features else []
     flags = [*(doc.get("flags") or ()), *(uw.get("flags") or ())]
     strengths, risks = _strengths_risks(signals, policy, flags)
     return {

@@ -174,7 +174,7 @@ def applications() -> list[dict[str, Any]]:
                                "conditions": ["월별 매출 보고"], "reason": "비수기 대비 조건 부여"}),
         _doc(5, "declined", _timeline(s[4], FLOW, (("declined", 3_000),)),
              officer_decision={"decision": "decline", "amount_krw": None, "officer_id": "preview-officer",
-                               "conditions": [], "reason": "정책 부적격(R001 거래 이력 부족, R101 매출 불일치)"}),
+                               "conditions": [], "reason": "정책 부적격(R001 거래 이력 부족, R104 업력 부족)"}),
         _doc(6, "withdrawn", _timeline(s[5], FLOW[:3], (("withdrawn", 120),)), rec=None),
         _doc(7, "data_incomplete", _timeline(s[6], FLOW[:2], (("data_incomplete", 70),)), rec=None),
         _doc(8, "received", _timeline(s[7], FLOW[:1]), rec=None),

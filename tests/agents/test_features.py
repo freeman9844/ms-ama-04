@@ -56,10 +56,10 @@ def test_features_match_calibration(cases, applicant_id, months, inflow, dscr, b
     ("applicant_id", "decision", "codes"),
     [
         ("seller-dailylook-01", "eligible", []),
-        ("seller-mangwon-02", "refer", ["R101"]),
-        ("seller-glowlab-03", "eligible", []),
-        ("seller-knitroom-04", "ineligible", ["R001", "R101", "R104"]),
-        ("seller-candle-05", "eligible", []),
+        ("seller-mangwon-02", "eligible", []),
+        ("seller-glowlab-03", "refer", ["R105", "R106"]),
+        ("seller-knitroom-04", "ineligible", ["R001", "R104", "R107"]),
+        ("seller-candle-05", "refer", ["R107"]),
     ],
 )
 def test_policy_outcomes_for_demo_applicants(cases, applicant_id, decision, codes):

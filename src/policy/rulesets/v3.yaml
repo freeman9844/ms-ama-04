@@ -1,0 +1,24 @@
+# 현금흐름 기반 온라인 셀러 소액 운전자금 대출 정책 v3 (데모용 수치, 50만~1,000만 원)
+# v2 대비: R101(신고매출·계좌매출 불일치) 삭제 — 간이·면세 사업자와 신고 주기 차이로 오탐이 많다(ADR-003).
+# R105~R108 추가. 값이 없는 지표(정산 자료 없음 등)의 규칙은 적용하지 않는다.
+version: "2026.11-v3"
+product:
+  min_amount_krw: 500000
+  max_amount_krw: 10000000
+  inflow_multiplier: 1.5
+knockouts:
+  - {code: R001, message: "거래 이력 6개월 미만", field: months_of_history, op: lt, threshold: 6}
+  - {code: R002, message: "DSCR 1.0 미만", field: dscr, op: lt, threshold: 1.0}
+refers:
+  - {code: R102, message: "매출 변동성 과다", field: revenue_volatility, op: gt, threshold: 0.5}
+  - {code: R103, message: "현금 완충일수 부족", field: cash_buffer_days, op: lt, threshold: 10}
+  - {code: R104, message: "업력 12개월 미만", field: business_age_months, op: lt, threshold: 12}
+  - {code: R105, message: "고비용 대부·P2P 상환 발견", field: high_cost_lender_count, op: gt, threshold: 0}
+  - {code: R106, message: "최근 60일 매출 급감", field: revenue_trend_ratio, op: lt, threshold: 0.8}
+  - {code: R107, message: "판매 채널 편중", field: pg_top_platform_share, op: gt, threshold: 0.8}
+  - {code: R108, message: "정산–입금 대사 불일치", field: pg_reconciliation_ratio, op: lt, threshold: 0.9}
+rate_bands:
+  - {band: A, min_dscr: 2.0}
+  - {band: B, min_dscr: 1.5}
+  - {band: C, min_dscr: 1.2}
+  - {band: D, min_dscr: 1.0}

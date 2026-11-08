@@ -15,37 +15,39 @@ DEMO_AMOUNT_KRW = 3_300_000
 LOAD_AMOUNT_KRW = 1_700_000
 DEMO_EXPECTED = {
     "seller-dailylook-01": ("eligible", (), "A"),
-    "seller-mangwon-02": ("refer", ("R101",), "A"),
-    "seller-glowlab-03": ("eligible", (), "A"),
-    "seller-knitroom-04": ("ineligible", ("R001", "R101", "R104"), None),
-    "seller-candle-05": ("eligible", (), "A"),
+    "seller-mangwon-02": ("eligible", (), "A"),
+    "seller-glowlab-03": ("refer", ("R105", "R106"), "A"),
+    "seller-knitroom-04": ("ineligible", ("R001", "R104", "R107"), None),
+    "seller-candle-05": ("refer", ("R107",), "A"),
     "seller-gearstore-06": ("eligible", (), "A"),
     "seller-petfood-07": ("eligible", (), "A"),
-    "seller-ceramic-08": ("eligible", (), "A"),
-    "seller-kimchi-09": ("refer", ("R101",), "A"),
+    "seller-ceramic-08": ("refer", ("R107",), "A"),
+    "seller-kimchi-09": ("eligible", (), "A"),
     "seller-linen-10": ("eligible", (), "A"),
-    "seller-skinlab-11": ("eligible", (), "A"),
-    "seller-kitchen-12": ("refer", ("R101",), "A"),
-    "seller-cable-13": ("eligible", (), "A"),
-    "seller-leather-14": ("ineligible", ("R001", "R101", "R104"), None),
+    "seller-skinlab-11": ("refer", ("R105", "R106"), "A"),
+    "seller-kitchen-12": ("eligible", (), "A"),
+    "seller-cable-13": ("refer", ("R105", "R106"), "A"),
+    "seller-leather-14": ("ineligible", ("R001", "R104", "R107"), None),
     "seller-tangerine-15": ("eligible", (), "A"),
-    "seller-petcare-16": ("refer", ("R101",), "A"),
-    "seller-tint-17": ("ineligible", ("R001", "R101", "R104"), None),
-    "seller-sofa-18": ("eligible", (), "A"),
-    "seller-streetfit-19": ("ineligible", ("R001", "R101", "R104"), None),
+    "seller-petcare-16": ("eligible", (), "A"),
+    "seller-tint-17": ("ineligible", ("R001", "R104", "R107"), None),
+    "seller-sofa-18": ("refer", ("R105", "R106"), "A"),
+    "seller-streetfit-19": ("ineligible", ("R001", "R104"), None),
     "seller-bakery-20": ("eligible", (), "A"),
+    "seller-mugshop-21": ("ineligible", ("R002", "R106", "R108", "R901"), None),
 }
 LOAD_EXPECTED = {
     "healthy": ("eligible", (), "A"),
-    "mismatch": ("refer", ("R101",), "A"),
-    "stress": ("eligible", (), "A"),
-    "thin": ("ineligible", ("R001", "R101"), None),
+    "mismatch": ("eligible", (), "A"),
+    "stress": ("refer", ("R105", "R106"), "A"),
+    "thin": ("ineligible", ("R001",), None),
 }
 
 
 def _decision(case, amount):
     uw = compute_underwriting(case.profile.applicant_id, case.profile, case.transactions, case.tax_filings,
-                              as_of=AS_OF, requested_amount_krw=amount, requested_tenor_months=12)
+                              as_of=AS_OF, requested_amount_krw=amount, requested_tenor_months=12,
+                              pg_settlements=case.pg_settlements)
     p = evaluate(uw.features, load_rules())
     return p.decision.value, tuple(sorted(r.code for r in p.reason_codes)), p.rate_band
 

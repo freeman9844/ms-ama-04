@@ -10,7 +10,10 @@ _LIMIT_UNIT_KRW = 100_000
 
 
 def _check(cond: Condition, features: CashFlowFeatures) -> ReasonCode | None:
-    observed = float(getattr(features, cond.field))
+    value = getattr(features, cond.field)
+    if value is None:  # 선택 지표가 없으면 규칙을 적용하지 않는다(정책 v3)
+        return None
+    observed = float(value)
     if not _OPS[cond.op](observed, cond.threshold):
         return None
     return ReasonCode(

@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RESERVED_CODES = frozenset({"R900", "R901"})
-DEFAULT_RULES_PATH = Path(__file__).parent / "rulesets" / "v2.yaml"
+DEFAULT_RULES_PATH = Path(__file__).parent / "rulesets" / "v3.yaml"
 
 FeatureName = Literal[
     "months_of_history",
@@ -16,6 +16,10 @@ FeatureName = Literal[
     "revenue_volatility",
     "tax_bank_match_ratio",
     "business_age_months",
+    "high_cost_lender_count",
+    "revenue_trend_ratio",
+    "pg_top_platform_share",
+    "pg_reconciliation_ratio",
 ]
 Op = Literal["lt", "le", "gt", "ge"]
 

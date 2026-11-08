@@ -16,7 +16,7 @@ def client(rules):
 
 
 def test_healthz_reports_rules_version(client):
-    assert client.get("/healthz").json() == {"status": "ok", "rules_version": "2026.11-v2"}
+    assert client.get("/healthz").json() == {"status": "ok", "rules_version": "2026.11-v3"}
 
 
 def test_decision_roundtrip(client, make_features):
@@ -24,7 +24,7 @@ def test_decision_roundtrip(client, make_features):
     assert r.status_code == 200
     d = PolicyDecision.model_validate(r.json())
     assert d.decision == "eligible"
-    assert d.rules_version == "2026.11-v2"
+    assert d.rules_version == "2026.11-v3"
 
 
 def test_ineligible_response_shape(client, make_features):

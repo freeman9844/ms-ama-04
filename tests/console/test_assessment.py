@@ -23,8 +23,9 @@ def test_signal_thresholds_and_limits_match_policy_rules():
     rules = load_rules(DEFAULT_RULES_PATH)
     expected = {c.field: ("knockout", c.threshold) for c in rules.knockouts}
     expected |= {c.field: ("refer", c.threshold) for c in rules.refers}
+    expected |= {"tax_bank_match_ratio": ("watch", 0.7)}  # v3에서 R101 삭제, 참고 지표로만 표시
     assert SIGNAL_RULES == expected
-    ops = {c.field: c.op for c in (*rules.knockouts, *rules.refers)}
+    ops = {c.field: c.op for c in (*rules.knockouts, *rules.refers)} | {"tax_bank_match_ratio": "lt"}
     assert {field: direction for field, _, direction, _, _ in SIGNALS} == {
         f: "min" if op == "lt" else "max" for f, op in ops.items()}
     assert assessment.PRODUCT_MAX_KRW == rules.product.max_amount_krw
@@ -57,8 +58,25 @@ def test_strengths_and_risks_cover_violations_reason_codes_and_flags(make_doc):
     p = assessment_panels(view(make_doc, features, policy, flags=["data_incomplete"]))
     assert len(p["strengths"]) == 5
     assert p["risks"] == [
-        "주의(회부 기준): 세금·계좌 일치율 0.6 — 신고 매출의 60%가 계좌 입금으로 확인됩니다(기준 0.7 이상).",
+        "주의(참고 지표): 세금·계좌 일치율 0.6 — 신고 매출의 60%가 계좌 입금으로 확인됩니다(참고 지표, 0.7 이상 권장).",
         "R900 산출 한도가 상품 최소 금액 미만", "데이터 부족"]
+
+
+def test_tax_match_is_watch_not_refer(make_doc):
+    s = by_field(assessment_panels(view(make_doc, features={**STRONG, "tax_bank_match_ratio": 0.5})))
+    assert s["tax_bank_match_ratio"]["state"] == "watch" and s["tax_bank_match_ratio"]["tone"] == "amber"
+
+
+def test_v3_optional_signals_hidden_when_missing(make_doc):
+    fields = set(by_field(assessment_panels(view(make_doc, features=STRONG))))
+    assert not fields & {"revenue_trend_ratio", "high_cost_lender_count", "pg_reconciliation_ratio", "pg_top_platform_share"}
+
+
+def test_v3_signal_refer_on_low_reconciliation(make_doc):
+    p = assessment_panels(view(make_doc, features={**STRONG, "pg_reconciliation_ratio": 0.62, "pg_top_platform_share": 0.56}))
+    s = by_field(p)
+    assert s["pg_reconciliation_ratio"]["state"] == "refer" and s["pg_top_platform_share"]["state"] == "pass"
+    assert any("정산" in r for r in p["risks"])
 
 
 def test_limit_bars_highlight_the_binding_minimum(make_doc):
