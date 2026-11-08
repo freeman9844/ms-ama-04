@@ -54,6 +54,7 @@ def test_build_demo_cases():
         "seller-sofa-18": Archetype.STRESSED,
         "seller-streetfit-19": Archetype.THIN_FILE,
         "seller-bakery-20": Archetype.HEALTHY_SEASONAL,
+        "seller-mugshop-21": Archetype.ASSIGNED,
     }
     injected = [cid for cid, c in cases.items() if any(t.description == INJECTION_TEXT for t in c.transactions)]
     assert injected == ["seller-candle-05"]

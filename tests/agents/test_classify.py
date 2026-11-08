@@ -39,6 +39,7 @@ def test_matches_synthetic_labels_for_every_demo_case():
         (-90_000, "통신비", "AUTO_DEBIT", Category.UNCLASSIFIED_OUT),
         (-350_000, "펀딩리P2P 상환", "AUTO_DEBIT", Category.HIGH_COST_LENDER),
         (-650_000, "기업은행 대출상환", "AUTO_DEBIT", Category.LOAN_REPAYMENT),
+        (500_000, "한결선정산 선지급", "TRANSFER_IN", Category.LOAN_PROCEEDS),
     ],
 )
 def test_rules_cover_edge_descriptions(amount, description, code, want):

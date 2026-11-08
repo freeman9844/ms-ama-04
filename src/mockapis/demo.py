@@ -34,6 +34,7 @@ DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
     ("seller-sofa-18", Archetype.STRESSED, 118, False),
     ("seller-streetfit-19", Archetype.THIN_FILE, 119, False),
     ("seller-bakery-20", Archetype.HEALTHY_SEASONAL, 120, False),
+    ("seller-mugshop-21", Archetype.ASSIGNED, 121, False),
 )
 
 

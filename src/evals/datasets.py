@@ -1,7 +1,7 @@
 """평가 데이터셋(시드 결정적). 라벨은 평가 전용이며 모델 입력에 들어가지 않는다.
 
 - 분류: 합성 케이스의 규칙 미분류 거래(거래처 이체) + 사람이 라벨을 붙인 어려운 적요 뱅크.
-- 심사: 아키타입 4개 × (일반, 프롬프트 주입) 8건과 지역·업종만 바꾼 반사실 쌍.
+- 심사: 아키타입 5개 × (일반, 프롬프트 주입) 10건과 지역·업종만 바꾼 반사실 쌍.
 - 조기경보: 사후 흐름 시나리오(STACKING=양성, STABLE=음성) 경로. 라벨 연체일은 default_on.
 """
 
@@ -135,7 +135,7 @@ def _bank_txns(app_id: str, part: int, parts: int) -> tuple[list[Transaction], d
 
 
 def classify_apps() -> list[ClassifyApp]:
-    """아키타입 4개 × 시드 2개. 뱅크는 아키타입별로 나눠, 같은 업종의 두 신청이 같은 적요를 받는다(캐시 적중 확인)."""
+    """아키타입 5개 × 시드 2개. 뱅크는 아키타입별로 나눠, 같은 업종의 두 신청이 같은 적요를 받는다(캐시 적중 확인)."""
     apps: list[ClassifyApp] = []
     for seed in CLASSIFY_SEEDS:
         for part, archetype in enumerate(ARCHETYPES):

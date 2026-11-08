@@ -63,3 +63,13 @@ def test_deterministic():
     a = bank_receipts(_payouts(), AS_OF, random.Random(9))
     b = bank_receipts(_payouts(), AS_OF, random.Random(9))
     assert a == b
+
+def test_assigned_case_has_advances_classified_as_loan_proceeds():
+    from agents.classify import Category, classify
+    from mockapis.synth import Archetype, generate_case
+
+    case = generate_case("app-a", Archetype.ASSIGNED, AS_OF, 121)
+    advances = [t for t in case.transactions if t.description == ADVANCE_DESCRIPTION]
+    assert advances and all(t.booked_on >= AS_OF - timedelta(days=97) for t in advances)
+    assert {classify(t) for t in advances} == {Category.LOAN_PROCEEDS}
+    assert {case.labels[t.txn_id] for t in advances} == {TxnCategory.LOAN_PROCEEDS}

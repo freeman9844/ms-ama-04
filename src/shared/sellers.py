@@ -38,6 +38,7 @@ DEMO_SELLERS: tuple[DemoSeller, ...] = (
     DemoSeller("seller-sofa-18", "광주소파공장", ("쿠팡", "스마트스토어", "자사몰"), "리빙"),
     DemoSeller("seller-streetfit-19", "동대문스트릿핏", ("스마트스토어", "쿠팡"), "패션의류"),
     DemoSeller("seller-bakery-20", "대전밀빵공방", ("쿠팡", "스마트스토어", "자사몰"), "식품"),
+    DemoSeller("seller-mugshop-21", "연남머그상점", ("자사몰", "쿠팡", "스마트스토어"), "리빙"),
 )
 SELLER_BY_ID = {s.applicant_id: s for s in DEMO_SELLERS}
 
