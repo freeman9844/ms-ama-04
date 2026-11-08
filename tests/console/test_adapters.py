@@ -148,6 +148,7 @@ def test_build_deps_wires_env(monkeypatch):
     assert made["StorageQueueSender"][0] == (("queues", "https://queue"),)
     assert deps.pseudonym_key == b"k" * 32
     assert made["CosmosOps"][0] == (("applications", "https://cos", "lending"),)
+    assert deps.chat is None
 
 
 def test_cosmos_ops_lists_runs_and_projects_docs():
@@ -208,3 +209,38 @@ def test_build_deps_rejects_unknown_auth_settings(monkeypatch, env):
             "DATA_BLOB_ENDPOINT": "https://blob", "QUEUE_ENDPOINT": "https://queue", "PSEUDONYM_KEY": "k" * 32}
     with pytest.raises(ValueError):
         build_deps(base | env)
+
+
+class FakeCredential:
+    def __init__(self):
+        self.scopes = []
+
+    def get_token(self, scope):
+        self.scopes.append(scope)
+        return type("Token", (), {"token": "tok"})()
+
+
+def test_build_chat_needs_endpoint_and_model():
+    from console.adapters import build_chat
+
+    assert build_chat({}, FakeCredential()) is None
+    assert build_chat({"AI_PROJECT_ENDPOINT": "https://p"}, FakeCredential()) is None
+    assert build_chat({"CHAT_MODEL": "gpt-6-luna"}, FakeCredential()) is None
+
+
+@pytest.mark.parametrize("gateway, routed", [({}, False),
+                                            ({"AI_GATEWAY": "apim", "AI_GATEWAY_URL": "https://apim"}, True)])
+def test_build_chat_wires_runtime(gateway, routed):
+    from agents.gateway import GatewayRunner
+    from agents.officer_chat import OfficerChat
+    from agents.runtime import FoundryAgents
+    from console.adapters import FOUNDRY_SCOPE, build_chat
+
+    cred = FakeCredential()
+    chat = build_chat({"AI_PROJECT_ENDPOINT": "https://p/api/projects/x", "CHAT_MODEL": "gpt-6-luna"} | gateway, cred)
+    assert isinstance(chat, OfficerChat) and chat._spec.model == "gpt-6-luna"
+    runner = chat._runner
+    assert isinstance(runner, GatewayRunner) is routed
+    inner = runner._inner if routed else runner
+    assert isinstance(inner, FoundryAgents)
+    assert inner._token() == "tok" and cred.scopes == [FOUNDRY_SCOPE] == ["https://ai.azure.com/.default"]

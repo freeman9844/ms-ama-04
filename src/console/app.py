@@ -9,7 +9,9 @@
 import hashlib
 import hmac
 import json
+import logging
 import secrets
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,8 +24,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from agents.monitoring import WEEKS
+from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply
@@ -45,6 +49,7 @@ from console.monitoring import (
     load_monitoring_raw,
     loan_view,
 )
+from console.officer_chat import CHAT_ERRORS, build_snapshot, clean_history, validate_question
 from console.opinion import opinion_panel
 from console.ops import (
     AXIS_LABELS,
@@ -87,6 +92,9 @@ CONSENT_COMMAND_QUEUE = "consent-commands"
 GRIEVANCE_QUEUE = "grievances"
 GRIEVANCE_DECISION_QUEUE = "grievance-decisions"
 MAX_FORM_BYTES = 16 * 1024
+MAX_CHAT_BYTES = 128 * 1024
+CSRF_HEADER = "X-CSRF-Token"
+chat_log = logging.getLogger("console.chat")
 LIST_LIMIT = 50
 DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
@@ -145,6 +153,8 @@ class ConsoleDeps:
     privacy: PrivacyStore | None = None
     new_grievance_id: Callable[[], str] = field(default=_new_grievance_id)
     ops: OpsStore | None = None
+    # 심사역 결정 채팅(agents.officer_chat.OfficerChat). 없으면 결정 탭에 "채팅을 쓸 수 없습니다"만 보인다.
+    chat: Any | None = None
 
 
 def state_tag(*docs: Any) -> str:
@@ -212,6 +222,32 @@ async def _form(request: Request) -> dict[str, str]:
     except (UnicodeDecodeError, ValueError) as e:
         raise HTTPException(400, "bad form") from e
     return {k: v[0] for k, v in parsed.items()}
+
+
+class _BadBody(Exception):
+    pass
+
+
+async def _json_body(request: Request) -> dict[str, Any]:
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        raise HTTPException(415, "json required")
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_CHAT_BYTES:
+            raise HTTPException(413, "body too large")
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as e:
+        raise _BadBody from e
+    if not isinstance(parsed, dict):
+        raise _BadBody
+    return parsed
+
+
+def _chat_error(code: str) -> JSONResponse:
+    status, message = CHAT_ERRORS[code]
+    return JSONResponse({"error": message}, status_code=status)
 
 
 def create_app(deps: ConsoleDeps) -> FastAPI:
@@ -386,6 +422,46 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         message = OfficerMessage(application_id=application_id, decision=decision.model_dump(mode="json"))
         deps.queue.send(DECISION_QUEUE, message.model_dump(mode="json"))
         return render("sent.html", user, 202, application_id=application_id, decision=decision, since=state_tag(doc))
+
+    @app.post("/applications/{application_id}/chat")
+    async def officer_chat(application_id: str, request: Request) -> JSONResponse:
+        user = viewer(request)
+        if not verify_csrf(csrf_key, user.user_id, request.headers.get(CSRF_HEADER)):
+            raise HTTPException(403, "invalid csrf token")
+        try:
+            body = await _json_body(request)
+        except _BadBody:
+            return _chat_error("bad_request")
+        if deps.chat is None:
+            return _chat_error("disabled")
+        doc = deps.store.get(application_id)
+        if doc is None:
+            return _chat_error("not_found")
+        question = validate_question(body.get("question"))
+        if question is None:
+            return _chat_error("invalid_question")
+        # 원천 Blob을 읽지 않는다(raw=None): 스냅샷에는 저장된 가명 텍스트만 들어간다.
+        snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False))
+        started = time.monotonic()
+        result, answer = "ok", None
+        try:
+            answer = await run_in_threadpool(deps.chat.ask, snapshot, clean_history(body.get("history")), question)
+        except GatewayThrottled:
+            result = "throttled"
+        except GatewayBlocked:
+            result = "blocked"
+        except AgentError:
+            result = "failed"
+        except Exception:  # noqa: BLE001 - 토큰 발급 실패 등. 본문 없이 결과 코드만 남긴다
+            result = "failed"
+        chat_log.info(
+            "officer_chat application_id=%s result=%s latency_ms=%d input_tokens=%d output_tokens=%d",
+            application_id, result, int((time.monotonic() - started) * 1000),
+            answer.input_tokens if answer else 0, answer.output_tokens if answer else 0,
+        )
+        if answer is None:
+            return _chat_error(result)
+        return JSONResponse({"answer": answer.answer})
 
     def monitoring_store() -> MonitoringStore:
         if deps.monitoring is None:

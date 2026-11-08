@@ -6,6 +6,7 @@
 - Storage Queue: applications-start·officer-decisions·monitoring-replay·restructure-decisions·
   consent-commands·grievances·grievance-decisions에 보내기만 한다
   (Functions host.json messageEncoding=none)
+- Foundry 에이전트(심사역 채팅): Azure AI User, 계정 범위(AI_PROJECT_ENDPOINT·CHAT_MODEL이 있을 때만)
 """
 
 import json
@@ -221,6 +222,25 @@ def ManagedIdentityCredential(**kwargs: Any) -> Any:  # noqa: N802 - 테스트�
     return Credential(**kwargs)
 
 
+FOUNDRY_SCOPE = "https://ai.azure.com/.default"
+CHAT_TIMEOUT_S = 60.0
+
+
+def build_chat(env: Mapping[str, str], credential: Any) -> Any | None:
+    """AI_PROJECT_ENDPOINT와 CHAT_MODEL이 모두 있을 때만 심사역 채팅을 켠다. 게이트웨이 설정은 오케스트레이터와 같다."""
+    if not (env.get("AI_PROJECT_ENDPOINT") and env.get("CHAT_MODEL")):
+        return None
+    from agents.gateway import GatewayRunner, gateway_enabled
+    from agents.officer_chat import OfficerChat
+    from agents.runtime import FoundryAgents
+
+    runner: Any = FoundryAgents(env["AI_PROJECT_ENDPOINT"], lambda: credential.get_token(FOUNDRY_SCOPE).token,
+                                timeout=CHAT_TIMEOUT_S)
+    if gateway_enabled(env):
+        runner = GatewayRunner(runner)
+    return OfficerChat(runner, env["CHAT_MODEL"])
+
+
 REQUIRED_ENV = ("AZURE_CLIENT_ID", "COSMOS_ENDPOINT", "COSMOS_DATABASE", "DATA_BLOB_ENDPOINT", "QUEUE_ENDPOINT")
 CONSOLE_ROLES = (CREDIT_OFFICER, CREDIT_MANAGER, AUDITOR)
 
@@ -252,4 +272,5 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
         pseudonym_key=load_pseudonym_key(env, credential),
         demo_principal=demo,
         ops=CosmosOps(db.get_container_client(APPLICATIONS)),
+        chat=build_chat(env, credential),
     )
