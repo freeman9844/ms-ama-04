@@ -54,10 +54,11 @@ class Payout:
     code: TxnTypeCode
     gross_krw: int
     fee_krw: int
+    deduction_krw: int = 0  # 광고비 상계(receipts.bank_receipts가 정한다)
 
     @property
     def net_krw(self) -> int:
-        return self.gross_krw - self.fee_krw
+        return self.gross_krw - self.fee_krw - self.deduction_krw
 
 
 def fee_rate(channel: Channel, industry: str) -> float:

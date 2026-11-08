@@ -136,6 +136,17 @@ def test_pg_settlement_net_must_equal_gross_minus_fee():
         PgSettlement(settled_on=date(2026, 9, 7), platform="배민", gross_krw=1000, fee_krw=68, net_krw=1000)
 
 
+def test_pg_settlement_net_subtracts_deduction():
+    day = date(2026, 9, 7)
+    s = PgSettlement(settled_on=day, platform="쿠팡", gross_krw=1000, fee_krw=68, deduction_krw=30, net_krw=902)
+    assert s.deduction_krw == 30
+    assert PgSettlement(settled_on=day, platform="쿠팡", gross_krw=1000, fee_krw=68, net_krw=932).deduction_krw == 0
+    with pytest.raises(ValidationError):
+        PgSettlement(settled_on=day, platform="쿠팡", gross_krw=1000, fee_krw=68, deduction_krw=30, net_krw=932)
+    with pytest.raises(ValidationError):
+        PgSettlement(settled_on=day, platform="쿠팡", gross_krw=1000, fee_krw=68, deduction_krw=-1, net_krw=933)
+
+
 def test_features_reject_nan_inf_and_ranges():
     with pytest.raises(ValidationError):
         _features(dscr=float("nan"))

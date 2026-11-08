@@ -6,7 +6,7 @@ import pytest
 from evals.datasets import TRUTH_LABEL
 from mockapis.demo import DEMO_APPLICANTS, build_load_cases
 from shared.krcalendar import add_business_days, is_business_day, next_business_day
-from mockapis.sellerdata.channels import COUPANG, ELEVENST, OWNMALL, SMARTSTORE, payout_schedule, payouts
+from mockapis.sellerdata.channels import COUPANG, ELEVENST, OWNMALL, SMARTSTORE, Payout, payout_schedule, payouts
 from mockapis.sellerdata.personas import DEMO_PERSONAS, business_reg_no, is_valid_brn
 from mockapis.sellerdata.seasonality import day_factor, month_index
 from mockapis.synth import TxnCategory
@@ -107,3 +107,9 @@ def test_demo_sellers_have_unique_names_apart_from_load_sellers():
     assert len(set(businesses)) == len(businesses)
     assert not set(businesses) & {n for names in LOAD_BUSINESS_NAMES.values() for n in names}
     assert len(set(people)) == len(people) and not set(people) & load_people
+
+
+def test_payout_net_subtracts_deduction():
+    p = Payout(date(2026, 4, 6), "쿠팡", "쿠팡(주) 주정산", "PG_SETTLE", 1000, 100, 30)
+    assert p.net_krw == 870
+    assert Payout(date(2026, 4, 6), "쿠팡", "쿠팡(주) 주정산", "PG_SETTLE", 1000, 100).net_krw == 900

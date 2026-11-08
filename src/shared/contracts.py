@@ -87,12 +87,13 @@ class PgSettlement(Contract):
     platform: str = Field(min_length=1)
     gross_krw: int = Field(ge=0)
     fee_krw: int = Field(ge=0)
+    deduction_krw: int = Field(default=0, ge=0)  # 광고비·물류비 상계(2026-11-08). 옛 JSON은 0.
     net_krw: int
 
     @model_validator(mode="after")
     def _net(self) -> "PgSettlement":
-        if self.net_krw != self.gross_krw - self.fee_krw:
-            raise ValueError("net_krw == gross_krw - fee_krw 이어야 한다")
+        if self.net_krw != self.gross_krw - self.fee_krw - self.deduction_krw:
+            raise ValueError("net_krw == gross_krw - fee_krw - deduction_krw 이어야 한다")
         return self
 
 
