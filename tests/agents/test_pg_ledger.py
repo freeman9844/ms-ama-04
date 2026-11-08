@@ -52,8 +52,15 @@ def test_concentration_take_rate_trend_and_features():
     r = ledger_summary(s, t, AS_OF)
     assert r["pg_top_platform_share"] == 0.5 and r["pg_hhi"] == 0.5
     assert [m["month"] for m in r["monthly_take_rate"]] == ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]
-    assert r["pg_take_rate_trend_pp"] == round((r["monthly_take_rate"][-1]["rate"] - r["monthly_take_rate"][0]["rate"]) * 100, 2) > 0
+    assert r["pg_take_rate_trend_pp"] == 1.5  # 최근 3개월 (10.0+10.5+11.0)/3 − 이전 3개월 (8.5+9.0+9.5)/3 = 1.5%p
     assert features_of(r) == {"pg_reconciliation_ratio": 1.0, "pg_top_platform_share": 0.5}
+
+
+def test_take_rate_trend_is_three_month_means_not_first_vs_last():
+    s = [_s(date(2026, m, 10), "쿠팡", 1000, 50 if m == 10 else 10) for m in range(5, 11)]  # 1%×5, 마지막 달 5%
+    t = [_t(x.settled_on, x.net_krw, "쿠팡(주) 주정산") for x in s]
+    r = ledger_summary(s, t, AS_OF)
+    assert r["pg_take_rate_trend_pp"] == 1.33  # (1+1+5)/3 − (1+1+1)/3; 첫·끝 달 차이 4.00pp와 다르다
 
 
 def test_unavailable_without_settlements():

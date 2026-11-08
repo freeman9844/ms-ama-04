@@ -33,6 +33,14 @@ def _platform_of(t: Transaction) -> str | None:
     return next((p for payer, p in PAYER_PLATFORM.items() if payer in t.description), None)
 
 
+def _trend_pp(rates: Sequence[float]) -> float | None:
+    """최근 3개월 평균 − 이전 3개월 평균(%p, 소수 둘째 자리). 원 비율로 계산하고 마지막에만 반올림한다."""
+    if len(rates) < WINDOW_MONTHS:
+        return None
+    half = WINDOW_MONTHS // 2
+    return round((sum(rates[-half:]) / half - sum(rates[-WINDOW_MONTHS:-half]) / half) * 100, 2)
+
+
 def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[Transaction], as_of: date) -> dict:
     """키: available, period{from,to}, settlement_count, pg_reconciliation_ratio, pg_top_platform_share, pg_hhi,
     pg_take_rate_trend_pp, platforms[{platform,gross_krw,share,unpaid_krw}], monthly_take_rate[{month,rate}],
@@ -70,7 +78,7 @@ def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[T
         unpaid[s.platform] += s.net_krw
     total = sum(gross.values())
     shares = {p: g / total for p, g in gross.items()} if total else {}
-    monthly = [{"month": k, "rate": round(v[1] / v[0], 4)} for k, v in sorted(by_month.items()) if v[0] > 0]
+    monthly_raw = [(k, v[1] / v[0]) for k, v in sorted(by_month.items()) if v[0] > 0]
     return {
         "available": True,
         "period": {"from": start.isoformat(), "to": end.isoformat()},
@@ -78,11 +86,10 @@ def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[T
         "pg_reconciliation_ratio": round(1 - sum(s.net_krw for s in unmatched) / target, 3) if target > 0 else None,
         "pg_top_platform_share": round(max(shares.values()), 3) if shares else None,
         "pg_hhi": round(sum(v * v for v in shares.values()), 3) if shares else None,
-        "pg_take_rate_trend_pp": (round((monthly[-1]["rate"] - monthly[0]["rate"]) * 100, 2)
-                                  if len(monthly) >= WINDOW_MONTHS else None),
+        "pg_take_rate_trend_pp": _trend_pp([r for _, r in monthly_raw]),
         "platforms": [{"platform": p, "gross_krw": g, "share": round(shares[p], 3), "unpaid_krw": unpaid[p]}
                       for p, g in sorted(gross.items(), key=lambda kv: (-kv[1], kv[0]))],
-        "monthly_take_rate": monthly,
+        "monthly_take_rate": [{"month": k, "rate": round(r, 4)} for k, r in monthly_raw],
         "unmatched_count": len(unmatched),
         "unmatched": [{"settled_on": s.settled_on.isoformat(), "platform": s.platform, "net_krw": s.net_krw}
                       for s in sorted(unmatched, key=lambda s: s.settled_on, reverse=True)[:UNMATCHED_LIMIT]],
