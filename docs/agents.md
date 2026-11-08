@@ -66,9 +66,9 @@
 ## 추심
 
 - **목적:** 상환 원장에서 미납이 확정된 회차(추심 건 `rc-<재생>-i<회차>`)를 받아 승인된 스크립트로만 연락하고, 상환 곤란이면 재조정 요청을 심사역에게 넘긴다(L3). 재조정 결정은 사람만 한다.
-- **언제 도는가(2026-11-07):** 상환일 당일 `에이엠에이렌딩 대출상환` 출금이 없을 때(미납)만 돈다(`repayment.updated`, `src/agents/repayment.py`). 상환 안내(`payment_reminder`)는 상환일 3일 전에 LLM 없이 보낸다(`remind`, 공정 추심 규칙에 걸리면 `deferred`). 조기경보만으로는 차주에게 연락하지 않는다. 경보는 심사역 검토용이고, 추심 에이전트는 `get_case`로 최근 경보 요약을 참고만 한다.
+- **언제 도는가(2026-11-07):** 상환일 당일 `에이엠에이렌딩 대출상환` 출금이 없을 때(미납)만 돈다(`repayment.updated`, `src/agents/repayment.py`). 상환 안내(`payment_reminder`)는 상환일 3일 전에 LLM 없이 보낸다(`remind`, 공정 추심 규칙에 걸리면 `deferred`). 조기경보만으로는 차주에게 연락하지 않는다. 경보는 심사역 검토용이고, 추심 에이전트는 `get_case`로 최근 경보 요약과 신호 종류(`signals`, 예: `loan_stacking`·`inflow_drop`)를 참고만 한다. 조사 폴백 경보는 요약에 근거가 없어 신호 종류로 판단한다(2026-11-08).
 - **재생 정지·재개(P9):** 13주 재생 중 재조정 요청이 생기면 재생이 그 주에서 멈추고(대출 `paused`, 콘솔 "재조정 대기"), 심사역이 승인/거절하면 `awaiting_resume`으로 바뀌어 "이어서 재생"/"여기서 종료"를 고른다. 기다리는 사이 심사 동의가 만료·철회되면 재개 요청은 이유를 오류로 남기고 재생을 종료한다(`stopped`). 재조정 결과(유예·분할)는 이후 재생 흐름에 반영하지 않는다(`docs/limitations.md`).
-- **도구 allowlist(`src/agents/collections.py`):** `get_case`(회차·상환일·금액·누적 미납·최근 경보 요약), `get_contact_history`, `list_scripts`, `send_script`(승인 스크립트 enum만), `route_hardship`(`revenue_shock`/`illness_or_disaster`/`debt_overload`).
+- **도구 allowlist(`src/agents/collections.py`):** `get_case`(회차·상환일·금액·누적 미납·최근 경보 요약·신호 종류), `get_contact_history`, `list_scripts`, `send_script`(승인 스크립트 enum만), `route_hardship`(`revenue_shock`/`illness_or_disaster`/`debt_overload`).
 - **가드레일:** 공정 추심 규칙을 도구 안에서 결정적으로 강제 — 7일 `MAX_CONTACTS_PER_7_DAYS=7`회, `CONTACT_HOURS` 08:00~21:00(KST) 밖이면 발송 보류(`deferred`). 자유 문장 발송 불가, 승인 스크립트만. `send_script`는 한 번만 성공.
 - **실패 시 동작:** 에이전트를 쓸 수 없으면 최근 경보가 high면 `hardship_offer`, 아니면 `missed_payment`를 보내고 재조정 요청은 만들지 않는다.
 - **모델 근거:** 스크립트 선택·분류 중심이라 `gpt-5.4-mini`(`COLLECTIONS_MODEL`).
@@ -97,7 +97,7 @@
   | 에이전트 | 연결 | TPM |
   |---|---|---|
   | `underwriting-analyst` | `gw-analyst` | 150,000 |
-  | `early-warning-investigator` | `gw-early-warning` | 50,000 |
+  | `early-warning-investigator` | `gw-early-warning` | 100,000 |
   | `underwriting-reviewer` | `gw-reviewer` | 15,000 |
   | `data-assembly` | `gw-data-assembly` | 17,000 |
   | `txn-classifier` | `gw-txn-classifier` | 20,000 |

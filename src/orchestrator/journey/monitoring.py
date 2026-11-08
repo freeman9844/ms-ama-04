@@ -462,6 +462,7 @@ def _repayment_week(
                     "week": a.get("week"),
                     "severity": a.get("severity"),
                     "summary": a.get("summary"),
+                    "signals": [s["kind"] for s in a.get("signals") or []],
                 }
         deps.store.upsert(
             ALERTS,

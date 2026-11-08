@@ -294,6 +294,9 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     (case,) = cases(deps)
     assert case["week"] == WEEKS and case["installment"]["no"] == 3 and case["missed_count"] == 1
     assert case["recent_alert"]["alert_id"] == mon["alert_ids"][-1]
+    # 폴백 경보는 요약에 근거가 없어 추심 에이전트가 신호 종류로 판단한다.
+    last = deps.store.read(ALERTS, mon["alert_ids"][-1], LOAN)
+    assert case["recent_alert"]["signals"] == [s["kind"] for s in last["signals"]] and case["recent_alert"]["signals"]
     assert [c["by"] for c in case["collections"]["contacts"]] == ["fallback"]
     assert case["collections"]["contacts"][0]["script_id"] == "missed_payment"  # 탐지기 경보는 medium
     sent = contacts(deps, mon["replay_id"])
