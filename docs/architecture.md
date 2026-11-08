@@ -174,7 +174,7 @@ sequenceDiagram
   O->>A: 데이터 수집 (data-assembly, L3)
   A->>M: fetch_source (동의 범위 한정)
   O->>O: 심사 지표 산출 — 거래 분류 포함 (classify-v1 → Decision-1), 정산 원장 대사 (pg.json 대사)
-    O->>P: 정책 판정 (fail-closed, 정책 v3)
+  O->>P: 정책 판정 (fail-closed, 정책 v3)
   O->>A: 신용 평가 (analyst ↔ reviewer, 최대 3회)
   O->>C: 단계별 스냅샷 저장
   O->>U: 심사역 대기 (wait_for_external_event, SLA 타이머)
