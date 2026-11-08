@@ -874,3 +874,7 @@ python -m ops smoke
 - **라이브 확인** `app-20261108-29c02d`(`seller-dailylook-01`, 500만 원·6개월, 재생 207초): 조사 5건(1·2·7·11·12주차) 모두 `investigator=gpt-5.6-luna`로 끝났고 폴백 0건입니다. 이전에 `agent_error`로 폴백하던 7주차도 정상 경보를 냈습니다. `gw-early-warning` 호출 43건·429 0건(같은 경로의 이전 `gpt-5.4` 재생은 56건).
 - **`window close`** 완료.
 - **luna 쿼터 증설 반영**: 구독의 다른 리소스가 쓰던 `gpt-5.6-luna` 쿼터가 100 → 10으로 줄어 이 배포를 150 → 240(쿼터 250/250)으로 올리고, `gw-early-warning` TPM을 75K → 150K(이전 `gpt-5.4`에서 429 0건을 확인한 값)로 되돌렸습니다. luna 게이트웨이 합 222K ≤ 240K. `window open` 프로비저닝 → 배포 용량 240·APIM 정책 `tokens-per-minute="150000"` 확인 → `ops smoke` 성공(`job-smoke-olmrsib`) → **`window close`** 완료.
+## 2026-11-08 사후 모니터링 새로 고침 7초
+
+- **변경**(`6686059`): 사후 모니터링 화면(대출 목록·대출 상세)의 자동 새로 고침을 3·5초에서 7초(`MONITORING_REFRESH_SECONDS`)로 맞췄습니다. `window open --acr` → `ops deploy console`(`console:20261108115721`) → **`window close`** 완료.
+- **콘솔 403**: 모바일 회선 출구 IP가 바뀌어 콘솔이 403이었습니다. 창을 닫은 뒤 `AGWFirewallLogs`의 브라우저 IP와 새 PC IP를 `allowOperatorOnly` 조건으로 더하고 `azd env set CONSOLE_IP`로 갱신해 `/`·`/loans` 200을 확인했습니다. 더한 조건은 다음 프로비저닝이 지웁니다.
