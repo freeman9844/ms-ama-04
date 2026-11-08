@@ -40,7 +40,12 @@ def test_console_runs_in_internal_environment_with_own_identity(closed):
     assert ingress["allowInsecure"] is False
     env = {e["name"] for e in app["properties"]["template"]["containers"][0]["env"]}
     assert env == {"AZURE_CLIENT_ID", "COSMOS_ENDPOINT", "COSMOS_DATABASE", "DATA_BLOB_ENDPOINT",
-                   "QUEUE_ENDPOINT", "KEYVAULT_URI"}  # 가명 키는 Key Vault에서만 읽습니다.
+                   "QUEUE_ENDPOINT", "KEYVAULT_URI",  # 가명 키는 Key Vault에서만 읽습니다.
+                   "AI_PROJECT_ENDPOINT", "AI_GATEWAY", "AI_GATEWAY_URL", "CHAT_MODEL"}
+    values = {e["name"]: e.get("value") for e in app["properties"]["template"]["containers"][0]["env"]}
+    assert values["CHAT_MODEL"] == "gpt-6-luna" and values["AI_GATEWAY"] == "apim"
+    assert re.fullmatch(r"https://ais-[0-9a-z]+\.services\.ai\.azure\.com/api/projects/[0-9a-z-]+",
+                        values["AI_PROJECT_ENDPOINT"])
     queue = next(e["value"] for e in app["properties"]["template"]["containers"][0]["env"]
                  if e["name"] == "QUEUE_ENDPOINT")
     assert re.fullmatch(r"https://stfn[0-9a-z]+\.queue\.core\.windows\.net/", queue)
@@ -107,8 +112,9 @@ def test_console_app_registration_defines_roles_and_requires_assignment():
     assert "Microsoft.Graph/appRoleAssignedTo@v1.0" in by_type
 
 
-# 콘솔 ID는 읽기 + 결정 큐 보내기만 합니다(쓰기·삭제 없음).
+# 콘솔 ID는 읽기 + 결정 큐 보내기 + 심사역 채팅 에이전트 호출만 합니다(쓰기·삭제 없음).
 EXPECTED_CONSOLE_GRANTS = {
+    "foundry-account": {"foundryUser", "openAiUser"},
     "keyvault": {"kvValueReader"},
     "storage-data": {"blobReader"},
     "storage-functions": {"queueSender"},

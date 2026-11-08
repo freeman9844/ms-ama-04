@@ -34,7 +34,7 @@ def test_smoke_config_covers_all_private_endpoints(closed):
                    ".servicebus.windows.net", ".azurecr.io", ".azurewebsites.net", ".azure-api.net"):
         assert any(h.endswith(suffix) for h in hosts), suffix
     assert sum(".core.windows.net" in h for h in hosts) == 5  # stagt/stdat/stfn blob + stfn queue/table
-    assert config["chat_models"] == ["gpt-5.4", "gpt-5.6-luna", "gpt-6.1-sol", "gpt-5.6-sol"]
+    assert config["chat_models"] == ["gpt-5.4", "gpt-5.6-luna", "gpt-6.1-sol", "gpt-5.6-sol", "gpt-6-luna"]
     assert config["servicebus_host"].endswith(".servicebus.windows.net")
     assert config["project_endpoint"].endswith("/api/projects/proj-lending")
 

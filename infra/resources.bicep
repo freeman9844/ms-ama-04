@@ -334,6 +334,8 @@ module aiAccount 'modules/foundry/account.bicep' = {
       { principalId: identities.outputs.smokePrincipalId, roleId: role.openAiUser, principalType: sp }
       { principalId: identities.outputs.evalPrincipalId, roleId: role.foundryUser, principalType: sp }
       { principalId: identities.outputs.evalPrincipalId, roleId: role.openAiUser, principalType: sp }
+      { principalId: identities.outputs.consolePrincipalId, roleId: role.foundryUser, principalType: sp }
+      { principalId: identities.outputs.consolePrincipalId, roleId: role.openAiUser, principalType: sp }
     ], hasOperator ? [
       { principalId: operatorPrincipalId, roleId: role.foundryUser, principalType: 'User' }
       { principalId: operatorPrincipalId, roleId: role.openAiUser, principalType: 'User' }
@@ -605,6 +607,11 @@ module caConsole 'modules/container-app.bicep' = {
       { name: 'DATA_BLOB_ENDPOINT', value: stData.outputs.blobEndpoint }
       { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${storageSuffix}/' }
       { name: 'KEYVAULT_URI', value: keyVault.outputs.uri }
+      // 심사역 결정 채팅(src/console/adapters.py build_chat). 게이트웨이 설정은 오케스트레이터와 같습니다.
+      { name: 'AI_PROJECT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}' }
+      { name: 'AI_GATEWAY', value: gatewaySettings.AI_GATEWAY }
+      { name: 'AI_GATEWAY_URL', value: gatewaySettings.AI_GATEWAY_URL }
+      { name: 'CHAT_MODEL', value: 'gpt-6-luna' }
     ], consoleAuthEnabled ? [] : [
       { name: 'CONSOLE_AUTH_MODE', value: 'demo' }
       { name: 'CONSOLE_DEMO_ROLE', value: consoleDemoRole }
