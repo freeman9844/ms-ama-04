@@ -56,6 +56,17 @@
 - **모델 재변경(2026-11-07):** `gpt-6.1-sol`은 게이트웨이 연결(Agent Service → APIM, chat completions)에서 함수 도구와 추론을 함께 쓰면 400("Function tools with reasoning_effort are not supported … in /v1/chat/completions")으로 거부한다. `reasoning.effort=none`은 이 모델이 지원하지 않는다(low·medium·high만). 그 사이 들어온 신청 2건은 평가 없이 심사역 대기로 넘어갔다. 분석가를 게이트웨이에서 함수 도구가 동작하는 `gpt-5.6-sol`(입력 $4·출력 $20/1M 토큰, 배포 150K TPM, 평가 Job과 공유)로 옮겼다. 이제 분석가와 평가 full 구성이 같은 모델이다. `gpt-6.1-sol` 배포(50K)는 보유만 한다.
 - **재측정(2026-11-07, 게이트웨이 경로, 심사 8케이스):** `eval/reports/job-eval-ngrkucj/report.md` 3장 — `gpt-5.6-sol`은 1라운드 근거 통과 100%·최종 100%·검토 통과 100%·평균 1.12라운드·평가서 건당 $0.0783이다. 같은 경로의 `gpt-5.4`(`eval/reports/job-eval-aqisk13/report.md`)는 75.0%·100%·87.5%·2.00라운드·$0.0984였다. 정책 일치·세무 불일치 탐지는 둘 다 100%, 판정자 G/R/C는 3.88/4.75/4.62 대 3.75/5.00/4.62. 대신 호출 p95 지연이 11.7초로 길다(mini 4.6초). 단일 실행이라 LLM 변동 범위 안일 수 있다.
 
+## 정산 원장 대사
+
+- **목적:** 마켓플레이스 정산 원장(`pg.json`)과 계좌 입금을 대조해 매출 실재성, 채널 집중, 공제율 추이를 잰다(`src/agents/pg_ledger.py`, 2026-11-08). 지표는 결정적 코드만 만들고 에이전트는 인용만 한다.
+- **대상 기간·매칭:** 기준일 직전 6개 완결 월의 정산 건이 대상이고, 기준일 직전 3영업일 안의 지급은 아직 입금 전일 수 있어 뺀다. 정산 1건은 같은 플랫폼·같은 실지급액(`net_krw`)이고 입금일이 지급일부터 3영업일 안인 가장 이른 미사용 계좌 입금과 짝이 된다(한 입금은 한 번만). 계좌 입금의 플랫폼은 입금처 키워드(네이버파이낸셜·쿠팡 주정산/최종액정산·11번가·토스페이먼츠)로 판별한다.
+- **지표:** `pg_reconciliation_ratio`(매칭된 실지급액 합 ÷ 대상 실지급액 합), `pg_top_platform_share`(총액 기준 최대 플랫폼 비중), `pg_hhi`, `pg_take_rate_trend_pp`(최근 3개월 평균 공제율 − 이전 3개월 평균, %p. 공제율은 수수료+광고비 상계 ÷ 총액). 광고비 상계는 실지급액에 이미 반영돼 있어 대사율에는 영향이 없고 공제율에만 나타난다. 매칭 못 한 정산 건은 미입금으로 세고 콘솔에 최근 10건만 올린다.
+- **자료 없음:** 정산 레코드가 없거나 PG 동의가 없으면 지표가 모두 `None`이고 결과는 `{"available": false}`다. 정책은 R107·R108을 적용하지 않고, 콘솔은 "정산 자료 없음"을 보인다(2026-11-08 이전 신청 문서도 같다). `pg.json`이 손상돼 읽지 못하면 같은 처리에 `pg_ledger_unavailable` 플래그를 남기고 심사는 계속한다.
+- **에이전트 인용 규칙:** `get_metrics`의 지표 맵에 `M:pg_reconciliation_ratio`·`M:pg_top_platform_share`·`M:pg_hhi`·`M:pg_take_rate_trend_pp`가 들어간다(값이 `None`이면 넣지 않음). `get_settlement_summary`는 인자 없이 기간·건수·지표 ID·플랫폼 비중·월별 공제율·미입금 건수만 돌려주고(집계만, 미입금 개별 금액은 없음) 자료가 없으면 `{"available": false}`다. 지시문은 정산 자료가 있으면 이 도구로 확인하고 `M:pg_*` ID와 값만 인용하게 하며, 정책 사유 R107·R108이 있으면 `P:R107:threshold`·`P:R108:threshold`를 목표로 한 반사실을 허용한다. 숫자 대조(`check_grounding`)는 기존 방식 그대로다.
+- **선지급 입금 분류:** 계좌에 들어온 "선정산" 이체(`TRANSFER_IN`)는 매출이 아니라 대출금(`LOAN_PROCEEDS`)으로 분류한다(`src/agents/classify.py`). 정산 양도 셀러의 선지급이 매출로 잡히지 않게 하려는 규칙이다. 양도 시나리오(`seller-mugshop-21`)는 정책에서 R108이 사유로 붙고, 선지급이 대출금으로 빠지면서 DSCR도 낮아져 R002·R106이 함께 걸린다([ADR-003](adr/ADR-003-deterministic-policy.md#2026-11-08-개정-정책-v3)).
+- **평가:** 심사 suite의 `TAX_EVIDENCE`는 `M:tax_bank_match_ratio` 하나로 줄었고(R101 삭제), 정산 양도(ASSIGNED) 케이스에서 주장이 `M:pg_reconciliation_ratio` 또는 `P:R108`을 인용하는 비율을 `settlement_gap_detection_rate`로 재서 리포트 표의 "정산 차이 탐지" 열에 싣는다(`src/evals/suites/underwriting.py`). 이 지표의 실측은 아직 없다.
+- **콘솔:** 상세 화면 현금흐름 탭의 "정산 대사" 카드가 대사율·최대 채널 비중·공제율 변화, 플랫폼 비중 막대, 월별 공제율 막대, 미입금 정산 목록을 보인다(`settlement_card`, `src/console/dashboard.py`). 세금·계좌 일치율은 정책 규칙이 아니라 참고(watch) 지표로만 표시한다.
+
 ## 조기경보
 
 - **목적:** 통계 탐지기 트리거가 있을 때 의미 기반으로 스트레스를 조사하고 경보 여부·심각도·권고를 정한다(L4, 사후).

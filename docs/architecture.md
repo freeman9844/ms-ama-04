@@ -93,7 +93,7 @@ flowchart TB
 | Application Gateway WAF v2 | `snet-appgw`, 공용 IP `pip-agw-*`(DNS 레이블), WAF_v2 자동 확장 0–2 | HTTPS 종단(Key Vault 자체 서명 인증서), HTTP→HTTPS 영구 리디렉션, WAF 정책(Prevention, OWASP DRS 2.1, `allowOperatorOnly`), 백엔드 HTTPS·`/healthz` 프로브 | 없음 | 사용자 할당 ID `id-appgw-*`(Key Vault Secrets User) | `infra/modules/appgw.bicep`, `src/ops/appgw_cert.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
-| Mock API | Container Apps internal `cae-int`(복제본 1) | 외부 데이터 제공자 대역. 동의 발급·철회(HMAC 서명 토큰), 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정) 제공, 범위·만료 동의 토큰 검증, 대출 후 흐름 재생, 장애 주입(`FAULT_MODE`) | 합성 데이터(시드로 프로세스 내 결정적 생성), 동의 레지스트리(메모리) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
+| Mock API | Container Apps internal `cae-int`(복제본 1) | 외부 데이터 제공자 대역. 동의 발급·철회(HMAC 서명 토큰), 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정, 정산 원장과 계좌 입금을 따로 만들어 시점 차이·광고비 상계·선정산 양도를 반영) 제공, 범위·만료 동의 토큰 검증, 대출 후 흐름 재생, 장애 주입(`FAULT_MODE`) | 합성 데이터(시드로 프로세스 내 결정적 생성), 동의 레지스트리(메모리) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
 | AI 게이트웨이 | API Management Developer, 내부 VNet 모드(`snet-apim`) | 에이전트별 TPM 한도, 콘텐츠 안전(Prompt Shields), 토큰 지표(agent·model) | 없음(본문 미기록) | 에이전트별 구독 키(Foundry 연결) → APIM MI로 Foundry 호출 | `infra/modules/apim.bicep`, `infra/modules/foundry/gateway-connections.bicep`, `src/agents/gateway.py` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
@@ -173,8 +173,8 @@ sequenceDiagram
   O->>M: 동의 요청·토큰 발급 (동의)
   O->>A: 데이터 수집 (data-assembly, L3)
   A->>M: fetch_source (동의 범위 한정)
-  O->>O: 심사 지표 산출 — 거래 분류 포함 (classify-v1 → Decision-1)
-  O->>P: 정책 판정 (fail-closed)
+  O->>O: 심사 지표 산출 — 거래 분류 포함 (classify-v1 → Decision-1), 정산 원장 대사 (pg.json 대사)
+    O->>P: 정책 판정 (fail-closed, 정책 v3)
   O->>A: 신용 평가 (analyst ↔ reviewer, 최대 3회)
   O->>C: 단계별 스냅샷 저장
   O->>U: 심사역 대기 (wait_for_external_event, SLA 타이머)
@@ -183,6 +183,8 @@ sequenceDiagram
 ```
 
 단계 이름은 `src/opsmetrics/labels.py`의 `STEP_LABELS`를 따른다: 동의(consent) → 데이터 수집(assemble) → 거래 분류(classify) → 심사 지표 산출(underwrite) → 정책 판정(policy) → 신용 평가(assess). 거래 분류는 심사 지표 산출 활동 안의 하위 단계다(`src/orchestrator/journey/metering.py`). 데이터가 불완전하면(`FLAG_DATA_INCOMPLETE`) 심사를 건너뛰고 바로 심사역 대기로 간다(`src/orchestrator/journey/orchestration.py`).
+
+**정산 원장 데이터 흐름(2026-11-08).** 데이터 수집이 원천 저장소(Blob)에 넣은 `pg.json`을 심사 지표 산출 활동이 선택으로 읽어(없거나 손상되면 빈 목록 + 손상이면 `pg_ledger_unavailable` 플래그) 계좌 거래와 대조한다(`src/agents/pg_ledger.py`의 `ledger_summary`, [에이전트](agents.md#정산-원장-대사)). 결과는 세 곳으로 간다. ① 정산 지표(`pg_reconciliation_ratio`·`pg_top_platform_share`)가 심사 특성에 들어가 정책 v3(R107·R108)이 판정한다. 값이 없으면 그 규칙은 적용하지 않는다. ② 상세(플랫폼별 비중·월별 공제율·미매칭 정산 최근 10건)가 신청 문서의 `underwriting.pg_ledger`에 저장되어 신용 평가 단계의 분석가 도구 `get_settlement_summary`와 `M:pg_*` 근거 ID가 된다. ③ 같은 값을 콘솔 상세의 "정산 대사" 카드가 읽는다. 정책·에이전트·콘솔 모두 정산 값을 다시 계산하지 않는다.
 
 ## 사후 흐름
 
@@ -221,7 +223,7 @@ flowchart LR
 | `ApplicantProfile` v1 | 사업자 프로필(업종·지역·업력) |
 | `Transaction` v1 | 거래(유형 코드·적요·금액) |
 | `TaxFiling` v1 | 세무 신고 |
-| `PgSettlement` v1 | 카드·PG 정산 |
+| `PgSettlement` v1 | 카드·PG 정산(`deduction_krw` 광고비·물류비 상계 기본값 0, `net = gross − fee − deduction`) |
 | `CashFlowFeatures` v1 | 심사 지표(DSCR·버퍼·변동성 등) |
 | `PolicyDecision` v1 | 정책 판정(자격·한도·금리·`rules_version`·reason code) |
 | `CreditAssessment` v1 | 평가(추천·근거 `Claim`·`ProposedStructure`·`Counterfactual`) |
