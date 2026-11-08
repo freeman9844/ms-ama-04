@@ -79,6 +79,13 @@ def test_v3_signal_refer_on_low_reconciliation(make_doc):
     assert any("정산" in r for r in p["risks"])
 
 
+def test_high_cost_lender_signal_counts_transactions_not_lenders(make_doc):
+    s = by_field(assessment_panels(view(make_doc, features={**STRONG, "high_cost_lender_count": 25})))
+    assert s["high_cost_lender_count"]["state"] == "refer"
+    assert s["high_cost_lender_count"]["text"] == (
+        "고비용 대출 상환 25건 — 대부업·고금리 대출 상환 거래가 계좌에서 보입니다(기준 0건).")
+
+
 def test_limit_bars_highlight_the_binding_minimum(make_doc):
     p = assessment_panels(view(make_doc, STRONG, requested_amount_krw=10_000_000))
     limit = p["limit"]

@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import pytest
 
 from agents.classify import Category, classify
-from agents.features import EXPENSE_GROUPS, FLAG_HIGH_COST_LENDER, compute_underwriting, monthly_installment
+from agents.features import EXPENSE_GROUPS, FLAG_HIGH_COST_LENDER, compute_underwriting, data_end, monthly_installment
 from evals.datasets import TRUTH_LABEL
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
@@ -233,3 +233,29 @@ def test_pg_features_none_without_settlements(cases):
     uw = _underwrite(cases, "seller-dailylook-01", pg=False)
     assert uw.features.pg_reconciliation_ratio is None and uw.features.pg_top_platform_share is None
     assert uw.pg_ledger == {"available": False} and "pg_hhi" not in uw.signals
+
+
+def test_data_end_is_next_business_day_after_last_transaction(cases):
+    txns = cases["seller-dailylook-01"].transactions
+    assert max(t.booked_on for t in txns) == date(2026, 10, 30)  # 금요일
+    assert data_end(txns, date(2026, 11, 1)) == date(2026, 11, 1)  # 주말 기준일은 그대로
+    assert data_end(txns, date(2026, 11, 30)) == date(2026, 11, 2)
+    assert data_end([], date(2026, 11, 30)) == date(2026, 11, 30)
+
+
+@pytest.mark.parametrize("applicant_id", ["seller-dailylook-01", "seller-candle-05", "seller-glowlab-03",
+                                          "seller-mugshop-21"])
+def test_trend_and_pg_ledger_do_not_drift_when_data_is_stale(cases, applicant_id):
+    case = cases[applicant_id]
+
+    def at(as_of):
+        return compute_underwriting(f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
+                                    as_of=as_of, requested_amount_krw=AMOUNT, requested_tenor_months=TENOR,
+                                    pg_settlements=case.pg_settlements)
+
+    fresh = at(AS_OF)
+    assert fresh.features.revenue_trend_ratio is not None and fresh.pg_ledger["available"]
+    for days in (14, 30):
+        stale = at(AS_OF + timedelta(days=days))
+        assert stale.features.revenue_trend_ratio == fresh.features.revenue_trend_ratio
+        assert stale.pg_ledger == fresh.pg_ledger

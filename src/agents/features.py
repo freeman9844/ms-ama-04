@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from agents.classify import RULES_VERSION, Category, classify
 from agents.pg_ledger import features_of, ledger_summary
 from shared.contracts import ApplicantProfile, CashFlowFeatures, PgSettlement, TaxFiling, Transaction
+from shared.krcalendar import add_business_days
 
 ANNUAL_RATE = 0.08  # 신규 대출 월상환액 추정용 가정 금리(원리금 균등)
 DAYS_PER_MONTH = 30.4
@@ -100,17 +101,29 @@ def _tax_match(transactions: Sequence[Transaction], categories: dict[str, Catego
     return min(declared, observed) / high if high > 0 else 0.0
 
 
+def data_end(transactions: Sequence[Transaction], as_of: date) -> date:
+    """최근 구간(매출 추세·정산 대사)을 재는 끝날: 기준일과 '마지막 거래일 다음 영업일' 중 이른 날.
+
+    원천 데이터가 기준일보다 일찍 끝나면(오래 떠 있던 목 API 등) 거래 없는 날이 최근 구간에 들어가 지표가
+    인위적으로 나빠진다. 다음 영업일로 재므로 주말·공휴일 직후의 기준일은 그대로 쓴다.
+    """
+    if not transactions:
+        return as_of
+    return min(as_of, add_business_days(max(t.booked_on for t in transactions), 1))
+
+
 def _revenue_trend(txns: Sequence[Transaction], categories: Mapping[str, Category], as_of: date) -> float | None:
-    """최근 60일 일평균 매출 ÷ 그 앞(최대 180일, 최소 60일) 일평균 매출."""
+    """최근 60일 일평균 매출 ÷ 그 앞(최대 180일, 최소 60일) 일평균 매출. 구간 끝은 기준일이 아니라 `data_end`다."""
     if not txns:
         return None
-    split = as_of - timedelta(days=TREND_RECENT_DAYS)
+    end = data_end(txns, as_of)
+    split = end - timedelta(days=TREND_RECENT_DAYS)
     prior_from = max(split - timedelta(days=TREND_PRIOR_DAYS), min(t.booked_on for t in txns))
     prior_days = (split - prior_from).days
     if prior_days < TREND_MIN_PRIOR_DAYS:
         return None
     rev = [t for t in txns if categories.get(t.txn_id) is Category.REVENUE and t.amount_krw > 0]
-    recent = sum(t.amount_krw for t in rev if split <= t.booked_on < as_of) / TREND_RECENT_DAYS
+    recent = sum(t.amount_krw for t in rev if split <= t.booked_on < end) / TREND_RECENT_DAYS
     prior = sum(t.amount_krw for t in rev if prior_from <= t.booked_on < split) / prior_days
     return round(recent / prior, 3) if prior > 0 else None
 
@@ -225,7 +238,7 @@ def compute_underwriting(
     }
     adjusted = _compute(*args, rules | applied, **kw) if applied else base
     features = _conservative(base.features, adjusted.features)
-    pg = ledger_summary(pg_settlements or (), transactions, as_of)
+    pg = ledger_summary(pg_settlements or (), transactions, data_end(transactions, as_of))
     features = features.model_copy(update=features_of(pg))
     signals = {
         **adjusted.signals,

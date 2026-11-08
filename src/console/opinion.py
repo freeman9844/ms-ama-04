@@ -29,7 +29,7 @@ METRIC_LABELS = {
     "avg_monthly_noi_krw": "월평균 순영업이익", "avg_monthly_debt_service_krw": "월평균 기존 상환",
     "new_installment_krw": "이번 대출 월 상환액", "avg_monthly_owner_draw_krw": "월평균 대표자 인출",
     "dscr_after_owner_draw": "대표자 인출 후 DSCR", "unclassified_count": "미분류 거래 수",
-    "high_cost_lender_count": "고비용 대출 상환처 수", "loan_proceeds_count": "대출금 입금 수",
+    "high_cost_lender_count": "고비용 대출 상환 거래 수", "loan_proceeds_count": "대출금 입금 수",
     "max_amount_krw": "정책 한도",
     "pg_reconciliation_ratio": "정산금 계좌 입금 비율", "pg_top_platform_share": "최대 채널 비중",
     "pg_hhi": "채널 집중도(HHI)", "pg_take_rate_trend_pp": "공제율 변화(%p)",

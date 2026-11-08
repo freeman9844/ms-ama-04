@@ -46,7 +46,7 @@ SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
     ("revenue_trend_ratio", "최근 매출 추세", "min", 1.0,
      "최근 매출 추세 {v} — 최근 60일 하루 매출이 그 전보다 {pct}% 수준입니다(기준 {t} 이상)."),
     ("high_cost_lender_count", "고비용 대출 상환", "max", -1,
-     "고비용 대출 상환 {v}곳 — 대부업·고금리 대출 상환이 계좌에서 보입니다(기준 {t}곳)."),
+     "고비용 대출 상환 {v}건 — 대부업·고금리 대출 상환 거래가 계좌에서 보입니다(기준 {t}건)."),
     ("pg_reconciliation_ratio", "정산금 계좌 입금", "min", 0.98,
      "정산금 계좌 입금 {v} — 플랫폼 정산금의 {pct}%가 이 계좌로 들어왔습니다(기준 {t} 이상)."),
     ("pg_top_platform_share", "최대 채널 비중", "max", 0.6,
