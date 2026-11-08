@@ -32,6 +32,9 @@ class AgentError(RuntimeError):
 
 MAX_RETRY_AFTER_S = 10.0
 DEFAULT_RETRY_AFTER_S = 1.0
+# 429 지수 백오프: n번째(0부터) 재시도 전 max(retry-after, 1·2^n)초를 기다리고 상한은 30초다(5회면 최소 1·2·4·8·16초).
+BACKOFF_BASE_S = 1.0
+MAX_BACKOFF_S = 30.0
 # 소문자 부분 문자열. AI 게이트웨이(APIM llm-content-safety·llm-token-limit)와 모델 자체 필터의 오류 본문을 가른다.
 # Task 4 관문에서 관측한 본문에 맞춰 보정한다. 한도 표지어는 관측 문구 그대로 좁혀
 # 다른 400(예: 컨텍스트 길이 초과의 "token limit")을 한도로 오인하지 않게 한다.
@@ -69,6 +72,10 @@ def _retry_after(response: httpx.Response) -> float:
     return min(max(value, 0.0), MAX_RETRY_AFTER_S)
 
 
+def _backoff(response: httpx.Response, attempt: int) -> float:
+    return min(max(_retry_after(response), BACKOFF_BASE_S * 2**attempt), MAX_BACKOFF_S)
+
+
 def _status_error(response: dict[str, Any], conversation_id: str | None) -> AgentError:
     """completed가 아닌 응답을 오류로. 차단·한도를 구분하고 본문은 메시지에 넣지 않는다."""
     status = response.get("status")
@@ -89,6 +96,8 @@ class AgentSpec:
     output_name: str
     output_schema: dict[str, Any]
     output_model: type[BaseModel]
+    # 게이트웨이 429를 다시 보낼 최대 횟수(지수 백오프). 에이전트 정의에는 들어가지 않는다.
+    throttle_retries: int = 1
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -191,12 +200,16 @@ class FoundryAgents:
             method, self._base + path, json=body, headers={"Authorization": f"Bearer {self._token()}"}
         )
 
-    def _call(self, method: str, path: str, body: Any = None, conversation_id: str | None = None) -> dict[str, Any]:
+    def _call(
+        self, method: str, path: str, body: Any = None, conversation_id: str | None = None, *, throttle_retries: int = 1
+    ) -> dict[str, Any]:
         try:
             r = self._request(method, path, body)
-            if r.status_code == 429 and self._retry_throttle:
-                # 게이트웨이 토큰 한도. 429는 응답을 만들지 않으므로 한 번만 다시 보낸다(입력 중복 없음).
-                self._sleep(_retry_after(r))
+            attempt = 0
+            # 게이트웨이 토큰 한도. 429는 응답을 만들지 않으므로 다시 보내도 입력이 중복되지 않는다.
+            while r.status_code == 429 and self._retry_throttle and attempt < throttle_retries:
+                self._sleep(_backoff(r, attempt))
+                attempt += 1
                 r = self._request(method, path, body)
         except httpx.HTTPError as e:
             raise AgentError(f"{method} {path}: {type(e).__name__}", conversation_id) from e
@@ -216,6 +229,7 @@ class FoundryAgents:
                 "POST",
                 f"/agents/{spec.name}/versions?api-version={AGENTS_API_VERSION}",
                 {"definition": spec.definition()},
+                throttle_retries=spec.throttle_retries,
             )
             self._versions[spec.name] = str(created.get("version", ""))
         return self._versions[spec.name]
@@ -245,7 +259,7 @@ class FoundryAgents:
         max_rounds: int = 6,
     ) -> AgentRun:
         version = self.ensure_agent(spec)
-        conversation_id = self._call("POST", "/openai/v1/conversations", {})["id"]
+        conversation_id = self._call("POST", "/openai/v1/conversations", {}, throttle_retries=spec.throttle_retries)["id"]
         containers: list[str] = []
         try:
             return self._loop(spec, version, conversation_id, input_text, handlers, max_rounds, containers)
@@ -296,7 +310,9 @@ class FoundryAgents:
 
         def respond(payload: Any) -> dict[str, Any]:
             body = {"agent_reference": ref, "conversation": conversation_id, "input": payload}
-            response = self._call("POST", "/openai/v1/responses", body, conversation_id)
+            response = self._call(
+                "POST", "/openai/v1/responses", body, conversation_id, throttle_retries=spec.throttle_retries
+            )
             for item in response.get("output", []):
                 cid = item.get("container_id") if item.get("type") == "code_interpreter_call" else None
                 if cid and cid not in containers:

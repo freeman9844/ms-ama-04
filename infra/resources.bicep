@@ -547,7 +547,7 @@ module functions 'modules/functions.bicep' = {
       ANALYST_MODEL: 'gpt-5.6-sol'
       REVIEWER_MODEL: 'gpt-5.6-luna'
       CLASSIFIER_MODEL: 'gpt-5.6-luna'
-      EW_MODEL: 'gpt-5.4'
+      EW_MODEL: 'gpt-5.6-luna'
       COLLECTIONS_MODEL: 'gpt-5.6-luna'
       NOTICE_MODEL: 'gpt-5.6-luna'
       GRIEVANCE_MODEL: 'gpt-5.6-luna'
@@ -770,13 +770,15 @@ module opsJob 'modules/eval-job.bicep' = {
 
 // ── AI 게이트웨이(APIM) ────────────────────────────────────────────────
 // 에이전트마다 제품·구독·Foundry 연결 하나. TPM은 Task 11 실측(운영 부하+평가) 피크 기준입니다.
-// gw-analyst 150K는 GlobalStandard gpt-5.6-sol 배포 용량(150K, 평가 Job과 공유), gw-early-warning 150K는 gpt-5.4 배포 용량 200K(main.bicep, 평가 judge와 공유) 안에 듭니다.
-// 인라인 재생은 13주 조사를 몇 분 안에 연달아 돌려 50K·100K에서 429 폴백이 났습니다(2026-11-08, 1분 피크 85.9K).
+// gw-analyst 150K는 GlobalStandard gpt-5.6-sol 배포 용량(150K, 평가 Job과 공유), gw-early-warning 75K는 gpt-5.6-luna 배포 용량 150K(main.bicep) 안에 듭니다.
+// luna를 쓰는 게이트웨이 합계: 조기경보 75K + 소형 에이전트 72K = 147K ≤ 150K.
+// 인라인 재생은 13주 조사를 몇 분 안에 연달아 돌려 429가 나기 쉽습니다(2026-11-08, gpt-5.4 1분 피크 85.9K).
+// 조기경보 조사는 429를 지수 백오프로 최대 5번 다시 보냅니다(src/agents/early_warning.py EW_THROTTLE_RETRIES).
 // DataZoneStandard는 배포 용량이 100K라 APIM TPM보다 배포 한도가 먼저 걸립니다.
 // src/agents/gateway.py CONNECTIONS와 이름이 같아야 합니다(테스트가 교차 확인).
 var gateways = [
   { name: 'gw-analyst', tpm: 150000 }
-  { name: 'gw-early-warning', tpm: 150000 }
+  { name: 'gw-early-warning', tpm: 75000 }
   { name: 'gw-reviewer', tpm: 15000 }
   { name: 'gw-data-assembly', tpm: 17000 }
   { name: 'gw-txn-classifier', tpm: 20000 }

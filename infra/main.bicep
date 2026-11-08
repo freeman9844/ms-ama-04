@@ -79,17 +79,18 @@ var tags = {
 }
 
 // capacity 단위는 1K TPM. 구독 쿼터(GlobalStandard): gpt-5.4 250, gpt-5.6-luna 250, gpt-6.1-sol 250, gpt-5.6-sol 250.
-// gpt-5.6-luna 100 = 소형 에이전트 전부(데이터 수집·검토·분류 폴백·추심·안내·이의 회신). 구독의 다른 리소스가 쿼터 100을 씁니다.
+// gpt-5.6-luna 150 = 소형 에이전트 전부(데이터 수집·검토·분류 폴백·추심·안내·이의 회신 합 72K) + 조기경보 조사(gw-early-warning 75K).
+// 구독의 다른 리소스가 쿼터 100을 쓰고 있어 이 배포가 가질 수 있는 최대치가 150입니다.
 // 종량제라 용량을 늘려도 고정비는 없습니다.
 // gpt-5.6-sol 150 = 분석 에이전트(gw-analyst 150K). 평가 Job의 full 구성(EVAL_FULL_MODEL)도 같은 배포를 나눠 씁니다.
 // 구독의 다른 리소스가 gpt-5.6-sol 쿼터 100을 쓰고 있어 이 배포가 가질 수 있는 최대치가 150입니다.
-// gpt-5.4 200 = gw-early-warning 50K + 평가 판정·이전 분석 용량(쿼터 보유만).
+// gpt-5.4 200 = 평가 판정(EVAL_JUDGE_MODEL)·이전 분석 용량(쿼터 보유만).
 // gpt-6.1-sol 50 = 보유만. 게이트웨이 연결(chat completions)에서 함수 도구 + 추론을 거부해(400) 분석가로 쓰지 않습니다.
 // DataZoneStandard 쿼터는 100이라 100으로 낮추며, 이때는 APIM TPM보다 배포 한도(100K)가 먼저 걸립니다.
 // ARM은 리소스 이름에 예약어 MICROSOFT를 허용하지 않으므로 Decision-1은 배포 이름을 따로 둡니다.
 var modelDeployments = [
   { name: 'gpt-5.4', format: 'OpenAI', version: '2026-03-05', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 200 : 100 }
-  { name: 'gpt-5.6-luna', format: 'OpenAI', version: '2026-07-09', sku: chatModelSku, capacity: 100 }
+  { name: 'gpt-5.6-luna', format: 'OpenAI', version: '2026-07-09', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 150 : 100 }
   { name: 'gpt-6.1-sol', format: 'OpenAI', version: '2026-09-29', sku: chatModelSku, capacity: 50 }
   { name: 'gpt-5.6-sol', format: 'OpenAI', version: '2026-07-09', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 150 : 100 }
   { name: 'Microsoft-Decision-1', deploymentName: 'decision-1', format: 'Microsoft', version: '1', sku: decisionModelSku, capacity: 50 }

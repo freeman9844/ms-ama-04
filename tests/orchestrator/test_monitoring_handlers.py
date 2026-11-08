@@ -362,7 +362,7 @@ def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
     raised = [m for m in outbox.sent if m[0] == TOPIC_ALERT]
     assert [m[1]["alert_id"] for m in raised] == mon["alert_ids"] and all(m[3] == LOAN for m in raised)
     alert = deps.store.read(ALERTS, mon["alert_ids"][0], LOAN)
-    assert alert["severity"] == "high" and alert["models"] == {"investigator": "gpt-5.4"}
+    assert alert["severity"] == "high" and alert["models"] == {"investigator": "gpt-5.6-luna"}
     assert alert["replay_id"] == started["replay_id"] and alert["collections"] is None
     # 13주차 미납은 재생을 멈추지 않는다. 재생은 끝나고 재조정 요청은 결정을 기다린다.
     last = cases(deps)[-1]

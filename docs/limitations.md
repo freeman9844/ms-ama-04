@@ -66,7 +66,7 @@
 - 게이트웨이 로그에는 LLM 요청·응답 본문과 헤더를 남기지 않는다(호출 수·상태·지연·토큰 지표만). 원인 분석은 지표와 Foundry 트레이스에 기댄다. (ADR-010)
 - 콘솔 상세의 "AI 게이트웨이 · 콘텐츠 차단" 표시는 모델 배포 자체의 콘텐츠 필터 결과(400 `content_filter`·`incomplete_details`)도 `GatewayBlocked`로 분류하므로(`src/agents/runtime.py`), 배포 필터가 막은 건이 게이트웨이 차단으로 보일 수 있다. 막은 계층은 게이트웨이 로그로 따로 확인한다. (ADR-010)
 - 평가(eval) 트래픽이 운영과 같은 에이전트별 TPM을 나눠 쓴다. 조기경보 평가 피크(1분 53.7K)는 한도 50K를 넘어 Agent Service 재시도가 흡수했다. 평가 전용 제품 분리는 후속 과제다. (ADR-010)
-- `llm-token-limit`은 `estimate-prompt-tokens=false`라 한도를 넘긴 요청 자체는 통과하고 카운터가 넘은 **다음 호출부터** 429가 된다. 429가 나도 Agent Service가 1회, 클라이언트가 재시도한다. (ADR-010)
+- `llm-token-limit`은 `estimate-prompt-tokens=false`라 한도를 넘긴 요청 자체는 통과하고 카운터가 넘은 **다음 호출부터** 429가 된다. 429가 나도 Agent Service가 1회, 클라이언트가 재시도한다(기본 1회, 조기경보 조사는 지수 백오프 1·2·4·8·16초로 최대 5회). (ADR-010)
 - 게이트웨이 경로는 같은 일을 하는 데 더 많은 토큰을 쓴다: 건당 AI 비용 $0.0589 → $0.0939(+59%), 분석가 TPM 150K·`gpt-5.4` 용량 200이 필요했다([비용 모델](cost-model.md#게이트웨이-경로-건당-ai-비용)). `collections-agent`·`grievance-reply-agent`의 TPM(10K·5K)은 측정하지 못한 여유값이다. (ADR-010)
 
 ## 동의·삭제·이의제기

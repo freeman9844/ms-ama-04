@@ -12,7 +12,7 @@
 | `txn-classifier` | 거래 분류 | L2 | `gpt-5.6-luna`(폴백), `decision-1`(주) | 없음(구조화 출력) | 없음 | 규칙 분류만으로 심사 계속 | `src/agents/txn_classify.py`, `src/agents/classify.py` |
 | `underwriting-analyst` | 신용 평가 | L2 | `gpt-5.6-sol` | `get_metrics`, `get_monthly_series`, `get_settlement_summary`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 → 1회 재시도 후 신청 `failed` | `src/agents/underwriting.py` |
 | `underwriting-reviewer` | 신용 평가 | L2 | `gpt-5.6-luna` | 없음 | 없음 | 3라운드 초과 시 "검토 미통과" | `src/agents/underwriting.py` |
-| `early-warning-investigator` | 사후 조기경보 | L4 | `gpt-5.4` | `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `query_transactions`, `raise_alert` | 경보(`raise_alert`) | 탐지기 단독 medium 경보(fail-safe) | `src/agents/early_warning.py` |
+| `early-warning-investigator` | 사후 조기경보 | L4 | `gpt-5.6-luna` | `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `query_transactions`, `raise_alert` | 경보(`raise_alert`) | 탐지기 단독 medium 경보(fail-safe) | `src/agents/early_warning.py` |
 | `collections-agent` | 사후 추심 | L3 | `gpt-5.6-luna` | `get_case`, `get_contact_history`, `list_scripts`, `send_script`, `route_hardship` | 스크립트 발송·재조정 요청 | 최근 경보 high면 `hardship_offer`, 아니면 `missed_payment`. 재조정 없음 | `src/agents/collections.py` |
 | `consent-notice-agent` | 동의 안내 | L4 | `gpt-5.6-luna` | 없음 | 없음 | 템플릿 문안 대체 | `src/agents/notices.py` |
 | `grievance-reply-agent` | 이의 회신 | L3 | `gpt-5.6-luna` | 없음 | 없음 | 템플릿 문안 대체 | `src/agents/notices.py` |

@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import httpx
@@ -342,12 +343,40 @@ def test_runtime_second_429_raises_throttled_without_body():
     assert sleeps == [1.0]
 
 
-@pytest.mark.parametrize("header, expected", [("120", 10.0), ("abc", 1.0), ("-3", 0.0), ("nan", 1.0)])
+@pytest.mark.parametrize("header, expected", [("120", 10.0), ("abc", 1.0), ("-3", 1.0), ("nan", 1.0)])
 def test_retry_after_is_clamped(header, expected):
     sleeps = []
     a = _gateway_agents([httpx.Response(429, headers={"retry-after": header}), httpx.Response(200, json={})], sleeps)
     a._call("POST", "/x", {})
     assert sleeps == [expected]
+
+
+def test_spec_throttle_retries_back_off_exponentially_then_raise():
+    sleeps = []
+    responses = [httpx.Response(429) for _ in range(6)]
+    a = _gateway_agents(responses, sleeps)
+    spec = dataclasses.replace(SPEC, throttle_retries=5)
+    with pytest.raises(GatewayThrottled):
+        a.run(spec, "신청", {})
+    assert sleeps == [1.0, 2.0, 4.0, 8.0, 16.0] and responses == []
+
+
+def test_backoff_honours_longer_retry_after_and_caps_at_max():
+    sleeps = []
+    responses = [httpx.Response(429, headers={"retry-after": "9"}), httpx.Response(429), httpx.Response(429),
+                 httpx.Response(429), httpx.Response(429), httpx.Response(429), done({"status": "ok"})]
+    a = _gateway_agents(responses, sleeps)
+    assert a._call("POST", "/openai/v1/responses", {}, throttle_retries=6)["status"] == "completed"
+    assert sleeps == [9.0, 2.0, 4.0, 8.0, 16.0, 30.0]
+
+
+def test_spec_throttle_retries_recover_after_three_429s():
+    sleeps = []
+    responses = [httpx.Response(429), httpx.Response(429), httpx.Response(429), done({"status": "ok"})]
+    a = _gateway_agents(responses, sleeps)
+    run = a.run(dataclasses.replace(SPEC, throttle_retries=5), "신청", {})
+    assert run.output.status == "ok"
+    assert sleeps == [1.0, 2.0, 4.0]
 
 
 def test_context_length_400_is_not_throttled():
