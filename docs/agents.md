@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|---|---|
 | `data-assembly` | 데이터 수집 | L3 | `gpt-5.6-luna` | `fetch_source` | 없음(읽기) | 안전망 수집 + `agent_fallback` 플래그 | `src/agents/data_assembly.py` |
 | `txn-classifier` | 거래 분류 | L2 | `gpt-5.6-luna`(폴백), `decision-1`(주) | 없음(구조화 출력) | 없음 | 규칙 분류만으로 심사 계속 | `src/agents/txn_classify.py`, `src/agents/classify.py` |
-| `underwriting-analyst` | 신용 평가 | L2 | `gpt-5.6-sol` | `get_metrics`, `get_monthly_series`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 → 1회 재시도 후 신청 `failed` | `src/agents/underwriting.py` |
+| `underwriting-analyst` | 신용 평가 | L2 | `gpt-5.6-sol` | `get_metrics`, `get_monthly_series`, `get_settlement_summary`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 → 1회 재시도 후 신청 `failed` | `src/agents/underwriting.py` |
 | `underwriting-reviewer` | 신용 평가 | L2 | `gpt-5.6-luna` | 없음 | 없음 | 3라운드 초과 시 "검토 미통과" | `src/agents/underwriting.py` |
 | `early-warning-investigator` | 사후 조기경보 | L4 | `gpt-5.4` | `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `query_transactions`, `raise_alert` | 경보(`raise_alert`) | 탐지기 단독 medium 경보(fail-safe) | `src/agents/early_warning.py` |
 | `collections-agent` | 사후 추심 | L3 | `gpt-5.6-luna` | `get_case`, `get_contact_history`, `list_scripts`, `send_script`, `route_hardship` | 스크립트 발송·재조정 요청 | 최근 경보 high면 `hardship_offer`, 아니면 `missed_payment`. 재조정 없음 | `src/agents/collections.py` |
@@ -46,7 +46,7 @@
 ## 심사(분석가·검토자)
 
 - **목적:** 정책 판정을 근거로 분석가가 설명·대출 구조·반사실을 만들고, 검토자가 근거(grounding)를 검증한다(신용 평가 단계, L2). **결정 권한 없음** — 최종은 심사역.
-- **분석가 도구 allowlist(`src/agents/underwriting.py`):** `get_metrics`, `get_monthly_series`, `query_transactions`(가명 거래, 최대 `MAX_TXNS=20`), 그리고 Foundry 내장 `code_interpreter`. 쓰기 도구 없음.
+- **분석가 도구 allowlist(`src/agents/underwriting.py`):** `get_metrics`, `get_monthly_series`, `get_settlement_summary`(정산 원장 대사 요약, 집계만), `query_transactions`(가명 거래, 최대 `MAX_TXNS=20`), 그리고 Foundry 내장 `code_interpreter`. 쓰기 도구 없음.
 - **검토자:** 도구 없음. 주장별 근거 충족을 예/아니오로 판정한다.
 - **반성 패턴:** 결정적 grounding 검사(`check_grounding` + `src/agents/grounding.py`의 숫자 대조, 허용 오차 2%) → 통과 시 검토자 → 지적 사항을 다음 라운드 입력으로, 최대 `MAX_ROUNDS=3`회. 3회 초과 시 `review_not_passed`로 심사역에게 넘긴다.
 - **가드레일:** 모델로 가는 모든 문자열은 가명처리. Code Interpreter 컨테이너는 실행마다 즉시 삭제(`delete_container`). 근거 목록에 없는 숫자(직접 계산 포함) 사용 금지. 정책이 ineligible이면 추천은 decline/refer만. 제안 구조의 기간은 상품 기간 3~6개월(`check_grounding`의 구조 검사, `shared.contracts`의 `MIN_TENOR_MONTHS`·`MAX_TENOR_MONTHS`, 2026-11-08 1~12개월에서 축소). 권고 `conditional`은 남아 있지만 심사역 결정에는 조건부 승인이 없으므로 콘솔은 "승인 권고(조건 제안)"로 표시한다.

@@ -1,5 +1,6 @@
 import copy
 import json
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -10,6 +11,7 @@ from agents.runtime import AgentError, AgentRun
 from agents.underwriting import (
     ANALYST_AGENT,
     ANALYST_OUTPUT_SCHEMA,
+    ANALYST_TOOLS,
     FLAG_ASSESSMENT_UNAVAILABLE,
     FLAG_REVIEW_NOT_PASSED,
     MAX_ROUNDS,
@@ -69,6 +71,7 @@ def context(cases, applicant_id="seller-dailylook-01") -> UnderwritingContext:
     uw = compute_underwriting(
         f"app-{applicant_id}", case.profile, case.transactions, case.tax_filings,
         as_of=AS_OF, requested_amount_krw=AMOUNT, requested_tenor_months=12,
+        pg_settlements=case.pg_settlements,
     )
     policy = evaluate(uw.features, load_rules(DEFAULT_RULES_PATH))
     return UnderwritingContext(
@@ -82,6 +85,7 @@ def context(cases, applicant_id="seller-dailylook-01") -> UnderwritingContext:
         transactions=case.transactions,
         categories={k: v.value for k, v in uw.categories.items()},
         mask=build_pseudonymizer(KEY, case.profile, case.transactions).mask,
+        settlement=uw.pg_ledger,
     )
 
 
@@ -141,7 +145,9 @@ def test_specs_are_strict_with_tools_and_code_interpreter():
     a = analyst_spec("gpt-5.4")
     assert (a.name, a.model) == ("underwriting-analyst", "gpt-5.4")
     functions = [t for t in a.tools if t["type"] == "function"]
-    assert [t["name"] for t in functions] == ["get_metrics", "get_monthly_series", "query_transactions"]
+    assert [t["name"] for t in functions] == [
+        "get_metrics", "get_monthly_series", "get_settlement_summary", "query_transactions",
+    ]
     for t in functions:
         assert t["strict"] is True
         assert_strict(t["parameters"])
@@ -182,9 +188,27 @@ def test_query_transactions_filters_limits_and_masks(cases):
     assert q({"category": "revenue", "month": "2026/03", "limit": 3}) == {"error": "invalid_month"}
 
 
+def test_settlement_summary_tool_returns_ids_and_platforms(cases):
+    ctx = context(cases)
+    out = ctx.handlers()["get_settlement_summary"]({})
+    assert out["available"] is True
+    assert out["metric_ids"]["M:pg_reconciliation_ratio"] == ctx.features["pg_reconciliation_ratio"]
+    assert out["metric_ids"]["M:pg_top_platform_share"] == ctx.features["pg_top_platform_share"]
+    assert out["metric_ids"]["M:pg_hhi"] == ctx.signals["pg_hhi"]
+    assert out["platforms"][0].keys() == {"platform", "share"}
+    assert "unmatched" not in out  # 개별 미입금 금액은 근거 ID가 없어 주지 않는다
+
+
+def test_settlement_summary_unavailable(cases):
+    ctx = replace(context(cases), settlement=None)
+    assert ctx.handlers()["get_settlement_summary"]({}) == {"available": False}
+    assert any(t.get("name") == "get_settlement_summary" for t in ANALYST_TOOLS)
+
+
 ALL_TOOLS = [
     ("get_metrics", {}),
     ("get_monthly_series", {}),
+    ("get_settlement_summary", {}),
     *[("query_transactions", {"category": c, "month": "", "limit": 20}) for c in ("payroll", "owner_transfer", "unclassified_out", "rent")],
 ]
 

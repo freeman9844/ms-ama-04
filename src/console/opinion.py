@@ -39,6 +39,7 @@ KRW_MONTHLY = frozenset({"revenue", "operating_out", "debt_service", "owner_draw
 SOURCES = (("M", "현금흐름 지표", "blue"), ("S", "월별 흐름", "teal"), ("P", "정책 결과", "purple"),
            ("txn", "근거 거래", "orange"), ("missing", "확인 안 됨", "red"))
 TOOL_LABELS = {"get_metrics": "지표 조회", "get_monthly_series": "월별 흐름 조회",
+               "get_settlement_summary": "정산 요약 조회",
                "query_transactions": "거래 조회", "code_interpreter": "코드 계산"}
 SCHEDULE_LABELS = {"level": "균등 상환", "seasonal": "계절 감액 상환"}
 INDEX_CHART = {"width": 480, "height": 220}
