@@ -41,7 +41,7 @@ GOOD = {
     ],
     "proposed_structure": {
         "amount_krw": 3_300_000,
-        "tenor_months": 12,
+        "tenor_months": 6,
         "schedule": "level",
         "reduced_payment_months": [],
         "rationale": "요청 금액이 정책 한도 안이다.",
@@ -275,9 +275,13 @@ def test_recommendation_must_respect_policy(cases):
     assert any("한도" in i for i in check_grounding(over, context(cases)))
 
 
-def test_structure_tenor_is_capped_at_12_months(cases):
-    long = draft(proposed_structure={**GOOD["proposed_structure"], "tenor_months": 13})
-    assert any("1~12" in i for i in check_grounding(long, context(cases)))
+@pytest.mark.parametrize("tenor", [2, 7, 12])
+def test_structure_tenor_must_be_3_to_6_months(cases, tenor):
+    off = draft(proposed_structure={**GOOD["proposed_structure"], "tenor_months": tenor})
+    assert any("3~6" in i for i in check_grounding(off, context(cases)))
+
+
+def test_structure_shape_issues(cases):
     missing = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 0})
     assert any("proposed_structure" in i for i in check_grounding(missing, context(cases)))
     seasonal = draft(proposed_structure={**GOOD["proposed_structure"], "schedule": "seasonal"})

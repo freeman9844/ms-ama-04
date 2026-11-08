@@ -21,6 +21,8 @@ from agents.grounding import close, ungrounded
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from shared.contracts import (
     EVIDENCE_ID_PATTERN,
+    MAX_TENOR_MONTHS,
+    MIN_TENOR_MONTHS,
     Claim,
     Counterfactual,
     CreditAssessment,
@@ -50,7 +52,7 @@ ANALYST_INSTRUCTIONS = """너는 한국 소상공인 현금흐름 기반 운전�
    query_transactions가 준 거래 txn_id는 txn_ids에 넣는다. 문장 속 숫자는 인용한 근거 값과
    같아야 한다(반올림 2% 이내, 만·억·% 표기 허용). 근거 목록에 없는 숫자(직접 계산한 값 포함)는 쓰지 않는다.
 4. recommendation: 정책 결과가 ineligible이면 decline 또는 refer만 쓴다. approve·conditional이면 proposed_structure를
-   채우고 amount_krw는 신청액과 정책 한도(P:max_amount_krw) 중 작은 값 이하로, tenor_months는 12 이하로 한다. decline·refer면 amount_krw=0.
+   채우고 amount_krw는 신청액과 정책 한도(P:max_amount_krw) 중 작은 값 이하로, tenor_months는 3~6개월로 한다. decline·refer면 amount_krw=0.
 5. get_monthly_series의 index가 뚜렷하게 낮은 달이 있으면 schedule=seasonal과 reduced_payment_months(1~12월)를
    제안할 수 있다. 아니면 schedule=level, reduced_payment_months=[].
 6. counterfactuals에는 결과를 바꿀 수 있는 지표를 metric_id, current(근거 값 그대로), target, explanation으로 적는다.
@@ -355,8 +357,8 @@ def check_grounding(draft: AnalystDraft, ctx: UnderwritingContext) -> list[str]:
             issues.append("proposed_structure: approve·conditional에는 금액이 필요하다")
         elif s.amount_krw > ctx.amount_cap:
             issues.append(f"proposed_structure: 금액 {s.amount_krw:,}원이 한도 {ctx.amount_cap:,}원을 넘는다")
-        if not 1 <= s.tenor_months <= 12:
-            issues.append("proposed_structure: tenor_months는 1~12이어야 한다")
+        if not MIN_TENOR_MONTHS <= s.tenor_months <= MAX_TENOR_MONTHS:
+            issues.append(f"proposed_structure: tenor_months는 {MIN_TENOR_MONTHS}~{MAX_TENOR_MONTHS}이어야 한다")
         if (s.schedule == "seasonal") != bool(s.reduced_payment_months):
             issues.append("proposed_structure: seasonal일 때만 reduced_payment_months를 채운다")
         if any(not 1 <= m <= 12 for m in s.reduced_payment_months):

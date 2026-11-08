@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Any
 
+from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
+
 MIN_AMOUNT_KRW = 500_000
 MAX_AMOUNT_KRW = 10_000_000
 CONSENT_FIELDS = ("consent_account", "consent_tax", "consent_pg")
@@ -15,7 +17,7 @@ APPLY_ERRORS = {
     "consent_required": "데이터 3종에 모두 동의해야 신청할 수 있습니다.",
     "applicant_invalid": "신청 사업자를 목록에서 골라야 합니다.",
     "amount_invalid": "신청 금액은 50만~1,000만 원 사이로 입력해야 합니다.",
-    "tenor_invalid": "대출 기간은 1~12개월로 입력해야 합니다.",
+    "tenor_invalid": f"대출 기간은 {MIN_TENOR_MONTHS}~{MAX_TENOR_MONTHS}개월로 입력해야 합니다.",
 }
 
 _REVIEWING = frozenset(
@@ -65,7 +67,7 @@ def validate_apply(form: dict[str, str], applicants: tuple[str, ...]) -> str | N
     if amount is None or not MIN_AMOUNT_KRW <= amount <= MAX_AMOUNT_KRW:
         return "amount_invalid"
     tenor = _digits(form.get("requested_tenor_months", ""))
-    if tenor is None or not 1 <= tenor <= 12:
+    if tenor is None or not MIN_TENOR_MONTHS <= tenor <= MAX_TENOR_MONTHS:
         return "tenor_invalid"
     return None
 

@@ -268,7 +268,7 @@ def test_new_application_is_enqueued_and_redirects(env):
     token = csrf(client, OFFICER, "/applications/new")
     resp = client.post("/applications", headers=OFFICER, data={
         "csrf": token, "applicant_id": "seller-dailylook-01", "requested_amount_krw": "10,000,000",
-        "requested_tenor_months": "12"})
+        "requested_tenor_months": "6"})
     assert resp.status_code == 303
     assert resp.headers["location"] == "/applications/app-20261101-abc123"
     (queue_name, sent), = queue.sent
@@ -276,17 +276,18 @@ def test_new_application_is_enqueued_and_redirects(env):
     assert datetime.fromisoformat(submitted_at).tzinfo is not None
     assert (queue_name, sent) == ("applications-start", {
         "application_id": "app-20261101-abc123", "applicant_id": "seller-dailylook-01",
-        "requested_amount_krw": 10_000_000, "requested_tenor_months": 12, "sla_hours": 24.0,
+        "requested_amount_krw": 10_000_000, "requested_tenor_months": 6, "sla_hours": 24.0,
         "source": "console"})
 
 
-@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_amount_krw": "10000001"}, {"requested_tenor_months": "13"},
-                                    {"applicant_id": ""}, {"requested_amount_krw": "lots"}])
+@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_amount_krw": "10000001"},
+                                    {"requested_tenor_months": "2"}, {"requested_tenor_months": "7"},
+                                    {"requested_tenor_months": "12"}, {"applicant_id": ""}, {"requested_amount_krw": "lots"}])
 def test_new_application_validation(env, fields):
     client, queue = env
     token = csrf(client, OFFICER, "/applications/new")
     form = {"csrf": token, "applicant_id": "seller-dailylook-01",     "requested_amount_krw": "10000000",
-            "requested_tenor_months": "12"} | fields
+            "requested_tenor_months": "6"} | fields
     assert client.post("/applications", headers=OFFICER, data=form).status_code == 422
     assert client.post("/applications", headers=OFFICER, data=form | {"csrf": ""}).status_code == 403
     assert queue.sent == []
@@ -333,7 +334,7 @@ def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
     assert "빈스카페(대표 김대표)는 계절성이 있다" in client.get("/applications/app-1").text
     token = csrf(client, {}, "/applications/new")
     resp = client.post("/applications", data={"csrf": token, "applicant_id": "seller-dailylook-01",
-                                              "requested_amount_krw": "5,000,000", "requested_tenor_months": "12"})
+                                              "requested_amount_krw": "5,000,000", "requested_tenor_months": "6"})
     assert resp.status_code == 303
     assert queue.sent[0][1]["application_id"] == "app-20261101-demo01"
 

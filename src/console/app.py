@@ -75,6 +75,7 @@ from journey.models import (
     replay_in_progress,
 )
 from journey.validation import validate_officer_decision
+from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
 HERE = Path(__file__).parent
@@ -298,6 +299,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             )
         except ValidationError:
             return render("new.html", user, 422, error="신청 정보가 올바르지 않습니다.", form=form)
+        if not MIN_TENOR_MONTHS <= req.requested_tenor_months <= MAX_TENOR_MONTHS:
+            return render("new.html", user, 422, error=APPLY_ERRORS["tenor_invalid"], form=form)
         deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
 

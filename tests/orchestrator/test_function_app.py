@@ -16,7 +16,7 @@ START = {
     "application_id": "app-1",
     "applicant_id": "seller-dailylook-01",
     "requested_amount_krw": 10_000_000,
-    "requested_tenor_months": 12,
+    "requested_tenor_months": 6,
 }
 
 
@@ -64,7 +64,8 @@ def test_duplicate_start_is_ignored():
     assert client.started == []
 
 
-@pytest.mark.parametrize("body", ["not json", json.dumps({**START, "requested_amount_krw": -1}), json.dumps({**START, "x": 1})])
+@pytest.mark.parametrize("body", ["not json", json.dumps({**START, "requested_amount_krw": -1}), json.dumps({**START, "x": 1}),
+                                  json.dumps({**START, "requested_tenor_months": 2}), json.dumps({**START, "requested_tenor_months": 12})])
 def test_invalid_start_is_dropped(body):
     client = FakeClient()
     assert run(handle_start(client, body)) is None

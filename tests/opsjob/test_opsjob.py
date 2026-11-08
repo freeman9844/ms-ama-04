@@ -74,7 +74,7 @@ def test_message_shape():
     m = message("load-1", 3, "load-healthy-01", T0, "load")
     assert m == {"application_id": "load-1-03", "applicant_id": "load-healthy-01",
                  "requested_amount_krw": LOAD_GRID[0].requested_amount_krw,
-                 "requested_tenor_months": 12, "submitted_at": T0.isoformat(), "source": "load", "run_id": "load-1"}
+                 "requested_tenor_months": 6, "submitted_at": T0.isoformat(), "source": "load", "run_id": "load-1"}
 
 
 def test_message_amount_follows_load_grid_and_defaults_otherwise():

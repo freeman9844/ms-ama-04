@@ -11,7 +11,7 @@
     </select>
   </label>
   <label>신청 금액(원, 최대 1,000만) <input name="requested_amount_krw" inputmode="numeric" required value="{{ form.requested_amount_krw if form else '5000000' }}"></label>
-  <label>기간(개월, 1~12) <input name="requested_tenor_months" inputmode="numeric" required value="{{ form.requested_tenor_months if form else '12' }}"></label>
+  <label>기간(개월, 3~6) <input name="requested_tenor_months" inputmode="numeric" required value="{{ form.requested_tenor_months if form else '6' }}"></label>
   <button type="submit">제출</button>
 </form>
 <p><a href="/">목록으로</a></p>

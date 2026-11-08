@@ -16,7 +16,7 @@ from shared.contracts import Transaction, TxnTypeCode
 
 AS_OF = date(2026, 11, 1)
 REQUESTED_AMOUNT_KRW = 3_300_000
-REQUESTED_TENOR_MONTHS = 12
+REQUESTED_TENOR_MONTHS = 6
 ARCHETYPES = tuple(Archetype)
 CLASSIFY_SEEDS = (101, 102)
 UW_SEED = 201

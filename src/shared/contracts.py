@@ -8,6 +8,9 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 
 SchemaV1 = Literal["1"]
 NonNegFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+# 상품 대출 기간(개월). 신규 신청 입구에서만 강제한다. 저장된 신청·대출과 진행 중인 오케스트레이션은 이전 범위(1~12)로 읽는다.
+MIN_TENOR_MONTHS = 3
+MAX_TENOR_MONTHS = 6
 
 
 class Contract(BaseModel):

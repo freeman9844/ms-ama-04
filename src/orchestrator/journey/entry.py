@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from journey.models import OfficerMessage, StartRequest
 from journey.orchestration import EVENT_OFFICER_DECISION, ORCHESTRATOR
+from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
 
 log = logging.getLogger("journey.entry")
 RESTARTABLE = ("Failed", "Terminated", "Canceled")
@@ -26,6 +27,10 @@ async def handle_start(client: Any, body: str) -> str | None:
         req = StartRequest.model_validate_json(body)
     except ValidationError as e:
         log.warning("잘못된 신청 메시지 폐기: %s", e.errors(include_input=False)[:3])
+        return None
+    # 스키마(1~12)는 재실행 호환용이라 넓다. 새 신청은 상품 기간만 받는다.
+    if not MIN_TENOR_MONTHS <= req.requested_tenor_months <= MAX_TENOR_MONTHS:
+        log.warning("상품 기간 밖 신청 폐기: %s (%d개월)", req.application_id, req.requested_tenor_months)
         return None
     status = _status(await client.get_status(req.application_id))
     if not should_start(status):

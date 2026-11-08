@@ -304,7 +304,7 @@ ANALYST_DRAFT = {
     "summary": "상환 여력이 충분하다.",
     "claims": [{"text": "DSCR은 4.106다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
     "proposed_structure": {
-        "amount_krw": 3_300_000, "tenor_months": 12, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
+        "amount_krw": 3_300_000, "tenor_months": 6, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
     },
     "counterfactuals": [],
 }

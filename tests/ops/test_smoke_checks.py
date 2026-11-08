@@ -220,7 +220,7 @@ def test_journey_starts_application_and_approves_within_policy_limit():
     assert start["url"] == "https://stfnx.queue.core.windows.net/applications-start/messages"
     assert start["headers"]["x-ms-version"] == "2023-11-03"
     assert queue_text(start) == {"application_id": "smoke-e2e-test", "applicant_id": "seller-dailylook-01",
-                                 "requested_amount_krw": 3_300_000, "requested_tenor_months": 12}
+                                 "requested_amount_krw": 3_300_000, "requested_tenor_months": 6}
     [decision] = http.find("POST", "/officer-decisions/messages")
     assert queue_text(decision) == {"application_id": "smoke-e2e-test", "decision": {
         "decision": "approve", "officer_id": "smoke", "amount_krw": 2_500_000, "reason": "smoke e2e"}}

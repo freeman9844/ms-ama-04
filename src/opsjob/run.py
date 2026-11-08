@@ -19,7 +19,7 @@ from shared.segments import LOAD_GRID
 # 부하 격자 밖 신청자(submit 모드)의 신청 금액. 격자 신청자는 격자 금액을 쓴다.
 DEFAULT_AMOUNT_KRW = 1_700_000
 _LOAD_AMOUNTS = {a.applicant_id: a.requested_amount_krw for a in LOAD_GRID}
-TENOR_MONTHS = 12
+TENOR_MONTHS = 6
 MAX_COUNT = len(LOAD_GRID)
 GUARD_SAMPLE = 3
 BUDGET_GUARD_USD = 8.0

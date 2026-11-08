@@ -27,7 +27,7 @@ PRINCIPAL = Principal(user_id="preview-officer", name="미리보기 심사역", 
 FLOW = ("received", "consent_granted", "data_assembled", "underwritten", "assessed", "awaiting_officer")
 OFFSETS = (0, 20, 65, 100, 190, 195)
 AS_OF = date(2026, 11, 2)
-TENOR = 12
+TENOR = 6
 # 신청 번호 → 셀러. 데모 셀러 5곳과 부하 셀러 6곳(상호가 겹치지 않는다).
 SELLERS = {1: "load-healthy-01", 2: "seller-mangwon-02", 3: "seller-dailylook-01", 4: "seller-candle-05",
            5: "seller-knitroom-04", 6: "load-mismatch-01", 7: "load-thin-01", 8: "load-healthy-02",
@@ -263,7 +263,7 @@ def _weeks(replay_id: str, count: int) -> list[dict[str, Any]]:
 def _loan(app_id: str, applicant: str, industry: str, amount: int, monitoring: dict | None) -> dict[str, Any]:
     return {
         "id": app_id, "loan_id": app_id, "application_id": app_id, "applicant_id": applicant, "industry": industry,
-        "underwriting_consent_id": None, "decision": "approve", "amount_krw": amount, "tenor_months": 12,
+        "underwriting_consent_id": None, "decision": "approve", "amount_krw": amount, "tenor_months": TENOR,
         "approved_at": (NOW - timedelta(days=1)).isoformat(), "baseline": BASELINE, "monitoring": monitoring,
         "updated_at": NOW.isoformat(),
     }

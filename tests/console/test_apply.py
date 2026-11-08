@@ -91,8 +91,9 @@ def test_consent_value_other_than_on_is_not_consent(env):
     ({"requested_amount_krw": "10000001"}, "amount_invalid"),
     ({"requested_amount_krw": "-5000000"}, "amount_invalid"),
     ({"requested_amount_krw": "오백만"}, "amount_invalid"),
-    ({"requested_tenor_months": "0"}, "tenor_invalid"),
-    ({"requested_tenor_months": "13"}, "tenor_invalid"),
+    ({"requested_tenor_months": "2"}, "tenor_invalid"),
+    ({"requested_tenor_months": "7"}, "tenor_invalid"),
+    ({"requested_tenor_months": "12"}, "tenor_invalid"),
     ({"applicant_id": "seller-unknown-99"}, "applicant_invalid"),
 ])
 def test_out_of_range_input_is_rejected_and_form_kept(env, fields, code):
@@ -107,8 +108,9 @@ def test_out_of_range_input_is_rejected_and_form_kept(env, fields, code):
 def test_boundary_amounts_are_accepted(env):
     client, _, queue = env
     assert apply(client, requested_amount_krw="500000").status_code == 303
-    assert apply(client, requested_amount_krw="10,000,000", requested_tenor_months="1").status_code == 303
+    assert apply(client, requested_amount_krw="10,000,000", requested_tenor_months="3").status_code == 303
     assert [m["requested_amount_krw"] for _, m in queue.sent] == [500_000, 10_000_000]
+    assert [m["requested_tenor_months"] for _, m in queue.sent] == [6, 3]
 
 
 def test_apply_requires_csrf(env):
