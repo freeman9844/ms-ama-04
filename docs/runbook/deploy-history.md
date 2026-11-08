@@ -857,3 +857,12 @@ python -m ops smoke
 - **3차 검증** `app-20261108-d0b4b0`(재생 234초): EW 429 0건, 1분 피크 103.8K. 원장 납부 2·미납 1, 마지막 추심 건 `routed` → `재조정 상담 요청`(`pending_officer`)과 `재조정 결정` 폼. 결정하지 않고 데모 B로 둡니다.
 - **남은 문제**: 2·3차 모두 7주차(트리거 `inflow_drop`·`buffer_drop`·`loan_stacking`) 조사가 HTTP 오류·429 없이 `agent_error`로 폴백했습니다. 오류 문구는 비공개 Cosmos의 `monitoring.weeks[].investigation.record.error`에만 있어 확인하지 못했습니다(도구 라운드 한도 또는 출력 스키마 불일치로 추정). 폴백 경보도 심사역 검토 대상으로 남고 추심 판단은 신호 종류로 동작합니다.
 - **`window close`** 완료.
+## 2026-11-08 정산 원장·정책 v3 배포
+
+- **변경**: 마켓플레이스 정산 원장 대사와 정책 `2026.11-v3`(`016b357`~`16c193a`, 계획 `docs/superpowers/plans/2026-11-08-settlement-ledger-policy-v3.md`). 신청 기간 3~6개월(기본 6)과 결정 보내기 버튼 잠금도 함께 배포했습니다. 이미지 `policy:20261108075226`, `mockapi:20261108084226`, `console:20261108084823`, Functions `func-gaz7yh2zic7zc`. 순서는 policy → orchestrator → mockapi → console입니다(mockapi의 새 필드를 `extra="forbid"`인 오케스트레이터가 먼저 받아야 함).
+- **Functions 403**: `ops deploy orchestrator`가 두 번 403이었습니다. `operator` 규칙에 이미 `api.ipify` IP가 있었으므로 App Service 출구 IP가 달랐습니다. [deploy](deploy.md#app-service-출구-ip가-다를-때) 절차로 `AppServiceIPSecAuditLogs`를 조회해 출구 IP 2개(회전)를 `operator-alt2`·`operator-alt3`으로 허용했고, 세 번째 시도에 성공했습니다(첫 IP만 허용했을 때는 업로드 중 연결 재설정).
+- **smoke**: 첫 `ops smoke`는 Job은 성공했지만 콘솔 관문이 403이었습니다(공인 IP가 `CONSOLE_IP`와 달라짐). `window open --acr`로 갱신한 뒤 `ops smoke` 성공(`job-smoke-jijy4vi`).
+- **라이브 확인**(500만 원·6개월):
+  - `app-20261108-04b021`(`seller-mugshop-21`): 부적격 [R002, R106, R108, R901], 정산 대사 카드의 정산금 계좌 입금 77%(기준 90% 이상), 에이전트 의견이 `pg_reconciliation_ratio`를 인용합니다.
+  - `app-20261108-7da0f6`(`seller-dailylook-01`): 적격, 정산금 계좌 입금 100%, 에이전트 권고는 승인입니다.
+- 임시 규칙은 그 뒤의 프로비저닝이 이미 지웠고, 진단 설정 `ipsec-probe-temp`는 지웠습니다. **`window close`** 완료.
