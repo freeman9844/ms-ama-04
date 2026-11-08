@@ -867,3 +867,9 @@ python -m ops smoke
   - `app-20261108-7da0f6`(`seller-dailylook-01`): 적격, 정산금 계좌 입금 100%, 에이전트 권고는 승인입니다.
 - 임시 규칙은 그 뒤의 프로비저닝이 이미 지웠고, 진단 설정 `ipsec-probe-temp`는 지웠습니다. **`window close`** 완료.
 - **최종 리뷰 수정 재배포**(`8a8c717`): 매출 추세·정산 대사 창의 끝을 마지막 거래 다음 영업일로 맞춰(데이터가 오래돼도 R106이 번지지 않음) 고비용 상환 단위를 "곳"에서 "건"으로 고쳤습니다. `console:20261108094644`·오케스트레이터 재배포(이번에는 Functions 403 없음), `ops smoke` 성공(`job-smoke-x5vdop3`). `app-20261108-e260af`(`seller-glowlab-03`): 회부 [R105, R106], "고비용 대출 상환 25건 … (기준 0건)". **`window close`** 완료.
+## 2026-11-08 조기경보 조사 gpt-5.6-luna·429 백오프 배포
+
+- **변경**(`fb21928`): 조기경보 조사 모델 `gpt-5.4` → `gpt-5.6-luna`. 429는 지수 백오프(max(retry-after, 1·2^n)초, 상한 30초)로 최대 5번 다시 보냅니다(다른 에이전트는 1번 그대로). 지시문이 독립 도구 호출(`get_weekly_series`·`get_baseline`·`get_peer_cohort`, 여러 `query_transactions`)을 한 응답에 묶도록 안내합니다. 용량: `gpt-5.6-luna` 배포 100 → 150(쿼터 250 중 다른 리소스 100), `gw-early-warning` TPM 150K → 75K(luna 게이트웨이 합 147K).
+- `window open --acr`(프로비저닝 4분 13초) → `ops deploy orchestrator`(Functions 403 없음) → `ops smoke` 성공(`job-smoke-elvz75p`). Function 설정 `EW_MODEL=gpt-5.6-luna`, 배포 용량 150 확인.
+- **라이브 확인** `app-20261108-29c02d`(`seller-dailylook-01`, 500만 원·6개월, 재생 207초): 조사 5건(1·2·7·11·12주차) 모두 `investigator=gpt-5.6-luna`로 끝났고 폴백 0건입니다. 이전에 `agent_error`로 폴백하던 7주차도 정상 경보를 냈습니다. `gw-early-warning` 호출 43건·429 0건(같은 경로의 이전 `gpt-5.4` 재생은 56건).
+- **`window close`** 완료.
