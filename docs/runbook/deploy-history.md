@@ -878,3 +878,9 @@ python -m ops smoke
 
 - **변경**(`6686059`): 사후 모니터링 화면(대출 목록·대출 상세)의 자동 새로 고침을 3·5초에서 7초(`MONITORING_REFRESH_SECONDS`)로 맞췄습니다. `window open --acr` → `ops deploy console`(`console:20261108115721`) → **`window close`** 완료.
 - **콘솔 403**: 모바일 회선 출구 IP가 바뀌어 콘솔이 403이었습니다. 창을 닫은 뒤 `AGWFirewallLogs`의 브라우저 IP와 새 PC IP를 `allowOperatorOnly` 조건으로 더하고 `azd env set CONSOLE_IP`로 갱신해 `/`·`/loans` 200을 확인했습니다. 더한 조건은 다음 프로비저닝이 지웁니다.
+## 2026-11-08 심사역 결정 채팅 배포
+
+- **변경**(`8c0a256`~`b950e9f`, 계획 `docs/superpowers/plans/2026-11-08-officer-chat.md`): 심사역 결정 탭에 현금흐름·정책 판정·에이전트 의견만 근거로 답하는 채팅을 더했습니다. 에이전트 `officer-assistant`(연결 `gw-officer-chat`, TPM 100K), 모델 `gpt-6-luna`(2026-09-22, GlobalStandard 100), 콘솔 ID에 Foundry User·OpenAI User 역할, 콘솔 환경 변수 `AI_PROJECT_ENDPOINT`·`AI_GATEWAY`·`AI_GATEWAY_URL`·`CHAT_MODEL`. App Gateway `console-https` 요청 시간 제한 60 → 180초(429 재시도 예산보다 길게).
+- `window open --acr` → `ops deploy console`(`console:20261108150547`) → `ops smoke` 성공(`job-smoke-u4iibc0`, 채팅 점검 포함) → **`window close`** 완료. 프로비저닝이 `allowOperatorOnly`를 PC IP 하나로 되돌려 `AGWFirewallLogs`의 브라우저 IP를 다시 더했습니다.
+- **WAF 오탐**: 앞선 답변을 담은 세 번째 질문부터 403이었습니다. 답변의 괄호 출처 표기로 `history.text`마다 942430(SQL 특수문자 12개 이상)이 매칭돼 이상 점수 6 ≥ 5(949110)였습니다. `question`·`history.*` 인자에서 942430만 빼는 제외를 bicep에 넣고, 라이브 정책에는 같은 제외를 `az network application-gateway waf-policy managed-rule exclusion rule-set add`로 바로 적용했습니다.
+- **라이브 확인** `app-20261108-c92b51`(심사역 대기): 질문 4개(부족한 달, 정책 판정·회부 사유, 권고 근거, 대표자 주소)가 모두 200, 1.8~8.4초. 답변마다 괄호로 출처(현금흐름·정책·에이전트 의견)를 달았고 주소 질문은 "자료에 없음"이었습니다. 승인·거절 지시와 실명은 없었습니다. `ca-console` 로그에 `officer_chat ... result=ok` 줄만 있고 질문 원문은 없으며, APIM 429는 0건, `/`·`/loans` 200.

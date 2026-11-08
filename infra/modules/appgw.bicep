@@ -60,6 +60,22 @@ resource policy 'Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolic
     ]
     managedRules: {
       managedRuleSets: [ { ruleSetType: 'Microsoft_DefaultRuleSet', ruleSetVersion: '2.1' } ]
+      // 심사역 채팅 본문(question, history.*)은 SQL에 쓰이지 않는 자연어·LLM 답변이라
+      // 괄호 출처 표기만으로 942430(특수문자 개수)이 누적 매칭됩니다. 이 인자에서만 그 규칙을 뺍니다.
+      exclusions: [
+        {
+          matchVariable: 'RequestArgNames'
+          selectorMatchOperator: 'Equals'
+          selector: 'question'
+          exclusionManagedRuleSets: [ { ruleSetType: 'Microsoft_DefaultRuleSet', ruleSetVersion: '2.1', ruleGroups: [ { ruleGroupName: 'SQLI', rules: [ { ruleId: '942430' } ] } ] } ]
+        }
+        {
+          matchVariable: 'RequestArgNames'
+          selectorMatchOperator: 'StartsWith'
+          selector: 'history.'
+          exclusionManagedRuleSets: [ { ruleSetType: 'Microsoft_DefaultRuleSet', ruleSetVersion: '2.1', ruleGroups: [ { ruleGroupName: 'SQLI', rules: [ { ruleId: '942430' } ] } ] } ]
+        }
+      ]
     }
   }
 }

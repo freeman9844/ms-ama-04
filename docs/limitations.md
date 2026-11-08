@@ -18,7 +18,7 @@
 - 콘솔은 App Gateway WAF v2(Prevention, OWASP DRS 2.1) 뒤 internal 환경 `cae-int`에 있고 운영자 IP 규칙으로만 열린다([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 남는 한계는 다음과 같다.
   - TLS는 자체 서명 인증서라 브라우저 경고가 뜬다. 공인 CA 인증서·사용자 도메인은 운영 전환 과제다.
   - 운영자 IP 규칙은 단일 `CONSOLE_IP`(`/32`)다. 다른 IP는 `window open --ip` 또는 WAF 규칙 조건 추가로만 허용하고, 다음 프로비저닝이 Bicep 정의로 되돌린다.
-  - DRS 2.1 오탐은 조정하지 않았다. 차단되면 방화벽 로그로 규칙을 찾아 해당 규칙만 제외해야 한다.
+  - DRS 2.1 오탐 제외는 하나뿐이다. 심사역 채팅 본문 인자(`question`, `history.*`)에서 942430(SQL 특수문자 개수)만 뺐다. 다른 오탐이 생기면 방화벽 로그로 규칙을 찾아 해당 규칙만 제외해야 한다.
   - 게이트웨이는 첫 `window open`에서 프로비저닝 → 인증서 → 두 번째 프로비저닝으로 만들어져 더 오래 걸린다.
   - 게이트웨이는 상시 비용이 든다(월 약 $370, [비용 모델](cost-model.md)).
 - 배포 창 동안에는 운영자 IP에서 데이터 평면에 접근할 수 있다. `window status`로 확인하고 작업 후 바로 닫는다. (P2)
@@ -131,7 +131,7 @@
 | Decision-1 한국어 적요 분류 품질·배포 가능 여부 | 배포·호출 확인, 단 공개 단가 미확인으로 비용은 호출 수만 집계 |
 | 전체 비공개 네트워크 배포 복잡도 | 배포 창 토글로 운영, 실행 기록은 [deploy-history](runbook/deploy-history.md) |
 | 배포 창 동안 PaaS public access 일시 허용 | 운영자 IP만 허용하고 작업 후 닫음, Foundry·Functions만 열림(`docs/security/threat-model.md:75`) |
-| 콘솔 외부 진입 | App Gateway WAF v2(Prevention, DRS 2.1)와 운영자 IP 규칙으로 구축([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 데모 모드는 Easy Auth 꺼짐([ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 자체 서명 인증서·오탐 미조정은 위 "인증·접근"의 한계 |
+| 콘솔 외부 진입 | App Gateway WAF v2(Prevention, DRS 2.1)와 운영자 IP 규칙으로 구축([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 데모 모드는 Easy Auth 꺼짐([ADR-007](adr/ADR-007-demo-auth-mode.md) 참조; 운영 전환 시 Entra 복원). 자체 서명 인증서·오탐 조정 최소는 위 "인증·접근"의 한계 |
 | Decision-1 APAC 배포 문서·CLI 불일치 | 배포 SKU를 파라미터로 두고 배포 성공 |
 | Foundry caphost 삭제 후 서브넷 점유 | teardown 스크립트가 순서·대기 처리 |
 | Durable + 비공개 스토리지 조합 | 검증된 Durable 1.x Python + Azure Storage 백엔드로 배포 |
