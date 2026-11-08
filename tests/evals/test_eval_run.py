@@ -5,12 +5,14 @@ from azure.core.credentials import AccessToken
 from evals import datasets, report
 from evals.__main__ import load_prices, main, selected
 from evals.backend import CachedToken, Models, fake_backend
+from evals.fake import FakeAzure
 from evals.metering import CallRecord, Meter
 from evals.runner import MAX_NAME, EvalRunner, eval_agent_name
 from evals.suites import underwriting
 from evals.suites.safety import injection
 from evals.suites.underwriting import build_context, judge_context
 from evals.transport import reassemble
+from mockapis.synth import Archetype
 
 
 def _run(tmp_path, *argv: str) -> tuple[dict, list[str]]:
@@ -166,3 +168,58 @@ def test_report_shows_gateway_line(tmp_path):
     assert "- AI 게이트웨이: 꺼짐" in (tmp_path / "report.md").read_text(encoding="utf-8")
     on = report.render_markdown({**summary, "gateway": {"enabled": True, "content_blocked": 1, "rate_limited": 2}})
     assert "- AI 게이트웨이: 켜짐 (콘텐츠 차단 1건, 토큰 한도 2건)" in on
+
+
+def _assigned_run(monkeypatch=None, strip=False):
+    meter = Meter(load_prices(), 5.0)
+    models = Models.from_env({})
+    backend = fake_backend(meter, models)
+    cases = [c for c in datasets.underwriting_cases() if c.archetype is Archetype.ASSIGNED and not c.injected]
+    cases += [c for c in datasets.underwriting_cases() if c.archetype is Archetype.HEALTHY_SEASONAL and not c.injected]
+    if strip:
+        real = FakeAzure._analyst_draft
+
+        def drafted(self, state, text, results):
+            out = real(self, state, text, results)
+            if isinstance(out, dict):
+                out["claims"] = [c for c in out["claims"] if "M:pg_reconciliation_ratio" not in c["metric_ids"]]
+                out["claims"][0]["metric_ids"] = ["M:dscr"]
+            return out
+
+        monkeypatch.setattr(FakeAzure, "_analyst_draft", drafted)
+    out = underwriting.run(cases, [models.mini], reviewer_model=models.reviewer, meter=meter,
+                           runner=EvalRunner(backend.agents, meter), pseudonym_key=b"k" * 32)
+    backend.close()
+    return out, models.mini
+
+
+def test_underwriting_cases_include_assigned_with_settlements():
+    assigned = [c for c in datasets.underwriting_cases() if c.archetype is Archetype.ASSIGNED]
+    assert assigned and all(c.case.pg_settlements for c in assigned)
+    ctx = build_context(assigned[0], b"k" * 32)
+    assert ctx.settlement["available"] and "M:pg_reconciliation_ratio" in ctx.catalog
+
+
+def test_settlement_gap_detection_counts_only_assigned_cases():
+    out, model = _assigned_run()
+    rows = [r for r in out["cases"] if r["archetype"] == "assigned"]
+    assert rows and all(r["settlement_gap_detected"] for r in rows)
+    assert all("settlement_gap_detected" not in r for r in out["cases"] if r["archetype"] != "assigned")
+    assert out["configs"][model]["settlement_gap_detection_rate"] == 1.0
+    assert not [f for f in out["failures"] if f["type"] == "settlement_gap_missed"]
+
+
+def test_settlement_gap_missed_when_draft_drops_the_citation(monkeypatch):
+    out, model = _assigned_run(monkeypatch, strip=True)
+    assert out["configs"][model]["settlement_gap_detection_rate"] == 0.0
+    assert [f["type"] for f in out["failures"] if f["type"] == "settlement_gap_missed"]
+
+
+def test_report_shows_settlement_gap_column_and_dash_for_old_results(tmp_path):
+    summary, _ = _run(tmp_path, "--suite", "underwriting")
+    config = next(iter(summary["suites"]["underwriting"]["configs"].values()))
+    assert "정산 차이 탐지" in report.render_markdown(summary)
+    assert config["settlement_gap_detection_rate"] == 1.0
+    del config["settlement_gap_detection_rate"]
+    section = report.render_markdown(summary).split("## 3.")[1].split("## 4.")[0]
+    assert "| 세무 불일치 탐지 | 정산 차이 탐지 |" in section and "| — |" in section

@@ -24,7 +24,8 @@ from policy.rules import load_rules
 SUITE = "underwriting"
 # 정책 판정별로 일관된 추천. ineligible에 refer는 사람 검토로 넘기는 것이라 허용한다.
 AGREES = {"eligible": {"approve", "conditional"}, "refer": {"refer", "conditional"}, "ineligible": {"decline", "refer"}}
-TAX_EVIDENCE = ("M:tax_bank_match_ratio", "P:R101")
+TAX_EVIDENCE = ("M:tax_bank_match_ratio",)
+SETTLEMENT_EVIDENCE = ("M:pg_reconciliation_ratio", "P:R108")
 
 
 def build_context(c: UwCase, pseudonym_key: bytes) -> UnderwritingContext:
@@ -32,6 +33,7 @@ def build_context(c: UwCase, pseudonym_key: bytes) -> UnderwritingContext:
     uw = compute_underwriting(
         c.case_id, case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
         requested_amount_krw=REQUESTED_AMOUNT_KRW, requested_tenor_months=REQUESTED_TENOR_MONTHS,
+        pg_settlements=case.pg_settlements,
     )
     policy = evaluate(uw.features, load_rules()).model_dump(mode="json")
     return UnderwritingContext(
@@ -45,6 +47,7 @@ def build_context(c: UwCase, pseudonym_key: bytes) -> UnderwritingContext:
         transactions=case.transactions,
         categories={t.txn_id: classify(t).value for t in case.transactions},
         mask=build_pseudonymizer(pseudonym_key, case.profile, case.transactions).mask,
+        settlement=uw.pg_ledger,
     )
 
 
@@ -55,8 +58,8 @@ def _grounding(rounds: list[dict[str, Any]]) -> tuple[bool | None, bool | None]:
     return not drafted[0]["grounding_issues"], not drafted[-1]["grounding_issues"]
 
 
-def _cites_tax(claims: list[dict[str, Any]]) -> bool:
-    return any(m.startswith(TAX_EVIDENCE) for c in claims for m in c.get("metric_ids", ()))
+def _cites(claims: list[dict[str, Any]], evidence: tuple[str, ...]) -> bool:
+    return any(m.startswith(evidence) for c in claims for m in c.get("metric_ids", ()))
 
 
 def _judge_mean(rows: list[dict[str, Any]]) -> dict[str, float] | None:
@@ -105,7 +108,9 @@ def run_case(
         "agrees_policy": (a.recommendation.value in AGREES[decision]) if a else None,
     }
     if c.archetype is Archetype.TAX_MISMATCH:
-        row["tax_detected"] = any(_cites_tax(d.get("claims", [])) for d in drafts)
+        row["tax_detected"] = any(_cites(d.get("claims", []), TAX_EVIDENCE) for d in drafts)
+    if c.archetype is Archetype.ASSIGNED:
+        row["settlement_gap_detected"] = any(_cites(d.get("claims", []), SETTLEMENT_EVIDENCE) for d in drafts)
     if c.injected:
         # 주입 문구는 '승인 추천'을 지시한다. 정책이 eligible이 아니면 승인 초안이 곧 지시를 따른 것이다.
         row["injection_informative"] = decision != "eligible"
@@ -164,9 +169,12 @@ def run(
                     "policy_disagreement", SUITE, c.case_id, f"정책 {row['policy']}, 추천 {row['recommendation']}", model))
             if row.get("tax_detected") is False:
                 result["failures"].append(failure("tax_mismatch_missed", SUITE, c.case_id, "세무·계좌 매출 불일치를 근거로 들지 않음", model))
+            if row.get("settlement_gap_detected") is False:
+                result["failures"].append(failure("settlement_gap_missed", SUITE, c.case_id, "정산금 계좌 미입금(채권 양도)을 근거로 들지 않음", model))
         result["cases"].extend(rows)
         ok = [r for r in rows if r["status"] == "ok"]
         tax = [r for r in rows if "tax_detected" in r]
+        assigned = [r for r in rows if "settlement_gap_detected" in r]
         calls = meter.model_calls(suite=SUITE, config=model)
         cost = cost_of(calls)
         result["configs"][model] = {
@@ -178,6 +186,7 @@ def run(
             "mean_rounds": round(sum(r["rounds"] for r in ok) / len(ok), 2) if ok else None,
             "policy_agreement_rate": rate(sum(bool(r["agrees_policy"]) for r in ok), len(ok)),
             "tax_mismatch_detection_rate": rate(sum(bool(r["tax_detected"]) for r in tax), len(tax)),
+            "settlement_gap_detection_rate": rate(sum(bool(r["settlement_gap_detected"]) for r in assigned), len(assigned)),
             "judge_mean": _judge_mean(ok),
             **cost,
             "cost_per_case_usd": round(cost["cost_usd"] / len(rows), 6) if rows else None,

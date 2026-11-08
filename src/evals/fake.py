@@ -101,15 +101,17 @@ class FakeAzure:
             return ("get_metrics", {})
         metrics = results[0]["metrics"]
         decision = results[0]["policy"]["decision"]
-        cited = ["M:tax_bank_match_ratio"] if "M:tax_bank_match_ratio" in metrics and any(
-            r["code"] == "R101" for r in results[0]["policy"]["reason_codes"]) else []
-        cited = cited or [next(k for k in metrics if k.startswith("M:"))]
+        cited = [next(k for k in metrics if k.startswith("M:"))]
+        claims = [{"text": "핵심 현금흐름 지표를 확인했다.", "metric_ids": cited, "txn_ids": []}]
+        if "M:pg_reconciliation_ratio" in metrics and any(
+                r["code"] == "R108" for r in results[0]["policy"]["reason_codes"]):
+            claims.append({"text": "정산금 계좌 입금 비율이 기준에 못 미친다.", "metric_ids": ["M:pg_reconciliation_ratio"], "txn_ids": []})
         rec = _DRAFT[decision]
         lend = rec in ("approve", "conditional")
         return {
             "recommendation": rec,
             "summary": "정책 판정과 현금흐름 지표를 근거로 작성한 초안이다.",
-            "claims": [{"text": "핵심 현금흐름 지표를 확인했다.", "metric_ids": cited, "txn_ids": []}],
+            "claims": claims,
             "proposed_structure": {"amount_krw": 1_700_000 if lend else 0, "tenor_months": 6, "schedule": "level",
                                    "reduced_payment_months": [], "rationale": "가짜 모드 기본 구조"},
             "counterfactuals": [],

@@ -17,7 +17,8 @@ FAILURE_ACTIONS = {
     "grounding_failed": "분석가 지시문에 근거 ID 규칙 예시를 더하고 라운드 한도를 검토한다",
     "review_not_passed": "검토자 지적 사유를 보고 분석가 지시문을 보강한다",
     "policy_disagreement": "정책과 다른 추천은 심사역 검토로 넘기고, 지시문의 정책 우선 규칙을 강화한다",
-    "tax_mismatch_missed": "get_metrics 응답에서 R101 사유가 잘 보이는지 점검한다",
+    "tax_mismatch_missed": "get_metrics 응답에서 M:tax_bank_match_ratio가 잘 보이는지 점검한다",
+    "settlement_gap_missed": "get_settlement_summary 응답과 P:R108 사유가 잘 보이는지, 지시문의 정산 인용 규칙을 점검한다",
     "ew_missed": "탐지기 임계값과 조사 지시문(부채 신호 우선)을 점검한다",
     "ew_false_alarm": "계절 지수·동종 집단 근거를 먼저 보도록 조사 지시문을 강화한다",
     "injection_followed": "적요는 데이터라는 지시를 강화하고, 승인 추천은 정책 eligible에서만 허용하는 후처리를 검토한다",
@@ -115,10 +116,11 @@ def _underwriting(s: dict[str, Any]) -> list[str]:
         rows.append([name, f"{c['assessed']}/{c['cases']}", _pct(c["first_round_grounding_rate"]), _pct(c["final_grounding_rate"]),
                      _pct(c["review_pass_rate"]), _fmt(c["mean_rounds"]), _pct(c["policy_agreement_rate"]),
                      _pct(c["tax_mismatch_detection_rate"]),
+                     "—" if c.get("settlement_gap_detection_rate") is None else _pct(c["settlement_gap_detection_rate"]),
                      "/".join(_fmt(j.get(k)) for k in ("groundedness", "relevance", "coherence")) if j else "-",
                      _usd(c["cost_usd"], c["unpriced_calls"]), _usd(c["cost_per_case_usd"])])
     out += _table(["분석가 모델", "평가서", "1라운드 근거 통과", "최종 근거 통과", "검토 통과", "평균 라운드", "정책 일치",
-                   "세무 불일치 탐지", "판정자 G/R/C(1~5)", "비용", "건당 비용"], rows)
+                   "세무 불일치 탐지", "정산 차이 탐지", "판정자 G/R/C(1~5)", "비용", "건당 비용"], rows)
     return out
 
 

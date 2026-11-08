@@ -26,6 +26,7 @@ def baseline_for(p: EwPath) -> Baseline:
     uw = compute_underwriting(
         p.path_id, case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
         requested_amount_krw=REQUESTED_AMOUNT_KRW, requested_tenor_months=REQUESTED_TENOR_MONTHS,
+        pg_settlements=case.pg_settlements,
     )
     return Baseline.from_underwriting(
         {
