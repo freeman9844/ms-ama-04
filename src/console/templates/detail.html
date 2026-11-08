@@ -5,7 +5,7 @@
 {% set d = v.doc %}
 {% set p = panels %}
 {% set default_tab = "decision" if (v.decidable and user.can_decide) or error else "summary" %}
-{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ watch_seconds }};url={{ watch_url }}">{% elif in_progress %}<meta http-equiv="refresh" content="3">{% endif %}<script src="/static/tabs.js" defer></script>{% endblock %}
+{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ detail_refresh_seconds }};url={{ watch_url }}">{% elif in_progress %}<meta http-equiv="refresh" content="{{ detail_refresh_seconds }}">{% endif %}<script src="/static/tabs.js" defer></script>{% endblock %}
 {% block title %}{{ d.application_id }} · AMA Lending 심사 콘솔{% endblock %}
 {% block main %}
 <div class="page-head">
@@ -16,7 +16,7 @@
   </div>
   <div class="actions">{% if d.monitoring %}<a class="button secondary" href="/loans/{{ d.application_id|path }}">사후 모니터링</a>{% endif %}</div>
 </div>
-{% if watch_url %}<p class="note" role="status">결정 반영을 기다리는 중입니다. {{ watch_seconds }}초마다 다시 확인합니다.</p>{% endif %}
+{% if watch_url %}<p class="note" role="status">결정 반영을 기다리는 중입니다. {{ detail_refresh_seconds }}초마다 다시 확인합니다.</p>{% endif %}
 <section class="card">
 <h2>타임라인</h2>
 {{ ch.stepper(ui.steps, "신청 진행 단계") }}

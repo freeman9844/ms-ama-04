@@ -356,8 +356,8 @@ def test_decision_sent_page_forwards_to_detail_until_the_decision_lands(env, mak
     m = re.search(r'http-equiv="refresh" content="1;url=(/applications/app-1\?since=[0-9a-f]{12})"', resp.text)
     assert m, resp.text
     waiting = client.get(m.group(1), headers=OFFICER).text
-    assert re.search(r'content="5;url=/applications/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
-    assert "반영을 기다리는 중" in waiting and "5초마다" in waiting
+    assert re.search(r'content="10;url=/applications/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
+    assert "반영을 기다리는 중" in waiting and "10초마다" in waiting
     assert 'http-equiv="refresh"' in client.get(m.group(1) + "&n=11", headers=OFFICER).text
     assert 'http-equiv="refresh"' not in client.get(m.group(1) + "&n=12", headers=OFFICER).text
     client.app.state.deps.store.docs["app-1"] = make_doc(status="approved")
@@ -365,11 +365,12 @@ def test_decision_sent_page_forwards_to_detail_until_the_decision_lands(env, mak
     assert 'http-equiv="refresh"' not in landed and "반영을 기다리는 중" not in landed
 
 
-def test_in_progress_pages_refresh_quickly(env, make_doc):
+def test_application_detail_pages_refresh_every_ten_seconds(env, make_doc):
     client, _ = env
     client.app.state.deps.store.docs["app-1"] = make_doc(status="received")
-    assert '<meta http-equiv="refresh" content="3">' in client.get("/applications/app-1", headers=OFFICER).text
-    assert '<meta http-equiv="refresh" content="5">' in client.get("/applications/app-9", headers=OFFICER).text
+    assert '<meta http-equiv="refresh" content="10">' in client.get("/applications/app-1", headers=OFFICER).text
+    pending = client.get("/applications/app-9", headers=OFFICER).text
+    assert '<meta http-equiv="refresh" content="10">' in pending and "10초마다" in pending
     assert 'hx-trigger="every 3s"' in client.get("/", headers=OFFICER).text
 
 
