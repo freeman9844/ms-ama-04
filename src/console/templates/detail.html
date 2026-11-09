@@ -46,6 +46,16 @@
 
 <section id="tab-summary" class="tab-panel" role="tabpanel" aria-labelledby="tab-summary-tab">
 <h2 class="tab-title">요약</h2>
+{% if p.officer %}{% set o = p.officer %}
+<section class="card summary-officer">
+<h3>심사역 결정 <span class="badge badge-{{ o.tone }}">{{ o.label }}</span>{% if o.override %} <span class="badge badge-red">정책 예외 승인</span>{% endif %}</h3>
+<dl class="facts">
+  <dt>신청 금액</dt><dd>{{ o.requested|krw }}{% if o.tenor %} / {{ o.tenor }}개월{% endif %}</dd>
+  {% if o.approved is not none %}<dt>승인 금액</dt><dd><strong>{{ o.approved|krw }}</strong></dd>{% endif %}
+  {% if o.at %}<dt>결정 시각</dt><dd>{{ o.at }}</dd>{% endif %}
+</dl>
+</section>
+{% endif %}
 {% set s = p.summary %}
 <div class="grid-4">
   {{ ch.kpi("정책 판정", s.decision, v.policy.rules_version if v.policy else "", s.decision_tone) }}

@@ -410,3 +410,16 @@ def test_detail_shows_gateway_block_badge(env, make_doc):
     client.app.state.deps.store.docs["app-1"] = doc
     page = client.get("/applications/app-1", headers=OFFICER).text
     assert "<dt>AI 게이트웨이</dt>" in page and "콘텐츠 차단 · 데이터 수집" in page
+
+
+def test_summary_tab_shows_officer_decision_once_decided(env, make_doc):
+    client, _ = env
+    assert "summary-officer" not in client.get("/applications/app-1", headers=OFFICER).text
+    doc = make_doc(status="approved")
+    doc["officer_decision"] = {"decision": "approve", "amount_krw": 5_000_000, "officer_id": "o1", "conditions": [],
+                               "reason": "", "policy_override": False, "at": "2026-11-09T05:00:00+00:00"}
+    client.app.state.deps.store.docs["app-1"] = doc
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    card = page[page.index('id="tab-summary"'):page.index('id="tab-cashflow"')]
+    assert 'class="card summary-officer"' in card and "심사역 결정" in card and ">승인<" in card
+    assert "신청 금액" in card and "승인 금액" in card and "5,000,000원" in card

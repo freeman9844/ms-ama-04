@@ -57,6 +57,8 @@ SIGNAL_TONES = {"pass": "green", "refer": "amber", "watch": "amber", "knockout":
 SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "watch": "주의(참고 지표)",
                        "knockout": "위반(거절 기준)", "unknown": "값 없음"}
 RECOMMENDATION_TONES = {"approve": "green", "conditional": "blue", "refer": "purple", "decline": "red"}
+# 요약 탭 심사역 결정 카드. 옛 문서의 conditional은 승인으로 본다(심사역 결정에 조건부 승인 없음).
+OFFICER_DECISIONS = {"approve": ("승인", "green"), "conditional": ("승인", "green"), "decline": ("거절", "red")}
 LEFTOVER = ("leftover", "남는 돈", "green")
 
 
@@ -102,6 +104,19 @@ def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
         "gauge": gauge,
         "gauge_text": f"{gauge['pct']:.0f}%" if gauge["frac"] is not None else "-",
         "gauge_sub": f"한도 {krw_text(limit)} / 신청 {krw_text(requested)}",
+    }
+
+
+def _officer(doc: Mapping[str, Any]) -> dict[str, Any] | None:
+    od = doc.get("officer_decision")
+    if not isinstance(od, Mapping) or od.get("decision") not in OFFICER_DECISIONS:
+        return None
+    label, tone = OFFICER_DECISIONS[od["decision"]]
+    return {
+        "label": label, "tone": tone,
+        "requested": doc.get("requested_amount_krw"), "tenor": doc.get("requested_tenor_months"),
+        "approved": od.get("amount_krw") if label == "승인" else None,
+        "override": bool(od.get("policy_override")), "at": od.get("at"),
     }
 
 
@@ -206,6 +221,7 @@ def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
     strengths, risks = _strengths_risks(signals, policy, flags)
     return {
         "summary": _summary(view, doc),
+        "officer": _officer(doc),
         "signals": signals,
         "capacity": _capacity(monthly, (uw.get("signals") or {}).get("new_installment_krw")),
         "limit": _limit(doc, features, policy),

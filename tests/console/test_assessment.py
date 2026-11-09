@@ -142,3 +142,20 @@ def test_summary_kpis_claim_checks_and_empty_document(make_doc):
     assert empty["signals"] == [] and empty["capacity"] is None and empty["limit"] is None
     assert empty["expenses"] is None and empty["summary"]["gauge_text"] == "-"
     assert empty["summary"]["recommendation"] == "권고 없음"
+
+
+def test_summary_officer_decision_only_for_approve_or_decline(make_doc):
+    approved = view(make_doc, STRONG, officer_decision={"decision": "approve", "amount_krw": 5_000_000, "officer_id": "o1",
+                                                       "conditions": [], "reason": "", "policy_override": True,
+                                                       "at": "2026-11-09T05:00:00+00:00"})
+    o = assessment_panels(approved)["officer"]
+    assert (o["label"], o["tone"], o["requested"], o["approved"], o["override"]) == ("승인", "green", 30_000_000,
+                                                                                      5_000_000, True)
+    assert o["at"] == "2026-11-09T05:00:00+00:00"
+    legacy = view(make_doc, STRONG, officer_decision={"decision": "conditional", "amount_krw": 4_000_000, "officer_id": "o1"})
+    assert assessment_panels(legacy)["officer"]["label"] == "승인"
+    declined = view(make_doc, STRONG, officer_decision={"decision": "decline", "amount_krw": None, "officer_id": "o1"})
+    o = assessment_panels(declined)["officer"]
+    assert (o["label"], o["tone"], o["approved"], o["override"]) == ("거절", "red", None, False)
+    assert assessment_panels(view(make_doc, STRONG))["officer"] is None
+    assert assessment_panels(view(make_doc, STRONG, officer_decision={"decision": "refer"}))["officer"] is None
