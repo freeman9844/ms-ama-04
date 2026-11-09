@@ -885,3 +885,9 @@ python -m ops smoke
 - **WAF 오탐**: 앞선 답변을 담은 세 번째 질문부터 403이었습니다. 답변의 괄호 출처 표기로 `history.text`마다 942430(SQL 특수문자 12개 이상)이 매칭돼 이상 점수 6 ≥ 5(949110)였습니다. `question`·`history.*` 인자에서 942430만 빼는 제외를 bicep에 넣고, 라이브 정책에는 같은 제외를 `az network application-gateway waf-policy managed-rule exclusion rule-set add`로 바로 적용했습니다.
 - **라이브 확인** `app-20261108-c92b51`(심사역 대기): 질문 4개(부족한 달, 정책 판정·회부 사유, 권고 근거, 대표자 주소)가 모두 200, 1.8~8.4초. 답변마다 괄호로 출처(현금흐름·정책·에이전트 의견)를 달았고 주소 질문은 "자료에 없음"이었습니다. 승인·거절 지시와 실명은 없었습니다. `ca-console` 로그에 `officer_chat ... result=ok` 줄만 있고 질문 원문은 없으며, APIM 429는 0건, `/`·`/loans` 200.
 - **gpt-6-luna 증설(2026-11-09)**: 채팅 배포 `gpt-6-luna` 100 → 250(쿼터 250/250), `gw-officer-chat` TPM 100K → 250K(DataZoneStandard 변형은 100 그대로). `window open` 프로비저닝 4분 40초 → 배포 용량 250·APIM 정책 `tokens-per-minute="250000"` 확인. `agw-amalend`가 다시 `Stopped`라 smoke 콘솔 관문이 시간 초과였고, `az network application-gateway start` 뒤 `ops smoke` 성공(`job-smoke-ielem0w`). 채팅 질문 4개 모두 200(2.0~9.9초). **`window close`** 완료. WAF 942430 제외는 bicep에 있어 유지됐습니다.
+
+## 2026-11-09 심사 도우미 정책 설명 배포
+
+- **변경**(`a554d5a`~`5f00580`, 계획 `docs/superpowers/plans/2026-11-09-officer-chat-policy-explain.md`): 정책 엔진 `explain()`이 규칙별 점검·한도 계산·금리 구간 추적을 돌려주고, 채팅 스냅샷에 판정 버전의 규정(`policy.rules`)과 계산 추적(`policy.trace`)을 넣었습니다. 답변 출처 표기는 "(정책 규정 <버전>)"·"(정책 계산)"입니다. v1 규정은 제자리 개정(2026-11-04) 전에 접수한 건이면 규정·추적을 빼고 `trace_note`로 알립니다. 콘솔 이미지에 `policy` 모듈·`rulesets`와 `PyYAML==6.0.3`을 더했습니다.
+- `window open --acr` → `ops deploy console`(`console:20261109013727`) → `ops smoke` 성공(`job-smoke-7775qf2`) → **`window close`** 완료.
+- **라이브 확인** `app-20261108-c92b51`(v3, 심사역 대기): 질문 4개 모두 200(2.5~21.5초). 금리 구간 기준은 DSCR 1.76 → B와 v3 구간(A 2.0·B 1.5·C 1.2·D 1.0), 한도는 월 유입 × 1.5와 상품 최대 10,000,000원·신청액 5,000,000원·100,000원 단위, R102는 매출 변동성 0.06 ≤ 기준 0.5로 답했고, 구간별 실제 금리는 "자료에 없음"이었습니다. `ca-console` 로그에는 `officer_chat ... result=ok` 줄만 있고 질문 원문은 없으며, `/`·`/loans` 200.
