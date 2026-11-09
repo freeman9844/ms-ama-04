@@ -60,7 +60,14 @@ ANALYST_INSTRUCTIONS = """너는 한국 소상공인 현금흐름 기반 운전�
    정책 사유 코드가 있으면 P:Rxxx:threshold를 목표값으로 활용한다.
    정책 사유 R107·R108이 있으면 M:pg_top_platform_share 또는 M:pg_reconciliation_ratio를 반사실 지표로 쓸 수 있다(목표값 P:R107:threshold·P:R108:threshold).
 7. [[PERSON_...]] 같은 토큰은 가려진 개인정보다. 복원하거나 추측하지 않는다.
-8. 이전 초안과 지적 사항이 주어지면 지적을 모두 반영한 새 초안을 낸다. summary는 한국어 세 문장 이내."""
+8. 이전 초안과 지적 사항이 주어지면 지적을 모두 반영한 새 초안을 낸다.
+9. summary는 심사역이 먼저 읽는 한국어 해설로 5~7문장을 다음 순서로 쓴다.
+   (1) 상환 여력: DSCR·월 유입·현금 완충일수 같은 핵심 지표로 신규 상환액을 감당할 수 있는지.
+   (2) 위험 요인: 매출 변동성·계절성·채널 집중·부채 부담 중 이 건에서 두드러진 것.
+   (3) 정책 판정과의 관계: 정책 결과·한도·금리 구간과 사유 코드가 권고와 어떻게 이어지는지.
+   (4) 제안 구조: 금액·기간·상환 방식과 그 이유(decline·refer면 심사역이 확인할 점).
+   (5) 결과를 바꿀 조건: counterfactuals의 핵심 지표와 목표값.
+   summary 속 숫자는 도구가 준 근거 값이나 제안 금액(amount_krw)과 같아야 하며 근거 ID는 쓰지 않는다."""
 
 REVIEWER_INSTRUCTIONS = """너는 대출 심사 의견서의 독립 검토자다. 각 claim이 함께 주어진 근거 값·거래만으로
 뒷받침되는지 판정한다. 과장·근거 밖 추론·정책 결과와 모순되는 권고는 supported=false로 하고 이유를 적는다.
@@ -368,6 +375,10 @@ def check_grounding(draft: AnalystDraft, ctx: UnderwritingContext) -> list[str]:
             issues.append(f"counterfactuals[{i}]: 알 수 없는 지표 {cf.metric_id}")
         elif not close(cf.current, float(ctx.catalog[cf.metric_id])):
             issues.append(f"counterfactuals[{i}]: current {cf.current}가 {cf.metric_id} 값 {ctx.catalog[cf.metric_id]}와 다르다")
+    allowed = [float(v) for v in ctx.catalog.values()] + [float(draft.proposed_structure.amount_krw)]
+    allowed += [float(ctx.by_id[t].amount_krw) for c in draft.claims for t in c.txn_ids if t in ctx.by_id]
+    if bad := ungrounded(draft.summary, allowed):
+        issues.append(f"summary: 근거 지표·제안 금액에 없는 수치 {bad}")
     rec, s = draft.recommendation, draft.proposed_structure
     lending = rec in (Recommendation.APPROVE, Recommendation.CONDITIONAL)
     if lending and ctx.policy["decision"] == "ineligible":

@@ -7,6 +7,7 @@ import pytest
 
 from agents.data_assembly import build_pseudonymizer
 from agents.features import compute_underwriting
+from agents.grounding import close
 from agents.runtime import AgentError, AgentRun
 from agents.underwriting import (
     ANALYST_AGENT,
@@ -280,6 +281,24 @@ def test_transaction_amounts_can_ground_numbers(cases):
     t = next(t for t in ctx.transactions if t.amount_krw < -400_000)
     text = f"{t.booked_on:%Y-%m-%d}에 {-t.amount_krw:,}원이 나갔다."
     d = draft(claims=[{"text": text, "metric_ids": [], "txn_ids": [t.txn_id]}])
+    assert check_grounding(d, ctx) == []
+
+
+def test_ungrounded_summary_numbers_are_reported(cases):
+    bad = draft(summary="DSCR은 4.5로 충분하다. 월 유입은 1,234만원이다.")
+    issues = [i for i in check_grounding(bad, context(cases)) if i.startswith("summary")]
+    assert len(issues) == 1 and "4.5" in issues[0] and "1,234만" in issues[0]
+
+
+def test_summary_numbers_may_come_from_catalog_or_proposed_amount(cases):
+    ctx = context(cases)
+    dscr = ctx.catalog["M:dscr"]
+    structure = {**GOOD["proposed_structure"], "amount_krw": 2_100_000}
+    assert not any(close(2_100_000, float(v)) for v in ctx.catalog.values())
+    d = draft(
+        summary=f"DSCR은 {dscr}로 정책 하한을 웃돈다. 2,100,000원을 6개월 균등 상환으로 제안한다.",
+        proposed_structure=structure,
+    )
     assert check_grounding(d, ctx) == []
 
 
