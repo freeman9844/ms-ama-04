@@ -51,7 +51,7 @@ def test_model_deployments_default_to_global_standard(closed):
     assert deployments["gpt-5.6-sol"]["properties"]["model"]["version"] == "2026-07-09"
     assert deployments["gpt-5.6-sol"]["sku"]["capacity"] == 150
     assert deployments["gpt-6-luna"]["properties"]["model"]["version"] == "2026-09-22"
-    assert deployments["gpt-6-luna"]["sku"]["capacity"] == 100
+    assert deployments["gpt-6-luna"]["sku"]["capacity"] == 250
 
 
 def test_model_deployment_names_avoid_reserved_words(closed):
