@@ -1,15 +1,20 @@
 import json
 
+from agents.features import ANNUAL_RATE
 from console.assessment import assessment_panels
 from console.officer_chat import (
     HISTORY_MESSAGES,
     MESSAGE_MAX,
     SNAPSHOT_MAX_CHARS,
+    TRACE_NOTES,
     build_snapshot,
     clean_history,
     validate_question,
 )
 from console.views import detail_view
+from policy.engine import evaluate
+from policy.rules import rules_for_version
+from shared.contracts import CashFlowFeatures
 
 
 def _view(make_doc, key, **overrides):
@@ -27,7 +32,8 @@ def test_snapshot_keeps_whitelisted_sections(make_doc, key):
                                 "debt_service": 1_000_000, "owner_draw": 1_000_000}]
     assert cash["features"] == {"dscr": 1.8, "avg_monthly_inflow_krw": 42_000_000}
     assert cash["signals"] == {"owner_draw_ratio": 0.1}
-    assert cash["capacity"] == {"new_installment_krw": 0, "months": 1, "short_months": []}
+    assert cash["capacity"] == {"new_installment_krw": 0, "months": 1, "short_months": [],
+                                "assumed_annual_rate": ANNUAL_RATE}
     assert cash["settlement"] == {"available": False}
     assert snap["policy"]["reason_codes"] == [{"code": "R101", "message": "DSCR 충족", "observed": 1.8,
                                                "threshold": 1.25}]
@@ -44,7 +50,8 @@ def test_snapshot_capacity_matches_detail_panel(make_doc, key):
     uw = make_doc()["underwriting"] | {"signals": {"new_installment_krw": 9_500_000}}
     view = _view(make_doc, key, underwriting=uw)
     capacity = build_snapshot(view)["cashflow"]["capacity"]
-    assert capacity == {"new_installment_krw": 9_500_000, "months": 1, "short_months": ["2026-09"]}
+    assert capacity == {"new_installment_krw": 9_500_000, "months": 1, "short_months": ["2026-09"],
+                        "assumed_annual_rate": ANNUAL_RATE}
     assert len(capacity["short_months"]) == assessment_panels(view)["capacity"]["short_months"]
 
 
@@ -100,3 +107,79 @@ def test_clean_history_keeps_recent_valid_messages():
     assert history[0]["text"].startswith("8") and all(len(m["text"]) == MESSAGE_MAX for m in history)
     assert {m["role"] for m in history} == {"user", "assistant"}
     assert clean_history("nope") == [] and clean_history(None) == []
+
+
+def _decided_doc(make_doc, version="2026.11-v3", **kw):
+    """정책 엔진으로 판정한 특성·판정을 담은 신청 문서."""
+    base = dict(application_id="app-1", months_of_history=12, avg_monthly_inflow_krw=3_000_000, dscr=1.8,
+                cash_buffer_days=30.0, revenue_volatility=0.2, tax_bank_match_ratio=0.95,
+                requested_amount_krw=3_000_000, requested_tenor_months=12, industry="cafe", region="서울 성동구",
+                business_age_months=38) | kw
+    f = CashFlowFeatures(**base)
+    doc = make_doc()
+    doc["underwriting"] = doc["underwriting"] | {"features": f.model_dump(mode="json")}
+    doc["policy"] = evaluate(f, rules_for_version(version)).model_dump(mode="json")
+    return doc
+
+
+def _policy_of(doc, key):
+    return build_snapshot(detail_view(doc, None, key, restore=False))["policy"]
+
+
+def test_snapshot_policy_rules_and_trace(make_doc, key):
+    p = _policy_of(_decided_doc(make_doc, business_age_months=11), key)
+    assert p["decision"] == "refer"
+    assert p["rules"]["version"] == "2026.11-v3" and p["rules"]["product"]["limit_unit_krw"] == 100_000
+    assert p["rules"]["product"]["inflow_multiplier"] == 1.5
+    assert p["rules"]["refers"][0] == {"code": "R102", "message": "매출 변동성 과다", "field": "revenue_volatility",
+                                       "op": "gt", "threshold": 0.5}
+    assert p["rules"]["rate_bands"] == [{"band": "A", "min_dscr": 2.0}, {"band": "B", "min_dscr": 1.5},
+                                        {"band": "C", "min_dscr": 1.2}, {"band": "D", "min_dscr": 1.0}]
+    assert p["trace_note"] is None
+    trace = p["trace"]
+    assert {c["code"] for c in trace["checks"] if c["result"] == "hit"} == {"R104"}
+    assert next(c for c in trace["checks"] if c["code"] == "R102") == {
+        "code": "R102", "message": "매출 변동성 과다", "kind": "refer", "field": "revenue_volatility", "op": "gt",
+        "observed": 0.2, "threshold": 0.5, "result": "pass"}
+    assert trace["band"]["band"] == p["rate_band"] == "B"
+    assert trace["band"]["bands"] == p["rules"]["rate_bands"]
+    assert trace["limit"]["limit_krw"] == p["max_amount_krw"] == 3_000_000
+    assert set(trace) == {"checks", "limit", "band"}
+
+
+def test_snapshot_trace_for_v1_decision(make_doc, key):
+    p = _policy_of(_decided_doc(make_doc, version="2026.11-v1"), key)
+    assert p["rules"]["version"] == "2026.11-v1" and p["trace"] is not None and p["trace_note"] is None
+
+
+def test_snapshot_unknown_version(make_doc, key):
+    doc = _decided_doc(make_doc)
+    doc["policy"]["rules_version"] = "2026.10-v0"
+    p = _policy_of(doc, key)
+    assert p["rules"] is None and p["trace"] is None and p["trace_note"] == TRACE_NOTES["unknown_version"]
+
+
+def test_snapshot_trace_null_when_features_invalid(make_doc, key):
+    p = _policy_of(make_doc(), key)  # 기본 문서는 특성이 3개뿐이다
+    assert p["rules"]["version"] == "2026.11-v1"
+    assert p["trace"] is None and p["trace_note"] == TRACE_NOTES["invalid_features"]
+
+
+def test_snapshot_trace_null_on_mismatch(make_doc, key):
+    doc = _decided_doc(make_doc)
+    doc["policy"]["max_amount_krw"] -= 100_000
+    p = _policy_of(doc, key)
+    assert p["rules"] is not None and p["trace"] is None and p["trace_note"] == TRACE_NOTES["mismatch"]
+
+
+def test_snapshot_capacity_states_assumed_rate(make_doc, key):
+    assert build_snapshot(_view(make_doc, key))["cashflow"]["capacity"]["assumed_annual_rate"] == ANNUAL_RATE
+
+
+def test_fit_never_trims_policy(make_doc, key):
+    doc = _decided_doc(make_doc)
+    full = _policy_of(doc, key)
+    claims = [{"text": f"주장 {i} " + "가" * 900, "metric_ids": ["M:dscr"], "txn_ids": []} for i in range(40)]
+    doc["assessment"] = doc["assessment"] | {"claims": claims}
+    snap = build_snapshot(detail_view(doc, None, key, restore=False))
+    assert snap["truncated"] is True and snap["policy"] == full and full["trace"] is not None

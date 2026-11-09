@@ -6,7 +6,15 @@
 
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from typing import Any
+
+from pydantic import ValidationError
+
+from agents.features import ANNUAL_RATE
+from policy.engine import LIMIT_UNIT_KRW, explain
+from policy.rules import RuleSet, rules_for_version
+from shared.contracts import CashFlowFeatures
 
 SNAPSHOT_MAX_CHARS = 24_000
 QUESTION_MAX = 500
@@ -17,6 +25,11 @@ SETTLEMENT_KEYS = ("available", "pg_reconciliation_ratio", "pg_top_platform_shar
                    "unmatched_count", "settlement_count", "period")
 STRUCTURE_KEYS = ("amount_krw", "tenor_months", "schedule", "reduced_payment_months", "rationale")
 CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?")
+TRACE_NOTES = {
+    "unknown_version": "적용 규정 버전을 콘솔에서 찾을 수 없어 계산 과정을 만들지 않았습니다.",
+    "invalid_features": "저장된 특성 값이 불완전해 계산 과정을 만들지 않았습니다.",
+    "mismatch": "다시 계산한 결과가 저장된 판정과 달라 계산 과정을 싣지 않았습니다.",
+}
 CHAT_ERRORS: dict[str, tuple[int, str]] = {
     "bad_request": (400, "요청 형식이 올바르지 않습니다."),
     "not_found": (404, "신청을 찾을 수 없습니다."),
@@ -45,7 +58,8 @@ def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any) -> dict[st
         owed = (debt if _num(debt) else 0) + new
         if not (_num(rev) and _num(opex)) or rev - opex < owed:
             short.append(m.get("month"))
-    return {"new_installment_krw": new, "months": len(monthly), "short_months": short}
+    return {"new_installment_krw": new, "months": len(monthly), "short_months": short,
+            "assumed_annual_rate": ANNUAL_RATE}
 
 
 def _settlement(pg: Any) -> dict[str, Any]:
@@ -54,9 +68,39 @@ def _settlement(pg: Any) -> dict[str, Any]:
     return {k: pg.get(k) for k in SETTLEMENT_KEYS}
 
 
-def _policy(policy: Any) -> dict[str, Any] | None:
+def _rules(rules: RuleSet) -> dict[str, Any]:
+    return {
+        "version": rules.version,
+        "product": rules.product.model_dump() | {"limit_unit_krw": LIMIT_UNIT_KRW},
+        "knockouts": [c.model_dump() for c in rules.knockouts],
+        "refers": [c.model_dump() for c in rules.refers],
+        "rate_bands": [b.model_dump() for b in rules.rate_bands],
+    }
+
+
+def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[dict[str, Any] | None, str | None]:
+    """저장된 특성으로 판정을 다시 계산한다. 저장된 판정과 다르면 틀린 근거가 되므로 싣지 않는다."""
+    try:
+        parsed = CashFlowFeatures.model_validate_json(json.dumps(features))
+    except (ValidationError, TypeError, ValueError):
+        return None, TRACE_NOTES["invalid_features"]
+    e = explain(parsed, rules)
+    d = e.decision
+    stored_codes = {r.get("code") for r in policy.get("reason_codes") or () if isinstance(r, Mapping)}
+    if (d.decision.value, d.max_amount_krw, d.rate_band, {r.code for r in d.reason_codes}) != (
+        policy.get("decision"), policy.get("max_amount_krw"), policy.get("rate_band"), stored_codes
+    ):
+        return None, TRACE_NOTES["mismatch"]
+    band = asdict(e.band)
+    band["bands"] = [{"band": b, "min_dscr": m} for b, m in e.band.bands]
+    return {"checks": [asdict(c) for c in e.checks], "limit": asdict(e.limit), "band": band}, None
+
+
+def _policy(policy: Any, features: Any) -> dict[str, Any] | None:
     if not isinstance(policy, Mapping):
         return None
+    rules = rules_for_version(policy.get("rules_version"))
+    trace, note = _trace(rules, policy, features) if rules else (None, TRACE_NOTES["unknown_version"])
     return {
         "decision": policy.get("decision"),
         "rules_version": policy.get("rules_version"),
@@ -64,6 +108,9 @@ def _policy(policy: Any) -> dict[str, Any] | None:
         "rate_band": policy.get("rate_band"),
         "reason_codes": [{k: r.get(k) for k in ("code", "message", "observed", "threshold")}
                          for r in policy.get("reason_codes") or ()],
+        "rules": _rules(rules) if rules else None,
+        "trace": trace,
+        "trace_note": note,
     }
 
 
@@ -123,7 +170,7 @@ def build_snapshot(view: Mapping[str, Any]) -> dict[str, Any]:
             "capacity": _capacity(monthly, signals.get("new_installment_krw")),
             "settlement": _settlement(uw.get("pg_ledger")),
         },
-        "policy": _policy(view.get("policy")),
+        "policy": _policy(view.get("policy"), features),
         "agent_opinion": _opinion(view),
         "officer_decision": {"decision": officer.get("decision"), "amount_krw": officer.get("amount_krw")}
         if isinstance(officer, Mapping) else None,

@@ -69,6 +69,15 @@ def test_dockerfile_copies_everything_the_console_imports(tmp_path):
     assert (app / "evals" / "prices.json").exists()
     assert (app / "opsmetrics" / "summary.py").exists()
     assert not (app / "evals" / "runner.py").exists()
+    assert (app / "policy" / "engine.py").exists() and (app / "policy" / "rulesets" / "v3.yaml").exists()
+    assert not (app / "policy" / "app.py").exists() and not (app / "policy" / "main.py").exists()
+
+
+def test_console_pins_same_pyyaml_as_policy_api():
+    def pin(name):
+        return [ln for ln in (ROOT / name).read_text(encoding="utf-8").splitlines() if ln.startswith("PyYAML==")]
+
+    assert pin("requirements-console.txt") == pin("requirements-api.txt") == ["PyYAML==6.0.3"]
 
 
 def test_dockerignore_keeps_other_images_lean():

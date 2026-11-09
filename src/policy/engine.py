@@ -11,7 +11,7 @@ from policy.rules import Condition, RuleSet
 from shared.contracts import CashFlowFeatures, Decision, PolicyDecision, ReasonCode
 
 _OPS = {"lt": operator.lt, "le": operator.le, "gt": operator.gt, "ge": operator.ge}
-_LIMIT_UNIT_KRW = 100_000
+LIMIT_UNIT_KRW = 100_000
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ def explain(features: CashFlowFeatures, rules: RuleSet) -> Explanation:
     product = rules.product
     inflow_cap = int(features.avg_monthly_inflow_krw * product.inflow_multiplier)
     before = min(features.requested_amount_krw, inflow_cap, product.max_amount_krw)
-    limit = before - before % _LIMIT_UNIT_KRW
+    limit = before - before % LIMIT_UNIT_KRW
     limit_trace = LimitTrace(
         requested_amount_krw=features.requested_amount_krw,
         avg_monthly_inflow_krw=features.avg_monthly_inflow_krw,
@@ -86,7 +86,7 @@ def explain(features: CashFlowFeatures, rules: RuleSet) -> Explanation:
         product_max_krw=product.max_amount_krw,
         product_min_krw=product.min_amount_krw,
         before_rounding_krw=before,
-        unit_krw=_LIMIT_UNIT_KRW,
+        unit_krw=LIMIT_UNIT_KRW,
         limit_krw=limit,
     )
     r900 = RuleCheck("R900", "산출 한도가 상품 최소 금액 미만", "engine", "max_amount_krw", "lt", float(limit),
