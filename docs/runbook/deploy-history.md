@@ -891,3 +891,9 @@ python -m ops smoke
 - **변경**(`a554d5a`~`5f00580`, 계획 `docs/superpowers/plans/2026-11-09-officer-chat-policy-explain.md`): 정책 엔진 `explain()`이 규칙별 점검·한도 계산·금리 구간 추적을 돌려주고, 채팅 스냅샷에 판정 버전의 규정(`policy.rules`)과 계산 추적(`policy.trace`)을 넣었습니다. 답변 출처 표기는 "(정책 규정 <버전>)"·"(정책 계산)"입니다. v1 규정은 제자리 개정(2026-11-04) 전에 접수한 건이면 규정·추적을 빼고 `trace_note`로 알립니다. 콘솔 이미지에 `policy` 모듈·`rulesets`와 `PyYAML==6.0.3`을 더했습니다.
 - `window open --acr` → `ops deploy console`(`console:20261109013727`) → `ops smoke` 성공(`job-smoke-7775qf2`) → **`window close`** 완료.
 - **라이브 확인** `app-20261108-c92b51`(v3, 심사역 대기): 질문 4개 모두 200(2.5~21.5초). 금리 구간 기준은 DSCR 1.76 → B와 v3 구간(A 2.0·B 1.5·C 1.2·D 1.0), 한도는 월 유입 × 1.5와 상품 최대 10,000,000원·신청액 5,000,000원·100,000원 단위, R102는 매출 변동성 0.06 ≤ 기준 0.5로 답했고, 구간별 실제 금리는 "자료에 없음"이었습니다. `ca-console` 로그에는 `officer_chat ... result=ok` 줄만 있고 질문 원문은 없으며, `/`·`/loans` 200.
+
+## 2026-11-09 에이전트 요약 확장 배포
+
+- **변경**(`f607c99`): 신용 평가 분석가의 `summary`를 세 문장 이내에서 5~7문장 해설(상환 여력 → 위험 요인 → 정책 판정과의 관계 → 제안 구조 → 결과를 바꿀 조건)로 바꾸고, `check_grounding`이 요약 속 숫자도 근거 카탈로그·제안 금액·인용 거래 금액과 대조합니다. 에이전트 버전은 실행 시 코드의 지시로 만들어지므로 오케스트레이터만 배포했습니다. 기존 신청의 요약은 그대로이고 새로 평가하는 신청부터 적용됩니다.
+- `window open --acr` → `ops deploy orchestrator`가 두 번 403이었습니다. App Service가 본 출구 IP가 `api.ipify` IP와 같은 /16의 다른 주소였습니다([deploy](deploy.md#app-service-출구-ip가-다를-때) 절차). SCM은 주 사이트 규칙을 따르므로(`scmIpSecurityRestrictionsUseMain=true`) `operator-alt2`를 **주 사이트**에 넣어야 했습니다(SCM 규칙에 넣으면 여전히 403). 세 번째 시도에 성공했고, 임시 규칙과 진단 설정 `ipsec-probe-temp`는 지웠습니다. **`window close`** 완료. `ops smoke`는 첫 시도에 az CLI JSON 오류였고 다시 돌려 성공(`job-smoke-2uzou1w`), `/`·`/loans` 200.
+- **라이브 확인** `app-20261109-045335`(`seller-dailylook-01`, 5,000,000원·6개월): 109초 만에 평가가 났고, 요약이 5문장으로 영업 DSCR 2.2·월 유입·완충일수 → 인출 반영 DSCR 0.638·2월 계절 지수·플랫폼 비중 → 정책 eligible·한도·금리 구간 A → 5,000,000원·6개월 계절형 상환 → 인출 반영 DSCR 1.0 이상이면 재검토 순서였습니다.

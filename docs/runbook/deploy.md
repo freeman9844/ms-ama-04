@@ -147,7 +147,7 @@ az functionapp config access-restriction show -g <resource-group> -n <function-a
 1. Functions 앱의 `AppServiceIPSecAuditLogs`를 Log Analytics 작업 영역으로 보내는 임시 진단 설정을 만듭니다.
 2. SCM 사이트에 요청을 몇 번 보내 403 기록을 만들고 약 5분 기다립니다.
 3. 작업 영역에서 출구 IP를 조회합니다.
-4. 나온 IP를 `/32`로 `operator-alt2`, `operator-alt3`… 이름의 Functions 규칙(priority 111부터)에 넣습니다.
+4. 나온 IP를 `/32`로 `operator-alt2`, `operator-alt3`… 이름의 Functions 규칙(priority 111부터)에 넣습니다. SCM은 주 사이트 규칙을 따르므로(`scmIpSecurityRestrictionsUseMain=true`) `--scm-site`를 붙이지 않고 주 사이트에 넣습니다.
 5. 압축 파일을 Kudu 게시 API에 `curl`로 올립니다([deploy-history](deploy-history.md)의 `curl.exe -X POST --data-binary … /api/publish` 예시와 같은 명령이며, `/api/deployments`에서 status 4를 확인합니다).
 6. 임시 규칙과 진단 설정을 지우고 `ops window close`로 창을 닫습니다.
 
