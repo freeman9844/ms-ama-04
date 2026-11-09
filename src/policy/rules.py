@@ -1,5 +1,6 @@
 """버전드 YAML 정책 규칙 모델과 로더."""
 
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -76,3 +77,14 @@ class RuleSet(_Model):
 def load_rules(path: Path = DEFAULT_RULES_PATH) -> RuleSet:
     with open(path, encoding="utf-8") as f:
         return RuleSet.model_validate(yaml.safe_load(f))
+
+
+@cache
+def _rulesets() -> dict[str, RuleSet]:
+    rulesets = (load_rules(p) for p in sorted(DEFAULT_RULES_PATH.parent.glob("*.yaml")))
+    return {r.version: r for r in rulesets}
+
+
+def rules_for_version(version: object) -> RuleSet | None:
+    """판정에 적힌 규정 버전의 규칙을 돌려준다. 모르는 버전이면 None."""
+    return _rulesets().get(version) if isinstance(version, str) else None

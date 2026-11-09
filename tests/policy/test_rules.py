@@ -2,7 +2,13 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from policy.rules import DEFAULT_RULES_PATH, RuleSet, load_rules
+from policy.rules import DEFAULT_RULES_PATH, RuleSet, load_rules, rules_for_version
+
+
+def test_rules_for_version_reads_every_ruleset():
+    for v in ("2026.11-v1", "2026.11-v2", "2026.11-v3"):
+        assert rules_for_version(v).version == v
+    assert rules_for_version("2026.10-v0") is None and rules_for_version(None) is None
 
 
 def _data():
