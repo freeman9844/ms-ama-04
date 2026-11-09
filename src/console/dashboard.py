@@ -316,25 +316,50 @@ def loans_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def alert_steps(alert: Mapping[str, Any]) -> list[dict[str, Any]]:
+def alert_followups(cases: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """미납 추심 건을 그 건이 근거로 본 최근 경보(recent_alert)에 묶는다. 경보 카드에 그 경보로 나간 연락을 보인다."""
+    links: dict[str, list[dict[str, Any]]] = {}
+    for c in cases:
+        alert_id = (c.get("recent_alert") or {}).get("alert_id")
+        if not alert_id:
+            continue
+        collections = c.get("collections") or {}
+        links.setdefault(alert_id, []).append({
+            "case_id": c.get("case_id"),
+            "no": (c.get("installment") or {}).get("no"),
+            "decision": collections.get("decision"),
+            "restructure": (c.get("restructure") or {}).get("status"),
+            "contacts": [{k: x.get(k) for k in ("at", "script_id", "status")} for x in collections.get("contacts") or ()],
+        })
+    return links
+
+
+def _restructure_step(status: str | None) -> dict[str, Any]:
+    return _step("restructure", "재조정 결정", "current" if status == "pending_officer" else "done",
+                 RESTRUCTURE_NOTES.get(status, status or ""))
+
+
+def alert_steps(alert: Mapping[str, Any], followups: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, Any]]:
     collections = alert.get("collections") or {}
-    if not collections and not alert.get("restructure"):
-        # 조기경보는 심사역 검토용이다. 차주 연락은 상환 원장의 미납 추심 건이 맡는다.
-        return [
-            _step("detect", "탐지", "done", f"{alert.get('week')}주차"),
-            _step("investigate", "조기경보 조사", "done", SEVERITY_LABELS.get(alert.get("severity") or "", "")),
-            _step("review", "심사역 검토", "done", "연락 없음"),
-        ]
-    steps = [
+    head = [
         _step("detect", "탐지", "done", f"{alert.get('week')}주차"),
         _step("investigate", "조기경보 조사", "done", SEVERITY_LABELS.get(alert.get("severity") or "", "")),
-        _step("collections", "추심 에이전트", "done" if collections else "current", collections.get("decision") or ""),
     ]
+    if not collections and not alert.get("restructure"):
+        # 조기경보는 심사역 검토용이다. 차주 연락은 상환 원장의 미납 추심 건이 맡고, 그 건이 이 경보를 근거로 보면 잇는다.
+        if not followups:
+            return [*head, _step("review", "심사역 검토", "done", "연락 없음")]
+        f = followups[-1]
+        scripts = ", ".join(x["script_id"] for x in f["contacts"] if x.get("script_id"))
+        steps = [*head, _step("followup", "미납 추심 연락", "done" if f["decision"] else "current",
+                              f"{f['no']}회차" + (f" · {scripts}" if scripts else ""))]
+        if f["restructure"]:
+            steps.append(_restructure_step(f["restructure"]))
+        return steps
+    steps = [*head, _step("collections", "추심 에이전트", "done" if collections else "current", collections.get("decision") or "")]
     restructure = alert.get("restructure")
     if restructure:
-        st = restructure.get("status")
-        steps.append(_step("restructure", "재조정 결정", "current" if st == "pending_officer" else "done",
-                           RESTRUCTURE_NOTES.get(st, st or "")))
+        steps.append(_restructure_step(restructure.get("status")))
     return steps
 
 
@@ -372,6 +397,7 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     buffers = [(w.get("week"), (w.get("row") or {}).get("buffer_days")) for w in weeks]
     numeric = [(wk, b) for wk, b in buffers if charts.is_num(b)]
     min_week, min_buffer = min(numeric, key=lambda x: x[1]) if numeric else (None, None)
+    followups = alert_followups(view.get("cases") or ())
     groups = []
     for w in weeks:
         r = w.get("row") or {}
@@ -405,7 +431,8 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "line": charts.line([b for _, b in buffers], **LOAN_CHART) if groups else None,
         "markers": markers,
         "legend": [("매출", "blue"), ("트리거 주", "red"), ("기준 주매출", "neutral"), ("현금 버퍼(일, 오른쪽 축)", "purple")],
-        "alert_steps": {a.get("alert_id"): alert_steps(a) for a in alerts},
+        "alert_followups": followups,
+        "alert_steps": {a.get("alert_id"): alert_steps(a, followups.get(a.get("alert_id"), ())) for a in alerts},
         "case_steps": {c.get("case_id"): case_steps(c) for c in view.get("cases") or ()},
         "repayment": _repayment(loan),
         **_expected_vs_actual(weeks),

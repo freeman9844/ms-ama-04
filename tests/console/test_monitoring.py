@@ -350,7 +350,18 @@ def test_loan_page_shows_ledger_and_case(setup):
     assert "상환 원장" in page and 'class="r-missed"' in page and "t-pay-2" in page and "(보류)" in page
     assert 'id="rc-rp-1-i1"' in page and "1회차 미납" in page and 'href="#ew-rp-1-w01"' in page
     assert "상환 2/3회" in page and "미납 1" in page
-    assert "심사역 검토 대상 · 차주 연락 없음" in page  # 조기경보 카드는 연락하지 않는다
+    # 경보를 근거로 미납 추심이 연락했으면 경보 카드에도 그 연락을 보인다.
+    card = page[page.index('id="ew-rp-1-w01"'):page.index('id="rc-rp-1-i1"')]
+    assert "이 경보를 근거로 한 차주 연락" in card and 'href="#rc-rp-1-i1"' in card
+    assert "1회차 미납 추심" in card and "hardship_offer" in card and "sent" in card
+    assert "재조정 상담 요청 pending_officer" in card and "차주 연락 없음" not in page
+
+
+def test_alert_card_without_followup_says_alert_alone_does_not_contact(setup, mask):
+    client, *_ = setup(alerts=[make_alert(mask)])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "심사역 검토 대상 · 이 경보로 나간 차주 연락 없음" in page
+    assert "경보만으로는 연락하지 않고, 미납이 생기면 추심 에이전트가 연락합니다" in page
 
 
 def test_legacy_alert_with_restructure_still_decidable(setup, mask):

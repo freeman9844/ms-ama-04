@@ -159,6 +159,28 @@ def test_alert_steps_branches():
     assert (done[-1]["state"], done[-1]["note"]) == ("done", "거절")
 
 
+def test_alert_followups_link_missed_payment_contacts_to_cited_alert():
+    case = {"case_id": "rc-1", "installment": {"no": 3}, "recent_alert": {"alert_id": "ew-12"},
+            "collections": {"decision": "routed", "contacts": [
+                {"at": "2026-11-09T16:13:21", "script_id": "hardship_offer", "status": "sent"}]},
+            "restructure": {"status": "pending_officer"}}
+    waiting = {"case_id": "rc-2", "installment": {"no": 4}, "recent_alert": {"alert_id": "ew-12"}}
+    other = {"case_id": "rc-0", "installment": {"no": 1}, "recent_alert": None}
+    links = dashboard.alert_followups([case, waiting, other])
+    assert set(links) == {"ew-12"}
+    assert links["ew-12"][0] == {"case_id": "rc-1", "no": 3, "decision": "routed", "restructure": "pending_officer",
+                                 "contacts": [{"at": "2026-11-09T16:13:21", "script_id": "hardship_offer",
+                                               "status": "sent"}]}
+    assert links["ew-12"][1]["contacts"] == [] and links["ew-12"][1]["decision"] is None
+    steps = dashboard.alert_steps({"week": 12, "severity": "high", "collections": None, "restructure": None},
+                                  links["ew-12"][:1])
+    assert [(s["label"], s["state"], s["note"]) for s in steps] == [
+        ("탐지", "done", "12주차"), ("조기경보 조사", "done", "높음"),
+        ("미납 추심 연락", "done", "3회차 · hardship_offer"), ("재조정 결정", "current", "심사역 대기")]
+    pending = dashboard.alert_steps({"week": 12, "severity": "high"}, links["ew-12"][1:])
+    assert (pending[-1]["label"], pending[-1]["state"], pending[-1]["note"]) == ("미납 추심 연락", "current", "4회차")
+
+
 def week(n, buffer, triggers=(), new=()):
     row = {"start": f"2026-09-0{n}", "end": f"2026-09-0{n + 6}", "revenue": 8_000_000 + n, "buffer_days": buffer}
     return {"week": n, "row": row, "triggers": list(triggers), "new_triggers": list(new)}

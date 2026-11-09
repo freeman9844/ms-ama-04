@@ -182,7 +182,17 @@
 </ul>
 <p class="review">조사 모델: {% for role, model in a.models|dictsort %}{{ role }}={{ model }} {% endfor %}{% if a.event_error %} · <span class="error">이벤트 발행 실패: {{ a.event_error }}</span>{% endif %}</p>
 {% if a.collections %}{{ collections_block(a.collections) }}
-{% elif not a.restructure %}<p class="note">심사역 검토 대상 · 차주 연락 없음</p>{% endif %}
+{% elif not a.restructure %}{% set links = ui.alert_followups.get(a.alert_id) or [] %}
+{% if links %}<h3>이 경보를 근거로 한 차주 연락</h3>
+<ul class="followups">{% for f in links %}
+  <li><a href="#{{ f.case_id }}">{{ f.no }}회차 미납 추심</a>{% if f.decision %} · 추심 에이전트 {{ f.decision }}{% else %} · 추심 에이전트 처리 대기 중{% endif %}
+  {% for x in f.contacts %} · {{ x.at }} {{ x.script_id }} {{ x.status }}{% endfor %}
+  {% if f.restructure %} · 재조정 상담 요청 {{ f.restructure }}{% endif %}</li>
+{% endfor %}</ul>
+<p class="note"><small>경보만으로는 연락하지 않고, 미납이 생기면 추심 에이전트가 이 경보를 참고해 연락합니다. 재조정 결정은 추심 카드에서 합니다.</small></p>
+{% else %}<p class="note">심사역 검토 대상 · 이 경보로 나간 차주 연락 없음</p>
+<p class="note"><small>경보만으로는 연락하지 않고, 미납이 생기면 추심 에이전트가 연락합니다.</small></p>{% endif %}
+{% endif %}
 {% if a.restructure %}{{ restructure_block(a.id, a.restructure, a.decidable) }}{% endif %}
 </section>
 {% endfor %}
