@@ -116,7 +116,7 @@ def _decided_doc(make_doc, version="2026.11-v3", **kw):
                 requested_amount_krw=3_000_000, requested_tenor_months=12, industry="cafe", region="서울 성동구",
                 business_age_months=38) | kw
     f = CashFlowFeatures(**base)
-    doc = make_doc()
+    doc = make_doc(received_at="2026-11-09T09:00:00+09:00")
     doc["underwriting"] = doc["underwriting"] | {"features": f.model_dump(mode="json")}
     doc["policy"] = evaluate(f, rules_for_version(version)).model_dump(mode="json")
     return doc
@@ -160,8 +160,10 @@ def test_snapshot_unknown_version(make_doc, key):
 
 
 def test_snapshot_trace_null_when_features_invalid(make_doc, key):
-    p = _policy_of(make_doc(), key)  # 기본 문서는 특성이 3개뿐이다
-    assert p["rules"]["version"] == "2026.11-v1"
+    doc = _decided_doc(make_doc)
+    doc["underwriting"]["features"] = {"dscr": 1.8, "avg_monthly_inflow_krw": 42_000_000, "industry": "cafe"}
+    p = _policy_of(doc, key)
+    assert p["rules"]["version"] == "2026.11-v3"
     assert p["trace"] is None and p["trace_note"] == TRACE_NOTES["invalid_features"]
 
 
@@ -183,3 +185,19 @@ def test_fit_never_trims_policy(make_doc, key):
     doc["assessment"] = doc["assessment"] | {"claims": claims}
     snap = build_snapshot(detail_view(doc, None, key, restore=False))
     assert snap["truncated"] is True and snap["policy"] == full and full["trace"] is not None
+
+
+def test_snapshot_v1_received_before_in_place_amendment(make_doc, key):
+    # v1 규정 파일은 2026-11-04에 버전 이름을 그대로 둔 채 상품 한도가 바뀌었다. 그 전 판정의 규정은 확인할 수 없다.
+    doc = _decided_doc(make_doc, version="2026.11-v1")
+    doc["received_at"] = "2026-11-03T10:00:00+09:00"
+    p = _policy_of(doc, key)
+    assert p["rules"] is None and p["trace"] is None and p["trace_note"] == TRACE_NOTES["amended_version"]
+    doc["received_at"] = None
+    assert _policy_of(doc, key)["trace_note"] == TRACE_NOTES["amended_version"]
+
+
+def test_snapshot_v3_ignores_v1_amendment(make_doc, key):
+    doc = _decided_doc(make_doc)
+    doc["received_at"] = "2026-11-03T10:00:00+09:00"
+    assert _policy_of(doc, key)["trace"] is not None

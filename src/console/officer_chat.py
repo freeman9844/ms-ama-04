@@ -7,13 +7,14 @@
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
 
 from agents.features import ANNUAL_RATE
 from policy.engine import LIMIT_UNIT_KRW, explain
-from policy.rules import RuleSet, rules_for_version
+from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
 from shared.contracts import CashFlowFeatures
 
 SNAPSHOT_MAX_CHARS = 24_000
@@ -29,6 +30,7 @@ TRACE_NOTES = {
     "unknown_version": "적용 규정 버전을 콘솔에서 찾을 수 없어 계산 과정을 만들지 않았습니다.",
     "invalid_features": "저장된 특성 값이 불완전해 계산 과정을 만들지 않았습니다.",
     "mismatch": "다시 계산한 결과가 저장된 판정과 달라 계산 과정을 싣지 않았습니다.",
+    "amended_version": "적용 규정 버전이 판정 뒤 같은 이름으로 수정되어 당시 규정과 계산 과정을 확인할 수 없습니다.",
 }
 CHAT_ERRORS: dict[str, tuple[int, str]] = {
     "bad_request": (400, "요청 형식이 올바르지 않습니다."),
@@ -96,11 +98,28 @@ def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[di
     return {"checks": [asdict(c) for c in e.checks], "limit": asdict(e.limit), "band": band}, None
 
 
-def _policy(policy: Any, features: Any) -> dict[str, Any] | None:
+def _amended_since(version: Any, received_at: Any) -> bool:
+    """판정이 지금 파일로 고치기 전 규정으로 났을 수 있으면 True(접수 시각을 모르면 보수적으로 True)."""
+    amended = AMENDED_IN_PLACE.get(version) if isinstance(version, str) else None
+    if amended is None:
+        return False
+    try:
+        return datetime.fromisoformat(received_at) < amended
+    except (TypeError, ValueError):
+        return True
+
+
+def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, Any] | None:
     if not isinstance(policy, Mapping):
         return None
-    rules = rules_for_version(policy.get("rules_version"))
-    trace, note = _trace(rules, policy, features) if rules else (None, TRACE_NOTES["unknown_version"])
+    version = policy.get("rules_version")
+    rules = rules_for_version(version)
+    if rules is None:
+        trace, note = None, TRACE_NOTES["unknown_version"]
+    elif _amended_since(version, received_at):
+        rules, trace, note = None, None, TRACE_NOTES["amended_version"]
+    else:
+        trace, note = _trace(rules, policy, features)
     return {
         "decision": policy.get("decision"),
         "rules_version": policy.get("rules_version"),
@@ -170,7 +189,7 @@ def build_snapshot(view: Mapping[str, Any]) -> dict[str, Any]:
             "capacity": _capacity(monthly, signals.get("new_installment_krw")),
             "settlement": _settlement(uw.get("pg_ledger")),
         },
-        "policy": _policy(view.get("policy"), features),
+        "policy": _policy(view.get("policy"), features, doc.get("received_at")),
         "agent_opinion": _opinion(view),
         "officer_decision": {"decision": officer.get("decision"), "amount_krw": officer.get("amount_krw")}
         if isinstance(officer, Mapping) else None,

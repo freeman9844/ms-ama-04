@@ -1,5 +1,6 @@
 """버전드 YAML 정책 규칙 모델과 로더."""
 
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 from typing import Literal
@@ -83,6 +84,11 @@ def load_rules(path: Path = DEFAULT_RULES_PATH) -> RuleSet:
 def _rulesets() -> dict[str, RuleSet]:
     rulesets = (load_rules(p) for p in sorted(DEFAULT_RULES_PATH.parent.glob("*.yaml")))
     return {r.version: r for r in rulesets}
+
+
+# 버전 이름을 그대로 둔 채 내용을 고친 규정과 그 시각(커밋 6ff03ee: v1 상품 한도 300만~3,000만 → 50만~500만).
+# 이 시각 전에 접수된 판정은 지금 파일과 다른 규정으로 났을 수 있다.
+AMENDED_IN_PLACE: dict[str, datetime] = {"2026.11-v1": datetime.fromisoformat("2026-11-04T01:29:11+09:00")}
 
 
 def rules_for_version(version: object) -> RuleSet | None:
