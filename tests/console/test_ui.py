@@ -88,6 +88,8 @@ def test_detail_tabs_and_assessment_panels(client):
         assert text in html, text
     assert 'class="claims-table"' in html and 'aria-label="주장 근거 출처 구성"' in html
     assert client.get("/static/tabs.js").status_code == 200
+    js = client.get("/static/tabs.js").text
+    assert "sessionStorage" in js and "data-tab-reset" in js
 
 
 def test_detail_shows_settlement_card(client):

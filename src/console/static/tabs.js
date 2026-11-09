@@ -1,10 +1,21 @@
 // 신청 상세 탭(P9 §11). JS가 없으면 모든 탭 패널이 펼쳐진 채로 보이고 탭 목록은 앵커 링크로 동작한다.
+// 고른 탭은 신청별로 sessionStorage에 남겨 자동 새로 고침·결정 후 이동(해시가 사라짐)에도 유지한다.
+// 결정 오류로 다시 그린 화면(data-tab-reset)은 오류가 보이도록 서버가 정한 탭을 연다.
 (function () {
   "use strict";
   var root = document.querySelector("[data-tabs]");
   if (!root) return;
   var tabs = Array.prototype.slice.call(root.querySelectorAll('[role="tab"]'));
   var panels = tabs.map(function (t) { return document.getElementById(t.getAttribute("aria-controls")); });
+  var key = "tab:" + location.pathname;
+
+  function remember(id) {
+    try { sessionStorage.setItem(key, id); } catch (e) { /* 저장소를 쓸 수 없으면 해시만 쓴다 */ }
+  }
+
+  function recalled() {
+    try { return sessionStorage.getItem(key) || ""; } catch (e) { return ""; }
+  }
 
   function show(id, focus) {
     if (!tabs.some(function (t) { return t.getAttribute("aria-controls") === id; })) return false;
@@ -19,11 +30,20 @@
   }
 
   function select(id, focus) {
-    if (show(id, focus) && history.replaceState) history.replaceState(null, "", "#" + id);
+    if (!show(id, focus)) return;
+    remember(id);
+    if (history.replaceState) history.replaceState(null, "", "#" + id);
   }
 
   root.classList.add("tabs-on");
-  if (!show(location.hash.slice(1))) show(root.getAttribute("data-default-tab"));
+  var fallback = root.getAttribute("data-default-tab");
+  if (root.hasAttribute("data-tab-reset")) {
+    select(fallback);
+  } else if (show(location.hash.slice(1))) {
+    remember(location.hash.slice(1));
+  } else if (!show(recalled())) {
+    show(fallback);
+  }
 
   tabs.forEach(function (t, i) {
     t.addEventListener("click", function (e) {
@@ -44,5 +64,5 @@
     e.preventDefault();
     select(a.getAttribute("href").slice(1));
   });
-  window.addEventListener("hashchange", function () { show(location.hash.slice(1)); });
+  window.addEventListener("hashchange", function () { if (show(location.hash.slice(1))) remember(location.hash.slice(1)); });
 })();

@@ -39,7 +39,7 @@
 
 {% set tabs = (("summary", "요약"), ("cashflow", "현금흐름"), ("policy", "정책 판정"), ("opinion", "에이전트 의견"),
                ("evidence", "근거 거래"), ("consent", "동의·데이터"), ("decision", "심사역 결정")) %}
-<div class="tabs" data-tabs data-default-tab="tab-{{ default_tab }}">
+<div class="tabs" data-tabs data-default-tab="tab-{{ default_tab }}"{% if error %} data-tab-reset{% endif %}>
 <ul class="tab-list" role="tablist" aria-label="신청 상세">
 {% for key, label in tabs %}<li role="presentation"><a id="tab-{{ key }}-tab" href="#tab-{{ key }}" role="tab" aria-controls="tab-{{ key }}" aria-selected="{{ 'true' if key == default_tab else 'false' }}">{{ label }}</a></li>{% endfor %}
 </ul>
