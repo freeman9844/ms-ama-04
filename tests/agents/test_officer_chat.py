@@ -50,6 +50,11 @@ def test_instructions_keep_officer_in_charge_and_cite_sources():
         assert phrase in INSTRUCTIONS
 
 
+def test_instructions_explain_policy_sources():
+    for phrase in ("(정책 규정", "(정책 계산)", "trace_note", "not_applied", "assumed_annual_rate", "구간별 실제 금리"):
+        assert phrase in INSTRUCTIONS
+
+
 def test_ask_sends_snapshot_history_question_and_deletes_conversation():
     runner = FakeRunner(result=_run())
     history = [{"role": "user", "text": "앞 질문"}, {"role": "assistant", "text": "앞 답"}]

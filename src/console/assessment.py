@@ -1,6 +1,7 @@
 """신청 상세 '에이전트 평가' 패널 계산(P9 §5). 순수 함수이고 그리기는 `_charts.html` 매크로가 한다.
 
-콘솔은 정책 패키지를 가져오지 않으므로 신호등 기준값을 상수로 둔다. 테스트가 `load_rules()`와 같은지 고정한다.
+신호등 기준값은 상수로 두고 테스트가 `load_rules()`와 같은지 고정한다. 콘솔은 정책 패키지를 심사 도우미의 판정 설명
+(`console.officer_chat`)에서만 쓴다.
 """
 
 from collections.abc import Mapping, Sequence
