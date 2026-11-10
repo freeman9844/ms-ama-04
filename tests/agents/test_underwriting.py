@@ -21,6 +21,8 @@ from agents.underwriting import (
     REVIEWER_OUTPUT_SCHEMA,
     AnalystDraft,
     UnderwritingContext,
+    _reviewer_input,
+    _to_assessment,
     analyst_spec,
     assess,
     check_grounding,
@@ -29,7 +31,7 @@ from agents.underwriting import (
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
-from shared.contracts import CreditAssessment, Recommendation
+from shared.contracts import CreditAssessment, Recommendation, ReviewOutcome
 from shared.pseudonymize import find_pii
 
 AS_OF = date(2026, 11, 2)
@@ -61,6 +63,7 @@ SUPPORTED = {
         {"claim_index": 1, "supported": True, "reason": "M:cash_buffer_days 값과 같다."},
     ],
     "feedback": "",
+    "check_verdicts": [],
 }
 
 
@@ -253,6 +256,55 @@ def test_check_grounding_limits_count_and_requires_settlement(cases):
     assert "officer_checks: 정산 자료가 없는데 확인 사항이 있다" in check_grounding(draft(officer_checks=[CHECK]), ctx)
 
 
+WITH_CHECK = GOOD | {"officer_checks": [CHECK]}
+CHECK_OK = SUPPORTED | {"check_verdicts": [{"check_index": 0, "supported": True, "reason": "근거와 맞다"}]}
+
+
+def test_reviewer_sees_checks_with_evidence(cases):
+    ctx = context(cases)
+    payload = json.loads(_reviewer_input(ctx, draft(officer_checks=[CHECK])).split("\n", 1)[1])
+    assert payload["officer_checks"] == [{"check_index": 0, "text": CHECK["text"],
+                                          "evidence": {"M:pg_reconciliation_ratio": ctx.catalog["M:pg_reconciliation_ratio"]}}]
+    assert "check_verdicts" in REVIEWER_OUTPUT_SCHEMA["required"]
+
+
+def test_supported_check_is_kept_with_verdict(cases):
+    result = run_assess(context(cases), FakeRunner([WITH_CHECK], [CHECK_OK]))
+    assert result.assessment.review.passed and result.assessment.officer_checks[0].supported is True
+
+
+def test_rejected_or_missing_check_verdict_triggers_revision(cases):
+    bad = SUPPORTED | {"check_verdicts": [{"check_index": 0, "supported": False, "reason": "근거 밖 추론"}]}
+    runner = FakeRunner([WITH_CHECK] * 3, [bad, SUPPORTED, CHECK_OK])
+    result = run_assess(context(cases), runner)
+    rounds = result.record["rounds"]
+    assert "officer_checks[0]: 검토자 지적 - 근거 밖 추론" in rounds[0]["review_issues"]
+    assert "officer_checks[0]: 검토 결과 없음" in rounds[1]["review_issues"]
+    assert result.assessment.review.passed and result.assessment.officer_checks[0].supported is True
+
+
+def test_unsupported_check_is_shown_not_hidden_after_max_rounds(cases):
+    bad = SUPPORTED | {"check_verdicts": [{"check_index": 0, "supported": False, "reason": "과장"}]}
+    result = run_assess(context(cases), FakeRunner([WITH_CHECK] * 3, [bad] * 3))
+    assert not result.assessment.review.passed and result.assessment.officer_checks[0].supported is False
+
+
+def test_check_verdicts_come_from_review_of_final_draft(cases):
+    ungrounded = WITH_CHECK | {"claims": [{"text": "DSCR은 9.9다.", "metric_ids": ["M:dscr"], "txn_ids": []}]}
+    claim_bad = CHECK_OK | {"verdicts": [{"claim_index": 0, "supported": False, "reason": "x"},
+                                         {"claim_index": 1, "supported": True, "reason": "x"}]}
+    result = assess(context(cases), runner=FakeRunner([WITH_CHECK, ungrounded], [claim_bad]),
+                    analyst_model="a", reviewer_model="r", max_rounds=2)
+    assert result.assessment.officer_checks[0].supported is None
+
+
+def test_dropped_check_does_not_shift_verdicts(cases):
+    checks = [{"text": "확인", "metric_ids": ["bad id"]}, CHECK]  # 0번은 EvidenceId 패턴 위반으로 버려진다
+    a = _to_assessment(draft(officer_checks=checks), context(cases),
+                       ReviewOutcome(passed=True, rounds=1), {}, {0: False, 1: True})
+    assert [(c.text, c.supported) for c in a.officer_checks] == [(CHECK["text"], True)]
+
+
 ALL_TOOLS = [
     ("get_metrics", {}),
     ("get_monthly_series", {}),
@@ -413,6 +465,7 @@ def test_reviewer_rejection_triggers_revision(cases):
             {"claim_index": 1, "supported": True, "reason": "일치"},
         ],
         "feedback": "표현을 줄여라.",
+        "check_verdicts": [],
     }
     runner = FakeRunner([GOOD, GOOD], [rejected, SUPPORTED])
     r = run_assess(context(cases), runner)
@@ -422,7 +475,7 @@ def test_reviewer_rejection_triggers_revision(cases):
 
 
 def test_missing_verdict_is_not_a_pass(cases):
-    partial = {"verdicts": [SUPPORTED["verdicts"][0]], "feedback": ""}
+    partial = {"verdicts": [SUPPORTED["verdicts"][0]], "feedback": "", "check_verdicts": []}
     runner = FakeRunner([GOOD] * MAX_ROUNDS, [partial] * MAX_ROUNDS)
     r = run_assess(context(cases), runner)
     assert r.assessment.review.passed is False

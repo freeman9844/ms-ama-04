@@ -119,9 +119,16 @@ class FakeAzure:
         }
 
     def _review(self, state: dict[str, Any], text: str, results: list[Any]) -> Any:
-        claims = json.loads(text[text.index("{"):])["claims"]
-        return {"verdicts": [{"claim_index": c["claim_index"], "supported": True, "reason": "근거와 일치"} for c in claims],
-                "feedback": ""}
+        payload = json.loads(text[text.index("{"):])
+        claims = payload["claims"]
+        checks = payload.get("officer_checks", [])
+        return {
+            "verdicts": [{"claim_index": c["claim_index"], "supported": True, "reason": "근거와 일치"} for c in claims],
+            "feedback": "",
+            "check_verdicts": [
+                {"check_index": c["check_index"], "supported": True, "reason": "근거와 일치"} for c in checks
+            ],
+        }
 
     def _ew_decision(self, state: dict[str, Any], text: str, results: list[Any]) -> Any:
         if not results:
