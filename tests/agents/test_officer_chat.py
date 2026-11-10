@@ -55,6 +55,10 @@ def test_instructions_explain_policy_sources():
         assert phrase in INSTRUCTIONS
 
 
+def test_instructions_mention_officer_checks():
+    assert "agent_opinion.officer_checks" in INSTRUCTIONS
+
+
 def test_ask_sends_snapshot_history_question_and_deletes_conversation():
     runner = FakeRunner(result=_run())
     history = [{"role": "user", "text": "앞 질문"}, {"role": "assistant", "text": "앞 답"}]

@@ -23,7 +23,8 @@ HISTORY_MESSAGES = 12  # 6턴
 MESSAGE_MAX = 2_000
 MONTHLY_KEYS = ("month", "revenue", "operating_out", "debt_service", "owner_draw")
 SETTLEMENT_KEYS = ("available", "pg_reconciliation_ratio", "pg_top_platform_share", "pg_take_rate_trend_pp",
-                   "unmatched_count", "settlement_count", "period")
+                   "pg_cash_conversion_days", "pg_offset_rate_trend_pp", "pg_advance_share",
+                   "pg_advance_suspected_count", "unmatched_count", "settlement_count", "period")
 STRUCTURE_KEYS = ("amount_krw", "tenor_months", "schedule", "reduced_payment_months", "rationale")
 CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?")
 TRACE_NOTES = {
@@ -133,6 +134,14 @@ def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, An
     }
 
 
+def _officer_checks(view: Mapping[str, Any]) -> list[dict[str, Any]]:
+    checks = view.get("officer_checks")
+    if not checks:
+        return []
+    return [{"text": c.get("text"), "evidence": dict(c.get("evidence") or ()), "supported": c.get("supported")}
+            for c in checks]
+
+
 def _opinion(view: Mapping[str, Any]) -> dict[str, Any] | None:
     assessment = view.get("assessment")
     if not isinstance(assessment, Mapping):
@@ -146,6 +155,7 @@ def _opinion(view: Mapping[str, Any]) -> dict[str, Any] | None:
         "claims": [{"text": c["text"], "evidence": dict(c["evidence"])} for c in view.get("claims") or ()],
         "counterfactuals": [{k: c.get(k) for k in ("explanation", "current", "target")}
                             for c in assessment.get("counterfactuals") or ()],
+        "officer_checks": _officer_checks(view),
     }
 
 
@@ -158,7 +168,7 @@ def _fit(snapshot: dict[str, Any]) -> dict[str, Any]:
         return snapshot
     snapshot["truncated"] = True
     opinion = snapshot.get("agent_opinion") or {}
-    for key in ("claims", "counterfactuals"):
+    for key in ("claims", "counterfactuals", "officer_checks"):
         while _size(snapshot) > SNAPSHOT_MAX_CHARS and opinion.get(key):
             opinion[key].pop()
     monthly = snapshot["cashflow"]["monthly"]

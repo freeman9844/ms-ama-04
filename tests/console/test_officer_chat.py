@@ -5,6 +5,7 @@ from console.assessment import assessment_panels
 from console.officer_chat import (
     HISTORY_MESSAGES,
     MESSAGE_MAX,
+    SETTLEMENT_KEYS,
     SNAPSHOT_MAX_CHARS,
     TRACE_NOTES,
     build_snapshot,
@@ -57,13 +58,42 @@ def test_snapshot_capacity_matches_detail_panel(make_doc, key):
 
 def test_snapshot_settlement_subset(make_doc, key):
     pg = {"available": True, "pg_reconciliation_ratio": 0.82, "pg_top_platform_share": 0.9,
-          "pg_take_rate_trend_pp": 1.4, "unmatched_count": 3, "settlement_count": 40,
+          "pg_take_rate_trend_pp": 1.4, "pg_cash_conversion_days": 6.3, "pg_offset_rate_trend_pp": 0.21,
+          "pg_advance_share": 0.125, "pg_advance_suspected_count": 2, "unmatched_count": 3, "settlement_count": 40,
           "period": {"from": "2026-04-01", "to": "2026-09-30"},
           "unmatched": [{"platform": "coupang", "amount_krw": 1}], "platforms": [{"platform": "x", "share": 1}]}
     uw = make_doc()["underwriting"] | {"pg_ledger": pg}
     settlement = build_snapshot(_view(make_doc, key, underwriting=uw))["cashflow"]["settlement"]
-    assert settlement == {k: pg[k] for k in ("available", "pg_reconciliation_ratio", "pg_top_platform_share",
-                                             "pg_take_rate_trend_pp", "unmatched_count", "settlement_count", "period")}
+    assert settlement == {k: pg[k] for k in SETTLEMENT_KEYS}
+    assert "unmatched" not in settlement
+
+
+def test_snapshot_officer_checks_subset(make_doc, key):
+    uw = make_doc()["underwriting"] | {"features": make_doc()["underwriting"]["features"]
+                                       | {"pg_reconciliation_ratio": 0.82}}
+    doc = make_doc(underwriting=uw)
+    doc["assessment"] = doc["assessment"] | {
+        "officer_checks": [{"text": "정산 대사율이 낮다", "metric_ids": ["M:pg_reconciliation_ratio"], "supported": True}]
+    }
+    opinion = build_snapshot(detail_view(doc, None, key, restore=False))["agent_opinion"]
+    assert opinion["officer_checks"] == [{"text": "정산 대사율이 낮다",
+                                         "evidence": {"M:pg_reconciliation_ratio": 0.82}, "supported": True}]
+
+
+def test_snapshot_officer_checks_empty_for_legacy_assessment(make_doc, key):
+    opinion = build_snapshot(_view(make_doc, key))["agent_opinion"]
+    assert opinion["officer_checks"] == []
+
+
+def test_fit_trims_officer_checks_last(make_doc, key):
+    doc = make_doc()
+    doc["assessment"] = doc["assessment"] | {
+        "officer_checks": [{"text": f"확인 {i} " + "가" * 900, "metric_ids": ["M:dscr"], "supported": True}
+                           for i in range(40)]
+    }
+    snap = build_snapshot(detail_view(doc, None, key, restore=False))
+    assert len(json.dumps(snap, ensure_ascii=False)) <= SNAPSHOT_MAX_CHARS
+    assert snap["truncated"] is True and 0 < len(snap["agent_opinion"]["officer_checks"]) < 40
 
 
 def test_snapshot_excludes_identifiers(make_doc, key):
