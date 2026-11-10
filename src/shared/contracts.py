@@ -212,6 +212,14 @@ class Counterfactual(Contract):
     explanation: str = Field(min_length=1)
 
 
+class OfficerCheck(Contract):
+    """심사역이 결정 전에 확인할 사항 1개. 근거 지표 ID가 하나 이상 있어야 하며, 승인·거절·금리·한도를 지시하지 않는다."""
+
+    text: str = Field(min_length=1, max_length=200)
+    metric_ids: tuple[EvidenceId, ...] = Field(min_length=1)
+    supported: bool | None = None
+
+
 class ReviewOutcome(Contract):
     passed: bool
     rounds: int = Field(ge=1, le=3)
@@ -234,6 +242,7 @@ class CreditAssessment(Contract):
     claims: tuple[Claim, ...] = Field(min_length=1)
     proposed_structure: ProposedStructure | None
     counterfactuals: tuple[Counterfactual, ...] = ()
+    officer_checks: tuple[OfficerCheck, ...] = Field(default=(), max_length=3)
     review: ReviewOutcome
     models: dict[str, str]
 

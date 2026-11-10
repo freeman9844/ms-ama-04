@@ -13,6 +13,7 @@ from shared.contracts import (
     ConsentScope,
     CreditAssessment,
     Decision,
+    OfficerCheck,
     PgSettlement,
     PolicyDecision,
     ProposedStructure,
@@ -255,6 +256,27 @@ def test_approval_needs_structure_and_failed_review_needs_issues():
         _assessment(review=ReviewOutcome(passed=False, rounds=3))
     with pytest.raises(ValidationError):
         ReviewOutcome(passed=True, rounds=4)
+
+
+def test_officer_check_needs_evidence_and_bounded_text():
+    OfficerCheck(text="선정산 계약서를 확인한다.", metric_ids=("M:pg_advance_share",))
+    for bad in (
+        {"text": "x", "metric_ids": ()},
+        {"text": "", "metric_ids": ("M:pg_hhi",)},
+        {"text": "가" * 201, "metric_ids": ("M:pg_hhi",)},
+        {"text": "x", "metric_ids": ("pg_hhi",)},
+    ):
+        with pytest.raises(ValidationError):
+            OfficerCheck(**bad)
+
+
+def test_credit_assessment_officer_checks_default_and_limit():
+    legacy = _assessment().model_dump(mode="json", exclude={"officer_checks"})
+    assert CreditAssessment.model_validate(legacy).officer_checks == ()
+    check = OfficerCheck(text="확인", metric_ids=("M:pg_hhi",))
+    assert _assessment(officer_checks=(check,) * 3).officer_checks[2].supported is None
+    with pytest.raises(ValidationError):
+        _assessment(officer_checks=(check,) * 4)
 
 
 def _signal(**kw):
