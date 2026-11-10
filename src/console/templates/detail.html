@@ -131,7 +131,7 @@
 {% if op %}
 <h4>에이전트 확인 사항{% if op.officer_checks.state == "listed" %} <small>검토자 검증 {{ op.officer_checks.verified }}/{{ op.officer_checks.total }}</small>{% endif %}</h4>
 {% if op.officer_checks.state == "listed" %}
-<ul class="checks">
+<ul class="claims">
 {% for i in op.officer_checks["items"] %}
 <li>
 <span class="claim-mark {{ 'ok' if i.status == 'ok' else 'missing' }}" title="{{ i.status_text }}">{{ "✓" if i.status == "ok" else "⚠" }}</span>

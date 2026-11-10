@@ -393,6 +393,10 @@ def test_settlement_card_new_kpis_guide_and_split_take_rate():
         ("1건", "red")
     assert [t for t, _ in card["guide"]] == ["정산금 계좌 입금", "월별 공제율", "현금화 일수", "선정산 추정",
                                               "채널 집중도(HHI)"]
+    hhi_text = dict(card["guide"])["채널 집중도(HHI)"]
+    assert "정책 기준은 없" in hhi_text
+    assert "최대 채널 비중" in hhi_text
+    assert "쏠려 있다는 뜻입니다(기준 80% 이하, R107)" not in hhi_text
     assert card["take_rate_kind"] == "split" and card["cycles"][0] == \
         {"platform": "쿠팡", "cycle": dashboard.PLATFORM_CYCLES["쿠팡"], "lag_days": 32}
     assert card["unmatched"][0]["cause"] == "선지급 추정(6일 전, 정산액의 85%)"
