@@ -11,6 +11,7 @@ from agents.grounding import close
 from agents.runtime import AgentError, AgentRun
 from agents.underwriting import (
     ANALYST_AGENT,
+    ANALYST_INSTRUCTIONS,
     ANALYST_OUTPUT_SCHEMA,
     ANALYST_TOOLS,
     FLAG_ASSESSMENT_UNAVAILABLE,
@@ -52,6 +53,7 @@ GOOD = {
     "counterfactuals": [
         {"metric_id": "M:dscr", "current": 4.074, "target": 1.0, "explanation": "DSCR이 1.0 아래면 거절 사유가 된다."}
     ],
+    "officer_checks": [],
 }
 SUPPORTED = {
     "verdicts": [
@@ -196,7 +198,7 @@ def test_settlement_summary_tool_returns_ids_and_platforms(cases):
     assert out["metric_ids"]["M:pg_reconciliation_ratio"] == ctx.features["pg_reconciliation_ratio"]
     assert out["metric_ids"]["M:pg_top_platform_share"] == ctx.features["pg_top_platform_share"]
     assert out["metric_ids"]["M:pg_hhi"] == ctx.signals["pg_hhi"]
-    assert out["platforms"][0].keys() == {"platform", "share"}
+    assert out["platforms"][0].keys() == {"platform", "share", "lag_days"}
     assert "unmatched" not in out  # 개별 미입금 금액은 근거 ID가 없어 주지 않는다
 
 
@@ -204,6 +206,47 @@ def test_settlement_summary_unavailable(cases):
     ctx = replace(context(cases), settlement=None)
     assert ctx.handlers()["get_settlement_summary"]({}) == {"available": False}
     assert any(t.get("name") == "get_settlement_summary" for t in ANALYST_TOOLS)
+
+
+def test_settlement_summary_exposes_new_metrics_without_details(cases):
+    out = context(cases).handlers()["get_settlement_summary"]({})
+    assert "M:pg_cash_conversion_days" in out["metric_ids"] and "M:pg_unmatched_count" in out["metric_ids"]
+    assert out["platforms"][0].keys() == {"platform", "share", "lag_days"}
+    assert {"fee_rate", "offset_rate"} <= out["monthly_take_rate"][0].keys()
+    assert "unmatched" not in out and "advance" not in json.dumps(out)
+
+
+CHECK = {"text": "정산금 미입금 원인과 선정산 계약 여부를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"]}
+
+
+def test_analyst_schema_requires_officer_checks():
+    assert "officer_checks" in ANALYST_OUTPUT_SCHEMA["required"]
+    item = ANALYST_OUTPUT_SCHEMA["properties"]["officer_checks"]["items"]
+    assert item["required"] == ["text", "metric_ids"] and item["additionalProperties"] is False
+    assert "officer_checks" in ANALYST_INSTRUCTIONS and "정산 건전성" in ANALYST_INSTRUCTIONS
+    assert "6~8문장" in ANALYST_INSTRUCTIONS
+
+
+def test_grounded_check_has_no_issues(cases):
+    assert check_grounding(draft(officer_checks=[CHECK]), context(cases)) == []
+
+
+@pytest.mark.parametrize("check, issue", [
+    ({"text": "확인", "metric_ids": []}, "officer_checks[0]: 근거 ID가 없다"),
+    ({"text": "확인", "metric_ids": ["M:nope"]}, "officer_checks[0]: 알 수 없는 근거 ID"),
+    ({"text": "확인", "metric_ids": ["M:dscr"]}, "officer_checks[0]: 정산 근거(M:pg_*·P:R107·P:R108)가 없다"),
+    ({"text": "입금 비율 55%를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"]},
+     "officer_checks[0]: 인용 근거와 맞지 않는 수치"),
+])
+def test_check_grounding_reports_bad_checks(cases, check, issue):
+    issues = check_grounding(draft(officer_checks=[check]), context(cases))
+    assert any(i.startswith(issue) for i in issues), issues
+
+
+def test_check_grounding_limits_count_and_requires_settlement(cases):
+    assert "officer_checks: 3개를 넘는다" in check_grounding(draft(officer_checks=[CHECK] * 4), context(cases))
+    ctx = replace(context(cases), settlement={"available": False})
+    assert "officer_checks: 정산 자료가 없는데 확인 사항이 있다" in check_grounding(draft(officer_checks=[CHECK]), ctx)
 
 
 ALL_TOOLS = [

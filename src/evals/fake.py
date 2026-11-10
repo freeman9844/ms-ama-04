@@ -115,6 +115,7 @@ class FakeAzure:
             "proposed_structure": {"amount_krw": 1_700_000 if lend else 0, "tenor_months": 6, "schedule": "level",
                                    "reduced_payment_months": [], "rationale": "가짜 모드 기본 구조"},
             "counterfactuals": [],
+            "officer_checks": [],
         }
 
     def _review(self, state: dict[str, Any], text: str, results: list[Any]) -> Any:
