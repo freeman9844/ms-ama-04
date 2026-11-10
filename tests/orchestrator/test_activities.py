@@ -344,6 +344,7 @@ ANALYST_DRAFT = {
         "amount_krw": 3_300_000, "tenor_months": 6, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
     },
     "counterfactuals": [],
+    "officer_checks": [],
 }
 REVIEW = {"verdicts": [{"claim_index": 0, "supported": True, "reason": "일치"}], "feedback": ""}
 
