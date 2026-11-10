@@ -184,6 +184,7 @@ def _assigned_run(monkeypatch=None, strip=False):
             if isinstance(out, dict):
                 out["claims"] = [c for c in out["claims"] if "M:pg_reconciliation_ratio" not in c["metric_ids"]]
                 out["claims"][0]["metric_ids"] = ["M:dscr"]
+                out["officer_checks"] = []
             return out
 
         monkeypatch.setattr(FakeAzure, "_analyst_draft", drafted)
@@ -223,3 +224,27 @@ def test_report_shows_settlement_gap_column_and_dash_for_old_results(tmp_path):
     del config["settlement_gap_detection_rate"]
     section = report.render_markdown(summary).split("## 3.")[1].split("## 4.")[0]
     assert "| 세무 불일치 탐지 | 정산 차이 탐지 |" in section and "| — |" in section
+
+
+def test_settlement_check_detected_for_assigned_cases():
+    out, model = _assigned_run()
+    rows = [r for r in out["cases"] if r["archetype"] == "assigned"]
+    assert rows and all(r["settlement_check_detected"] for r in rows)
+    assert all("settlement_check_detected" not in r for r in out["cases"] if r["archetype"] != "assigned")
+    assert out["configs"][model]["settlement_check_rate"] == 1.0
+
+
+def test_settlement_check_missed_when_checks_dropped(monkeypatch):
+    out, model = _assigned_run(monkeypatch, strip=True)
+    assert out["configs"][model]["settlement_check_rate"] == 0.0
+    assert [f for f in out["failures"] if f["type"] == "settlement_check_missed"]
+
+
+def test_report_shows_settlement_check_column_and_dash_for_old_results(tmp_path):
+    summary, _ = _run(tmp_path, "--suite", "underwriting")
+    config = next(iter(summary["suites"]["underwriting"]["configs"].values()))
+    assert "정산 확인 사항" in report.render_markdown(summary)
+    assert config["settlement_check_rate"] == 1.0
+    del config["settlement_check_rate"]
+    section = report.render_markdown(summary).split("## 3.")[1].split("## 4.")[0]
+    assert "| — |" in section
