@@ -368,11 +368,10 @@ class UnderwritingContext:
         s = self.settlement or {}
         if not s.get("available"):
             return {"available": False}
-        # 선정산 추정 비중·건수(M:pg_advance_*)는 개별 입금 세부로 이어질 수 있어 이 집계 도구에는 넣지 않는다.
-        # get_metrics의 전체 카탈로그로는 여전히 인용할 수 있다(officer_checks 근거용).
         ids = (
             "M:pg_reconciliation_ratio", "M:pg_top_platform_share", "M:pg_hhi", "M:pg_take_rate_trend_pp",
-            "M:pg_cash_conversion_days", "M:pg_offset_rate_trend_pp", "M:pg_unmatched_count",
+            "M:pg_cash_conversion_days", "M:pg_offset_rate_trend_pp", "M:pg_advance_share",
+            "M:pg_advance_suspected_count", "M:pg_unmatched_count",
         )
         return {
             "available": True,

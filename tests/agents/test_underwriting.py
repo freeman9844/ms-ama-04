@@ -213,7 +213,11 @@ def test_settlement_summary_exposes_new_metrics_without_details(cases):
     assert "M:pg_cash_conversion_days" in out["metric_ids"] and "M:pg_unmatched_count" in out["metric_ids"]
     assert out["platforms"][0].keys() == {"platform", "share", "lag_days"}
     assert {"fee_rate", "offset_rate"} <= out["monthly_take_rate"][0].keys()
-    assert "unmatched" not in out and "advance" not in json.dumps(out)
+    # 개별 미입금·선지급 세부(unmatched[]·advance 객체)는 주지 않는다. 집계 지표 ID(M:pg_advance_*)는 허용한다.
+    assert "unmatched" not in out
+    assert not any("advance" in item for lst in (out["platforms"], out["monthly_take_rate"]) for item in lst)
+    assigned = context(cases, "seller-mugshop-21").handlers()["get_settlement_summary"]({})
+    assert "M:pg_advance_share" in assigned["metric_ids"] and "M:pg_advance_suspected_count" in assigned["metric_ids"]
 
 
 CHECK = {"text": "정산금 미입금 원인과 선정산 계약 여부를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"]}
