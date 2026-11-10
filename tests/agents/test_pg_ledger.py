@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from agents.pg_ledger import features_of, ledger_summary
 from shared.contracts import PgSettlement, Transaction
 
@@ -54,6 +56,9 @@ def test_concentration_take_rate_trend_and_features():
     assert [m["month"] for m in r["monthly_take_rate"]] == ["2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10"]
     assert r["pg_take_rate_trend_pp"] == 1.5  # 최근 3개월 (10.0+10.5+11.0)/3 − 이전 3개월 (8.5+9.0+9.5)/3 = 1.5%p
     assert features_of(r) == {"pg_reconciliation_ratio": 1.0, "pg_top_platform_share": 0.5}
+    may = r["monthly_take_rate"][0]
+    assert (may["fee_rate"], may["offset_rate"], may["rate"]) == (0.08, 0.005, 0.085)
+    assert r["pg_offset_rate_trend_pp"] == 1.5  # 상계 0.5~3.0%: (2.0+2.5+3.0)/3 − (0.5+1.0+1.5)/3
 
 
 def test_take_rate_trend_is_three_month_means_not_first_vs_last():
@@ -66,3 +71,47 @@ def test_take_rate_trend_is_three_month_means_not_first_vs_last():
 def test_unavailable_without_settlements():
     assert ledger_summary([], [], AS_OF) == {"available": False}
     assert features_of({"available": False}) == {"pg_reconciliation_ratio": None, "pg_top_platform_share": None}
+
+
+def test_advance_pairs_unmatched_settlement_with_earlier_partial_deposit():
+    s = [_s(date(2026, 10, 13), "쿠팡", 1000)]
+    t = [_t(date(2026, 10, 7), 850, "한결선정산 선지급", code="TRANSFER_IN")]
+    r = ledger_summary(s, t, AS_OF)
+    assert r["pg_advance_suspected_count"] == 1 and r["pg_advance_share"] == 1.0
+    assert r["unmatched"][0]["advance"] == {"booked_on": "2026-10-07", "amount_krw": 850, "lead_days": 6}
+
+
+@pytest.mark.parametrize("day, amount, desc", [
+    (date(2026, 10, 2), 850, "선지급"),           # 11일 전 → 창 밖
+    (date(2026, 10, 14), 850, "선지급"),          # 정산일 뒤
+    (date(2026, 10, 7), 960, "선지급"),           # 0.96
+    (date(2026, 10, 7), 740, "선지급"),           # 0.74
+    (date(2026, 10, 7), 850, "쿠팡(주) 주정산"),  # 플랫폼 입금
+])
+def test_advance_rejects_out_of_window_ratio_or_platform(day, amount, desc):
+    r = ledger_summary([_s(date(2026, 10, 13), "쿠팡", 1000)], [_t(day, amount, desc, code="TRANSFER_IN")], AS_OF)
+    assert r["pg_advance_suspected_count"] == 0 and r["unmatched"][0]["advance"] is None
+
+
+def test_advance_deposit_used_once():
+    s = [_s(date(2026, 10, 13), "쿠팡", 1000), _s(date(2026, 10, 13), "쿠팡", 1000)]
+    r = ledger_summary(s, [_t(date(2026, 10, 8), 850, "선지급", code="TRANSFER_IN")], AS_OF)
+    assert r["pg_advance_suspected_count"] == 1 and r["pg_advance_share"] == 0.5
+
+
+def test_advance_share_none_without_unmatched():
+    s = [_s(date(2026, 10, 13), "쿠팡", 1000)]
+    r = ledger_summary(s, [_t(date(2026, 10, 13), 1000, "쿠팡(주) 주정산")], AS_OF)
+    assert r["pg_advance_suspected_count"] == 0 and r["pg_advance_share"] is None
+
+
+def test_cash_conversion_days_weighted_and_renormalised():
+    def run(rows):
+        return ledger_summary(rows, [], AS_OF)
+    r = run([_s(date(2026, 10, 13), "쿠팡", 600), _s(date(2026, 10, 13), "스마트스토어", 400)])
+    assert r["pg_cash_conversion_days"] == 22.4  # 0.6×32 + 0.4×8
+    assert {p["platform"]: p["lag_days"] for p in r["platforms"]} == {"쿠팡": 32, "스마트스토어": 8}
+    r = run([_s(date(2026, 10, 13), "쿠팡", 1000), _s(date(2026, 10, 13), "기타몰", 1000)])
+    assert r["pg_cash_conversion_days"] == 32.0
+    assert next(p for p in r["platforms"] if p["platform"] == "기타몰")["lag_days"] is None
+    assert run([_s(date(2026, 10, 13), "기타몰", 1000)])["pg_cash_conversion_days"] is None

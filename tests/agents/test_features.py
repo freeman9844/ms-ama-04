@@ -259,3 +259,21 @@ def test_trend_and_pg_ledger_do_not_drift_when_data_is_stale(cases, applicant_id
         stale = at(AS_OF + timedelta(days=days))
         assert stale.features.revenue_trend_ratio == fresh.features.revenue_trend_ratio
         assert stale.pg_ledger == fresh.pg_ledger
+
+
+def test_pg_signals_mirror_ledger(cases):
+    uw = _underwrite(cases, "seller-dailylook-01")
+    assert uw.signals["pg_unmatched_count"] == uw.pg_ledger["unmatched_count"]
+    for k in ("pg_cash_conversion_days", "pg_offset_rate_trend_pp", "pg_advance_share", "pg_advance_suspected_count"):
+        assert (k in uw.signals) == (uw.pg_ledger[k] is not None)
+        if k in uw.signals:
+            assert uw.signals[k] == uw.pg_ledger[k]
+
+
+def test_demo_sellers_advance_detection(cases):
+    for applicant_id in cases:
+        pg = _underwrite(cases, applicant_id).pg_ledger
+        if applicant_id == "seller-mugshop-21":
+            assert pg["pg_advance_suspected_count"] >= 1 and pg["pg_advance_share"] >= 0.8
+        elif pg.get("available"):
+            assert pg["pg_advance_suspected_count"] == 0, applicant_id

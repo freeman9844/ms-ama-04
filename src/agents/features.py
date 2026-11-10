@@ -245,7 +245,10 @@ def compute_underwriting(
         "semantic_overrides": len(applied),
         "dscr_rules_only": base.features.dscr,
         "dscr_semantic": adjusted.features.dscr,
-        **{k: pg[k] for k in ("pg_hhi", "pg_take_rate_trend_pp") if pg.get(k) is not None},
+        **{k: pg[k] for k in ("pg_hhi", "pg_take_rate_trend_pp", "pg_cash_conversion_days",
+                              "pg_offset_rate_trend_pp", "pg_advance_share", "pg_advance_suspected_count")
+          if pg.get(k) is not None},
+        **({"pg_unmatched_count": pg["unmatched_count"]} if "unmatched_count" in pg else {}),
     }
     return Underwriting(
         features=features,
