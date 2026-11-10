@@ -93,6 +93,16 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         }
         for c in (assessment or {}).get("claims", ())
     ]
+    officer_checks = None
+    if assessment is not None and "officer_checks" in assessment:
+        officer_checks = [
+            {
+                "text": c.get("text", ""),
+                "evidence": [(m, catalog.get(m)) for m in c.get("metric_ids", ())],
+                "supported": c.get("supported"),
+            }
+            for c in assessment["officer_checks"] or ()
+        ]
     wanted = set(_referenced(claims))
     transactions = [
         {
@@ -110,6 +120,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "assessment": assessment,
         "assessment_run": assessment_run,
         "claims": claims,
+        "officer_checks": officer_checks,
         "transactions": transactions,
         "features": uw.get("features") or {},
         "policy": policy,

@@ -96,6 +96,20 @@ def test_detail_shows_settlement_card(client):
     html = page(client, "/applications/app-20261103-p01")
     assert "정산 대사" in html and "플랫폼별 정산 비중" in html and "월별 공제율(수수료+상계)" in html
     assert "정산 자료 없음" not in html
+    assert "지표 읽는 법" in html and "현금화 일수" in html and "선정산 추정" in html
+
+
+def test_detail_shows_officer_checks(client):
+    deps = build_deps()
+    deps.store.docs["app-20261103-p01"]["assessment"]["officer_checks"] = [
+        {"text": "선정산 계약서를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"], "supported": True}]
+    html = page(TestClient(create_app(deps), follow_redirects=False), "/applications/app-20261103-p01")
+    assert "에이전트 확인 사항" in html and "검토자 검증 1/1" in html and "선정산 계약서를 확인한다." in html
+
+
+def test_detail_officer_checks_legacy_notice(client):
+    html = page(client, "/applications/app-20261103-p01")
+    assert "2026-11-10 이전 심사분은 확인 사항이 없습니다" in html
 
 
 def test_detail_old_doc_shows_no_settlement():

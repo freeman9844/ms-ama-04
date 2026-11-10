@@ -226,6 +226,38 @@ def gateway_blocks(doc: Mapping[str, Any]) -> list[str]:
 
 RECONCILIATION_WARN = 0.90
 TOP_SHARE_WARN = 0.80
+# 표준 정산 주기 문구(mockapis/sellerdata/channels.py 정산 일정 근거는 agents/pg_ledger.py의 PLATFORM_LAG_DAYS 주석과 같다).
+PLATFORM_CYCLES = {
+    "스마트스토어": "구매확정 후 1영업일",
+    "쿠팡": "주정산 70% + 최종액 30%(익익월 1일)",
+    "11번가": "월 2회(25일·익월 10일)",
+    "자사몰": "PG 2영업일",
+}
+# "지표 읽는 법" 접기 패널 문구. (제목, 설명) 순서는 카드에 보이는 순서와 다르다(스펙 §4.5 스케치).
+SETTLEMENT_GUIDE: tuple[tuple[str, str], ...] = (
+    ("정산금 계좌 입금", "정산 원장 실지급액 중 지급일부터 3영업일 안에 같은 금액이 이 계좌로 들어온 비율입니다. "
+     "낮으면 매출이 이 계좌로 들어오지 않고 있다는 뜻입니다(기준 90% 이상, R108)."),
+    ("월별 공제율", "그 달 정산 총액 중 플랫폼이 떼어 간 몫(수수료 + 광고비 상계)입니다. "
+     "막대가 오르면 마진이 줄고 있다는 뜻입니다."),
+    ("현금화 일수", "플랫폼별 표준 정산 주기를 매출 비중으로 가중 평균한 값입니다. "
+     "실제 건별 지연이 아니라 추정치입니다."),
+    ("선정산 추정", "계좌에 들어오지 않은 정산 중 금액·기간 조건이 맞는 선지급성 입금과 짝지어진 건수입니다. "
+     "정산채권 양도 여부를 확인하는 단서입니다."),
+    ("채널 집중도(HHI)", "플랫폼별 매출 비중 제곱의 합입니다. "
+     "1에 가까울수록 한 채널에 쏠려 있다는 뜻입니다(기준 80% 이하, R107)."),
+)
+
+
+def _unmatched_cause(u: Mapping[str, Any]) -> str:
+    if "advance" not in u:
+        return "—"
+    advance = u["advance"]
+    if not isinstance(advance, Mapping):
+        return "원인 미상 — 지연·다른 계좌·상계 확인"
+    lead, amount, net = advance.get("lead_days"), advance.get("amount_krw"), u.get("net_krw")
+    if not (charts.is_num(lead) and charts.is_num(amount) and charts.is_num(net) and net):
+        return "원인 미상 — 지연·다른 계좌·상계 확인"
+    return f"선지급 추정({lead}일 전, 정산액의 {round(amount / net * 100)}%)"
 
 
 def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -233,22 +265,50 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
     if not isinstance(pg, Mapping) or not pg.get("available"):
         return {"available": False}
     recon, share, trend = pg.get("pg_reconciliation_ratio"), pg.get("pg_top_platform_share"), pg.get("pg_take_rate_trend_pp")
+    cash_days, advance_n, advance_share = (pg.get("pg_cash_conversion_days"), pg.get("pg_advance_suspected_count"),
+                                           pg.get("pg_advance_share"))
     pct = lambda v: f"{round(v * 100)}%" if charts.is_num(v) else "—"  # noqa: E731
+    advance_sub = ("미입금 중 선지급 짝" if not charts.is_num(advance_share)
+                  else f"미입금의 {round(advance_share * 100)}%")
     kpis = [
         {"label": "정산금 계좌 입금", "value": pct(recon), "sub": "기준 90% 이상",
          "tone": "red" if charts.is_num(recon) and recon < RECONCILIATION_WARN else "green"},
         {"label": "최대 채널 비중", "value": pct(share), "sub": "기준 80% 이하",
          "tone": "amber" if charts.is_num(share) and share > TOP_SHARE_WARN else "blue"},
+        {"label": "현금화 일수", "value": f"{cash_days:.1f}일" if charts.is_num(cash_days) else "—",
+         "sub": "표준 정산 주기 기준 추정", "tone": "blue" if charts.is_num(cash_days) else "neutral"},
         {"label": "공제율 변화(6개월)", "value": f"{trend:+.1f}%p" if charts.is_num(trend) else "—",
          "sub": "수수료+광고비 상계", "tone": "amber" if charts.is_num(trend) and trend >= 1.0 else "blue"},
+        {"label": "선정산 추정", "value": f"{advance_n}건" if charts.is_num(advance_n) else "—",
+         "sub": advance_sub if charts.is_num(advance_n) else "",
+         "tone": ("red" if advance_n >= 1 else "green") if charts.is_num(advance_n) else "neutral"},
     ]
-    platforms = charts.hbars([(p["platform"], round(p["share"] * 100, 1), "blue") for p in pg.get("platforms") or ()],
+    platforms_list = list(pg.get("platforms") or ())
+    platforms = charts.hbars([(p["platform"], round(p["share"] * 100, 1), "blue") for p in platforms_list],
                              width=320, label_w=88)
-    take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple") for m in pg.get("monthly_take_rate") or ()],
-                        width=320, label_w=56)
+    cycles = [{"platform": p["platform"], "cycle": PLATFORM_CYCLES.get(p["platform"], "-"),
+               "lag_days": p.get("lag_days")} for p in platforms_list]
+    monthly = list(pg.get("monthly_take_rate") or ())
+    split = bool(monthly) and all(charts.is_num(m.get("fee_rate")) and charts.is_num(m.get("offset_rate"))
+                                  for m in monthly)
+    if split:
+        groups = []
+        for m in monthly:
+            fee_pct, offset_pct = round(m["fee_rate"] * 100, 2), round(m["offset_rate"] * 100, 2)
+            month = m["month"][2:]
+            groups.append((month, [[("수수료", fee_pct, "purple", f"{month} 수수료 {fee_pct}%"),
+                                    ("광고비 상계", offset_pct, "orange", f"{month} 광고비 상계 {offset_pct}%")]]))
+        take = charts.columns(groups, width=320, height=200, tick_fmt=lambda v: f"{v:.1f}%")
+        take_rate_legend = [("수수료", "purple"), ("광고비 상계", "orange")]
+    else:
+        take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple") for m in monthly],
+                            width=320, label_w=56)
+        take_rate_legend = []
+    unmatched = [{**u, "cause": _unmatched_cause(u)} for u in pg.get("unmatched") or ()]
     period = pg.get("period") or {}
-    return {"available": True, "kpis": kpis, "platforms": platforms, "take_rate": take,
-            "unmatched": list(pg.get("unmatched") or ()), "unmatched_count": pg.get("unmatched_count", 0),
+    return {"available": True, "kpis": kpis, "guide": SETTLEMENT_GUIDE, "platforms": platforms, "cycles": cycles,
+            "take_rate_kind": "split" if split else "single", "take_rate": take, "take_rate_legend": take_rate_legend,
+            "unmatched": unmatched, "unmatched_count": pg.get("unmatched_count", 0),
             "note": f"{period.get('from', '')} ~ {period.get('to', '')} 정산 {pg.get('settlement_count', 0)}건"}
 
 

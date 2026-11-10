@@ -1,6 +1,7 @@
 import json
 
 from console.opinion import evidence_label, evidence_value, opinion_panel
+from console.views import detail_view
 
 
 def view(make_doc, claims=(), run=None, steps=None, **assessment):
@@ -118,3 +119,18 @@ def test_usage_uses_last_assess_step_by_model(make_doc):
         {"model": "gpt-5.6-sol", "role": "분석", "calls": 3, "input": 1500, "output": 300},
         {"model": "gpt-5.4-mini", "role": "검토", "calls": 1, "input": 300, "output": 50}]
     assert p["kpi"]["tokens"] == "2,150" and p["kpi"]["tokens_sub"] == "에이전트 단계 28.5초"
+
+
+def test_officer_checks_states(make_doc, key):
+    view = detail_view(make_doc(), None, key, restore=False)  # 평가서에 officer_checks 키 없음
+    assert opinion_panel(view)["officer_checks"]["state"] == "legacy"
+    doc = make_doc()
+    doc["assessment"]["officer_checks"] = [
+        {"text": "선정산 계약서를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"], "supported": True},
+        {"text": "정산계좌 변경을 확인한다.", "metric_ids": ["P:R108:threshold"], "supported": None}]
+    panel = opinion_panel(detail_view(doc, None, key, restore=False))["officer_checks"]
+    assert panel["state"] == "listed" and (panel["verified"], panel["total"]) == (1, 2)
+    assert [i["status_text"] for i in panel["items"]] == ["검토 통과", "검토 결과 없음"]
+    assert panel["items"][0]["evidence"][0]["label"] == "정산금 계좌 입금 비율"
+    doc["assessment"]["officer_checks"] = []
+    assert opinion_panel(detail_view(doc, None, key, restore=False))["officer_checks"]["state"] == "empty"

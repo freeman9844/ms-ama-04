@@ -97,19 +97,55 @@
 <section class="card">
 <h3>정산 대사 <small>마켓플레이스 정산 원장과 계좌 입금 비교</small></h3>
 {% if ui.settlement.available %}
-<div class="grid-4">
+<p>셀러 매출 대부분은 마켓플레이스 정산으로 들어옵니다. 정산은 이미 확정된 미래 현금이자 이 대출의 상환 재원이라,
+실제로 이 계좌에 들어오는지·한 채널에 쏠렸는지·얼마나 늦게 들어오는지·떼이는 몫이 느는지를 봅니다.</p>
+<div class="grid-5">
 {% for k in ui.settlement.kpis %}  {{ ch.kpi(k.label, k.value, k.sub, k.tone) }}
 {% endfor %}</div>
+<details><summary>지표 읽는 법</summary>
+<table class="kv">{% for title, text in ui.settlement.guide %}<tr><th>{{ title }}</th><td>{{ text }}</td></tr>{% endfor %}</table>
+</details>
 <div class="grid-2">
-<div>{{ ch.hbars(ui.settlement.platforms, "플랫폼별 정산 비중", "%") }}</div>
-<div>{{ ch.hbars(ui.settlement.take_rate, "월별 공제율(수수료+상계)", "%") }}</div>
+<div>
+{{ ch.hbars(ui.settlement.platforms, "플랫폼별 정산 비중", "%") }}
+<table class="kv">{% for c in ui.settlement.cycles %}<tr><th>{{ c.platform }}</th><td>{{ c.cycle }}{% if c.lag_days is not none %} · 약 {{ c.lag_days }}일{% endif %}</td></tr>{% endfor %}</table>
+</div>
+<div>
+{% if ui.settlement.take_rate_kind == "split" %}
+{{ ch.columns(ui.settlement.take_rate, "월별 공제율(수수료+상계)") }}
+{{ ch.legend(ui.settlement.take_rate_legend) }}
+{% else %}
+{{ ch.hbars(ui.settlement.take_rate, "월별 공제율(수수료+상계)", "%") }}
+{% endif %}
+</div>
 </div>
 {% if ui.settlement.unmatched %}
 <details><summary>계좌에 들어오지 않은 정산 {{ ui.settlement.unmatched_count }}건(최근 10건)</summary>
-<table class="kv">{% for u in ui.settlement.unmatched %}<tr><th>{{ u.settled_on }} {{ u.platform }}</th><td>{{ u.net_krw|krw }}</td></tr>{% endfor %}</table>
+<table class="kv">
+<thead><tr><th>정산일 · 플랫폼</th><th>실지급액</th><th>추정 원인</th></tr></thead>
+<tbody>{% for u in ui.settlement.unmatched %}<tr><th>{{ u.settled_on }} {{ u.platform }}</th><td>{{ u.net_krw|krw }}</td><td>{{ u.cause }}</td></tr>{% endfor %}</tbody>
+</table>
 </details>
 {% endif %}
 <p class="note">{{ ui.settlement.note }} · 지급일부터 3영업일 안의 같은 금액 입금을 짝지었습니다.</p>
+{% if op %}
+<h4>에이전트 확인 사항{% if op.officer_checks.state == "listed" %} <small>검토자 검증 {{ op.officer_checks.verified }}/{{ op.officer_checks.total }}</small>{% endif %}</h4>
+{% if op.officer_checks.state == "listed" %}
+<ul class="checks">
+{% for i in op.officer_checks["items"] %}
+<li>
+<span class="claim-mark {{ 'ok' if i.status == 'ok' else 'missing' }}" title="{{ i.status_text }}">{{ "✓" if i.status == "ok" else "⚠" }}</span>
+{{ i.text }} <small>({{ i.status_text }})</small>
+{% for e in i.evidence %}<span class="chip{% if e.missing %} warn{% endif %}">{{ e.label }} = {{ e.value }}</span>{% endfor %}
+</li>
+{% endfor %}
+</ul>
+{% elif op.officer_checks.state == "empty" %}
+<p class="note">이번 평가에서는 확인 사항이 없습니다.</p>
+{% else %}
+<p class="note">2026-11-10 이전 심사분은 확인 사항이 없습니다.</p>
+{% endif %}
+{% endif %}
 {% else %}<p class="note">정산 자료 없음 — 정산 원장이 없거나 2026-11-08 이전 심사분입니다.</p>{% endif %}
 </section>
 {% if p.signals %}

@@ -33,6 +33,9 @@ METRIC_LABELS = {
     "max_amount_krw": "정책 한도",
     "pg_reconciliation_ratio": "정산금 계좌 입금 비율", "pg_top_platform_share": "최대 채널 비중",
     "pg_hhi": "채널 집중도(HHI)", "pg_take_rate_trend_pp": "공제율 변화(%p)",
+    "pg_cash_conversion_days": "현금화 일수", "pg_offset_rate_trend_pp": "광고비 상계율 변화(%p)",
+    "pg_advance_share": "선지급 추정 비중", "pg_advance_suspected_count": "선정산 추정 건수",
+    "pg_unmatched_count": "미입금 정산 건수",
     "revenue_trend_ratio": "최근 매출 추세",
 }
 MONTHLY_LABELS = {"revenue": "매출", "operating_out": "운영비", "debt_service": "상환", "owner_draw": "대표자 인출",
@@ -268,6 +271,27 @@ def _usage(doc: Mapping[str, Any], models: Mapping[str, str]) -> dict[str, Any] 
     }
 
 
+OFFICER_CHECK_STATUS = {True: ("ok", "검토 통과"), False: ("failed", "검토 미통과")}
+
+
+def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
+    """확인 사항 패널. 평가서가 있는데 officer_checks 키가 없으면 legacy, 빈 목록이면 empty."""
+    checks = view.get("officer_checks")
+    if checks is None:
+        return {"state": "legacy", "items": [], "verified": 0, "total": 0}
+    if not checks:
+        return {"state": "empty", "items": [], "verified": 0, "total": 0}
+    items = []
+    for i, c in enumerate(checks, start=1):
+        status, status_text = OFFICER_CHECK_STATUS.get(c.get("supported"), ("unknown", "검토 결과 없음"))
+        evidence = [{"label": evidence_label(m), "value": evidence_value(m, val), "missing": val is None}
+                    for m, val in c.get("evidence") or ()]
+        items.append({"n": i, "text": c.get("text", ""), "evidence": evidence, "status": status,
+                      "status_text": status_text})
+    verified = sum(1 for i in items if i["status"] == "ok")
+    return {"state": "listed", "items": items, "verified": verified, "total": len(items)}
+
+
 def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
     assessment = view.get("assessment")
     if not assessment:
@@ -296,4 +320,5 @@ def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
         "loop": _loop(view.get("assessment_run")),
         "usage": usage,
         "models": assessment.get("models") or {},
+        "officer_checks": _officer_checks(view),
     }

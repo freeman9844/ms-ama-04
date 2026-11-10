@@ -51,10 +51,11 @@ h3 { font-size: 1rem; font-weight: 600; }
 /* 카드와 격자 */
 .card { background: var(--card); border-radius: 4px; box-shadow: var(--shadow); padding: 1rem 1.2rem; margin: 0 0 1rem; min-width: 0; }
 section { margin: 0 0 1rem; }
-.grid-2, .grid-4 { display: grid; gap: 1rem; margin-bottom: 1rem; }
+.grid-2, .grid-4, .grid-5 { display: grid; gap: 1rem; margin-bottom: 1rem; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.grid-2 > .card, .grid-4 > .card { margin: 0; }
+.grid-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.grid-2 > .card, .grid-4 > .card, .grid-5 > .card { margin: 0; }
 .kpi { border-top: 3px solid var(--c-blue); }
 .kpi-label { color: var(--muted); font-size: .85rem; }
 .kpi-value { font-size: 1.75rem; font-weight: 600; line-height: 1.2; margin: .2rem 0; }
@@ -237,6 +238,7 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
 /* 좁은 화면 */
 @media (max-width: 1000px) {
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
@@ -245,6 +247,7 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
   .sidebar nav ul { display: flex; flex-wrap: wrap; }
   .who { display: none; }
   .grid-4 { grid-template-columns: minmax(0, 1fr); }
+  .grid-5 { grid-template-columns: minmax(0, 1fr); }
   .stepper { flex-direction: column; gap: .5rem; }
   .step { flex-direction: row; text-align: left; }
   .step::before { display: none; }

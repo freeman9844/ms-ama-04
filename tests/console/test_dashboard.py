@@ -368,3 +368,38 @@ def test_settlement_card_warns_low_reconciliation():
 def test_settlement_card_unavailable_for_old_docs():
     assert dashboard.settlement_card(None) == {"available": False}
     assert dashboard.settlement_card({"available": False}) == {"available": False}
+
+
+LEDGER_V2 = {
+    **LEDGER,
+    "pg_cash_conversion_days": 21.4, "pg_advance_suspected_count": 1, "pg_advance_share": 0.92,
+    "platforms": [{"platform": "쿠팡", "gross_krw": 60_000_000, "share": 0.56, "unpaid_krw": 21_000_000,
+                   "lag_days": 32},
+                  {"platform": "스마트스토어", "gross_krw": 47_000_000, "share": 0.44, "unpaid_krw": 0,
+                   "lag_days": 8}],
+    "monthly_take_rate": [{"month": "2026-05", "rate": 0.081, "fee_rate": 0.07, "offset_rate": 0.011},
+                          {"month": "2026-10", "rate": 0.099, "fee_rate": 0.085, "offset_rate": 0.014}],
+    "unmatched": [{"settled_on": "2026-10-27", "platform": "쿠팡", "net_krw": 512_000,
+                   "advance": {"booked_on": "2026-10-21", "amount_krw": 435_000, "lead_days": 6}},
+                  {"settled_on": "2026-10-02", "platform": "11번가", "net_krw": 210_000, "advance": None}],
+}
+
+
+def test_settlement_card_new_kpis_guide_and_split_take_rate():
+    card = dashboard.settlement_card(LEDGER_V2)
+    assert [k["label"] for k in card["kpis"]] == ["정산금 계좌 입금", "최대 채널 비중", "현금화 일수",
+                                                   "공제율 변화(6개월)", "선정산 추정"]
+    assert card["kpis"][2]["value"] == "21.4일" and (card["kpis"][4]["value"], card["kpis"][4]["tone"]) == \
+        ("1건", "red")
+    assert [t for t, _ in card["guide"]] == ["정산금 계좌 입금", "월별 공제율", "현금화 일수", "선정산 추정",
+                                              "채널 집중도(HHI)"]
+    assert card["take_rate_kind"] == "split" and card["cycles"][0] == \
+        {"platform": "쿠팡", "cycle": dashboard.PLATFORM_CYCLES["쿠팡"], "lag_days": 32}
+    assert card["unmatched"][0]["cause"] == "선지급 추정(6일 전, 정산액의 85%)"
+    assert card["unmatched"][1]["cause"] == "원인 미상 — 지연·다른 계좌·상계 확인"
+
+
+def test_settlement_card_legacy_ledger():
+    card = dashboard.settlement_card(LEDGER)
+    assert card["kpis"][2]["value"] == "—" and card["kpis"][4]["value"] == "—"
+    assert card["take_rate_kind"] == "single" and card["unmatched"][0]["cause"] == "—"
