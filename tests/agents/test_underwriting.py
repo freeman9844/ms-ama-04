@@ -16,6 +16,7 @@ from agents.underwriting import (
     ANALYST_TOOLS,
     FLAG_ASSESSMENT_UNAVAILABLE,
     FLAG_REVIEW_NOT_PASSED,
+    MAX_OFFICER_CHECKS,
     MAX_ROUNDS,
     REVIEWER_AGENT,
     REVIEWER_OUTPUT_SCHEMA,
@@ -232,6 +233,7 @@ def test_analyst_schema_requires_officer_checks():
     assert item["required"] == ["text", "metric_ids"] and item["additionalProperties"] is False
     assert "officer_checks" in ANALYST_INSTRUCTIONS and "정산 건전성" in ANALYST_INSTRUCTIONS
     assert "6~8문장" in ANALYST_INSTRUCTIONS
+    assert "거래 상대방 이름 대신" in ANALYST_INSTRUCTIONS and "일반 명사" in ANALYST_INSTRUCTIONS
 
 
 def test_grounded_check_has_no_issues(cases):
@@ -287,6 +289,15 @@ def test_unsupported_check_is_shown_not_hidden_after_max_rounds(cases):
     bad = SUPPORTED | {"check_verdicts": [{"check_index": 0, "supported": False, "reason": "과장"}]}
     result = run_assess(context(cases), FakeRunner([WITH_CHECK] * 3, [bad] * 3))
     assert not result.assessment.review.passed and result.assessment.officer_checks[0].supported is False
+
+
+def test_officer_checks_capped_when_final_draft_still_has_too_many(cases):
+    """3라운드 내내 officer_checks가 4개(상한 초과)라 매 라운드 grounding에서 막혀 검토자가 한 번도 안 돈다.
+    그래도 마지막 초안이 review_not_passed로 심사역에게 넘어갈 때 officer_checks는 MAX_OFFICER_CHECKS로 잘려야 한다."""
+    too_many = GOOD | {"officer_checks": [CHECK] * 4}
+    result = run_assess(context(cases), FakeRunner([too_many] * MAX_ROUNDS))
+    assert not result.assessment.review.passed
+    assert len(result.assessment.officer_checks) == MAX_OFFICER_CHECKS
 
 
 def test_check_verdicts_come_from_review_of_final_draft(cases):

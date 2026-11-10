@@ -1,8 +1,9 @@
+import math
 from datetime import date
 
 import pytest
 
-from agents.pg_ledger import features_of, ledger_summary
+from agents.pg_ledger import _trend_pp, features_of, ledger_summary
 from shared.contracts import PgSettlement, Transaction
 
 AS_OF = date(2026, 11, 1)
@@ -68,6 +69,13 @@ def test_take_rate_trend_is_three_month_means_not_first_vs_last():
     assert r["pg_take_rate_trend_pp"] == 1.33  # (1+1+5)/3 − (1+1+1)/3; 첫·끝 달 차이 4.00pp와 다르다
 
 
+def test_trend_pp_normalises_negative_zero():
+    """부동소수 오차로 차이가 0 근처 아주 작은 음수가 되면 round()가 -0.0을 돌려줄 수 있다; 0.0으로 정규화해야 한다."""
+    rates = [0.1, 0.2, 0.30000000000000004, 0.1, 0.2, 0.3]
+    result = _trend_pp(rates)
+    assert result == 0.0 and math.copysign(1.0, result) == 1.0
+
+
 def test_unavailable_without_settlements():
     assert ledger_summary([], [], AS_OF) == {"available": False}
     assert features_of({"available": False}) == {"pg_reconciliation_ratio": None, "pg_top_platform_share": None}
@@ -97,6 +105,16 @@ def test_advance_deposit_used_once():
     s = [_s(date(2026, 10, 13), "쿠팡", 1000), _s(date(2026, 10, 13), "쿠팡", 1000)]
     r = ledger_summary(s, [_t(date(2026, 10, 8), 850, "선지급", code="TRANSFER_IN")], AS_OF)
     assert r["pg_advance_suspected_count"] == 1 and r["pg_advance_share"] == 0.5
+
+
+def test_advance_share_is_amount_weighted_not_count():
+    """스펙 §4.1: pg_advance_share는 짝지어진 미매칭 실지급액 ÷ 전체 미매칭 실지급액이다(건수 비율이 아니다).
+    1000원짜리 정산만 선지급과 짝지어지고 3000원짜리는 짝이 없으므로 건수 비율(1/2=0.5)과 금액 비율(1000/4000=0.25)이 달라야 한다."""
+    s = [_s(date(2026, 10, 10), "쿠팡", 1000), _s(date(2026, 10, 13), "쿠팡", 3000)]
+    t = [_t(date(2026, 10, 5), 850, "선지급", code="TRANSFER_IN")]  # 850/1000=0.85(쪽 1000과만 짝), 850/3000=0.28(쪽 3000과는 비율 밖)
+    r = ledger_summary(s, t, AS_OF)
+    assert r["pg_advance_suspected_count"] == 1
+    assert r["pg_advance_share"] == 0.25  # 1000 / (1000 + 3000), 건수 비율 0.5가 아니다
 
 
 def test_advance_share_none_without_unmatched():

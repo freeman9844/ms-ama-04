@@ -391,6 +391,7 @@ def test_settlement_card_new_kpis_guide_and_split_take_rate():
                                                    "공제율 변화(6개월)", "선정산 추정"]
     assert card["kpis"][2]["value"] == "21.4일" and (card["kpis"][4]["value"], card["kpis"][4]["tone"]) == \
         ("1건", "red")
+    assert card["kpis"][4]["sub"] == "미입금액의 92%"  # 건수 비율이 아니라 금액 비율 문구다
     assert [t for t, _ in card["guide"]] == ["정산금 계좌 입금", "월별 공제율", "현금화 일수", "선정산 추정",
                                               "채널 집중도(HHI)"]
     hhi_text = dict(card["guide"])["채널 집중도(HHI)"]
@@ -401,6 +402,13 @@ def test_settlement_card_new_kpis_guide_and_split_take_rate():
         {"platform": "쿠팡", "cycle": dashboard.PLATFORM_CYCLES["쿠팡"], "lag_days": 32}
     assert card["unmatched"][0]["cause"] == "선지급 추정(6일 전, 정산액의 85%)"
     assert card["unmatched"][1]["cause"] == "원인 미상 — 지연·다른 계좌·상계 확인"
+
+
+def test_settlement_card_unknown_platform_cycle_uses_em_dash():
+    ledger = {**LEDGER_V2, "platforms": [{"platform": "기타몰", "gross_krw": 1000, "share": 1.0, "unpaid_krw": 0,
+                                          "lag_days": None}]}
+    card = dashboard.settlement_card(ledger)
+    assert card["cycles"][0]["cycle"] == "—"
 
 
 def test_settlement_card_legacy_ledger():

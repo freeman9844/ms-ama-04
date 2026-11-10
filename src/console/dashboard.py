@@ -270,7 +270,7 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
                                            pg.get("pg_advance_share"))
     pct = lambda v: f"{round(v * 100)}%" if charts.is_num(v) else "—"  # noqa: E731
     advance_sub = ("미입금 중 선지급 짝" if not charts.is_num(advance_share)
-                  else f"미입금의 {round(advance_share * 100)}%")
+                  else f"미입금액의 {round(advance_share * 100)}%")
     kpis = [
         {"label": "정산금 계좌 입금", "value": pct(recon), "sub": "기준 90% 이상",
          "tone": "red" if charts.is_num(recon) and recon < RECONCILIATION_WARN else "green"},
@@ -287,7 +287,7 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
     platforms_list = list(pg.get("platforms") or ())
     platforms = charts.hbars([(p["platform"], round(p["share"] * 100, 1), "blue") for p in platforms_list],
                              width=320, label_w=88)
-    cycles = [{"platform": p["platform"], "cycle": PLATFORM_CYCLES.get(p["platform"], "-"),
+    cycles = [{"platform": p["platform"], "cycle": PLATFORM_CYCLES.get(p["platform"], "—"),
                "lag_days": p.get("lag_days")} for p in platforms_list]
     monthly = list(pg.get("monthly_take_rate") or ())
     split = bool(monthly) and all(charts.is_num(m.get("fee_rate")) and charts.is_num(m.get("offset_rate"))

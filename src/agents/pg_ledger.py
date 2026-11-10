@@ -53,7 +53,8 @@ def _trend_pp(rates: Sequence[float]) -> float | None:
     if len(rates) < WINDOW_MONTHS:
         return None
     half = WINDOW_MONTHS // 2
-    return round((sum(rates[-half:]) / half - sum(rates[-WINDOW_MONTHS:-half]) / half) * 100, 2)
+    value = round((sum(rates[-half:]) / half - sum(rates[-WINDOW_MONTHS:-half]) / half) * 100, 2)
+    return value + 0.0  # -0.0을 0.0으로 정규화한다.
 
 
 def _advance_pairs(unmatched: Sequence[PgSettlement], candidates: Sequence[Transaction]) -> dict[int, dict]:
@@ -113,6 +114,7 @@ def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[T
         key=lambda t: (t.booked_on, t.txn_id),
     )
     advance_pairs = _advance_pairs(unmatched, advance_candidates)
+    unmatched_total = sum(s.net_krw for s in unmatched)
     target = sum(s.net_krw for s in rows)
     gross: dict[str, int] = defaultdict(int)
     unpaid: dict[str, int] = defaultdict(int)
@@ -144,7 +146,10 @@ def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[T
         "pg_offset_rate_trend_pp": _trend_pp([off for _, _, off in monthly_raw]),
         "pg_cash_conversion_days": cash_conversion_days,
         "pg_advance_suspected_count": len(advance_pairs),
-        "pg_advance_share": round(len(advance_pairs) / len(unmatched), 3) if unmatched else None,
+        "pg_advance_share": (
+            round(sum(s.net_krw for s in unmatched if id(s) in advance_pairs) / unmatched_total, 3)
+            if unmatched_total else None
+        ),
         "platforms": [{"platform": p, "gross_krw": g, "share": round(shares[p], 3), "unpaid_krw": unpaid[p],
                       "lag_days": PLATFORM_LAG_DAYS.get(p)}
                       for p, g in sorted(gross.items(), key=lambda kv: (-kv[1], kv[0]))],
