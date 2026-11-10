@@ -4,13 +4,25 @@ param location string
 param tags object
 
 var subnets = [
-  { name: 'snet-agents', prefix: '192.168.0.0/24', delegation: 'Microsoft.App/environments', nsg: '' }    // Foundry Agent Service 전용(위임, 단독)
-  { name: 'snet-pe', prefix: '192.168.1.0/24', delegation: '', nsg: '' }       // Private Endpoint
-  { name: 'snet-functions', prefix: '192.168.2.0/26', delegation: 'Microsoft.App/environments', nsg: '' } // Flex Consumption VNet 통합
-  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegation: 'Microsoft.App/environments', nsg: '' }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
-  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegation: 'Microsoft.Network/applicationGateways', nsg: 'appgw' }    // Application Gateway WAF v2(콘솔 진입점, 전용). 위임은 App Gateway 네트워크 격리가 요구, NSG는 nsg-appgw
-  { name: 'snet-apim', prefix: '192.168.6.0/27', delegation: '', nsg: 'apim' }      // API Management 내부 모드(AI 게이트웨이)
+  { name: 'snet-agents', prefix: '192.168.0.0/24', delegation: 'Microsoft.App/environments', nsg: 'nsg-agents' }    // Foundry Agent Service 전용(위임, 단독)
+  { name: 'snet-pe', prefix: '192.168.1.0/24', delegation: '', nsg: 'nsg-pe' }       // Private Endpoint
+  { name: 'snet-functions', prefix: '192.168.2.0/26', delegation: 'Microsoft.App/environments', nsg: 'nsg-functions' } // Flex Consumption VNet 통합
+  { name: 'snet-apps-int', prefix: '192.168.4.0/24', delegation: 'Microsoft.App/environments', nsg: 'nsg-apps-int' }  // internal Container Apps 환경(Policy, Mock API, 콘솔, smoke)
+  { name: 'snet-appgw', prefix: '192.168.7.0/24', delegation: 'Microsoft.Network/applicationGateways', nsg: 'nsg-appgw' }    // Application Gateway WAF v2(콘솔 진입점, 전용). 위임은 App Gateway 네트워크 격리가 요구
+  { name: 'snet-apim', prefix: '192.168.6.0/27', delegation: '', nsg: 'nsg-apim' }      // API Management 내부 모드(AI 게이트웨이)
 ]
+
+// 내부 서브넷 NSG. 테넌트 정책이 NSG 없는 서브넷에 빈 NSG를 붙이지만 Bicep이 소유하지 않으면 프로비저닝마다 연결이 풀려
+// "NSG 없는 서브넷" 경고가 뜹니다. 그래서 직접 둡니다. 규칙은 Azure 기본 규칙(VNet·AzureLoadBalancer 인바운드 허용,
+// 인터넷 인바운드 거부, 아웃바운드 허용)만 써서 정책 NSG와 동작이 같습니다. 인터넷 인바운드는 App Gateway 서브넷만 받습니다.
+var internalNsgs = [ 'nsg-agents', 'nsg-pe', 'nsg-functions', 'nsg-apps-int' ]
+
+resource nsgInternal 'Microsoft.Network/networkSecurityGroups@2024-05-01' = [for n in internalNsgs: {
+  name: n
+  location: location
+  tags: tags
+  properties: { securityRules: [] }
+}]
 
 // APIM VNet 주입 필수 규칙만 둡니다. 인터넷 인바운드는 열지 않습니다(내부 모드).
 resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
@@ -78,11 +90,12 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: name
   location: location
   tags: tags
+  dependsOn: [ nsg, nsgAppGw, nsgInternal ]
   properties: {
     addressSpace: { addressPrefixes: [ '192.168.0.0/16' ] }
     subnets: [for s in subnets: {
       name: s.name
-      properties: union({
+      properties: {
         addressPrefix: s.prefix
         privateEndpointNetworkPolicies: 'Disabled'
         delegations: empty(s.delegation) ? [] : [
@@ -91,7 +104,8 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
             properties: { serviceName: s.delegation }
           }
         ]
-      }, s.nsg == 'apim' ? { networkSecurityGroup: { id: nsg.id } } : (s.nsg == 'appgw' ? { networkSecurityGroup: { id: nsgAppGw.id } } : {}))
+        networkSecurityGroup: { id: resourceId('Microsoft.Network/networkSecurityGroups', s.nsg) }
+      }
     }]
   }
 }

@@ -152,7 +152,7 @@ flowchart TB
 | `snet-appgw` | `192.168.7.0/24` | 예 | Application Gateway WAF v2(`Microsoft.Network/applicationGateways` 위임(네트워크 격리 필수), `nsg-appgw`(GatewayManager·AzureLoadBalancer·Internet 80/443 허용; IP 제한은 WAF 사용자 지정 규칙)) |
 | `snet-apim` | `192.168.6.0/27` | 아니오 | APIM 내부 모드(게이트웨이 사설 IP, 공인 IP 없음) |
 
-주소·프리픽스는 `infra/modules/network.bicep`의 템플릿 값이다. Private Endpoint·DNS zone은 `infra/modules/pe.bicep`와 `infra/modules/dns.bicep`로 리소스별(`infra/resources.bicep` 호출부)에 붙는다: Key Vault, Storage(blob/queue/table), Cosmos, AI Search, Foundry 계정, Service Bus, ACR, Functions.
+주소·프리픽스는 `infra/modules/network.bicep`의 템플릿 값이다. 서브넷마다 Bicep이 소유한 NSG가 붙는다: `snet-appgw`는 `nsg-appgw`, `snet-apim`은 `nsg-apim`(APIM 관리·LB·VNet 443과 Storage·SQL·Key Vault·Monitor 아웃바운드), 나머지 네 서브넷은 `nsg-agents`·`nsg-pe`·`nsg-functions`·`nsg-apps-int`(사용자 규칙 없이 Azure 기본 규칙만: VNet·AzureLoadBalancer 인바운드 허용, 인터넷 인바운드 거부). 테넌트 정책이 NSG 없는 서브넷에 빈 NSG를 붙이지만 Bicep이 소유하지 않으면 프로비저닝마다 연결이 풀려 "NSG 없는 서브넷" 경고가 뜨므로 직접 둔다(2026-11-10). Private Endpoint·DNS zone은 `infra/modules/pe.bicep`와 `infra/modules/dns.bicep`로 리소스별(`infra/resources.bicep` 호출부)에 붙는다: Key Vault, Storage(blob/queue/table), Cosmos, AI Search, Foundry 계정, Service Bus, ACR, Functions.
 
 ## AI 게이트웨이
 

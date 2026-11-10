@@ -903,3 +903,10 @@ python -m ops smoke
 - **탭 유지**(`9d16158`): 신청 상세에서 고른 탭을 `sessionStorage`(`tab:<경로>`)에 기억해 자동 새로고침·결정 뒤 이동에도 유지합니다. 결정 오류 재표시(`data-tab-reset`)만 서버 기본 탭을 씁니다. `window open --acr` → `ops deploy console`(`console:20261109070106`).
 - **요약 탭 심사역 결정 카드**(`f833894`): 승인·거절일 때만 요약 탭 맨 위에 신청 금액·기간, 승인 금액(승인일 때), 결정 시각, 정책 예외 승인 여부를 보입니다. 같은 창에서 `ops deploy console`(`console:20261109070732`) → `ops smoke` 성공(`job-smoke-kg1k4cd`) → 라이브 `app-20261109-3a9b70` 요약 탭에 "심사역 결정 승인 · 신청 5,000,000원 / 6개월 · 승인 5,000,000원" 확인 → **`window close`**, `/`·`/loans` 200.
 - **경보 카드 연락 연결**(`263d581`): 동작은 그대로(경보만으로는 연락하지 않음)이고, 미납 추심 건의 `recent_alert`로 경보와 연락을 이어 경보 카드에 "이 경보를 근거로 한 차주 연락"(회차·스크립트·상태·재조정 요청, 추심 카드 링크)과 스테퍼 `미납 추심 연락`·`재조정 결정` 단계를 보입니다. 연결이 없으면 "이 경보로 나간 차주 연락 없음". `window open --acr` → `ops deploy console`(`console:20261109073518`) → `ops smoke` 성공(`job-smoke-ref72kg`) → 라이브 `app-20261109-3a9b70` 12주차 높음 경보 카드에 "3회차 미납 추심 · routed · hardship_offer sent · 재조정 상담 요청 pending_officer", 나머지 경보 3장은 "연락 없음" 확인 → **`window close`**, `/`·`/loans` 200.
+
+## 2026-11-10 서브넷 NSG 직접 소유
+
+- **배경:** `vnet-amalend`에 "NSG 없는 서브넷" 보안 경고. `snet-agents`·`snet-pe`·`snet-functions`·`snet-apps-int`는 Bicep에 NSG가 없어 테넌트 정책이 붙인 빈 NSG(`vnet-amalend-snet-*-nsg-koreacentral`)에 기대고 있었고, 프로비저닝(`window open/close`)마다 연결이 풀렸다가 정책이 다시 붙였습니다.
+- **변경:** `infra/modules/network.bicep`이 `nsg-agents`·`nsg-pe`·`nsg-functions`·`nsg-apps-int`(사용자 규칙 없음, Azure 기본 규칙만 → 정책 NSG와 동작 동일)를 만들고 6개 서브넷 모두에 NSG를 연결합니다. 테스트 `tests/infra/test_network.py::test_every_subnet_has_owned_nsg`.
+- **라이브 적용:** 전체 프로비저닝 대신 같은 내용으로 `az network nsg create`(태그 `Control`·`azd-env-name`·`project`) → `az network vnet subnet update --network-security-group`를 서브넷별로 실행했습니다. 콘솔 `/`·`/loans`·`/loans/app-20261109-3a9b70` 200, `ops smoke` 성공(`job-smoke-i320hwq`). 연결이 없어진 정책 NSG 4개는 지웠습니다. 다음 프로비저닝은 이 상태와 일치합니다.
+- **콘솔 IP:** 운영자 IP가 바뀌어 WAF `allowOperatorOnly`에 새 IP 예외를 더하고 `CONSOLE_IP`를 갱신했습니다. `agw-amalend`가 `Stopped`라 시작했습니다.

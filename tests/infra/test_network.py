@@ -45,6 +45,18 @@ def test_subnets_and_delegations(closed):
     assert subnets["snet-appgw"]["addressPrefix"] == "192.168.7.0/24"
 
 
+def test_every_subnet_has_owned_nsg(closed):
+    # 정책이 붙이는 NSG에 맡기면 프로비저닝마다 연결이 풀려 "NSG 없는 서브넷" 경고가 뜹니다. 모두 직접 소유합니다.
+    subnets = _subnets(closed)
+    expected = {"snet-agents": "nsg-agents", "snet-pe": "nsg-pe", "snet-functions": "nsg-functions",
+                "snet-apps-int": "nsg-apps-int", "snet-appgw": "nsg-appgw", "snet-apim": "nsg-apim"}
+    for subnet, nsg in expected.items():
+        assert subnets[subnet]["networkSecurityGroup"]["id"].endswith(f"/networkSecurityGroups/{nsg}"), subnet
+    # 내부 서브넷 NSG는 Azure 기본 규칙(VNet·LB 인바운드 허용, 인터넷 인바운드 거부)만 씁니다.
+    for name in ("nsg-agents", "nsg-pe", "nsg-functions", "nsg-apps-int"):
+        assert closed.one("Microsoft.Network/networkSecurityGroups", name)["properties"]["securityRules"] == [], name
+
+
 def test_appgw_nsg_allows_web_and_platform(closed):
     nsg = closed.one("Microsoft.Network/networkSecurityGroups", "nsg-appgw")
     rules = {r["name"]: r["properties"] for r in nsg["properties"]["securityRules"]}
