@@ -907,6 +907,13 @@ python -m ops smoke
 ## 2026-11-10 서브넷 NSG 직접 소유
 
 - **배경:** `vnet-amalend`에 "NSG 없는 서브넷" 보안 경고. `snet-agents`·`snet-pe`·`snet-functions`·`snet-apps-int`는 Bicep에 NSG가 없어 테넌트 정책이 붙인 빈 NSG(`vnet-amalend-snet-*-nsg-koreacentral`)에 기대고 있었고, 프로비저닝(`window open/close`)마다 연결이 풀렸다가 정책이 다시 붙였습니다.
-- **변경:** `infra/modules/network.bicep`이 `nsg-agents`·`nsg-pe`·`nsg-functions`·`nsg-apps-int`(사용자 규칙 없음, Azure 기본 규칙만 → 정책 NSG와 동작 동일)를 만들고 6개 서브넷 모두에 NSG를 연결합니다. 테스트 `tests/infra/test_network.py::test_every_subnet_has_owned_nsg`.
+- **변경:** `infra/modules/network.bicep`이 `nsg-agents`·`nsg-pe`·`nsg-functions`·`nsg-apps-int`(사용자 규칙 없음, Azure 기본 규칙만 → 정책 NSG와 동작 동일)를 만들고 6개 서브넷 모두에 NSG를 연결합니다. 테스트 `tests/infra/test_network.py`의 `test_every_subnet_has_owned_nsg`.
 - **라이브 적용:** 전체 프로비저닝 대신 같은 내용으로 `az network nsg create`(태그 `Control`·`azd-env-name`·`project`) → `az network vnet subnet update --network-security-group`를 서브넷별로 실행했습니다. 콘솔 `/`·`/loans`·`/loans/app-20261109-3a9b70` 200, `ops smoke` 성공(`job-smoke-i320hwq`). 연결이 없어진 정책 NSG 4개는 지웠습니다. 다음 프로비저닝은 이 상태와 일치합니다.
 - **콘솔 IP:** 운영자 IP가 바뀌어 WAF `allowOperatorOnly`에 새 IP 예외를 더하고 `CONSOLE_IP`를 갱신했습니다. `agw-amalend`가 `Stopped`라 시작했습니다.
+
+## 2026-11-11 정산 인사이트·심사역 확인 사항 배포
+
+- **변경**(`feat/settlement-checks`, 스펙 `docs/superpowers/specs/2026-11-10-settlement-insights-officer-checks-design.md`): 정산 원장 지표 3종(`pg_cash_conversion_days`·`pg_offset_rate_trend_pp`·`pg_advance_share`/`pg_advance_suspected_count`, 선정산 비중은 미입금액 가중), 심사 분석가 `officer_checks`(최대 3개, 근거 검증) + 검토자 `check_verdicts`, 정산 대사 카드 KPI 5개·지표 읽는 법·에이전트 확인 사항, 심사 도우미 스냅샷에 확인 사항, 평가 지표 `settlement_check_rate`.
+- **배포:** `window open --acr` → `ops deploy orchestrator`(`func-gaz7yh2zic7zc`) → `ops deploy console`(`console:20261110233530`) → `ops smoke` 성공(`job-smoke-ccrx506`). 첫 시도는 로컬 DNS 일시 장애(패키지 피드·`management.azure.com` 조회 실패)로 실패해 재실행했습니다. 운영자 공인 IP가 통신사 대역 안에서 계속 바뀌어 창을 한 번 다시 열었습니다.
+- **라이브 확인:** `agw-amalend`가 `Stopped`라 시작했습니다. 새 신청 `app-20261111-5cbd5e`(mugshop-21): 선정산 추정 14건·미입금액의 100%, 미입금 표 "선지급 추정(…)", 에이전트 확인 사항 3개·검토자 검증 3/3(R108 0.774 근거, 거래 상대방 이름 없음). `app-20261111-3cb194`(dailylook-01): 선정산 추정 0건, 현금화 일수 18.7일, 확인 사항 3/3. 이전 신청 `app-20261110-a475cc`: 현금화 일수·선정산 추정 "—"와 "2026-11-10 이전 심사분은 확인 사항이 없습니다." 안내. 심사 도우미 "정산에서 확인할 점은?" → 확인 사항·R108 근거 답변. → **`window close`**.
+- **문서 테스트:** 위 NSG 항목의 `파일::테스트` 표기를 문서 경로 검사(`tests/docs`)가 읽을 수 있게 고쳤습니다.
