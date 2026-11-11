@@ -9,6 +9,8 @@
 - 정산 프로필에 예정 출금 일정(forecast.outflow_schedule)이 있으면 주차마다 4주 잔고 전망을 계산해
   projected_min_balance·projected_min_date·shortfall_date를 주차 행에 넣는다(스펙 §12.2). 최저 잔고가 0 아래면 projected_shortfall.
 - 탐지기는 결정적 규칙이다. 남는 오탐(명절 이동 등)을 거르는 일은 Early-Warning 에이전트의 몫이다(스펙 §3.3).
+- 자체 대출금 입금(LENDER_CREDIT)과 선정산 선지급은 loan_proceeds에서 빼고 advance_in으로 따로 센다(스펙 §5.5).
+  원장 트리거 4개와 주간 원장 필드는 `agents/ledger_monitor.py`가 채운다(detect는 기존 5개만 본다).
 - 근거 ID: W:{주차}:{필드}, F:{주차}:{전망 필드}, B:{기준선 이름}, B:index:{MM}, B:cohort:{이름}.
 """
 
@@ -23,6 +25,7 @@ from agents.features import DAYS_PER_MONTH, OPERATING_OUT
 from agents.forecast import outflow_schedule, project, summarize
 from agents.settlement import expected_revenue, settlement_profile
 from shared.contracts import Transaction
+from shared.repayment import LENDER_CREDIT
 
 WEEKS = 13
 INFLOW_DROP_RATIO = 0.75
@@ -30,7 +33,18 @@ EXPECTED_WEEKS = 3  # revenue_vs_expected를 재는 주 수(최근 n주 합)
 BUFFER_DROP_RATIO = 0.5
 VOLATILITY_WEEKS = 4
 VOLATILITY_COV = 0.15
-TRIGGERS = ("inflow_drop", "buffer_drop", "volatility_spike", "new_debt", "projected_shortfall")
+TRIGGERS = (
+    "inflow_drop",
+    "buffer_drop",
+    "volatility_spike",
+    "new_debt",
+    "projected_shortfall",
+    # 원장 트리거(agents/ledger_monitor.py가 계산한다, 2026-11-11). detect는 위 5개만 본다.
+    "sales_slump",
+    "settlement_hold",
+    "return_spike",
+    "cost_surge",
+)
 WEEK_FIELDS = (
     "revenue",
     "revenue_ratio",
@@ -44,8 +58,19 @@ WEEK_FIELDS = (
     "unclassified_in",
     "end_balance",
     "buffer_days",
+    # 선정산 선지급과 주간 원장 집계(ledger_monitor.observe가 채운다, 2026-11-11)
+    "advance_in",
+    "order_gross",
+    "orders_vs_expected",
+    "returns",
+    "return_rate",
+    "held",
+    "deductions",
+    "deduction_rate",
+    "settle_net",
 )
 FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date")
+ADVANCE_KEYWORD = "선정산"  # 정산 양도 선지급 입금 적요. 매출도 신규 차입도 아니다(스펙 §5.5)
 _UNCLASSIFIED = (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
 
 # 합성 업종 집단 통계(데모용 고정 표). 실제 운영에서는 집단 통계 저장소에서 읽는다.
@@ -193,11 +218,20 @@ def weekly_series(
         if txns:
             balance = txns[-1].balance_after_krw
         revenue = total(Category.REVENUE)
+        # 자체 대출금 입금과 선정산 선지급은 신규 차입이 아니다(스펙 §5.5). 선지급은 따로 센다.
+        advance_in = sum(t.amount_krw for t in txns if t.amount_krw > 0 and ADVANCE_KEYWORD in t.description)
+        loan_proceeds = sum(
+            t.amount_krw for t in txns
+            if categories[t.txn_id] is Category.LOAN_PROCEEDS
+            and t.description != LENDER_CREDIT and ADVANCE_KEYWORD not in t.description
+        )
         end_balance = balance if balance is not None else 0
         revenue_ratio = round(revenue / baseline.avg_weekly_revenue, 3) if baseline.avg_weekly_revenue else 0.0
         if baseline.settlement:
             expected = expected_revenue(baseline.settlement, lo, hi)
-            window = [*window, (revenue, expected)][-EXPECTED_WEEKS:]
+            # 선정산 양도분은 정산금이 선지급사를 거쳐 들어온 것이라 기대 입금과 견줄 때는 매출 쪽에 둔다
+            # (빼면 양도 셀러가 13주 내내 매출이 준 것처럼 보인다, 스펙 §5.5).
+            window = [*window, (revenue + advance_in, expected)][-EXPECTED_WEEKS:]
             total_expected = sum(e for _, e in window)
             vs_expected = round(sum(r for r, _ in window) / total_expected, 3) if total_expected else 0.0
         else:
@@ -215,7 +249,8 @@ def weekly_series(
                 "debt_service": -total(Category.LOAN_REPAYMENT, Category.HIGH_COST_LENDER),
                 "high_cost_lender": -total(Category.HIGH_COST_LENDER),
                 "high_cost_count": sum(1 for t in txns if categories[t.txn_id] is Category.HIGH_COST_LENDER),
-                "loan_proceeds": total(Category.LOAN_PROCEEDS),
+                "loan_proceeds": loan_proceeds,
+                "advance_in": advance_in,
                 "unclassified_in": total(Category.UNCLASSIFIED_IN),
                 "end_balance": end_balance,
                 "buffer_days": round(max(end_balance, 0) / baseline.operating_daily_krw, 1)

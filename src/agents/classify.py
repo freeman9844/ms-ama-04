@@ -35,6 +35,7 @@ _RULES: tuple[tuple[str, str | None, Category], ...] = (
     ("TRANSFER_OUT", "급여", Category.PAYROLL),
     ("TRANSFER_OUT", "개인이체", Category.OWNER_TRANSFER),
     ("TRANSFER_IN", "대출금", Category.LOAN_PROCEEDS),
+    ("TRANSFER_IN", "대출실행", Category.LOAN_PROCEEDS),  # 자체 대출금 입금(사후 재생 1일차, 2026-11-11)
     ("TRANSFER_IN", "선정산", Category.LOAN_PROCEEDS),
 )
 

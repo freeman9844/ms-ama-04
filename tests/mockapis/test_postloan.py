@@ -310,7 +310,9 @@ def test_sales_slump_story_on_the_seller_engine(cafe):
     flow = generate_postloan(cafe, FlowScenario.SALES_SLUMP, AS_OF, 7)
     by_desc = lambda d: [t for t in flow.transactions if t.description == d]  # noqa: E731
     (capex,) = by_desc("시즌 재고 대량 선매입")
-    assert capex.booked_on == AS_OF + timedelta(days=2) and capex.amount_krw < -cafe.persona.monthly_sales_krw / 4
+    # 월 매출의 1/5 이상을 한 번에 지른다. 주 마감 잔고는 CAPEX_WEEK_FLOOR_RATIO만큼 남겨 두므로(원장 모니터가
+    # 주문 하락보다 잔고 경보를 먼저 울리지 않게 한다) 선매입이 잔고를 바닥까지 비우지는 않는다.
+    assert capex.booked_on == AS_OF + timedelta(days=2) and capex.amount_krw < -cafe.persona.monthly_sales_krw / 5
     dues = by_desc("시즌 재고 외상 잔금")
     # 매주 같은 금액이고, 계절 매출이 받쳐 주면 목표 범위 안 한 주만 잔금을 몰아 낸다.
     assert len(dues) >= 8 and len({t.amount_krw for t in dues}) <= 2
