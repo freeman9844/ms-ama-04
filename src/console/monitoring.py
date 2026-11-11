@@ -76,6 +76,17 @@ PROPOSAL_LABELS = {
 PLAN_OPTION_LABELS = {"move": "상환일 이동", "split": "분할납부", "keep": "지금 일정 유지"}
 OFFER_LABELS = {"open": "고객 응답 대기", "chosen": "고객 선택", "kept": "유지 선택", "expired": "만료(고객 응답 없이 계속)"}
 PLAN_CHANGE_LABELS = {"pending_officer": "심사역 승인 대기", "approved": "승인", "declined": "반려"}
+# 차주 화면의 셀프 플랜 상태(borrower_plan의 status). 심사역 ID·결정 사유는 차주에게 보이지 않는다.
+BORROWER_PLAN_LABELS = {
+    "open": "플랜을 골라 주세요",
+    "reviewing": "심사역 확인 중",
+    "approved": "승인(상환 일정 변경)",
+    "declined": "반려(지금 일정대로 상환)",
+    "kept": "지금 일정 유지",
+    "expired": "만료",
+}
+# 차주 화면 "받은 안내"에 싣는 연락(조기경보 단계 안내·5일 전 추가 안내·심사역 승인 추심 문구).
+BORROWER_NOTICE_BY = ("early_warning", "early_reminder", "officer")
 # 템플릿 필터 이름 → 라벨(없는 값은 원문 그대로).
 MONITORING_FILTERS = {
     "hold_label": HOLD_LABELS,
@@ -87,6 +98,7 @@ MONITORING_FILTERS = {
     "plan_option_label": PLAN_OPTION_LABELS,
     "offer_label": OFFER_LABELS,
     "plan_change_label": PLAN_CHANGE_LABELS,
+    "borrower_plan_label": BORROWER_PLAN_LABELS,
 }
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
 CAUSE_LABELS = {
@@ -287,3 +299,31 @@ def _plan_view(led: Mapping[str, Any]) -> dict[str, Any]:
 def _pending(request: Mapping[str, Any] | None) -> bool:
     """재조정 요청·추심 제안·플랜 변경 요청이 심사역 결정을 기다리는지."""
     return bool(request) and request.get("status") == "pending_officer"
+
+
+def borrower_plan(loan: Mapping[str, Any], contacts: Mapping[str, Any] | None) -> dict[str, Any]:
+    """차주 화면의 대출별 셀프 플랜 제안·플랜 변경 결과·받은 안내(2026-11-11)."""
+    led = loan.get("repayment") or {}
+    offer, change = led.get("offer"), led.get("plan_change")
+    notices = sorted(
+        (
+            {"on": c.get("on") or "", "script_id": c.get("script_id"), "text": c.get("text"),
+             "status": c.get("status"), "reason": c.get("reason")}
+            for c in (contacts or {}).get("contacts") or ()
+            if c.get("by") in BORROWER_NOTICE_BY
+        ),
+        key=lambda n: n["on"],
+    )
+    return {"loan_id": loan["id"], "offer": offer, "plan_change": change, "notices": notices,
+            "status": _borrower_plan_status(offer, change)}
+
+
+def _borrower_plan_status(offer: Mapping[str, Any] | None, change: Mapping[str, Any] | None) -> str | None:
+    if not offer:
+        return None
+    status = offer.get("status")
+    if status != "chosen":
+        return status
+    if change and change.get("status") in ("approved", "declined"):
+        return change["status"]
+    return "reviewing"

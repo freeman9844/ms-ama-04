@@ -78,9 +78,7 @@
 <p><small>승인·수정한 문구는 보낼 때 실제 시각으로 연락 시간(08~21시)·7일 7회를 다시 검사하고, 걸리면 보류합니다.</small></p>
 {% endif %}
 {%- endmacro %}
-{% macro plan_items(items) -%}
-{% for i in items %}{{ i|installment_label }} {% if i.from_due_on and i.from_due_on != i.due_on %}{{ i.from_due_on }} → {% endif %}{{ i.due_on }} · {{ i.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}
-{%- endmacro %}
+{% from "_plan.html" import plan_items %}
 {% set l = v.loan %}{% set m = v.monitoring %}
 {% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }}">{% endif %}<script src="/static/decision.js" defer></script>{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}

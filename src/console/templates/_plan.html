@@ -1,0 +1,4 @@
+{# 셀프 상환 플랜의 바뀌는 회차 목록(대출 화면·차주 화면 공용). #}
+{% macro plan_items(items) -%}
+{% for i in items %}{{ i|installment_label }} {% if i.from_due_on and i.from_due_on != i.due_on %}{{ i.from_due_on }} → {% endif %}{{ i.due_on }} · {{ i.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+{%- endmacro %}

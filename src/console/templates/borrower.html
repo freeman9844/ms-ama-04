@@ -1,10 +1,69 @@
 {% extends "base.html" %}
 {% set nav = "borrower" %}
+{% from "_plan.html" import plan_items %}
 {% block title %}{{ applicant_id }} · 차주 시뮬레이터{% endblock %}
 {% block main %}
 <p><a href="/borrower">← 차주 선택</a></p>
 <h1>{{ applicant_id }} <small>차주 화면(데모)</small></h1>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+{% if plans %}
+<section id="self-plan">
+<h2>상환 플랜 제안</h2>
+{% for p in plans %}{% set o = p.offer %}
+<article class="plan">
+{% if not o %}
+<h3>{{ p.loan_id }}</h3>
+<p>받은 상환 플랜 제안이 없습니다.</p>
+{% else %}
+<h3>{{ p.loan_id }} <span class="status">{{ p.status|borrower_plan_label }}</span> <small>{{ o.sent_on }} 안내</small></h3>
+{% if p.status == "open" %}
+<p class="note">최근 자금 흐름을 고려해 다음 상환 방법 중 하나를 고르실 수 있습니다. 상환일 이동·분할납부는 심사역이 확인한 뒤 일정이 바뀌고, 지금 일정 유지는 바로 반영됩니다.</p>
+{% elif p.status == "reviewing" %}
+<p class="note">고르신 플랜을 심사역이 확인하고 있습니다. 확인 전까지는 지금 일정대로 상환됩니다.</p>
+{% elif p.status == "approved" %}
+<p class="note">고르신 플랜이 승인되어 상환 일정이 바뀌었습니다.</p>
+{% elif p.status == "declined" %}
+<p class="note">고르신 플랜이 반려되어 지금 일정대로 상환됩니다.</p>
+{% elif p.status == "expired" %}
+<p class="note">제안이 만료되었습니다. 지금 일정대로 상환됩니다.</p>
+{% endif %}
+<table>
+  <thead><tr><th>플랜</th><th>바뀔 일정</th></tr></thead>
+  <tbody>{% for op in o.options or () %}
+<tr><td>{{ op.option|plan_option_label }}{% if op.option == o.choice %} <span class="chip">선택</span>{% endif %}</td>
+<td>{% if op["items"] %}{{ plan_items(op["items"]) }}{% else %}지금 일정 그대로{% endif %}</td></tr>
+{% endfor %}</tbody>
+</table>
+{% if p.status == "open" and user.can_decide %}
+<form method="post" action="/borrower/{{ applicant_id|path }}/plan" class="decision">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="loan_id" value="{{ p.loan_id }}">
+  <input type="hidden" name="offer_id" value="{{ o.offer_id }}">
+  {% for op in o.options or () %}<button type="submit" name="option" value="{{ op.option }}">{{ op.option|plan_option_label }} 선택</button> {% endfor %}
+</form>
+{% endif %}
+{% endif %}
+</article>
+{% endfor %}
+</section>
+
+<section id="notices">
+<h2>받은 안내</h2>
+{% set notices = plans|map(attribute="notices")|sum(start=[]) %}
+{% if notices %}
+<table>
+  <thead><tr><th>날짜</th><th>안내</th><th>상태</th></tr></thead>
+  <tbody>{% for n in notices|sort(attribute="on") %}
+<tr><td>{{ n.on }}</td><td>{{ n.text or (n.script_id|script_label) }}</td>
+<td>{{ n.status|contact_status_label }}{% if n.reason %} · {{ n.reason|contact_reason_label }}{% endif %}</td></tr>
+{% endfor %}</tbody>
+</table>
+{% else %}
+<p>받은 안내가 없습니다.</p>
+{% endif %}
+</section>
+{% endif %}
 
 <section>
 <h2>동의 관리</h2>

@@ -44,10 +44,12 @@ from console.monitoring import (
     ACTION_LABELS,
     MONITORING_FILTERS,
     MONITORING_LABELS,
+    PLAN_OPTION_LABELS,
     REPAYMENT_LABELS,
     SEVERITY_LABELS,
     TRIGGER_LABELS,
     MonitoringStore,
+    borrower_plan,
     installment_label,
     load_monitoring_raw,
     loan_view,
@@ -78,6 +80,7 @@ from journey.models import (
     GrievanceSubmission,
     OfferExpire,
     OfficerMessage,
+    PlanChoice,
     PlanDecision,
     ReplayRequest,
     RestructureDecision,
@@ -666,8 +669,23 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 applications.append(doc)
         return render(
             "borrower.html", user, status_code, applicant_id=applicant_id, consents=consents,
-            applications=applications, grievances=store.grievances_for_applicant(applicant_id), **ctx,
+            applications=applications, grievances=store.grievances_for_applicant(applicant_id),
+            plans=borrower_plans(applicant_id, applications), **ctx,
         )
+
+    def borrower_plans(applicant_id: str, applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """신청별 대출(대출 id = 신청 id)의 셀프 플랜 제안과 받은 안내. 모니터링이 없으면 빈 목록."""
+        if deps.monitoring is None:
+            return []
+        plans = []
+        for doc in applications:
+            loan = deps.monitoring.get_loan(doc["application_id"])
+            if loan is None or loan.get("applicant_id") != applicant_id:
+                continue
+            replay_id = (loan.get("monitoring") or {}).get("replay_id")
+            contacts = deps.monitoring.get_contacts(loan["id"], replay_id) if replay_id else None
+            plans.append(borrower_plan(loan, contacts))
+        return plans
 
     @app.get("/borrower", response_class=HTMLResponse)
     def borrower_index(request: Request) -> HTMLResponse:
@@ -719,6 +737,30 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         back = f"/borrower/{quote(applicant_id, safe='')}"
         return sent(user, f"이의제기 {message.grievance_id}를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.",
                     back, "차주 화면으로")
+
+    @app.post("/borrower/{applicant_id}/plan", response_class=HTMLResponse)
+    async def borrower_plan_choice(applicant_id: str, request: Request) -> HTMLResponse:
+        """셀프 상환 플랜 선택. 만료(고객 응답 없이 계속)·응답이 끝난 제안에는 고를 수 없다(409)."""
+        user = decider(request)
+        form = await checked_form(request, user)
+        loan = monitoring_store().get_loan(form.get("loan_id", ""))
+        if loan is None or loan.get("applicant_id") != applicant_id:
+            raise HTTPException(404, "loan not found")
+        offer = (loan.get("repayment") or {}).get("offer")
+        if not offer or offer.get("status") != "open" or offer.get("offer_id") != form.get("offer_id"):
+            return borrower_page(user, applicant_id, 409, error="이미 마감된 상환 플랜 제안입니다.")
+        option = form.get("option", "")
+        if option not in {o.get("option") for o in offer.get("options") or ()}:
+            return borrower_page(user, applicant_id, 422, error="제안에 없는 플랜입니다.")
+        try:
+            message = PlanChoice(kind="plan_choice", loan_id=loan["id"], offer_id=offer["offer_id"], option=option)
+        except ValidationError:
+            return borrower_page(user, applicant_id, 422, error="제안에 없는 플랜입니다.")
+        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        label = PLAN_OPTION_LABELS[message.option]
+        text = (f"플랜({label})을 선택했습니다. 지금 일정대로 상환합니다." if message.option == "keep"
+                else f"플랜({label})을 선택했습니다. 심사역이 확인하면 결과가 차주 화면에 표시됩니다.")
+        return sent(user, text, f"/borrower/{quote(applicant_id, safe='')}#self-plan", "차주 화면으로")
 
     @app.post("/applications/{application_id}/consents/{consent_id}/{action}", response_class=HTMLResponse)
     async def consent_demo(application_id: str, consent_id: str, action: str, request: Request) -> HTMLResponse:

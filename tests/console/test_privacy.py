@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from console.app import ConsoleDeps, create_app
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER
+from tests.console.test_monitoring import NOW, FakeMonitoring, plan_loan
 
 OID = "http://schemas.microsoft.com/identity/claims/objectidentifier"
 
@@ -379,3 +380,137 @@ def test_privacy_pages_404_when_not_configured(make_doc, raw, key):
     for path in ("/borrower/seller-dailylook-01", "/grievances", "/consents/c-1/proof"):
         assert client.get(path, headers=OFFICER).status_code == 404
     assert client.get("/applications/app-1", headers=OFFICER).status_code == 200
+
+# ── 셀프 상환 플랜(2026-11-11) ──
+
+PLAN_PATH = "/borrower/seller-dailylook-01/plan"
+BORROWER = "/borrower/seller-dailylook-01"
+
+
+@pytest.fixture
+def plan_env(make_doc, raw, key):
+    def build(loan, contacts=None):
+        queue = FakeQueue()
+        deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=queue, pseudonym_key=key,
+                           privacy=FakePrivacy([consent("c-1", "app-1")], [], []),
+                           monitoring=FakeMonitoring([loan], [], contacts))
+        return TestClient(create_app(deps), follow_redirects=False), queue
+
+    return build
+
+
+def self_plan(page):
+    start = page.index('id="self-plan"')
+    return page[start:page.index("</section>", start)]
+
+
+def choose(client, **form):
+    return post(client, OFFICER, PLAN_PATH, BORROWER, **({"loan_id": "app-1", "offer_id": "of-rp-1"} | form))
+
+
+def test_borrower_sees_open_offer_with_option_schedules(plan_env):
+    client, _ = plan_env(plan_loan(offer_status="open", change_status=None, holds=("customer_response",),
+                                   status="awaiting_customer"))
+    section = self_plan(client.get(BORROWER, headers=OFFICER).text)
+    assert "상환 플랜 제안" in section
+    for s in ("상환일 이동", "분할납부", "지금 일정 유지", "3회차", "2026-11-30 → 2026-12-04", "1,779,000원",
+              "3-1회차", "3-2회차", "889,500원"):
+        assert s in section, s
+    assert f'action="{PLAN_PATH}"' in section
+    assert 'name="loan_id" value="app-1"' in section and 'name="offer_id" value="of-rp-1"' in section
+    for option in ("move", "split", "keep"):
+        assert f'name="option" value="{option}"' in section
+    # 감사자는 보기만 한다.
+    auditor = self_plan(client.get(BORROWER, headers=AUDITOR_H).text)
+    assert "분할납부" in auditor and f'action="{PLAN_PATH}"' not in auditor
+
+
+def test_borrower_choice_queues_plan_choice(plan_env):
+    client, queue = plan_env(plan_loan(offer_status="open", change_status=None, holds=("customer_response",),
+                                       status="awaiting_customer"))
+    resp = choose(client, option="move")
+    assert resp.status_code == 202, resp.text
+    assert queue.sent == [("restructure-decisions", {"kind": "plan_choice", "loan_id": "app-1",
+                                                     "offer_id": "of-rp-1", "option": "move"})]
+
+
+@pytest.mark.parametrize("offer_status, offer_id", [("expired", "of-rp-1"), ("chosen", "of-rp-1"),
+                                                    ("open", "of-rp-old")])
+def test_borrower_choice_on_expired_offer_is_409(plan_env, offer_status, offer_id):
+    change = None if offer_status != "chosen" else "pending_officer"
+    client, queue = plan_env(plan_loan(offer_status=offer_status, change_status=change))
+    resp = choose(client, option="keep", offer_id=offer_id)
+    assert resp.status_code == 409 and "상환 플랜 제안" in resp.text
+    assert queue.sent == []
+
+
+def test_borrower_choice_unknown_option_is_422(plan_env):
+    loan = plan_loan(offer_status="open", change_status=None, holds=("customer_response",), status="awaiting_customer")
+    loan["repayment"]["offer"]["options"] = [o for o in loan["repayment"]["offer"]["options"] if o["option"] != "move"]
+    client, queue = plan_env(loan)
+    assert choose(client, option="move").status_code == 422
+    assert choose(client, option="later").status_code == 422
+    assert queue.sent == []
+    # 다른 차주의 대출·없는 대출은 404, 감사자는 403.
+    other = plan_loan(offer_status="open", change_status=None) | {"applicant_id": "seller-knitroom-04"}
+    client2, queue2 = plan_env(other)
+    assert choose(client2, option="keep").status_code == 404
+    assert choose(client2, option="keep", loan_id="app-x").status_code == 404
+    token = csrf(client, OFFICER, BORROWER)
+    assert client.post(PLAN_PATH, headers=AUDITOR_H, data={"csrf": token, "loan_id": "app-1", "offer_id": "of-rp-1",
+                                                           "option": "keep"}).status_code == 403
+    assert queue2.sent == []
+
+
+def test_expired_offer_is_shown_as_expired(plan_env):
+    loan = plan_loan(offer_status="expired", change_status=None, holds=(), status="awaiting_resume")
+    loan["repayment"]["offer"].update(choice=None, expired_at=NOW.isoformat(), expired_by="oid-officer")
+    client, _ = plan_env(loan)
+    section = self_plan(client.get(BORROWER, headers=OFFICER).text)
+    assert "만료" in section and f'action="{PLAN_PATH}"' not in section and "oid-officer" not in section
+
+
+@pytest.mark.parametrize("offer_status, change_status, text", [
+    ("chosen", "pending_officer", "심사역 확인 중"),
+    ("chosen", "approved", "승인"),
+    ("chosen", "declined", "반려"),
+    ("kept", None, "지금 일정 유지"),
+])
+def test_responded_offer_shows_result_without_buttons(plan_env, offer_status, change_status, text):
+    loan = plan_loan(offer_status=offer_status, change_status=change_status)
+    if change_status in ("approved", "declined"):
+        loan["repayment"]["plan_change"].update(officer_id="oid-officer", decided_at=NOW.isoformat(), reason="내부 메모")
+    client, _ = plan_env(loan)
+    section = self_plan(client.get(BORROWER, headers=OFFICER).text)
+    assert text in section and f'action="{PLAN_PATH}"' not in section
+    assert "oid-officer" not in section and "내부 메모" not in section
+
+
+def test_borrower_sees_received_notices(plan_env):
+    contacts = {("app-1", "rp-1"): {"id": "contacts-rp-1", "loan_id": "app-1", "contacts": [
+        {"ref": "rp-1-i1", "on": "2026-09-28", "at": NOW.isoformat(), "script_id": "payment_reminder",
+         "status": "sent", "reason": None, "by": "reminder"},
+        {"ref": "rp-1-s1", "on": "2026-09-10", "at": NOW.isoformat(), "script_id": "balance_warning",
+         "status": "sent", "reason": None, "by": "early_warning", "text": "잔고 부족 예상 안내 문구입니다."},
+        {"ref": "rp-1-i3", "on": "2026-11-25", "at": NOW.isoformat(), "script_id": "early_reminder",
+         "status": "deferred", "reason": "weekly_limit", "by": "early_reminder", "text": "5일 전 추가 안내 문구입니다."},
+        {"ref": "rc-rp-1-i1", "on": "2026-10-01", "at": NOW.isoformat(), "script_id": "missed_payment",
+         "status": "sent", "reason": None, "by": "officer", "text": "심사역이 승인한 안내 문구입니다.",
+         "officer_id": "oid-officer"},
+    ]}}
+    client, _ = plan_env(plan_loan(offer_status="open", change_status=None), contacts)
+    page = client.get(BORROWER, headers=OFFICER).text
+    start = page.index('id="notices"')
+    section = page[start:page.index("</section>", start)]
+    for s in ("받은 안내", "2026-09-10", "잔고 부족 예상 안내 문구입니다.", "2026-11-25", "5일 전 추가 안내 문구입니다.",
+              "보류", "2026-10-01", "심사역이 승인한 안내 문구입니다.", "발송"):
+        assert s in section, s
+    assert section.index("2026-09-10") < section.index("2026-10-01") < section.index("2026-11-25")
+    assert "2026-09-28" not in section and "oid-officer" not in section
+
+
+def test_borrower_page_without_loan_has_no_plan_section(plan_env):
+    loan = plan_loan(offer_status="open", change_status=None) | {"applicant_id": "seller-knitroom-04"}
+    client, _ = plan_env(loan)
+    page = client.get(BORROWER, headers=OFFICER).text
+    assert 'id="self-plan"' not in page and "c-1" in page
