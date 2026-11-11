@@ -7,11 +7,13 @@
 """
 
 from collections import Counter
+from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
+from agents.escalation import next_stage
 from agents.features import compute_underwriting, monthly_installment
 from agents.ledger_monitor import ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, settlement_for, week_window
@@ -40,6 +42,23 @@ def baseline_for(p: EwPath) -> Baseline:
         },
         installment_krw=round(monthly_installment(REQUESTED_AMOUNT_KRW, REQUESTED_TENOR_MONTHS)),
     )
+
+
+def escalation_weeks(weeks: Sequence[Mapping[str, Any]]) -> dict[str, int | None]:
+    """경보가 난 주차의 심각도로 운영과 같은 단계 판정(next_stage)을 차례로 적용해 단계별 첫 도달 주차를 잰다.
+    발송은 모두 sent로 본다(평가에는 연락 시각·횟수 제한이 없다)."""
+    severities: list[str] = []
+    escalation: dict[str, Any] = {}
+    reached: dict[str, int | None] = {"stage1_week": None, "stage2_week": None}
+    for w in weeks:
+        if not w.get("severity"):
+            continue
+        severities.append(w["severity"])
+        stage = next_stage(severities, escalation)
+        if stage is not None:
+            escalation[f"stage{stage}"] = {"status": "sent"}
+            reached[f"stage{stage}_week"] = w["week"]
+    return reached
 
 
 def replay(p: EwPath, model: str, *, meter: Meter, runner: EvalRunner, pseudonym_key: bytes) -> dict[str, Any]:
@@ -108,6 +127,7 @@ def replay(p: EwPath, model: str, *, meter: Meter, runner: EvalRunner, pseudonym
         "in_window": bool(first and onset_week and first["week"] <= onset_week + ALERT_WINDOW_WEEKS),  # 조기 경보 포함
         "default_on": default_on.isoformat() if default_on else None,
         "lead_days": (default_on - date.fromisoformat(first["as_of"])).days if first and default_on else None,
+        "escalation": escalation_weeks(alerts),
         "weeks": weeks,
     }
 
@@ -166,6 +186,8 @@ def run(paths: list[EwPath], models: list[str], *, meter: Meter, runner: EvalRun
             "in_window_rate": rate(sum(r["in_window"] for r in ok if r["positive"]), sum(r["positive"] for r in ok)),
             "mean_lead_days": round(sum(leads) / len(leads), 1) if leads else None,
             "lead_days": leads,
+            "stage1_paths": sum(r["escalation"]["stage1_week"] is not None for r in ok),
+            "stage2_paths": sum(r["escalation"]["stage2_week"] is not None for r in ok),
             **cost,
         }
         if detector is None and ok:

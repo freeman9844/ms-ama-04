@@ -7,6 +7,7 @@ from evals.fake import FakeAzure
 from evals.metering import Meter
 from evals.runner import EvalRunner
 from evals.suites import early_warning
+from shared.contracts import AlertSeverity
 
 KEY = b"k" * 32
 
@@ -35,6 +36,40 @@ def test_fake_run_scores_causes():
     assert all(rows[p.path_id]["first_alert_cause"] == p.flow.cause.value
                for p in datasets.ew_paths() if p.positive)
     assert all(rows[p.path_id]["in_window"] for p in datasets.ew_paths() if p.positive)
+
+
+def test_escalation_weeks():
+    weeks = [{"week": 3, "severity": "high"}, {"week": 5, "severity": "medium"}, {"week": 7, "severity": "high"}, {"week": 9, "severity": "high"}]
+    assert early_warning.escalation_weeks(weeks) == {"stage1_week": 3, "stage2_week": 9}
+
+
+def test_escalation_weeks_ignores_non_alert_weeks():
+    weeks = [{"week": 2, "severity": None}, {"week": 4, "severity": "high"}, {"week": 6, "severity": None},
+             {"week": 8, "severity": "high"}]
+    assert early_warning.escalation_weeks(weeks) == {"stage1_week": 4, "stage2_week": 8}
+    assert early_warning.escalation_weeks([{"week": 1, "severity": "medium"}]) == {"stage1_week": None, "stage2_week": None}
+
+
+def test_fake_run_reports_stage_counts(monkeypatch):
+    # 가짜 백엔드는 medium만 올리므로, 모든 경보를 high로 올려 경로별 단계 도달을 잰다.
+    real = early_warning.investigate
+
+    def high(ctx, **kw):
+        result = real(ctx, **kw)
+        if result.alert is not None:
+            result.alert = result.alert.model_copy(update={"severity": AlertSeverity("high")})
+        return result
+
+    monkeypatch.setattr(early_warning, "investigate", high)
+    out, model = _run(datasets.ew_paths())
+    m = out["configs"][model]
+    assert {"stage1_paths", "stage2_paths"} <= set(m)
+    rows = [r for r in out["cases"] if r["status"] == "ok"]
+    alerted = [r for r in rows if r["agent_alerted"]]
+    assert m["stage1_paths"] == len(alerted) > 0
+    assert all(r["escalation"]["stage1_week"] == r["first_alert_week"] for r in alerted)
+    assert m["stage2_paths"] == sum(r["escalation"]["stage2_week"] is not None for r in rows)
+    assert all(r["escalation"] == {"stage1_week": None, "stage2_week": None} for r in rows if not r["agent_alerted"])
 
 
 def test_wrong_cause_is_reported(monkeypatch):
