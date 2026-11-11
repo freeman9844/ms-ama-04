@@ -363,8 +363,8 @@ def _refresh_hold(deps: Deps, loan_id: str) -> None:
         case_id = mon.get("pause_case_id") or mon.get("pause_alert_id")
         case = deps.store.read(ALERTS, case_id, loan_id) if case_id else None
         if case_id and case is None:
-            log.warning("멈춤 사유 문서가 없어 대기 항목을 갱신하지 않음: %s %s", loan_id, case_id)
-            return
+            # 추심 건 항목은 알 수 없지만 대출 단위 항목(고객 응답·플랜 변경)은 계속 본다.
+            log.warning("멈춤 사유 문서가 없어 대출 단위 대기 항목만 봄: %s %s", loan_id, case_id)
         holds = pending_holds(loan, case)  # type: ignore[arg-type]
         status = held_status(holds)
         if status == mon["status"] and holds == mon.get("holds"):
@@ -700,6 +700,9 @@ def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
     request = (doc or {}).get("restructure")
     if not request or request.get("status") != "pending_officer":
         log.warning("대기 중인 재조정 요청 없음: %s", msg.alert_id)
+        if request:
+            # 재전달: 결정은 기록됐지만 대기 항목 갱신 전에 실패했을 수 있다. 다시 결정하지 않고 상태만 고친다.
+            _refresh_hold(deps, msg.loan_id)
         return False
     status = "approved" if msg.decision == "approve" else "declined"
     request.update(
@@ -714,12 +717,20 @@ def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
 def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
     """추심 제안 승인·수정·반려. 추심 건 문서(제안·상태·재조정 요청)를 먼저 쓰고 연락을 기록한 뒤 대기 항목을 갱신한다.
 
-    제안이 대기 중이 아니면(큐 재전달·이미 결정) 아무것도 하지 않는다. 결정 오류(금지 표현 등)면 문서를 바꾸지 않는다.
+    결정 오류(금지 표현 등)면 문서를 바꾸지 않는다. 제안이 이미 결정됐으면(큐 재전달) 다시 결정하지 않고 False를 돌려주되,
+    앞선 처리가 문서를 쓴 뒤 실패했을 수 있으니 제안에 남긴 연락을 기록하고(ref·by로 중복 제거) 대기 항목을 갱신한다.
     """
     for _ in range(WRITE_ATTEMPTS):
         doc = deps.store.read(ALERTS, msg.case_id, msg.loan_id)
-        if (doc or {}).get("kind") != "repayment_case" or ((doc or {}).get("proposal") or {}).get("status") != "pending_officer":
+        proposal = (doc or {}).get("proposal")
+        if (doc or {}).get("kind") != "repayment_case" or not proposal:
             log.warning("대기 중인 추심 제안 없음: %s", msg.case_id)
+            return False
+        if proposal.get("status") != "pending_officer":
+            log.warning("이미 결정된 추심 제안: %s", msg.case_id)
+            if proposal.get("contact") is not None:
+                _append_contact(deps, msg.loan_id, doc["replay_id"], proposal["contact"])  # type: ignore[index]
+            _refresh_hold(deps, msg.loan_id)
             return False
         settled = settle_proposal(
             doc["proposal"],  # type: ignore[index]
@@ -735,7 +746,7 @@ def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
         if settled.errors:
             log.warning("추심 결정 반영 불가: %s %s", msg.case_id, settled.errors)
             return False
-        doc["proposal"] = settled.proposal  # type: ignore[index]
+        doc["proposal"] = settled.proposal | {"contact": settled.contact}  # type: ignore[index]
         if settled.restructure is not None:
             doc["restructure"] = settled.restructure  # type: ignore[index]
             doc["status"] = "restructure_pending"  # type: ignore[index]
@@ -768,4 +779,5 @@ def _append_contact(deps: Deps, loan_id: str, replay_id: str, contact: dict[str,
         doc["contacts"].append(contact)
         if deps.store.replace(ALERTS, doc, doc.get("_etag")):
             return
-    log.warning("동시 수정이 이어져 연락 기록을 남기지 못함: %s %s", loan_id, contact["ref"])
+    # 기록 없이 성공으로 끝내지 않는다: 예외로 큐가 다시 보내게 하고, 재전달 때 제안에 남긴 연락으로 다시 기록한다.
+    raise RuntimeError(f"동시 수정이 이어져 연락 기록을 남기지 못함: {loan_id} {contact['ref']}")

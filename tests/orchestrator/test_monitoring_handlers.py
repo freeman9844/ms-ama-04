@@ -817,13 +817,82 @@ def test_decision_landing_between_pause_check_and_pause_write_still_awaits_resum
 
 def test_restructure_decision_for_other_alert_does_not_unpause(mock_app):
     deps, _ = paused_inline(mock_app)
+    case_id = cases(deps)[0]["id"]
+    other = {k: v for k, v in deepcopy(cases(deps)[0]).items() if k != "_etag"} | {"id": "rc-elsewhere"}
+    deps.store.upsert(ALERTS, other)  # 아직 제안이 대기 중인 다른 추심 건
     doc = loan(deps)
     doc["monitoring"]["pause_case_id"] = "rc-elsewhere"
     deps.store.upsert(LOANS, doc)
-    case_id = cases(deps)[0]["id"]
     assert decide_collections(deps, case_id) is True
     assert decide_restructure(deps, case_id) is True
+    mon = loan(deps)["monitoring"]
+    assert mon["status"] == "paused" and mon["holds"][0] == "collections_proposal"
+
+
+def test_refresh_hold_with_missing_pause_case_still_sees_loan_holds(mock_app):
+    deps, _ = paused_inline(mock_app)
+    doc = loan(deps)
+    doc["monitoring"]["pause_case_id"] = "rc-missing"
+    doc["repayment"]["offer"] = {"status": "open"}
+    deps.store.upsert(LOANS, doc)
+    monitoring_module._refresh_hold(deps, LOAN)
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["holds"]) == ("awaiting_customer", ["customer_response"])
+
+
+def fail_once(monkeypatch, name):
+    real, calls = getattr(monitoring_module, name), []
+
+    def flaky(*a, **k):
+        if not calls:
+            calls.append(1)
+            raise RuntimeError("Cosmos 503")
+        return real(*a, **k)
+
+    monkeypatch.setattr(monitoring_module, name, flaky)
+
+
+@pytest.mark.parametrize("name", ["_append_contact", "_refresh_hold"])
+def test_redelivered_collections_decision_repairs_state_after_failure(mock_app, monkeypatch, name):
+    deps, replay_id, case = missed_without_agents(mock_app)
+    fail_once(monkeypatch, name)
+    with pytest.raises(RuntimeError):
+        decide_collections(deps, case["case_id"])
+    assert deps.store.read(ALERTS, case["case_id"], LOAN)["proposal"]["status"] == "approved"
     assert loan(deps)["monitoring"]["status"] == "paused"
+    assert decide_collections(deps, case["case_id"]) is False  # 큐 재전달: 다시 결정하지 않고 상태만 고친다
+    assert decide_collections(deps, case["case_id"]) is False
+    (sent,) = officer_contacts(deps, replay_id)
+    assert sent["text"] == case["proposal"]["text"]
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+
+
+def test_contact_write_conflicts_raise_so_redelivery_repairs(mock_app, monkeypatch):
+    deps, replay_id, case = missed_without_agents(mock_app)
+    real = deps.store.replace
+    monkeypatch.setattr(deps.store, "replace",
+                        lambda c, d, etag: False if d["id"].startswith("contacts-") else real(c, d, etag))
+    with pytest.raises(RuntimeError):
+        decide_collections(deps, case["case_id"])
+    monkeypatch.setattr(deps.store, "replace", real)
+    assert officer_contacts(deps, replay_id) == []
+    assert decide_collections(deps, case["case_id"]) is False
+    assert len(officer_contacts(deps, replay_id)) == 1
+    assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+def test_redelivered_restructure_decision_repairs_hold(mock_app, monkeypatch):
+    deps, _ = paused_inline(mock_app)
+    case_id = loan(deps)["monitoring"]["pause_case_id"]
+    assert decide_collections(deps, case_id) is True
+    fail_once(monkeypatch, "_refresh_hold")
+    with pytest.raises(RuntimeError):
+        decide_restructure(deps, case_id)
+    assert loan(deps)["monitoring"]["status"] == "paused"
+    assert decide_restructure(deps, case_id) is False
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
 
 
 def missed_without_agents(mock_app, **fields):
