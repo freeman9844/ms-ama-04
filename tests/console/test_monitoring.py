@@ -239,8 +239,8 @@ def test_restructure_decision_uses_login_identity(setup):
     form = {"csrf": csrf(client), "decision": "approve", "reason": "3개월 유예", "officer_id": "someone-else"}
     r = client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data=form, headers=OFFICER)
     assert r.status_code == 202
-    assert queue.sent == [(RESTRUCTURE_QUEUE, {"kind": "restructure", "loan_id": "app-1", "alert_id": "rc-rp-1-i1",
-                                               "decision": "approve",
+    # kind(기본값 restructure)는 빼서 보낸다: 이전 오케스트레이터(extra=forbid)도 받는다.
+    assert queue.sent == [(RESTRUCTURE_QUEUE, {"loan_id": "app-1", "alert_id": "rc-rp-1-i1", "decision": "approve",
                                                "officer_id": "oid-officer", "reason": "3개월 유예"})]
 
 

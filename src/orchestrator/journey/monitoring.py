@@ -265,7 +265,8 @@ def _resume_blocker(deps: Deps, loan: dict[str, Any]) -> str | None:
 
 
 def resume_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | None:
-    """재조정 결정 뒤 멈춘 재생을 paused_week 다음 주차부터 잇는다. 30분 가드도 다시 시작한다."""
+    """모든 대기 항목(재조정·추심 승인·상환 계획 등)이 정리되어 재개 대기가 된 재생을 paused_week 다음 주차부터 잇는다.
+    30분 가드도 다시 시작한다."""
     loan = _held_loan(deps, loan_id, replay_id, "awaiting_resume")
     if loan is None:
         return None

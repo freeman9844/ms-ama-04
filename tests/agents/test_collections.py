@@ -135,6 +135,12 @@ def test_message_issues(text, needle):
     assert any(needle in i for i in message_issues(text))
 
 
+@pytest.mark.parametrize("kind", ["PERSON", "BIZNO", "PHONE", "ACCOUNT"])
+def test_message_issues_flags_every_pseudonym_token_kind(kind):
+    text = f"[[{kind}_0123456789]] 고객님 상환일 안내드립니다."
+    assert "가명 토큰이 들어 있습니다." in message_issues(text)
+
+
 def test_remind_records_custom_script_and_text():
     out = remind("rp-1-i1-e", [], ON, DAY, script_id="early_reminder", by="early_warning", text="안내")
     assert (out["script_id"], out["by"], out["text"], out["status"]) == ("early_reminder", "early_warning", "안내", "sent")

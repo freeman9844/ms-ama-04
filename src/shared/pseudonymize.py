@@ -9,6 +9,8 @@ import re
 from collections.abc import Callable, Mapping
 
 _TOKEN_RE = re.compile(r"\[\[[A-Z]+_[0-9a-f]{10}\]\]")
+# 잘리거나 바뀐 토큰도 잡도록 앞부분([[KIND_)만 본다.
+_TOKEN_PREFIX_RE = re.compile(r"\[\[[A-Z]+_")
 
 _DATE = r"(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?!\d)"
 
@@ -46,6 +48,11 @@ def _sub_outside_tokens(text: str, pattern: re.Pattern[str], repl: Callable[[re.
 
 def _strip_tokens(text: str) -> str:
     return _TOKEN_RE.sub(" ", text)
+
+
+def has_token(text: str) -> bool:
+    """가명 토큰([[PERSON_…]]·[[BIZNO_…]]·[[PHONE_…]]·[[ACCOUNT_…]] 등)이 들어 있는지."""
+    return _TOKEN_PREFIX_RE.search(text) is not None
 
 
 class Pseudonymizer:

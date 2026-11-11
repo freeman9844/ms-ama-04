@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from agents.runtime import AgentSpec, ToolHandler
 from agents.underwriting import AgentRunner, _fn, _Session
 from shared.contracts import HardshipCategory
+from shared.pseudonymize import has_token
 
 COLLECTIONS_AGENT = "collections-agent"
 KST = timezone(timedelta(hours=9))  # 한국은 서머타임이 없다
@@ -183,10 +184,6 @@ def _banned_in(text: str) -> list[str]:
     return [p for p in BANNED_PHRASES if p in text]
 
 
-def _has_pii_token(text: str) -> bool:
-    return "[[PERSON_" in text
-
-
 def fair_check(contacts: Sequence[Mapping[str, Any]], on: date, now: datetime) -> str | None:
     """발송을 막는 사유. 횟수는 시뮬레이션 날짜(상환일·안내일), 시간대는 실제 KST 시각으로 본다."""
     if not _in_contact_hours(now):
@@ -204,8 +201,8 @@ def message_issues(text: str) -> list[str]:
     if len(text) > MESSAGE_MAX:
         issues.append(f"문구가 {MESSAGE_MAX}자를 넘습니다({len(text)}자).")
     issues += [f"금지 표현 '{p}'이(가) 들어 있습니다." for p in _banned_in(text)]
-    if _has_pii_token(text):
-        issues.append("가명 토큰([[PERSON_...]])이 들어 있습니다.")
+    if has_token(text):
+        issues.append("가명 토큰이 들어 있습니다.")
     return issues
 
 
@@ -409,7 +406,7 @@ def build_proposal(
     in_hours = _in_contact_hours(now)
     hours = f"{CONTACT_HOURS[0]:02d}:00~{CONTACT_HOURS[1]:02d}:00"
     banned = _banned_in(text)
-    pii = _has_pii_token(text)
+    pii = has_token(text)
     checks = [
         _check("approved_script", approved,
                f"승인된 스크립트({SCRIPTS[script_id]['purpose']})입니다." if approved else "승인된 스크립트가 아닙니다."),
@@ -419,7 +416,7 @@ def build_proposal(
                f"최근 7일 연락 {sent_7d}회(한도 {MAX_CONTACTS_PER_7_DAYS}회)."),
         _check("banned_words", not banned,
                "금지 표현이 없습니다." if not banned else f"금지 표현: {', '.join(banned)}."),
-        _check("pii_tokens", not pii, "가명 토큰([[PERSON_...]])이 들어 있습니다." if pii else "가명 토큰이 없습니다."),
+        _check("pii_tokens", not pii, "가명 토큰이 들어 있습니다." if pii else "가명 토큰이 없습니다."),
     ]
     if hardship:
         checks.append(_check("hardship_grounds", *_hardship_grounds(case)))

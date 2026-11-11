@@ -568,7 +568,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return loan_page(user, loan, 422, error="재조정 결정 형식이 올바르지 않습니다.")
         if not reason:
             return loan_page(user, loan, 422, error="사유를 입력해야 합니다.")
-        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        # kind(기본값 restructure)는 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
+        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
         return loan_sent(
             user, loan, f"재조정 결정({message.decision})을 큐에 보냈습니다.",
             note="결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요." if replay_held(loan.get("monitoring")) else None,
