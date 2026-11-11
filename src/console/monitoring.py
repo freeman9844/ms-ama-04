@@ -85,8 +85,9 @@ BORROWER_PLAN_LABELS = {
     "kept": "지금 일정 유지",
     "expired": "만료",
 }
-# 차주 화면 "받은 안내"에 싣는 연락(조기경보 단계 안내·5일 전 추가 안내·심사역 승인 추심 문구).
-BORROWER_NOTICE_BY = ("early_warning", "early_reminder", "officer")
+# 차주 화면 "받은 안내"에 싣는 연락(3일 전 기본 안내·조기경보 단계 안내·5일 전 추가 안내·심사역 승인 추심 문구).
+# 기본 안내는 문구가 기록되지 않아 스크립트 라벨로 보인다.
+BORROWER_NOTICE_BY = ("reminder", "early_warning", "early_reminder", "officer")
 # 템플릿 필터 이름 → 라벨(없는 값은 원문 그대로).
 MONITORING_FILTERS = {
     "hold_label": HOLD_LABELS,

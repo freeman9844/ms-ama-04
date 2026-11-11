@@ -484,6 +484,8 @@ def test_responded_offer_shows_result_without_buttons(plan_env, offer_status, ch
     section = self_plan(client.get(BORROWER, headers=OFFICER).text)
     assert text in section and f'action="{PLAN_PATH}"' not in section
     assert "oid-officer" not in section and "내부 메모" not in section
+    if offer_status == "kept":
+        assert "지금 일정대로 유지됩니다." in section
 
 
 def test_borrower_sees_received_notices(plan_env):
@@ -506,7 +508,10 @@ def test_borrower_sees_received_notices(plan_env):
               "보류", "2026-10-01", "심사역이 승인한 안내 문구입니다.", "발송"):
         assert s in section, s
     assert section.index("2026-09-10") < section.index("2026-10-01") < section.index("2026-11-25")
-    assert "2026-09-28" not in section and "oid-officer" not in section
+    # 3일 전 기본 안내는 문구가 기록되지 않아 스크립트 라벨로 보인다.
+    assert "2026-09-28" in section and "상환일 안내" in section
+    assert section.index("2026-09-10") < section.index("2026-09-28") < section.index("2026-10-01")
+    assert "oid-officer" not in section
 
 
 def test_borrower_page_without_loan_has_no_plan_section(plan_env):

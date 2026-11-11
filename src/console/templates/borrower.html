@@ -25,6 +25,8 @@
 <p class="note">고르신 플랜이 승인되어 상환 일정이 바뀌었습니다.</p>
 {% elif p.status == "declined" %}
 <p class="note">고르신 플랜이 반려되어 지금 일정대로 상환됩니다.</p>
+{% elif p.status == "kept" %}
+<p class="note">지금 일정대로 유지됩니다.</p>
 {% elif p.status == "expired" %}
 <p class="note">제안이 만료되었습니다. 지금 일정대로 상환됩니다.</p>
 {% endif %}
