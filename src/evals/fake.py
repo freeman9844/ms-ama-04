@@ -156,6 +156,7 @@ class FakeAzure:
             others = [c["cause"] for c in candidates if c["cause"] != cause][:2]
             return ("raise_alert", {
                 "severity": "medium", "summary": "탐지기가 지목한 원인 후보를 근거로 경보를 올린다.",
+                "check_action": "원인 후보의 정산·지출 추이 확인이 필요합니다.",
                 "recommended_action": "contact_borrower",
                 "signals": [{"kind": _EW_SIGNAL_KIND[cause], "text": "원인 후보의 주차 지표가 기준선에서 벗어났다.",
                              "metric_ids": list(chosen["evidence_ids"]), "txn_ids": []}],

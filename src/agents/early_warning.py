@@ -52,6 +52,27 @@ _TRIGGER_TEXT = {
     "return_spike": ("return_spike", "W:{week}:return_rate", "반품률이 기준선보다 크게 높다"),
     "cost_surge": ("cost_surge", "W:{week}:deduction_rate", "정산 공제율이 기준선보다 높다"),
 }
+# 폴백 경보 문구: 원인값 또는 트리거 이름 → (이유, 확인할 조치). 숫자를 넣지 않는다(grounding 대상 아님).
+_SETTLEMENT_HOLD_TEXT = ("정산 지급이 보류되어 다음 상환일 자금이 부족할 수 있습니다.", "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다.")
+_SALES_SLUMP_TEXT = ("판매대금 입금이 줄어 상환재원이 줄 수 있습니다.", "최근 주문·정산 추이 확인이 필요합니다.")
+_HIGH_COST_TEXT = ("고금리 차입 상환 부담으로 상환 여력이 줄 수 있습니다.", "신규 차입 내역과 상환 일정 확인이 필요합니다.")
+FALLBACK_TEXT: dict[str, tuple[str, str]] = {
+    AlertCause.SALES_SLUMP.value: _SALES_SLUMP_TEXT,
+    AlertCause.SETTLEMENT_HOLD.value: _SETTLEMENT_HOLD_TEXT,
+    AlertCause.RETURN_SPIKE.value: ("반품이 늘어 예상 정산액이 줄 수 있습니다.", "반품·환불 사유와 정산 차감 확인이 필요합니다."),
+    AlertCause.COST_SURGE.value: (
+        "비용이 늘어 매출이 유지돼도 가용현금이 줄 수 있습니다.",
+        "광고비·매입비 지출 계획 확인이 필요합니다.",
+    ),
+    AlertCause.HIGH_COST_BORROWING.value: _HIGH_COST_TEXT,
+    "inflow_drop": _SALES_SLUMP_TEXT,
+    "new_debt": _HIGH_COST_TEXT,
+    "due_shortfall": (
+        "다음 상환일 예상 잔고가 상환액보다 적습니다.",
+        "상환일 전 입금 예정과 다른 계좌의 가용자금 확인이 필요합니다.",
+    ),
+    "default": ("탐지기가 자금 흐름 이상을 확인했습니다.", "심사역 확인이 필요합니다."),
+}
 
 INSTRUCTIONS = """너는 한국 소상공인 운전자금 대출의 사후 조기경보 조사관이다. 통계 탐지기가 이번 주 계좌 흐름에서
 이상(triggers)을 잡았다. 탐지기는 정산 주기·영업일·월 계절 지수로 만든 기대 입금(W:n:expected_revenue)과 실제를
@@ -76,6 +97,16 @@ INSTRUCTIONS = """너는 한국 소상공인 운전자금 대출의 사후 조�
 5. 경보가 필요하면 raise_alert를 호출한다. signals마다 근거를 단다: W:·F:·B:로 시작하는 ID는 metric_ids에,
    query_transactions가 준 txn_id는 txn_ids에 넣는다. 문장 속 숫자는 인용한 근거 값과 같아야 한다
    (반올림 2% 이내, 만·억·% 표기 허용). raise_alert가 accepted=false와 issues를 돌려주면 고쳐서 다시 호출한다.
+   summary는 이유(위험이 무엇이고 왜인지), check_action은 심사역·고객이 확인할 조치를 한 문장으로 쓴다.
+   두 문장 속 숫자도 근거 값과 같아야 한다. 신호별로 이렇게 읽는다:
+   | 신호 | 이유 | 확인할 조치 |
+   | 판매대금 입금 감소 | 상환재원이 줄 수 있다 | 최근 주문·정산 추이 |
+   | 반품·환불 증가 | 예상 정산액이 줄 수 있다 | 반품·환불 사유와 정산 차감 |
+   | 광고비·매입비 증가 | 매출이 유지돼도 가용현금이 줄 수 있다 | 광고비·매입비 지출 계획 |
+   | 예상 현금잔액 < 예정 상환액 | 다음 상환일에 현금 부족이 예상된다 | 상환일 전 입금 예정과 다른 계좌의 가용자금 |
+   예시: summary "정산일이 7일 지연되어 다음 상환일에 현금 부족이 예상됩니다." /
+   check_action "정산 상태와 다른 계좌의 가용자금 확인이 필요합니다."
+   경보는 대출 회수·한도 축소·부도 확정·금리 변경을 권하지 않고, 그렇게 읽히는 문장도 쓰지 않는다.
 6. severity: high=상환 능력이 빠르게 무너지는 증거(신규 고금리 대출 반복, 잔고 완충 급감 등), medium=지켜볼 이상이 여럿,
    low=약한 이상. high이면 recommended_action에 monitor를 쓸 수 없다.
 7. 최종 응답: raise_alert가 accepted=true였으면 decision=alert, 아니면 no_alert. reason은 한국어 두 문장 이내.
@@ -128,7 +159,8 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "조기경보를 올린다. 근거 검사를 통과해야 accepted=true다. 한 번 받아들여지면 더 올릴 수 없다.",
         {
             "severity": {"type": "string", "enum": [s.value for s in AlertSeverity]},
-            "summary": {"type": "string"},
+            "summary": {"type": "string", "description": "이유: 위험이 무엇이고 왜인지"},
+            "check_action": {"type": "string", "description": "확인할 조치 한 문장(200자 이내)"},
             "recommended_action": {"type": "string", "enum": [a.value for a in RecommendedAction]},
             "signals": {"type": "array", "items": _SIGNAL_SCHEMA},
             "primary_cause": {
@@ -324,8 +356,11 @@ def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
         cited += [float(ctx.by_id[t].amount_krw) for t in txn_ids if t in ctx.by_id]
         if bad := ungrounded(str(s.get("text", "")), cited):
             issues.append(f"signals[{i}]: 인용 근거와 맞지 않는 수치 {bad}")
-    if bad := ungrounded(str(args.get("summary", "")), [float(v) for v in ctx.catalog.values() if _is_num(v)]):
+    catalog_values = [float(v) for v in ctx.catalog.values() if _is_num(v)]
+    if bad := ungrounded(str(args.get("summary", "")), catalog_values):
         issues.append(f"summary: 근거 카탈로그에 없는 수치 {bad}")
+    if bad := ungrounded(str(args.get("check_action") or ""), catalog_values):
+        issues.append(f"check_action: 근거 카탈로그에 없는 수치 {bad}")
     issues += _check_cause(args, ctx, signals)
     return issues
 
@@ -391,6 +426,7 @@ def build_alert(args: Mapping[str, Any], ctx: EwContext, models: dict[str, str])
         models=models,
         primary_cause=AlertCause(primary_raw) if primary_raw else None,
         secondary_causes=tuple(AlertCause(v) for v in _ids(args.get("secondary_causes"))),
+        check_action=str(args.get("check_action") or "").strip()[:200] or None,
     )
 
 
@@ -398,6 +434,8 @@ def fallback_alert(ctx: EwContext, reason: str) -> EarlyWarningAlert:
     """에이전트 없이 탐지기 결과만으로 올리는 경보. 수치를 문장에 넣지 않아 grounding 문제가 없다.
 
     primary_cause는 가장 먼저 발화한 후보, secondary_causes는 그다음 서로 다른 후보 최대 2개다.
+    이유·확인할 조치는 FALLBACK_TEXT에서 원인 → 첫 트리거 → default 순으로 고른다.
+    에이전트를 못 쓴 사유(reason)는 EwResult.reason에 남으므로 문구에 넣지 않는다.
     """
     signals = []
     for trigger in ctx.triggers:
@@ -405,9 +443,12 @@ def fallback_alert(ctx: EwContext, reason: str) -> EarlyWarningAlert:
         signals.append({"kind": kind, "text": text, "metric_ids": [metric.format(week=ctx.week)], "txn_ids": []})
     primary = ctx.candidates[0].cause if ctx.candidates else None
     secondary = [c.cause.value for c in ctx.candidates[1:3]]
+    key = primary.value if primary else (ctx.triggers[0] if ctx.triggers else "default")
+    summary, check_action = FALLBACK_TEXT.get(key, FALLBACK_TEXT["default"])
     args = {
         "severity": "medium",
-        "summary": f"조사 에이전트를 쓸 수 없어 탐지기 결과만으로 올린 경보다({reason}). 심사역 확인이 필요하다.",
+        "summary": summary,
+        "check_action": check_action,
         "recommended_action": "officer_review",
         "signals": signals,
         "primary_cause": primary.value if primary else "",

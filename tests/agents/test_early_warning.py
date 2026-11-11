@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date
 
 import pytest
@@ -6,10 +7,13 @@ import pytest
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import (
     EW_AGENT,
+    FALLBACK_TEXT,
     INSTRUCTIONS,
     TOOLS,
     EwContext,
     EwOutput,
+    build_alert,
+    check_alert,
     fallback_alert,
     investigate,
 )
@@ -19,7 +23,7 @@ from agents.monitoring import Baseline, categorize, detect, settlement_for, week
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
 from mockapis.postloan import FlowScenario, LoanTerms, generate_postloan
-from shared.contracts import AlertCause
+from shared.contracts import AlertCause, EarlyWarningAlert
 from shared.pseudonymize import find_pii
 
 AS_OF = date(2026, 11, 2)
@@ -441,3 +445,63 @@ def test_tool_schema_lists_causes():
     raise_alert = next(t for t in TOOLS if t["name"] == "raise_alert")
     assert "primary_cause" in json.dumps(raise_alert) and "get_settlement_ledger" in {t["name"] for t in TOOLS}
     assert "차입은 대개 결과다" in INSTRUCTIONS
+
+
+# --- 이유 + 확인할 조치(2026-11-11) ---
+
+OLD_ALERT_DOC = {
+    "alert_id": "ew-loan-1-6",
+    "loan_id": "loan-1",
+    "week": 6,
+    "as_of": "2026-12-14",
+    "severity": "medium",
+    "summary": "이번 주 잔고를 확인했다.",
+    "signals": [{"kind": "other", "text": "잔고 확인", "metric_ids": ["W:6:end_balance"], "txn_ids": []}],
+    "recommended_action": "monitor",
+    "triggers": ["inflow_drop"],
+    "models": {"investigator": "gpt-5.4"},
+}
+
+
+def test_check_action_is_grounded_like_summary(ctx):
+    args = stacking_alert(ctx) | {"check_action": "정산 상태를 확인하고 1,234,567원 부족분을 점검하세요."}
+    assert any(i.startswith("check_action:") for i in check_alert(args, ctx))
+
+
+def test_check_action_is_stored_on_alert(ctx):
+    args = stacking_alert(ctx) | {"check_action": "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다."}
+    assert build_alert(args, ctx, {}).check_action == "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다."
+
+
+def test_empty_check_action_is_none(ctx):
+    assert build_alert(stacking_alert(ctx) | {"check_action": ""}, ctx, {}).check_action is None
+
+
+def test_fallback_uses_cause_template_without_numbers(ctx_with_candidates):
+    a = fallback_alert(ctx_with_candidates, "agents_disabled")
+    assert a.summary == "정산 지급이 보류되어 다음 상환일 자금이 부족할 수 있습니다."
+    assert a.check_action == "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다."
+    assert not re.search(r"\d", a.summary + a.check_action)
+
+
+def test_fallback_without_cause_uses_trigger_or_default(ctx, ctx_without_candidates):
+    for c in (ctx, ctx_without_candidates):
+        a = fallback_alert(c, "agent_error")
+        trigger = c.triggers[0] if c.triggers else "default"
+        assert (a.summary, a.check_action) == FALLBACK_TEXT.get(trigger, FALLBACK_TEXT["default"])
+        assert "agent_error" not in a.summary
+
+
+def test_fallback_text_has_no_numbers():
+    assert {c.value for c in AlertCause} | {"due_shortfall", "default"} <= set(FALLBACK_TEXT)
+    for reason, action in FALLBACK_TEXT.values():
+        assert not re.search(r"\d", reason + action) and len(action) <= 200
+
+
+def test_raise_alert_schema_requires_check_action():
+    tool = next(t for t in TOOLS if t["name"] == "raise_alert")
+    assert "check_action" in tool["parameters"]["required"]
+
+
+def test_old_alert_without_check_action_validates():
+    assert EarlyWarningAlert.model_validate(OLD_ALERT_DOC).check_action is None

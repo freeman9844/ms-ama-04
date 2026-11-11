@@ -342,6 +342,8 @@ class EarlyWarningAlert(Contract):
     # 원인 분류(2026-11-11). 옛 경보는 원인 없음.
     primary_cause: AlertCause | None = None
     secondary_causes: tuple[AlertCause, ...] = Field(default=(), max_length=2)
+    # 확인할 조치 문장(2026-11-11). summary가 이유다. 옛 경보는 None.
+    check_action: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def _action(self) -> "EarlyWarningAlert":
