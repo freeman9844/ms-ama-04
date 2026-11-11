@@ -71,7 +71,7 @@ def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
         )
     return cases
 
-# 대출 실행 이후 흐름: 심사 때 건강했던 셀러가 시즌 재고 선매입 뒤 고금리 대출을 쌓는다(조기경보 데모).
+# 대출 실행 이후 흐름: 심사 때 건강했던 셀러가 시즌 재고를 선매입했는데 주문이 꺾여 고금리 대출을 쌓는다(조기경보 데모).
 # 주인공은 패션의류 seller-dailylook-01이고, 업종이 다른 건강 셀러 3곳도 같은 흐름을 탄다. 나머지는 정상 상환.
 STACKING_APPLICANTS = frozenset({"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"})
 POSTLOAN_SEED_OFFSET = 1000
@@ -85,7 +85,7 @@ def build_postloan_flows(cases: Mapping[str, SyntheticCase], as_of: date) -> dic
     return {
         applicant_id: generate_postloan(
             case,
-            FlowScenario.STACKING if applicant_id in STACKING_APPLICANTS else FlowScenario.STABLE,
+            FlowScenario.SALES_SLUMP if applicant_id in STACKING_APPLICANTS else FlowScenario.STABLE,
             start,
             seeds.get(applicant_id, 0) + POSTLOAN_SEED_OFFSET,
         )

@@ -93,14 +93,14 @@ def test_main_builds_app(monkeypatch):
     assert TestClient(module.app).get("/healthz").status_code == 200
 
 
-def test_postloan_flows_cast_the_healthy_seller_as_the_stacking_hero():
+def test_postloan_flows_cast_the_healthy_seller_as_the_slump_hero():
     from mockapis.demo import build_postloan_flows
     from mockapis.postloan import FlowScenario
 
     as_of = date(2026, 11, 2)
     flows = build_postloan_flows(build_demo_cases(as_of), as_of)
-    stacking = {"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"}
-    assert {k for k, f in flows.items() if f.scenario is FlowScenario.STACKING} == stacking
+    slumping = {"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"}
+    assert {k for k, f in flows.items() if f.scenario is FlowScenario.SALES_SLUMP} == slumping
     assert set(flows) == {a for a, *_ in DEMO_APPLICANTS}
     assert all(f.start == as_of for f in flows.values())
 

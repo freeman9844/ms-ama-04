@@ -2,7 +2,7 @@
 
 - 분류: 합성 케이스의 규칙 미분류 거래(거래처 이체) + 사람이 라벨을 붙인 어려운 적요 뱅크.
 - 심사: 아키타입 5개 × (일반, 프롬프트 주입) 10건과 지역·업종만 바꾼 반사실 쌍.
-- 조기경보: 사후 흐름 시나리오(STACKING=양성, STABLE=음성) 경로. 라벨 연체일은 default_on.
+- 조기경보: 사후 흐름 시나리오(SALES_SLUMP=양성, STABLE=음성) 경로. 라벨 연체일은 default_on.
 """
 
 import dataclasses
@@ -109,7 +109,7 @@ class EwPath:
 
     @property
     def positive(self) -> bool:
-        return self.flow.scenario is FlowScenario.STACKING
+        return self.flow.scenario is FlowScenario.SALES_SLUMP
 
 
 def _bank_txns(app_id: str, part: int, parts: int) -> tuple[list[Transaction], dict[str, str]]:
@@ -181,8 +181,8 @@ def counterfactual_cases(base: list[UwCase]) -> list[UwCase]:
 def ew_paths() -> list[EwPath]:
     paths: list[EwPath] = []
     for archetype in EW_ARCHETYPES:
-        for scenario in (FlowScenario.STACKING, FlowScenario.STABLE):
-            path_id = f"ev-e{archetype.value[:4]}{'k' if scenario is FlowScenario.STACKING else 'b'}"
+        for scenario in (FlowScenario.SALES_SLUMP, FlowScenario.STABLE):
+            path_id = f"ev-e{archetype.value[:4]}{'k' if scenario is FlowScenario.SALES_SLUMP else 'b'}"
             case = generate_case(path_id, archetype, AS_OF, EW_SEED)
             paths.append(EwPath(path_id, case, generate_postloan(case, scenario, AS_OF, EW_SEED)))
     return paths

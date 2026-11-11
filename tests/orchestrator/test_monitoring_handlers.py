@@ -281,8 +281,9 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     consent = deps.store.read("consents", mon["consent_id"], mon["consent_id"])
     assert consent["purpose"] == MONITORING_PURPOSE and consent["scopes"] == ["account"]
     assert deps.raw.get_json(f"consent-{mon['consent_id']}", "flow.json")
-    week2 = mon["weeks"][1]
-    assert "new_debt" in week2["new_triggers"] and week2["alert_id"]
+    # 매출 부진 셀러의 차입은 6주차 이후 결과로 나온다(원인 → 차입 순서).
+    debt_week = next(w for w in mon["weeks"] if "new_debt" in w["new_triggers"])
+    assert debt_week["week"] >= 6 and debt_week["alert_id"]
     found = alerts(deps)
     assert found and all(a["models"] == {"investigator": "detector_only"} for a in found)
     # 조기경보는 심사역 검토용이다. 추심은 미납(데모 셀러는 13주차 3회차)에서만 돈다.

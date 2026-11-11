@@ -127,7 +127,7 @@ def _underwriting(s: dict[str, Any]) -> list[str]:
 
 
 def _early_warning(s: dict[str, Any]) -> list[str]:
-    out = ["## 4. 조기경보", "", "경로 라벨: 대출 돌려막기(STACKING, 연체 발생)=양성, 계절 변동만 있는 경로(STABLE)=음성. "
+    out = ["## 4. 조기경보", "", "경로 라벨: 매출 급감(SALES_SLUMP, 연체 발생)=양성, 계절 변동만 있는 경로(STABLE)=음성. "
            "리드 타임은 첫 경보 시점부터 라벨 연체일까지 일수다.", ""]
     rows = [[name, c["evaluated"], c["tp"], c["fp"], c["fn"], c["tn"], _fmt(c["precision"]), _fmt(c["recall"]),
              c["investigations"], _fmt(c["mean_lead_days"]), _pct(c["rejected_attempt_rate"]), _usd(c["cost_usd"], c["unpriced_calls"])]

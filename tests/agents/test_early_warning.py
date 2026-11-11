@@ -38,11 +38,11 @@ def baseline(cafe):
 
 @pytest.fixture
 def ctx(cafe, baseline):
-    return make_ctx(cafe, baseline, week=2)
+    return make_ctx(cafe, baseline, week=6)
 
 
 def make_ctx(cafe, baseline, week):
-    flow = generate_postloan(cafe, FlowScenario.STACKING, AS_OF, 7)
+    flow = generate_postloan(cafe, FlowScenario.SALES_SLUMP, AS_OF, 7)
     cats = categorize(flow.transactions, {})
     rows = weekly_series(flow.transactions, cats, flow.start, week, baseline)
     return EwContext(
@@ -105,9 +105,9 @@ class FakeRunner:
 def test_ctx_hides_future_weeks(ctx):
     assert ctx.triggers and "new_debt" in ctx.triggers
     series = ctx.get_weekly_series({})
-    assert [r["week"] for r in series["weeks"]] == [1, 2]
+    assert [r["week"] for r in series["weeks"]] == [1, 2, 3, 4, 5, 6]
     assert all(t.booked_on <= ctx.as_of for t in ctx.by_id.values())
-    assert ctx.query_transactions({"category": "high_cost_lender", "week": 3}) == {"error": "invalid_week"}
+    assert ctx.query_transactions({"category": "high_cost_lender", "week": 7}) == {"error": "invalid_week"}
     assert ctx.query_transactions({"category": "nope", "week": 0}) == {"error": "invalid_category"}
     rows = ctx.query_transactions({"category": "high_cost_lender", "week": 0, "limit": 99})
     assert rows["total"] >= 1 and all(r["txn_id"] in ctx.by_id for r in rows["transactions"])
@@ -136,7 +136,7 @@ def test_rejected_then_accepted_first_wins(ctx):
     assert third["accepted"] is False
     assert result.decision == "alert" and result.alert.severity == "high"
     assert result.alert.models == {"investigator": MODEL}
-    assert result.alert.triggers == tuple(ctx.triggers) and result.alert.week == 2
+    assert result.alert.triggers == tuple(ctx.triggers) and result.alert.week == 6
     assert len(result.record["rejected"]) == 1 and result.conversations == ["conv-1"]
     assert runner.specs[0][0].name == EW_AGENT
 
@@ -148,7 +148,7 @@ def test_rejected_then_accepted_first_wins(ctx):
         ({"signals": [{"kind": "loan_stacking", "text": "근거", "metric_ids": ["W:9:revenue"], "txn_ids": []}]}, "W:9:revenue"),
         ({"signals": [{"kind": "loan_stacking", "text": "근거", "metric_ids": [], "txn_ids": []}]}, "근거 ID"),
         ({"severity": "high", "recommended_action": "monitor"}, "형식 오류"),
-        ({"summary": "잔고가 999,999,999원 줄었다."}, "summary"),
+        ({"summary": "잔고가 999,999,999,999원 줄었다."}, "summary"),
     ],
 )
 def test_raise_alert_rejects(ctx, change, needle):
@@ -198,7 +198,7 @@ def shortfall_ctx(cafe, baseline):
         ctx = make_ctx(cafe, fb, week)
         if "projected_shortfall" in ctx.triggers:
             return ctx
-    raise AssertionError("STACKING 13주 안에 잔고 부족 전망이 없다")
+    raise AssertionError("SALES_SLUMP 13주 안에 잔고 부족 전망이 없다")
 
 
 def test_alert_can_cite_projected_balance(shortfall_ctx):

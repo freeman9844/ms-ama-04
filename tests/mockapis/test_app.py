@@ -136,7 +136,7 @@ def test_postloan_flow_needs_account_scope_and_filters_by_window(clock):
     from mockapis.postloan import FlowScenario, generate_postloan
 
     case = generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)
-    flow = generate_postloan(case, FlowScenario.STACKING, AS_OF, 1)
+    flow = generate_postloan(case, FlowScenario.SALES_SLUMP, AS_OF, 1)
     c = TestClient(create_app({"a1": case}, SECRET, clock, flows={"a1": flow}))
     assert c.get("/mydata/flow", headers=_auth(_consent(c, scopes=("tax",))["token"])).status_code == 403
     h = _auth(_consent(c, scopes=("account",))["token"])
