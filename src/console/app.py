@@ -26,6 +26,7 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from agents.collections import message_issues
 from agents.monitoring import WEEKS
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
@@ -41,11 +42,13 @@ from console.dashboard import (
 )
 from console.monitoring import (
     ACTION_LABELS,
+    MONITORING_FILTERS,
     MONITORING_LABELS,
     REPAYMENT_LABELS,
     SEVERITY_LABELS,
     TRIGGER_LABELS,
     MonitoringStore,
+    installment_label,
     load_monitoring_raw,
     loan_view,
 )
@@ -69,10 +72,13 @@ from journey.models import (
     CONSENT_PURPOSE,
     CONSENT_TTL_DAYS,
     KST,
+    CollectionsDecision,
     ConsentCommand,
     GrievanceDecision,
     GrievanceSubmission,
+    OfferExpire,
     OfficerMessage,
+    PlanDecision,
     ReplayRequest,
     RestructureDecision,
     StartRequest,
@@ -192,8 +198,9 @@ def _templates() -> Environment:
     env.filters["seller_label"] = seller_label
     env.filters["seller_name"] = seller_name
     env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
-    for name, labels in LABEL_FILTERS.items():
+    for name, labels in (LABEL_FILTERS | MONITORING_FILTERS).items():
         env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
+    env.filters["installment_label"] = installment_label
     env.filters["pct"] = lambda v: f"{v * 100:.1f}%" if isinstance(v, int | float) else "-"
     env.filters["usd"] = lambda v: f"${v:,.4f}" if isinstance(v, int | float) else "-"
     env.filters["num"] = lambda v, d=1: f"{v:.{d}f}" if isinstance(v, int | float) else "-"
@@ -490,7 +497,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if request is not None:
             ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
         raw = load_monitoring_raw(deps.raw, loan)
-        view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore)
+        contacts = monitoring_store().get_contacts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else None
+        view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore, contacts=contacts)
         blocked = replay_in_progress(mon, deps.clock())
         return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked,
                       replay_held=replay_held(mon), weeks_left=WEEKS - (mon.get("paused_week") or 0), **ctx)
@@ -514,7 +522,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if replay_in_progress(loan.get("monitoring"), deps.clock()):
             return loan_page(user, loan, 409, error="이미 재생이 진행 중입니다.")
         if replay_held(loan.get("monitoring")):
-            return loan_page(user, loan, 409, error="재조정 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다.")
+            return loan_page(user, loan, 409, error="대기 중인 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다.")
         # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
         deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
         return loan_sent(user, loan, "사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.")
@@ -562,6 +570,81 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             user, loan, f"재조정 결정({message.decision})을 큐에 보냈습니다.",
             note="결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요." if replay_held(loan.get("monitoring")) else None,
         )
+
+    def held_note(loan: dict[str, Any]) -> str | None:
+        if replay_held(loan.get("monitoring")):
+            return "다른 대기 항목이 없으면 대출 화면에서 재생을 이어갈지 선택하세요."
+        return None
+
+    @app.post("/loans/{loan_id}/cases/{case_id}/proposal", response_class=HTMLResponse)
+    async def collections_proposal(loan_id: str, case_id: str, request: Request) -> HTMLResponse:
+        """추심 제안 승인·수정·반려. 고객 문구는 보내기 전에 여기서도 같은 규칙으로 검사한다."""
+        user = decider(request)
+        form = await checked_form(request, user)
+        loan = loan_or_404(loan_id)
+        case = next((a for a in loan_alerts(loan) if a.get("id") == case_id and a.get("kind") == "repayment_case"),
+                    None)
+        if case is None:
+            raise HTTPException(404, "case not found")
+        proposal = case.get("proposal") or {}
+        if proposal.get("status") != "pending_officer":
+            return loan_page(user, loan, 409, error="심사역 승인을 기다리는 추심 제안이 없습니다.")
+        decision = form.get("decision", "")
+        reason = form.get("reason", "").strip()
+        text = form.get("text", "").strip() if decision == "modify" else None
+        if decision in ("approve", "modify"):
+            issues = message_issues(str(proposal.get("text") or "") if text is None else text)
+            if issues:
+                return loan_page(user, loan, 422, error="고객 문구를 보낼 수 없습니다: " + " ".join(issues))
+        if decision == "reject" and not reason:
+            return loan_page(user, loan, 422, error="반려 사유를 입력해야 합니다.")
+        include = form.get("include_hardship") == "1" if decision == "modify" and proposal.get("hardship") else None
+        try:
+            message = CollectionsDecision(
+                kind="collections", loan_id=loan["id"], case_id=case_id, decision=decision,
+                officer_id=user.user_id, text=text, include_hardship=include, reason=reason,
+            )
+        except ValidationError:
+            return loan_page(user, loan, 422, error="추심 결정 형식이 올바르지 않습니다.")
+        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        return loan_sent(user, loan, f"추심 제안 결정({message.decision})을 큐에 보냈습니다.", note=held_note(loan))
+
+    @app.post("/loans/{loan_id}/plan/{change_id}", response_class=HTMLResponse)
+    async def plan_change(loan_id: str, change_id: str, request: Request) -> HTMLResponse:
+        user = decider(request)
+        form = await checked_form(request, user)
+        loan = loan_or_404(loan_id)
+        change = (loan.get("repayment") or {}).get("plan_change")
+        if not change or change.get("change_id") != change_id:
+            raise HTTPException(404, "plan change not found")
+        if change.get("status") != "pending_officer":
+            return loan_page(user, loan, 409, error="심사역 승인을 기다리는 플랜 변경 요청이 없습니다.")
+        reason = form.get("reason", "").strip()
+        try:
+            message = PlanDecision(
+                kind="plan_change", loan_id=loan["id"], change_id=change_id, decision=form.get("decision", ""),
+                officer_id=user.user_id, reason=reason,
+            )
+        except ValidationError:
+            return loan_page(user, loan, 422, error="플랜 변경 결정 형식이 올바르지 않습니다.")
+        if message.decision == "decline" and not reason:
+            return loan_page(user, loan, 422, error="반려 사유를 입력해야 합니다.")
+        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        return loan_sent(user, loan, f"플랜 변경 결정({message.decision})을 큐에 보냈습니다.", note=held_note(loan))
+
+    @app.post("/loans/{loan_id}/offer/expire", response_class=HTMLResponse)
+    async def offer_expire(loan_id: str, request: Request) -> HTMLResponse:
+        """고객 응답 없이 계속: 열린 플랜 제안을 닫는다(그 뒤 고객 선택은 오케스트레이터가 버린다)."""
+        user = decider(request)
+        await checked_form(request, user)
+        loan = loan_or_404(loan_id)
+        offer = (loan.get("repayment") or {}).get("offer")
+        if not offer or offer.get("status") != "open":
+            return loan_page(user, loan, 409, error="고객 응답을 기다리는 플랜 제안이 없습니다.")
+        message = OfferExpire(kind="offer_expire", loan_id=loan["id"], offer_id=offer["offer_id"],
+                              officer_id=user.user_id)
+        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        return loan_sent(user, loan, "고객 응답 없이 계속하도록 플랜 제안 만료를 큐에 보냈습니다.", note=held_note(loan))
 
     # ── 동의 수명주기·이의제기(P5b) ──
 

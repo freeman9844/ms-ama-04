@@ -4,11 +4,14 @@
 복원도 같은 입력으로 해야 같은 토큰 매핑이 나온다.
 """
 
+import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+from agents.collections import SCRIPTS
 from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
+from agents.repayment import item_amount, item_key
 from console.views import RawData, RawStore, _map_strings, _text_functions, raw_container
 from shared.contracts import ApplicantProfile, Transaction
 
@@ -21,7 +24,8 @@ ACTION_LABELS = {
 }
 MONITORING_LABELS = {
     "replaying": "재생 중",
-    "paused": "재조정 대기",
+    "paused": "심사역 결정 대기",
+    "awaiting_customer": "고객 응답 대기",
     "awaiting_resume": "재개 확인 대기",
     "stopped": "재생 종료",
     "completed": "재생 완료",
@@ -40,6 +44,50 @@ TRIGGER_LABELS = {
     "due_shortfall": "상환일 잔고 부족",
 }
 REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "missed": "미납"}
+# 재생을 멈춘 대기 항목(2026-11-11). 이 순서대로 멈춤 배너에 보인다(journey.holds.HOLD_ORDER와 같은 순서).
+HOLD_LABELS = {
+    "collections_proposal": "추심 승인 대기",
+    "customer_response": "고객 응답 대기",
+    "plan_change": "플랜 변경 승인 대기",
+    "restructure": "재조정 결정 대기",
+}
+# 추심 제안서의 정책 확인 항목(agents.collections.build_proposal의 checks[].id).
+CHECK_LABELS = {
+    "approved_script": "승인 스크립트",
+    "contact_hours": "연락 시간",
+    "weekly_limit": "7일 7회",
+    "banned_words": "금지 표현 없음",
+    "pii_tokens": "가명 토큰 없음",
+    "hardship_grounds": "재조정 근거",
+}
+SCRIPT_LABELS = {k: v["purpose"] for k, v in SCRIPTS.items()} | {
+    "balance_warning": "잔고 부족 예상 알림",
+    "early_reminder": "5일 전 추가 안내",
+    "self_plan_offer": "상환 플랜 제안",
+}
+CONTACT_STATUS_LABELS = {"sent": "발송", "deferred": "보류", "skipped": "건너뜀"}
+CONTACT_REASON_LABELS = {"contact_hours": "연락 시간 밖", "weekly_limit": "7일 7회 초과", "no_options": "고를 옵션 없음"}
+PROPOSAL_LABELS = {
+    "pending_officer": "심사역 승인 대기",
+    "approved": "승인",
+    "modified": "수정 후 승인",
+    "rejected": "반려",
+}
+PLAN_OPTION_LABELS = {"move": "상환일 이동", "split": "분할납부", "keep": "지금 일정 유지"}
+OFFER_LABELS = {"open": "고객 응답 대기", "chosen": "고객 선택", "kept": "유지 선택", "expired": "만료(고객 응답 없이 계속)"}
+PLAN_CHANGE_LABELS = {"pending_officer": "심사역 승인 대기", "approved": "승인", "declined": "반려"}
+# 템플릿 필터 이름 → 라벨(없는 값은 원문 그대로).
+MONITORING_FILTERS = {
+    "hold_label": HOLD_LABELS,
+    "check_label": CHECK_LABELS,
+    "script_label": SCRIPT_LABELS,
+    "contact_status_label": CONTACT_STATUS_LABELS,
+    "contact_reason_label": CONTACT_REASON_LABELS,
+    "proposal_label": PROPOSAL_LABELS,
+    "plan_option_label": PLAN_OPTION_LABELS,
+    "offer_label": OFFER_LABELS,
+    "plan_change_label": PLAN_CHANGE_LABELS,
+}
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
 CAUSE_LABELS = {
     "sales_slump": "매출 부진",
@@ -51,8 +99,11 @@ CAUSE_LABELS = {
 NO_CAUSE_LABEL = "—"
 NO_LEDGER_LABEL = "정산 원장 없음"
 # collections·restructure는 미납 추심 전환 전에 경보 문서에 붙던 필드다(옛 문서 표시용).
-_SHOWN_FIELDS = ("summary", "signals", "collections", "restructure")
+_SHOWN_FIELDS = ("summary", "check_action", "signals", "collections", "restructure")
 _CASE_FIELDS = ("recent_alert", "collections", "restructure")
+# 제안서에서 가명 토큰을 복원할 필드. 고객 문구(text·sent_text)는 토큰이 없어 그대로 보인다.
+_PROPOSAL_FIELDS = ("reason", "hardship", "evidence")
+_ITEM_KEY = re.compile(r"i(\d+)(?:p(\d+))?")
 _LEDGER_ROW_FIELDS = ("week", "order_gross", "returns", "held", "deductions", "settle_net")
 
 
@@ -62,6 +113,8 @@ class MonitoringStore(Protocol):
     def get_loan(self, loan_id: str) -> dict[str, Any] | None: ...
 
     def list_alerts(self, loan_id: str, replay_id: str) -> list[dict[str, Any]]: ...
+
+    def get_contacts(self, loan_id: str, replay_id: str) -> dict[str, Any] | None: ...
 
 
 def load_monitoring_raw(store: RawStore, loan: Mapping[str, Any]) -> RawData | None:
@@ -76,7 +129,13 @@ def load_monitoring_raw(store: RawStore, loan: Mapping[str, Any]) -> RawData | N
 
 
 def loan_view(
-    loan: Mapping[str, Any], alerts: list[dict[str, Any]], raw: RawData | None, key: bytes, *, restore: bool
+    loan: Mapping[str, Any],
+    alerts: list[dict[str, Any]],
+    raw: RawData | None,
+    key: bytes,
+    *,
+    restore: bool,
+    contacts: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     pii, model_text, raw_text = _text_functions(raw, key, restore)
     mon = loan.get("monitoring") or {}
@@ -93,7 +152,18 @@ def loan_view(
     for doc in sorted(alerts, key=lambda d: d.get("week", 0)):
         if doc.get("kind") == "repayment_case":
             text = _map_strings({k: doc.get(k) for k in _CASE_FIELDS}, model_text)
-            cases.append({**doc, **text, "decidable": _pending(text["restructure"])})
+            proposal = doc.get("proposal")
+            if proposal:
+                proposal = {**proposal, **_map_strings({k: proposal.get(k) for k in _PROPOSAL_FIELDS}, model_text)}
+            cases.append(
+                {
+                    **doc,
+                    **text,
+                    "proposal": proposal,
+                    "decidable": _pending(text["restructure"]),
+                    "proposal_decidable": _pending(proposal),
+                }
+            )
             continue
         text = _map_strings({k: doc.get(k) for k in _SHOWN_FIELDS}, model_text)
         signals = []
@@ -117,6 +187,7 @@ def loan_view(
                 "decidable": _pending(restructure),
                 "cause_label": CAUSE_LABELS.get(doc.get("primary_cause") or "", NO_CAUSE_LABEL),
                 "secondary_labels": [CAUSE_LABELS[c] for c in doc.get("secondary_causes") or ()],
+                "auto_contacts": _auto_contacts(mon, doc.get("alert_id"), contacts),
             }
         )
     transactions = [
@@ -139,8 +210,80 @@ def loan_view(
         "pii": pii,
         "ledger_rows": ledger_rows,
         "ledger_note": ledger_note,
+        **_plan_view(loan.get("repayment") or {}),
+        "holds": sorted(mon.get("holds") or (), key=lambda h: list(HOLD_LABELS).index(h) if h in HOLD_LABELS else 99),
     }
 
 
-def _pending(restructure: Mapping[str, Any] | None) -> bool:
-    return bool(restructure) and restructure.get("status") == "pending_officer"
+def installment_label(item: Mapping[str, Any]) -> str:
+    """회차 표시: 분할 회차는 "2-1회차"처럼."""
+    part = item.get("part")
+    return f"{item['no']}-{part}회차" if part else f"{item['no']}회차"
+
+
+def _key_label(key: str) -> str:
+    m = _ITEM_KEY.fullmatch(key)
+    if not m:
+        return key
+    return installment_label({"no": m.group(1), "part": m.group(2)})
+
+
+def _auto_contacts(
+    mon: Mapping[str, Any], alert_id: str | None, contacts: Mapping[str, Any] | None
+) -> list[dict[str, Any]]:
+    """이 경보로 나간 단계 자동 안내(조기경보 1·2단계). 문구는 연락 기록 문서에서 ref로 찾는다."""
+    escalation = mon.get("escalation") or {}
+    by_ref = {c.get("ref"): c for c in (contacts or {}).get("contacts") or () if c.get("by") == "early_warning"}
+    out = []
+    for stage in (1, 2):
+        rec = escalation.get(f"stage{stage}")
+        if not rec or not alert_id or rec.get("alert_id") != alert_id:
+            continue
+        sent = by_ref.get(f"{mon.get('replay_id')}-s{stage}") if rec.get("status") != "skipped" else None
+        out.append(
+            {
+                "stage": stage,
+                "on": rec.get("on"),
+                "status": rec.get("status"),
+                "reason": rec.get("reason"),
+                "script_id": (sent or {}).get("script_id") or ("balance_warning" if stage == 1 else "self_plan_offer"),
+                "text": (sent or {}).get("text"),
+            }
+        )
+    return out
+
+
+def _plan_view(led: Mapping[str, Any]) -> dict[str, Any]:
+    """플랜 제안·변경 요청·변경 이력(2026-11-11). 옛 문서는 셋 다 없다."""
+    installment = led.get("installment_krw") or 0
+    by_key = {item_key(s): s for s in led.get("schedule") or ()}
+    change = led.get("plan_change")
+    if change:
+        before = [
+            {"label": _key_label(k), "due_on": s.get("due_on") if s else None,
+             "amount_krw": item_amount(s, installment) if s else None}
+            for k in change.get("replaces") or ()
+            for s in (by_key.get(k),)
+        ]
+        after = [{"label": installment_label(i), "due_on": i["due_on"], "amount_krw": i["amount_krw"]}
+                 for i in change.get("items") or ()]
+        change = {**change, "before": before, "after": after}
+    history = [
+        {
+            **h,
+            "before": [{**b, "label": _key_label(b["key"])} for b in h.get("before") or ()],
+            "after": [{**a, "label": _key_label(a["key"])} for a in h.get("after") or ()],
+        }
+        for h in led.get("plan_history") or ()
+    ]
+    return {
+        "offer": led.get("offer"),
+        "plan_change": change,
+        "plan_decidable": _pending(change),
+        "plan_history": history,
+    }
+
+
+def _pending(request: Mapping[str, Any] | None) -> bool:
+    """재조정 요청·추심 제안·플랜 변경 요청이 심사역 결정을 기다리는지."""
+    return bool(request) and request.get("status") == "pending_officer"

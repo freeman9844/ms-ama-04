@@ -71,7 +71,10 @@ def make_loan_with_ledger() -> dict:
         "replay_id": "rp-l1", "consent_id": "m-l1", "flow_start": "2026-09-01", "started_at": NOW.isoformat(),
         "mode": "inline", "status": "replaying", "processed_week": 3, "seen_triggers": ["settlement_hold"],
         "overrides": {}, "weeks": _weeks(LEDGER_ROWS), "alert_ids": ["ew-rp-l1-w03"], "case_ids": [], "error": None,
-        "pg": "ok", "ledger_baseline": LEDGER_BASELINE,
+        "pg": "ok", "ledger_baseline": LEDGER_BASELINE, "holds": [],
+        "escalation": {"stage1": {"alert_id": "ew-rp-l1-w03", "on": "2026-09-22", "status": "sent", "reason": None},
+                       "stage2": {"alert_id": "ew-rp-l1-w03", "on": "2026-09-22", "status": "skipped",
+                                  "reason": "no_options"}},
     }
     return {
         "id": "app-ledger", "loan_id": "app-ledger", "application_id": "app-ledger",
@@ -92,6 +95,7 @@ def make_alert_with_cause() -> dict:
         "models": {"investigator": "gpt-5.4"}, "replay_id": "rp-l1", "status": "open",
         "created_at": NOW.isoformat(), "event_error": None, "collections": None, "restructure": None,
         "primary_cause": "settlement_hold", "secondary_causes": ["high_cost_borrowing"],
+        "check_action": "정산 보류 해제 예정일과 다른 계좌 가용자금을 확인하세요.",
     }
 
 
@@ -153,10 +157,20 @@ def legacy_alert():
     return make_legacy_alert()
 
 
+CONTACTS = {"id": "contacts-rp-l1", "loan_id": "app-ledger", "contacts": [
+    {"ref": "rp-l1-s1", "on": "2026-09-22", "at": "2026-09-22T10:00:00+09:00", "script_id": "balance_warning",
+     "status": "sent", "reason": None, "by": "early_warning",
+     "text": "다음 상환일 2026-10-01 전에 잔고가 부족할 수 있어 미리 알려 드립니다."},
+]}
+
+
 class FakeMonitoring:
     def __init__(self, loans, alerts):
         self.loans = {d["id"]: d for d in loans}
         self.alerts = alerts
+
+    def get_contacts(self, loan_id, replay_id):
+        return CONTACTS if (loan_id, replay_id) == ("app-ledger", "rp-l1") else None
 
     def list_loans(self, limit):
         return list(self.loans.values())[:limit]
@@ -200,3 +214,29 @@ def test_legacy_alert_and_replay_render(client, legacy_loan, legacy_alert):
 def test_ledger_table_renders(client, loan_with_ledger):
     html = client.get(f"/loans/{loan_with_ledger['id']}", headers=OFFICER).text
     assert "주간 정산(PG 원장)" in html and "보류" in html
+
+
+def test_alert_card_shows_reason_and_check_action(client, loan_with_ledger):
+    html = client.get(f"/loans/{loan_with_ledger['id']}", headers=OFFICER).text
+    card = html[html.index('id="ew-rp-l1-w03"'):]
+    assert "이유" in card and "확인할 조치" in card
+    assert "정산 보류 해제 예정일과 다른 계좌 가용자금을 확인하세요." in card
+    # 이 경보로 나간 단계 자동 안내(1단계 발송, 2단계는 고를 옵션이 없어 건너뜀)
+    assert "이 경보로 자동 발송된 안내" in card and "잔고 부족 예상 알림" in card
+    assert "다음 상환일 2026-10-01 전에 잔고가 부족할 수 있어" in card
+    assert "건너뜀" in card and "고를 옵션 없음" in card and "이 경보로 나간 차주 연락 없음" not in card
+
+
+def test_auto_contacts_in_view(loan_with_ledger, alert_with_cause):
+    v = loan_view(loan_with_ledger, [alert_with_cause], None, KEY, restore=False, contacts=CONTACTS)
+    stages = v["alerts"][0]["auto_contacts"]
+    assert [(c["stage"], c["status"]) for c in stages] == [(1, "sent"), (2, "skipped")]
+    assert stages[0]["script_id"] == "balance_warning" and stages[0]["text"].startswith("다음 상환일")
+    assert stages[1]["text"] is None
+
+
+def test_old_alert_without_check_action_renders(client, legacy_loan):
+    html = client.get(f"/loans/{legacy_loan['id']}", headers=OFFICER).text
+    card = html[html.index('id="ew-rp-legacy-w01"'):]
+    assert "1주차 매출이 기준보다 크게 줄었다" in card and "확인할 조치" not in card
+    assert "이 경보로 자동 발송된 안내" not in card and "이 경보로 나간 차주 연락 없음" in card

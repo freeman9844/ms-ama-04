@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from agents.collections import RepaymentCase, build_proposal
 from console.app import REPLAY_QUEUE, RESTRUCTURE_QUEUE, ConsoleDeps, create_app
 from console.auth import AUDITOR, CREDIT_OFFICER
 from journey.models import KST
@@ -90,10 +91,28 @@ def make_case(mask, restructure_status="pending_officer"):
     }
 
 
+def make_proposal_case(mask, status="pending_officer", hardship=True, **decided):
+    """추심 제안(proposal)이 있는 미납 추심 건(2026-11-11 이후). 제안서는 실제 조립 함수로 만든다."""
+    case = make_case(mask)
+    case.update(
+        status="proposal_pending", missed_count=2, restructure=None,
+        collections={"decision": "proposed", "reason": "누적 미납", "contacts": [], "record": {}, "at": NOW.isoformat()},
+    )
+    case["recent_alert"] = {**case["recent_alert"], "primary_cause": "settlement_hold",
+                            "check_action": "정산 상태와 다른 계좌 가용자금 확인이 필요합니다."}
+    draft = {"script_id": "hardship_offer", "reason": mask("김대표 정산 보류가 이어져 상담이 필요하다"), "by": "agent",
+             "hardship": {"category": "revenue_shock", "note": mask("김대표 정산 보류")} if hardship else None}
+    escalation = [{"script_id": "balance_warning", "on": "2026-09-10", "status": "sent"}]
+    proposal = build_proposal(RepaymentCase.from_doc(case), draft, [], NOW, escalation, lambda s: s)
+    case["proposal"] = {**proposal, "status": status, **decided}
+    return case
+
+
 class FakeMonitoring:
-    def __init__(self, loans, alerts):
+    def __init__(self, loans, alerts, contacts=None):
         self.loans = {d["id"]: d for d in loans}
         self.alerts = alerts
+        self.contacts = contacts or {}
         self.alert_queries = []
 
     def list_loans(self, limit):
@@ -109,6 +128,9 @@ class FakeMonitoring:
     def list_alerts(self, loan_id, replay_id):
         self.alert_queries.append((loan_id, replay_id))
         return [a for a in self.alerts if a["loan_id"] == loan_id and a["replay_id"] == replay_id]
+
+    def get_contacts(self, loan_id, replay_id):
+        return self.contacts.get((loan_id, replay_id))
 
 
 class FakeQueue:
@@ -254,7 +276,7 @@ def held_loan(status, paused_week=2):
 def test_paused_replay_blocks_new_replay_and_opens_restructure_form(setup):
     client, queue, *_ = setup(loan=held_loan("paused"))
     page = client.get("/loans/app-1", headers=OFFICER).text
-    assert "재조정 대기" in page and "재조정 요청으로 재생을 멈췄습니다" in page and "남은 11주" in page
+    assert "심사역 결정 대기" in page and "재조정 요청으로 재생을 멈췄습니다" in page and "남은 11주" in page
     assert 'http-equiv="refresh"' not in page  # 사유 입력이 지워지지 않게 새로 고치지 않는다
     assert "/restructure" in page and "/replay/resume" not in page
     assert re.search(r'<button type="submit" disabled>사후 13주 재생\(다시\)</button>', page)
@@ -362,7 +384,8 @@ def test_alert_card_without_followup_says_alert_alone_does_not_contact(setup, ma
     client, *_ = setup(alerts=[make_alert(mask)])
     page = client.get("/loans/app-1", headers=OFFICER).text
     assert "심사역 검토 대상 · 이 경보로 나간 차주 연락 없음" in page
-    assert "경보만으로는 연락하지 않고, 미납이 생기면 추심 에이전트가 연락합니다" in page
+    assert "높음 경보가 처음 나면 잔고 부족 예상 알림" in page and "심사역이 승인해야 보냅니다" in page
+    assert "경보만으로는 연락하지 않고" not in page
 
 
 def test_legacy_alert_with_restructure_still_decidable(setup, mask):
@@ -375,3 +398,191 @@ def test_legacy_alert_with_restructure_still_decidable(setup, mask):
     form = {"csrf": csrf(client), "decision": "approve", "reason": "옛 경보"}
     assert client.post("/loans/app-1/alerts/ew-rp-1-w01/restructure", data=form, headers=OFFICER).status_code == 202
     assert queue.sent[0][1]["alert_id"] == "ew-rp-1-w01"
+
+
+# ── 추심 제안 승인·수정·반려, 플랜 변경 승인, 응답 없이 계속(2026-11-11) ──
+
+PROPOSAL_PATH = "/loans/app-1/cases/rc-rp-1-i1/proposal"
+SPLIT = [{"no": 3, "part": 1, "due_on": "2026-11-30", "amount_krw": 889_500, "from_due_on": "2026-11-30"},
+         {"no": 3, "part": 2, "due_on": "2026-12-04", "amount_krw": 889_500, "from_due_on": "2026-11-30"}]
+MOVE = [{"no": 3, "part": None, "due_on": "2026-12-04", "amount_krw": 1_779_000, "from_due_on": "2026-11-30"}]
+
+
+def plan_loan(offer_status="chosen", change_status="pending_officer", holds=("plan_change",), status="paused"):
+    loan = held_loan(status)
+    loan["monitoring"].update(holds=list(holds), escalation={"stage1": None, "stage2": None})
+    loan["repayment"]["schedule"][2].update(status="scheduled", txn_id=None)
+    loan["repayment"]["offer"] = {
+        "offer_id": "of-rp-1", "week": 2, "sent_on": "2026-09-10", "status": offer_status,
+        "options": [{"option": "move", "items": MOVE, "replaces": ["i3"]},
+                    {"option": "split", "items": SPLIT, "replaces": ["i3"]},
+                    {"option": "keep", "items": [], "replaces": []}],
+        "choice": None if offer_status == "open" else "split", "responded_at": None,
+    }
+    loan["repayment"]["plan_change"] = None if change_status is None else {
+        "change_id": "pc-rp-1", "option": "split", "items": SPLIT, "replaces": ["i3"], "status": change_status,
+        "requested_at": NOW.isoformat(), "officer_id": None, "decided_at": None, "reason": None,
+    }
+    return loan
+
+
+def test_proposal_card_shows_actions_evidence_checks_and_exact_text(setup, mask):
+    case = make_proposal_case(mask)
+    client, *_ = setup(loan=held_loan("paused"), alerts=[make_alert(mask), case])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    card = page[page.index('id="rc-rp-1-i1"'):]
+    for s in ("제안 조치와 이유", "판단 근거", "정책 확인", "고객에게 보낼 문구", "상환 곤란 상담 안내",
+              "승인 스크립트", "7일 7회", "금지 표현 없음", "재조정 근거", "잔고 부족 예상 알림",
+              "정산 상태와 다른 계좌 가용자금 확인이 필요합니다.", "김대표 정산 보류가 이어져 상담이 필요하다"):
+        assert s in card, s
+    assert case["proposal"]["text"] in card and "✔" in card
+    assert f'action="{PROPOSAL_PATH}"' in card and 'value="modify"' in card and 'value="reject"' in card
+    assert 'name="include_hardship" value="1" checked' in card and 'maxlength="300"' in card
+    # 고객 문구에는 실명 토큰이 없고, 이유는 심사역에게만 복원된다.
+    assert "[[PERSON_" not in card
+    auditor = client.get("/loans/app-1", headers=AUDITOR_H).text
+    assert f'action="{PROPOSAL_PATH}"' not in auditor and case["proposal"]["text"] in auditor
+
+
+def test_proposal_without_hardship_has_no_hardship_checkbox(setup, mask):
+    client, *_ = setup(loan=held_loan("paused"), alerts=[make_proposal_case(mask, hardship=False)])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert 'name="include_hardship"' not in page and "재조정 근거" not in page
+
+
+def test_proposal_approve_queues_collections_decision(setup, mask):
+    client, queue, *_ = setup(loan=held_loan("paused"), alerts=[make_proposal_case(mask)])
+    form = {"csrf": csrf(client), "decision": "approve", "text": "무시", "include_hardship": "1", "reason": "규칙대로",
+            "officer_id": "someone-else"}
+    r = client.post(PROPOSAL_PATH, data=form, headers=OFFICER)
+    assert r.status_code == 202, r.text
+    assert queue.sent == [(RESTRUCTURE_QUEUE, {
+        "kind": "collections", "loan_id": "app-1", "case_id": "rc-rp-1-i1", "decision": "approve",
+        "officer_id": "oid-officer", "text": None, "include_hardship": None, "reason": "규칙대로"})]
+
+
+def test_proposal_modify_sends_text_and_hardship_choice(setup, mask):
+    client, queue, *_ = setup(loan=held_loan("paused"), alerts=[make_proposal_case(mask)])
+    form = {"csrf": csrf(client), "decision": "modify", "text": "  상환일 안내드립니다. 문의는 담당자에게 주세요.  "}
+    assert client.post(PROPOSAL_PATH, data=form, headers=OFFICER).status_code == 202
+    msg = queue.sent[0][1]
+    assert msg["kind"] == "collections" and msg["decision"] == "modify"
+    assert msg["text"] == "상환일 안내드립니다. 문의는 담당자에게 주세요." and msg["include_hardship"] is False
+
+
+@pytest.mark.parametrize("text", ["법적 조치를 진행하겠습니다.", "", "가" * 301, "[[PERSON_1]]님 안내"],
+                         ids=["banned", "empty", "too_long", "pii_token"])
+def test_proposal_modify_with_banned_text_is_422_and_not_queued(setup, mask, text):
+    client, queue, *_ = setup(loan=held_loan("paused"), alerts=[make_proposal_case(mask)])
+    r = client.post(PROPOSAL_PATH, data={"csrf": csrf(client), "decision": "modify", "text": text}, headers=OFFICER)
+    assert r.status_code == 422 and "고객 문구" in r.text and queue.sent == []
+
+
+def test_proposal_reject_requires_reason(setup, mask):
+    client, queue, *_ = setup(loan=held_loan("paused"), alerts=[make_proposal_case(mask)])
+    r = client.post(PROPOSAL_PATH, data={"csrf": csrf(client), "decision": "reject", "reason": " "}, headers=OFFICER)
+    assert r.status_code == 422 and "사유" in r.text
+    bad = client.post(PROPOSAL_PATH, data={"csrf": csrf(client), "decision": "maybe"}, headers=OFFICER)
+    assert bad.status_code == 422 and queue.sent == []
+    ok = client.post(PROPOSAL_PATH, data={"csrf": csrf(client), "decision": "reject", "reason": "이미 통화함"},
+                     headers=OFFICER)
+    assert ok.status_code == 202 and queue.sent[0][1]["decision"] == "reject"
+
+
+def test_proposal_not_pending_is_409(setup, mask):
+    contact = {"ref": "rc-rp-1-i1", "on": "2026-11-02", "at": NOW.isoformat(), "script_id": "hardship_offer",
+               "status": "deferred", "reason": "contact_hours", "by": "officer", "text": "x", "officer_id": "oid-officer"}
+    done = make_proposal_case(mask, status="modified", officer_id="oid-officer", decided_at=NOW.isoformat(),
+                              decision_reason="문구 순화", sent_text="수정한 안내 문구입니다.", contact=contact)
+    client, queue, *_ = setup(loan=held_loan("awaiting_resume"), alerts=[done])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    card = page[page.index('id="rc-rp-1-i1"'):]
+    assert "수정 후 승인" in card and "수정한 안내 문구입니다." in card and "보류" in card and "연락 시간 밖" in card
+    assert f'action="{PROPOSAL_PATH}"' not in card
+    r = client.post(PROPOSAL_PATH, data={"csrf": csrf(client), "decision": "approve"}, headers=OFFICER)
+    assert r.status_code == 409
+    nocase = client.post("/loans/app-1/cases/rc-nope/proposal", data={"csrf": csrf(client), "decision": "approve"},
+                         headers=OFFICER)
+    assert nocase.status_code == 404 and queue.sent == []
+
+
+def test_proposal_form_waits_for_replay_and_needs_decider(setup, mask):
+    client, queue, *_ = setup(loan=make_loan(status="replaying", started_at=NOW - timedelta(minutes=5)),
+                              alerts=[make_proposal_case(mask)])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "재생이 멈추면 결정할 수 있습니다" in page and f'action="{PROPOSAL_PATH}"' not in page
+    assert client.post(PROPOSAL_PATH, data={"csrf": "0" * 64, "decision": "approve"}, headers=AUDITOR_H).status_code == 403
+    assert queue.sent == []
+
+
+def test_case_without_proposal_renders_as_before(setup, mask):
+    client, *_ = setup(alerts=[make_case(mask)])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    card = page[page.index('id="rc-rp-1-i1"'):]
+    assert "추심 에이전트 <small>routed</small>" in card and "제안 조치와 이유" not in card
+    assert 'action="/loans/app-1/alerts/rc-rp-1-i1/restructure"' in card
+
+
+def test_plan_change_card_and_decline_requires_reason(setup):
+    client, queue, *_ = setup(loan=plan_loan(), alerts=[])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert 'id="plan-change"' in page and 'id="plan-offer"' in page and "분할납부" in page
+    assert "3-1회차" in page and "3-2회차" in page and "2026-12-04" in page and "889,500원" in page
+    assert 'action="/loans/app-1/plan/pc-rp-1"' in page
+    path = "/loans/app-1/plan/pc-rp-1"
+    r = client.post(path, data={"csrf": csrf(client), "decision": "decline", "reason": ""}, headers=OFFICER)
+    assert r.status_code == 422 and queue.sent == []
+    assert client.post("/loans/app-1/plan/pc-other", data={"csrf": csrf(client), "decision": "approve"},
+                       headers=OFFICER).status_code == 404
+    ok = client.post(path, data={"csrf": csrf(client), "decision": "approve", "reason": "확인"}, headers=OFFICER)
+    assert ok.status_code == 202
+    assert queue.sent == [(RESTRUCTURE_QUEUE, {"kind": "plan_change", "loan_id": "app-1", "change_id": "pc-rp-1",
+                                               "decision": "approve", "officer_id": "oid-officer", "reason": "확인"})]
+
+
+def test_decided_plan_change_is_409_and_shows_result(setup):
+    loan = plan_loan(change_status="declined", holds=(), status="awaiting_resume")
+    loan["repayment"]["plan_change"].update(officer_id="oid-officer", decided_at=NOW.isoformat(), reason="여력 부족")
+    client, queue, *_ = setup(loan=loan, alerts=[])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "반려" in page and "여력 부족" in page and 'action="/loans/app-1/plan/pc-rp-1"' not in page
+    r = client.post("/loans/app-1/plan/pc-rp-1", data={"csrf": csrf(client), "decision": "approve"}, headers=OFFICER)
+    assert r.status_code == 409 and queue.sent == []
+
+
+def test_offer_expire_queues_message_only_when_open(setup):
+    client, queue, *_ = setup(loan=plan_loan(offer_status="open", change_status=None, holds=("customer_response",),
+                                             status="awaiting_customer"), alerts=[])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "고객 응답 대기" in page and "고객 응답 없이 계속" in page and 'action="/loans/app-1/offer/expire"' in page
+    r = client.post("/loans/app-1/offer/expire", data={"csrf": csrf(client)}, headers=OFFICER)
+    assert r.status_code == 202
+    assert queue.sent == [(RESTRUCTURE_QUEUE, {"kind": "offer_expire", "loan_id": "app-1", "offer_id": "of-rp-1",
+                                               "officer_id": "oid-officer"})]
+    closed, queue2, *_ = setup(loan=plan_loan(), alerts=[])
+    assert 'action="/loans/app-1/offer/expire"' not in closed.get("/loans/app-1", headers=OFFICER).text
+    assert closed.post("/loans/app-1/offer/expire", data={"csrf": csrf(closed)}, headers=OFFICER).status_code == 409
+    assert queue2.sent == []
+
+
+def test_pause_banner_lists_holds_in_order(setup, mask):
+    loan = plan_loan(offer_status="open", change_status=None, holds=("customer_response", "collections_proposal"))
+    client, *_ = setup(loan=loan, alerts=[make_proposal_case(mask)])
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    banner = page[page.index('aria-label="재생 일시정지"'):page.index("</section>", page.index('aria-label="재생 일시정지"'))]
+    assert banner.index("추심 승인 대기") < banner.index("고객 응답 대기")
+    assert 'href="#rc-rp-1-i1"' in banner and 'href="#plan-offer"' in banner
+    assert "재조정 요청으로 재생을 멈췄습니다" not in page
+
+
+def test_ledger_shows_item_amount_parts_and_early_reminder(setup):
+    loan = make_loan()
+    sched = loan["repayment"]["schedule"]
+    sched[2].update(early_reminded_on="2026-11-25", early_reminder_status="deferred")
+    sched.append({**sched[2], "no": 4, "part": 1, "amount_krw": 889_500, "from_due_on": "2026-12-30",
+                  "due_on": "2026-12-30", "status": "scheduled", "txn_id": None, "early_reminded_on": None})
+    client, *_ = setup(loan=loan)
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    ledger = page[page.index("상환 원장"):]
+    assert "5일 전 안내" in ledger and "2026-11-25 (보류)" in ledger and "4-1회차" in ledger and "889,500원" in ledger
+    assert "시뮬레이션 날짜 10시" in ledger and "심사역 승인" in ledger

@@ -447,6 +447,9 @@ class MemoryMonitoring:
     def list_alerts(self, loan_id: str, replay_id: str) -> list[dict[str, Any]]:
         return [a for a in self.alerts if a["loan_id"] == loan_id and a["replay_id"] == replay_id]
 
+    def get_contacts(self, loan_id: str, replay_id: str) -> dict[str, Any] | None:
+        return None
+
 
 class EmptyPrivacy:
     def consents_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:

@@ -168,8 +168,8 @@ def test_alert_followups_link_missed_payment_contacts_to_cited_alert():
     other = {"case_id": "rc-0", "installment": {"no": 1}, "recent_alert": None}
     links = dashboard.alert_followups([case, waiting, other])
     assert set(links) == {"ew-12"}
-    assert links["ew-12"][0] == {"case_id": "rc-1", "no": 3, "decision": "routed", "restructure": "pending_officer",
-                                 "contacts": [{"at": "2026-11-09T16:13:21", "script_id": "hardship_offer",
+    assert links["ew-12"][0] == {"case_id": "rc-1", "no": 3, "decision": "routed", "proposal": None,
+                                 "restructure": "pending_officer", "contacts": [{"at": "2026-11-09T16:13:21", "script_id": "hardship_offer",
                                                "status": "sent"}]}
     assert links["ew-12"][1]["contacts"] == [] and links["ew-12"][1]["decision"] is None
     steps = dashboard.alert_steps({"week": 12, "severity": "high", "collections": None, "restructure": None},
@@ -218,6 +218,30 @@ def test_case_steps():
         ("미납", "done", "3회차 2027-01-29"), ("추심 에이전트", "done", "routed"), ("재조정 결정", "current", "심사역 대기")]
     waiting = dashboard.case_steps({**c, "collections": None, "restructure": None})
     assert [s["state"] for s in waiting] == ["done", "current"]
+    # 추심 제안(2026-11-11)이 있으면 재조정 앞에 "심사역 승인" 단계를 둔다.
+    proposed = dashboard.case_steps({**c, "collections": {"decision": "proposed"}, "restructure": None,
+                                     "proposal": {"status": "pending_officer"}})
+    assert [(s["label"], s["state"], s["note"]) for s in proposed][1:] == [
+        ("추심 에이전트", "done", "proposed"), ("심사역 승인", "current", "심사역 승인 대기")]
+    approved = dashboard.case_steps({**c, "proposal": {"status": "modified"}})
+    assert [(s["label"], s["state"], s["note"]) for s in approved][2:] == [
+        ("심사역 승인", "done", "수정 후 승인"), ("재조정 결정", "current", "심사역 대기")]
+
+
+def test_alert_steps_with_auto_contacts_and_proposal_followup():
+    alert = {"week": 3, "severity": "high", "auto_contacts": [{"stage": 1, "status": "sent"},
+                                                               {"stage": 2, "status": "skipped"}]}
+    steps = dashboard.alert_steps(alert)
+    assert [(s["label"], s["note"]) for s in steps][2:] == [
+        ("단계 자동 안내", "1단계 발송 · 2단계 건너뜀"), ("심사역 검토", "미납 추심 없음")]
+    case = {"case_id": "rc-1", "installment": {"no": 3}, "recent_alert": {"alert_id": "ew-3"},
+            "collections": {"decision": "proposed", "contacts": []},
+            "proposal": {"status": "approved", "contact": {"at": "t", "script_id": "missed_payment", "status": "sent"}}}
+    links = dashboard.alert_followups([case])
+    assert links["ew-3"][0]["contacts"] == [{"at": "t", "script_id": "missed_payment", "status": "sent"}]
+    followed = dashboard.alert_steps(alert, links["ew-3"])
+    assert [(s["label"], s["state"], s["note"]) for s in followed][3:] == [
+        ("미납 추심 연락", "done", "3회차 · missed_payment"), ("심사역 승인", "done", "승인")]
 
 
 def test_loan_summary_repayment_and_cases():

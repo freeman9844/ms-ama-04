@@ -73,6 +73,10 @@ def test_monitoring_store_reads_loans_and_partitioned_alerts():
     # 대출 파티션 안에서만 찾고, 연락 기록 문서(contacts-*)는 제외한다.
     assert alerts.calls[0] == ("query", ALERTS_QUERY, [{"name": "@replay", "value": "rp-1"}], "app-1")
     assert "STARTSWITH(c.id, 'ew-')" in ALERTS_QUERY
+    # 연락 기록 문서는 같은 파티션에서 점 읽기로 따로 가져온다(없으면 None).
+    assert store.get_contacts("app-1", "rp-1") == {"id": "contacts-rp-1"}
+    assert alerts.calls[1] == ("read", "contacts-rp-1", "app-1")
+    assert CosmosMonitoring(loans, FakeContainer(missing=True)).get_contacts("app-1", "rp-1") is None
 
 
 def test_privacy_store_reads_consents_proofs_and_grievances():

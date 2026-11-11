@@ -86,6 +86,10 @@ class CosmosMonitoring:
         )
         return list(items)
 
+    def get_contacts(self, loan_id: str, replay_id: str) -> dict[str, Any] | None:
+        """재생의 차주 연락 기록 문서(contacts-{replay_id}) 점 읽기. 단계 자동 안내 문구를 여기서 찾는다."""
+        return _read_or_none(self._alerts, f"contacts-{replay_id}", loan_id)
+
 
 CONSENTS_BY_APPLICANT = "SELECT * FROM c WHERE c.applicant_id = @applicant ORDER BY c.granted_at DESC"
 CONSENTS_BY_APPLICATION = "SELECT * FROM c WHERE c.application_id = @application ORDER BY c.granted_at DESC"

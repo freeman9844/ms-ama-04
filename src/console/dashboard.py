@@ -10,7 +10,7 @@ from typing import Any
 from agents.features import EXPENSE_GROUPS
 from agents.forecast import OUTFLOW_LABELS
 from console import charts
-from console.monitoring import SEVERITY_LABELS, TRIGGER_LABELS
+from console.monitoring import CONTACT_STATUS_LABELS, PROPOSAL_LABELS, SEVERITY_LABELS, TRIGGER_LABELS
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from opsmetrics.labels import STEP_LABELS
 
@@ -385,14 +385,23 @@ def alert_followups(cases: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[s
         if not alert_id:
             continue
         collections = c.get("collections") or {}
+        proposal = c.get("proposal") or {}
+        # 2026-11-11부터 추심 연락은 심사역이 승인·수정한 제안의 발송(proposal.contact) 한 건이다.
+        sent = [*(collections.get("contacts") or ()), *([proposal["contact"]] if proposal.get("contact") else [])]
         links.setdefault(alert_id, []).append({
             "case_id": c.get("case_id"),
             "no": (c.get("installment") or {}).get("no"),
             "decision": collections.get("decision"),
+            "proposal": proposal.get("status"),
             "restructure": (c.get("restructure") or {}).get("status"),
-            "contacts": [{k: x.get(k) for k in ("at", "script_id", "status")} for x in collections.get("contacts") or ()],
+            "contacts": [{k: x.get(k) for k in ("at", "script_id", "status")} for x in sent],
         })
     return links
+
+
+def _proposal_step(status: str | None) -> dict[str, Any]:
+    return _step("proposal", "심사역 승인", "current" if status == "pending_officer" else "done",
+                 PROPOSAL_LABELS.get(status or "", status or ""))
 
 
 def _restructure_step(status: str | None) -> dict[str, Any]:
@@ -407,13 +416,20 @@ def alert_steps(alert: Mapping[str, Any], followups: Sequence[Mapping[str, Any]]
         _step("investigate", "조기경보 조사", "done", SEVERITY_LABELS.get(alert.get("severity") or "", "")),
     ]
     if not collections and not alert.get("restructure"):
-        # 조기경보는 심사역 검토용이다. 차주 연락은 상환 원장의 미납 추심 건이 맡고, 그 건이 이 경보를 근거로 보면 잇는다.
+        # 높음 경보는 단계 자동 안내(잔고 부족 예상 알림·상환 플랜 제안)를 보낼 수 있다. 그 밖의 차주 연락은
+        # 상환 원장의 미납 추심 건이 맡고(제안 → 심사역 승인), 그 건이 이 경보를 근거로 보면 잇는다.
+        auto = alert.get("auto_contacts") or ()
+        if auto:
+            notes = " · ".join(f"{a['stage']}단계 {CONTACT_STATUS_LABELS.get(a['status'], a['status'])}" for a in auto)
+            head.append(_step("escalation", "단계 자동 안내", "done", notes))
         if not followups:
-            return [*head, _step("review", "심사역 검토", "done", "연락 없음")]
+            return [*head, _step("review", "심사역 검토", "done", "미납 추심 없음" if auto else "연락 없음")]
         f = followups[-1]
         scripts = ", ".join(x["script_id"] for x in f["contacts"] if x.get("script_id"))
         steps = [*head, _step("followup", "미납 추심 연락", "done" if f["decision"] else "current",
                               f"{f['no']}회차" + (f" · {scripts}" if scripts else ""))]
+        if f.get("proposal"):
+            steps.append(_proposal_step(f["proposal"]))
         if f["restructure"]:
             steps.append(_restructure_step(f["restructure"]))
         return steps
@@ -431,6 +447,9 @@ def case_steps(case: Mapping[str, Any]) -> list[dict[str, Any]]:
         _step("missed", "미납", "done", f"{inst.get('no')}회차 {inst.get('due_on')}"),
         _step("collections", "추심 에이전트", "done" if collections else "current", collections.get("decision") or ""),
     ]
+    proposal = case.get("proposal")
+    if proposal:
+        steps.append(_proposal_step(proposal.get("status")))
     restructure = case.get("restructure")
     if restructure:
         st = restructure.get("status")

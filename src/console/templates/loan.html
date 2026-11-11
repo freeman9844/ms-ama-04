@@ -29,6 +29,58 @@
 </form>
 {% endif %}
 {%- endmacro %}
+{% macro proposal_block(doc_id, p, decidable) -%}{% set ev = p.evidence or {} %}
+<h3>추심 제안 <small>{{ p.status|proposal_label }}</small></h3>
+<div class="decision-layout">
+<div>
+<h4>제안 조치와 이유</h4>
+<p><span class="chip">{{ p.script_id|script_label }}</span>{% if p.hardship %} <span class="chip warn">재조정 상담 요청 포함</span>{% endif %}</p>
+<p>{{ p.reason }}</p>
+{% if p.hardship %}<p>재조정 상담: {{ p.hardship.category }} · {{ p.hardship.note }}</p>{% endif %}
+<h4>판단 근거</h4>
+<ul>
+  <li>{{ ev.installment_no }}회차 {{ ev.due_on }} · {{ ev.amount_krw|krw }} · 누적 미납 {{ ev.missed_count }}회</li>
+  {% if ev.recent_alert %}<li>최근 경보 {{ ev.recent_alert.severity|severity_label }}: {{ ev.recent_alert.summary }}{% if ev.recent_alert.check_action %}<br>확인할 조치: {{ ev.recent_alert.check_action }}{% endif %}</li>{% endif %}
+  <li>최근 7일 차주 연락 {{ ev.contacts_7d }}회</li>
+  {% for e in ev.escalation or () %}<li>단계 자동 안내: {{ e.script_id|script_label }} · {{ e.on }} · {{ e.status|contact_status_label }}</li>{% endfor %}
+</ul>
+</div>
+<div>
+<h4>정책 확인 결과</h4>
+<ul class="checks">{% for k in p.checks or () %}
+  <li><span class="{{ 'ok' if k.ok else 'error' }}">{{ "✔" if k.ok else "✖" }}</span> {{ k.id|check_label }} · {{ k.detail }}</li>
+{% endfor %}</ul>
+<h4>{{ "고객에게 보낼 문구" if p.status == "pending_officer" else "제안한 문구" }}</h4>
+<blockquote>{{ p.text }}</blockquote>
+</div>
+</div>
+{% if p.status != "pending_officer" %}
+<h4>심사역 결정</h4>
+<p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason }}{% endif %}</p>
+{% if p.contact %}<p>발송 결과: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
+<blockquote>{{ p.sent_text or p.contact.text }}</blockquote>{% endif %}
+{% elif decidable and user.can_decide and replay_blocked %}
+<p><small>재생이 멈추면 결정할 수 있습니다.</small></p>
+{% elif decidable and user.can_decide %}
+{% set locked = " disabled" if watch_url else "" %}
+<form method="post" action="/loans/{{ v.loan.id|path }}/cases/{{ doc_id|path }}/proposal" class="decision" data-decision-form>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset><legend>추심 제안 결정</legend>
+    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> 승인(제안 문구 그대로 발송)</label>
+    <label><input type="radio" name="decision" value="modify"{{ locked }}> 수정 후 승인</label>
+    <label><input type="radio" name="decision" value="reject"{{ locked }}> 반려(발송 안 함)</label>
+  </fieldset>
+  <label>수정 문구(수정 후 승인일 때 이 문구로 발송, 300자 이하) <textarea name="text" rows="4" maxlength="300"{{ locked }}>{{ p.text }}</textarea></label>
+  {% if p.hardship %}<label><input type="checkbox" name="include_hardship" value="1" checked{{ locked }}> 수정 후 승인할 때 재조정 상담 요청 포함</label>{% endif %}
+  <label>사유(반려할 때 필수) <textarea name="reason" rows="2"{{ locked }}></textarea></label>
+  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "결정 보내기" }}</button>
+</form>
+<p><small>승인·수정한 문구는 보낼 때 실제 시각으로 연락 시간(08~21시)·7일 7회를 다시 검사하고, 걸리면 보류합니다.</small></p>
+{% endif %}
+{%- endmacro %}
+{% macro plan_items(items) -%}
+{% for i in items %}{{ i|installment_label }} {% if i.from_due_on and i.from_due_on != i.due_on %}{{ i.from_due_on }} → {% endif %}{{ i.due_on }} · {{ i.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+{%- endmacro %}
 {% set l = v.loan %}{% set m = v.monitoring %}
 {% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }}">{% endif %}<script src="/static/decision.js" defer></script>{% endblock %}
 {% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
@@ -51,7 +103,15 @@
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if watch_url %}<p class="note" role="status">요청 반영을 기다리는 중입니다. {{ monitoring_refresh_seconds }}초마다 다시 확인합니다.</p>
 {% elif replay_blocked %}<p class="note">재생이 진행 중입니다. {{ monitoring_refresh_seconds }}초마다 새로 고칩니다.</p>{% endif %}
-{% if m.status == "paused" %}
+{% set hold_anchor = {"collections_proposal": m.pause_case_id or m.pause_alert_id, "restructure": m.pause_case_id or m.pause_alert_id, "customer_response": "plan-offer", "plan_change": "plan-change"} %}
+{% if m.status in ("paused", "awaiting_customer") and v.holds %}
+<section class="card resume-card" aria-label="재생 일시정지">
+  <h2>{{ m.status|monitoring_label }}: 아래 항목이 끝나야 재생을 이어갈 수 있습니다</h2>
+  <p>{{ m.paused_week }}주차 처리 뒤 재생을 멈췄습니다. 대기 항목:</p>
+  <ol>{% for h in v.holds %}<li>{% if hold_anchor[h] %}<a href="#{{ hold_anchor[h] }}">{{ h|hold_label }}</a>{% else %}{{ h|hold_label }}{% endif %}</li>{% endfor %}</ol>
+  <p>모두 끝나면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
+</section>
+{% elif m.status == "paused" %}
 <section class="card resume-card" aria-label="재생 일시정지">
   <h2>재조정 요청으로 재생을 멈췄습니다</h2>
   <p>{{ m.paused_week }}주차 미납 추심 건에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 추심 건에서 재조정을 승인하거나 거절하면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
@@ -59,7 +119,7 @@
 {% elif m.status == "awaiting_resume" %}
 <section class="card resume-card" aria-label="재생 재개 확인">
   <h2>재생을 이어갈까요?</h2>
-  <p>재조정 결정(승인/거절)이 기록되었습니다. 남은 {{ weeks_left }}주 재생을 이어갈까요?</p>
+  <p>{% if m.holds is defined %}대기 중이던 결정이 모두 끝났습니다.{% else %}재조정 결정(승인/거절)이 기록되었습니다.{% endif %} 남은 {{ weeks_left }}주 재생을 이어갈까요?</p>
   {% if user.can_decide %}
   <div class="actions">
     <form method="post" action="/loans/{{ l.id|path }}/replay/resume">
@@ -137,20 +197,86 @@
 {% if l.repayment %}
 <section class="card">
 <h2>상환 원장</h2>
-<p class="note">상환일 당일 <code>에이엠에이렌딩 대출상환</code> 출금이 있으면 납부로 봅니다. 안내는 상환일 3일 전에 자동 발송하고, 공정 추심 규칙(연락 시간·7일 횟수)에 걸리면 보류합니다. 미납이면 추심 건이 생겨 추심 에이전트가 연락합니다.</p>
+<p class="note">상환일 당일 <code>에이엠에이렌딩 대출상환</code> 출금이 있으면 납부로 봅니다. 안내는 상환일 3일 전에 자동 발송하고, 높음 경보로 잔고 부족 예상 알림이 나간 뒤에는 5일 전에도 추가 안내를 보냅니다. 자동 안내는 시뮬레이션 날짜 10시 기준으로 공정 추심 규칙(연락 시간·7일 7회)을 검사하고, 걸리면 보류합니다. 미납이면 추심 건이 생겨 추심 에이전트가 연락 문구를 제안하고, 심사역 승인을 받아야 보냅니다.</p>
 <table>
-  <thead><tr><th>회차</th><th>상환일</th><th>금액</th><th>상태</th><th>안내일</th><th>출금 거래</th><th>추심 건</th></tr></thead>
+  <thead><tr><th>회차</th><th>상환일</th><th>금액</th><th>상태</th><th>5일 전 안내</th><th>안내일</th><th>출금 거래</th><th>추심 건</th></tr></thead>
   <tbody>
 {% for s in l.repayment.schedule %}
 <tr>
-  <td>{{ s.no }}</td><td>{{ s.due_on }}</td><td>{{ l.repayment.installment_krw|krw }}</td>
+  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>(원래 {{ s.from_due_on }})</small>{% endif %}</td><td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
   <td class="r-{{ s.status }}">{{ s.status|repayment_label }}</td>
+  <td>{{ s.early_reminded_on or "-" }}{% if s.early_reminder_status == "deferred" %} (보류){% endif %}</td>
   <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} (보류){% endif %}</td>
   <td>{{ s.txn_id or "-" }}</td>
   <td>{% if s.case_id %}<a href="#{{ s.case_id }}">{{ s.case_id }}</a>{% else %}-{% endif %}</td>
 </tr>
 {% endfor %}
   </tbody>
+</table>
+</section>
+{% endif %}
+{% if v.offer %}{% set o = v.offer %}
+<section id="plan-offer" class="card">
+<h2>상환 플랜 제안 <small>{{ o.status|offer_label }}</small></h2>
+<p class="note">높음 경보 2단계 안내로 {{ o.sent_on }}({{ o.week }}주차)에 고객에게 보낸 셀프 상환 플랜입니다. 고객이 이동·분할을 고르면 심사역이 승인해야 일정이 바뀝니다.</p>
+<table>
+  <thead><tr><th>옵션</th><th>바뀌는 일정</th></tr></thead>
+  <tbody>{% for op in o.options or () %}
+<tr><td>{{ op.option|plan_option_label }}{% if op.option == o.choice %} <span class="chip">고객 선택</span>{% endif %}</td>
+<td>{% if op["items"] %}{{ plan_items(op["items"]) }}{% else %}지금 일정 그대로{% endif %}</td></tr>
+{% endfor %}</tbody>
+</table>
+{% if o.responded_at %}<p>고객 응답: {{ o.responded_at }}</p>{% endif %}
+{% if o.expired_at %}<p>고객 응답 없이 계속: {{ o.expired_by }} · {{ o.expired_at }}</p>{% endif %}
+{% if o.status == "open" and user.can_decide and replay_blocked %}
+<p><small>재생이 멈추면 고객 응답 없이 계속할 수 있습니다.</small></p>
+{% elif o.status == "open" and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}
+<form method="post" action="/loans/{{ l.id|path }}/offer/expire" class="decision" data-decision-form>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <p><small>제안을 만료로 닫고 지금 일정대로 진행합니다. 그 뒤 들어온 고객 선택은 반영하지 않습니다.</small></p>
+  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "고객 응답 없이 계속" }}</button>
+</form>
+{% endif %}
+</section>
+{% endif %}
+{% if v.plan_change %}{% set pc = v.plan_change %}
+<section id="plan-change" class="card">
+<h2>플랜 변경 요청 <small>{{ pc.option|plan_option_label }} · {{ pc.status|plan_change_label }}</small></h2>
+<p class="note">고객이 {{ pc.requested_at }}에 고른 플랜입니다. 승인하면 아래처럼 상환 일정이 바뀌고, 이미 공개된 주차의 거래·판정은 바뀌지 않습니다.</p>
+<table>
+  <thead><tr><th>지금</th><th>바뀐 뒤</th></tr></thead>
+  <tbody><tr>
+    <td>{% for b in pc.before %}{{ b.label }} {{ b.due_on or "-" }} · {{ b.amount_krw|krw if b.amount_krw is not none else "-" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+    <td>{% for a in pc.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+  </tr></tbody>
+</table>
+{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason }}{% endif %}</p>
+{% elif v.plan_decidable and user.can_decide and replay_blocked %}
+<p><small>재생이 멈추면 결정할 수 있습니다.</small></p>
+{% elif v.plan_decidable and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}
+<form method="post" action="/loans/{{ l.id|path }}/plan/{{ pc.change_id|path }}" class="decision" data-decision-form>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <fieldset><legend>플랜 변경 결정</legend>
+    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> 승인</label>
+    <label><input type="radio" name="decision" value="decline"{{ locked }}> 반려</label>
+  </fieldset>
+  <label>사유(반려할 때 필수) <textarea name="reason" rows="2"{{ locked }}></textarea></label>
+  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "결정 보내기" }}</button>
+</form>
+{% endif %}
+</section>
+{% endif %}
+{% if v.plan_history %}
+<section class="card">
+<h2>상환 일정 변경 이력</h2>
+<table>
+  <thead><tr><th>변경</th><th>지금이던 일정</th><th>바뀐 일정</th><th>적용 시작</th><th>심사역</th></tr></thead>
+  <tbody>{% for h in v.plan_history %}
+<tr><td>{{ h.option|plan_option_label }}</td>
+<td>{% for b in h.before %}{{ b.label }} {{ b.due_on }} · {{ b.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+<td>{% for a in h.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+<td>{{ h.applied_from }}</td><td>{{ h.officer_id }} · {{ h.decided_at }}</td></tr>
+{% endfor %}</tbody>
 </table>
 </section>
 {% endif %}
@@ -187,7 +313,11 @@
 <h2>경보 {{ a.week }}주차 <span class="status sev-{{ a.severity }}">{{ a.severity|severity_label }}</span> <small>{{ a.recommended_action|action_label }} · {{ a.status }}</small></h2>
 <p class="cause"><span class="chip">주원인: {{ a.cause_label }}</span>{% if a.secondary_labels %} <span class="chip">부원인: {{ a.secondary_labels|join(", ") }}</span>{% endif %}</p>
 {% if ui.alert_steps[a.alert_id] %}{{ ch.stepper(ui.alert_steps[a.alert_id], "경보 처리 단계", compact=true) }}{% endif %}
-<p class="summary">{{ a.summary }}</p>
+{% if a.check_action %}<div class="decision-layout">
+  <div><h3>이유</h3><p class="summary">{{ a.summary }}</p></div>
+  <div><h3>확인할 조치</h3><p>{{ a.check_action }}</p></div>
+</div>
+{% else %}<p class="summary">{{ a.summary }}</p>{% endif %}
 <ul class="claims">
 {% for s in a.signals %}
   <li><strong>{{ s.kind }}</strong> {{ s.text }}
@@ -197,17 +327,22 @@
 {% endfor %}
 </ul>
 <p class="review">조사 모델: {% for role, model in a.models|dictsort %}{{ role }}={{ model }} {% endfor %}{% if a.event_error %} · <span class="error">이벤트 발행 실패: {{ a.event_error }}</span>{% endif %}</p>
+{% if a.auto_contacts %}<h3>이 경보로 자동 발송된 안내</h3>
+<table>
+  <thead><tr><th>단계</th><th>스크립트</th><th>날짜</th><th>상태</th><th>문구</th></tr></thead>
+  <tbody>{% for x in a.auto_contacts %}<tr><td>{{ x.stage }}단계</td><td>{{ x.script_id|script_label }}</td><td>{{ x.on }}</td><td>{{ x.status|contact_status_label }}{% if x.reason %} ({{ x.reason|contact_reason_label }}){% endif %}</td><td>{{ x.text or "-" }}</td></tr>{% endfor %}</tbody>
+</table>{% endif %}
 {% if a.collections %}{{ collections_block(a.collections) }}
 {% elif not a.restructure %}{% set links = ui.alert_followups.get(a.alert_id) or [] %}
 {% if links %}<h3>이 경보를 근거로 한 차주 연락</h3>
 <ul class="followups">{% for f in links %}
   <li><a href="#{{ f.case_id }}">{{ f.no }}회차 미납 추심</a>{% if f.decision %} · 추심 에이전트 {{ f.decision }}{% else %} · 추심 에이전트 처리 대기 중{% endif %}
+  {% if f.proposal %} · 추심 제안 {{ f.proposal|proposal_label }}{% endif %}
   {% for x in f.contacts %} · {{ x.at }} {{ x.script_id }} {{ x.status }}{% endfor %}
   {% if f.restructure %} · 재조정 상담 요청 {{ f.restructure }}{% endif %}</li>
 {% endfor %}</ul>
-<p class="note"><small>경보만으로는 연락하지 않고, 미납이 생기면 추심 에이전트가 이 경보를 참고해 연락합니다. 재조정 결정은 추심 카드에서 합니다.</small></p>
-{% else %}<p class="note">심사역 검토 대상 · 이 경보로 나간 차주 연락 없음</p>
-<p class="note"><small>경보만으로는 연락하지 않고, 미납이 생기면 추심 에이전트가 연락합니다.</small></p>{% endif %}
+{% elif not a.auto_contacts %}<p class="note">심사역 검토 대상 · 이 경보로 나간 차주 연락 없음</p>{% endif %}
+<p class="note"><small>높음 경보가 처음 나면 잔고 부족 예상 알림(1단계)을, 높음 경보가 두 번 이어지면 상환 플랜 제안(2단계)을 자동으로 보냅니다(단계마다 재생에서 한 번). 미납이 생기면 추심 에이전트가 이 경보를 참고해 연락 문구를 제안하고, 심사역이 승인해야 보냅니다. 재조정 결정은 추심 카드에서 합니다.</small></p>
 {% endif %}
 {% if a.restructure %}{{ restructure_block(a.id, a.restructure, a.decidable) }}{% endif %}
 </section>
@@ -220,7 +355,8 @@
 {% if c.recent_alert %}<p>최근 경보: <a href="#{{ c.recent_alert.alert_id }}">{{ c.recent_alert.week }}주차 {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary }}</p>
 {% else %}<p class="note">이번 재생에 앞선 경보 없음.</p>{% endif %}
 {% if c.event_error %}<p class="error">이벤트 발행 실패: {{ c.event_error }}</p>{% endif %}
-{% if c.collections %}{{ collections_block(c.collections) }}{% else %}<p>추심 에이전트 처리 대기 중.</p>{% endif %}
+{% if c.proposal %}{{ proposal_block(c.id, c.proposal, c.proposal_decidable) }}
+{% elif c.collections %}{{ collections_block(c.collections) }}{% else %}<p>추심 에이전트 처리 대기 중.</p>{% endif %}
 {% if c.restructure %}{{ restructure_block(c.id, c.restructure, c.decidable) }}{% endif %}
 </section>
 {% endfor %}
