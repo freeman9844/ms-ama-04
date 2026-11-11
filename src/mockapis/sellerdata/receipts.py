@@ -41,12 +41,14 @@ class ReceiptHooks:
     hold: 참이면 그 지급은 held_krw = 상계 뒤 net이 되고 net 0(계좌 사건 없음).
     release_on: 보류가 있었으면 그날 플랫폼별로 해제 행 1개(누적 보류를 released_krw로 입금).
     advance_platform: 있으면 _top_platform 대신 이 플랫폼을 선정산 양도 대상으로 쓴다.
+    advance_until: 있으면 그날까지의 지급만 선지급으로 바꾼다(급할 때만 쓰고 끊는 신규 양도).
     """
 
     extra_offset: Callable[[date], float] = lambda d: 0.0
     hold: Callable[[Payout], bool] = lambda p: False
     release_on: date | None = None
     advance_platform: str | None = None
+    advance_until: date | None = None
 
 
 def _top_platform(payouts: Sequence[Payout], since: date) -> str | None:
@@ -85,7 +87,8 @@ def bank_receipts(
     for p in ledger:
         if p.held_krw > 0:
             continue  # 보류된 지급은 계좌 사건을 만들지 않는다(난수도 쓰지 않는다)
-        if top is not None and assigned_from is not None and p.channel == top and p.paid_on >= assigned_from:
+        if (top is not None and assigned_from is not None and p.channel == top and p.paid_on >= assigned_from
+                and (hooks.advance_until is None or p.paid_on <= hooks.advance_until)):
             amount = round(p.net_krw * rng.uniform(*ADVANCE_RATIO))
             lead = rng.randint(*ADVANCE_LEAD_DAYS)
             if amount > 0:

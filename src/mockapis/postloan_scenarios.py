@@ -7,7 +7,7 @@
 | 시나리오 | 원인 변화 | 결과 | 정답 |
 |---|---|---|---|
 | SALES_SLUMP | 주문액 7일 1.0 → 31일 0.50 | 광고·카드 1.8배, 대부 2주 간격, 급여 지연·4대보험 미납 | 매출 부진 |
-| SETTLEMENT_HOLD | 지급일 14~41일 보류, 44일 해제 | 선정산 양도, 브릿지 대부 1회·일시 상환, 첫 상환 미납 | 정산 보류 |
+| SETTLEMENT_HOLD | 지급일 14~41일 보류, 44일 해제 | 선정산 양도(해제까지), 브릿지 대부 1회·일시 상환, 첫 상환 미납 | 정산 보류 |
 | RETURN_SPIKE | 반품률 14~55일 22.5%, 이후 8% | 반품회수 택배비, 차입 없음 | 반품 급증 |
 | COST_SURGE | 상계율 +8%p, 광고·카드 2배·택배 1.3배 | 소액 대부 1회 | 비용 증가 |
 """
@@ -21,7 +21,7 @@ from mockapis.sellerdata.channels import OrderDay, _same_rate
 from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.personas import Persona
 from mockapis.sellerdata.receipts import OFFSET_PLATFORMS, ReceiptHooks
-from mockapis.synth import SyntheticCase
+from mockapis.synth import Archetype, SyntheticCase
 from shared.contracts import AlertCause, TxnTypeCode
 from shared.krcalendar import next_business_day, previous_business_day
 from shared.repayment import LENDER_DEBIT, due_dates
@@ -54,7 +54,6 @@ HOLD_LOAN_DAY = 28
 HOLD_LOAN_UNIT_KRW = 1_000_000
 HOLD_LOAN_MIN_KRW = 1_500_000
 HOLD_LOAN_INTEREST = 0.03  # 브릿지 대부 일시 상환 이자
-HOLD_LOAN_HEADROOM = 4  # 잔고가 0 아래로 내려가지 않을 때까지 올려 보는 횟수
 
 RETURN_FROM_DAY = 14
 RETURN_TO_DAY = 55
@@ -199,6 +198,7 @@ def _sales_slump(case: SyntheticCase, start: date, days: int) -> ScenarioPlan:
 def _settlement_hold(case: SyntheticCase, start: date, days: int) -> ScenarioPlan:
     end = start + timedelta(days=days)
     platform = hold_platform(case.persona)
+    advance = _advance_platform(case.persona, platform)
     release_on = next_business_day(start + timedelta(days=HOLD_RELEASE_DAY))
     opening = case.transactions[-1].balance_after_krw if case.transactions else 0
     first_due = due_dates(start, days)[0]
@@ -209,16 +209,16 @@ def _settlement_hold(case: SyntheticCase, start: date, days: int) -> ScenarioPla
         return payout.channel == platform and HOLD_FROM_DAY <= day <= HOLD_TO_DAY
 
     def adjust(events: list[Event], orders: Sequence[OrderDay]) -> list[Event]:
-        """보류 기간 잔고가 0 아래로 내려가지 않을 만큼만 빌리고(100만 원 단위), 해제 다음 영업일에 일시 상환한다."""
+        """보류 기간 잔고가 0 아래로 내려가지 않을 만큼만 빌리고(100만 원 단위), 해제 다음 영업일에 일시 상환한다.
+
+        빌린 돈은 상환일 전까지만 잔고를 떠받친다. 해제 뒤 구간까지 메우려 들면 일시 상환액(원금의 1.03배)이
+        함께 커져 꼬리가 더 나빠지므로, 부족분은 보류 기간(차입일~상환 전날)만 보고 한 번에 정한다.
+        """
         paid = [e for e in events if not (e.description == LENDER_DEBIT and e.booked_on == first_due)]
-        amount = HOLD_LOAN_MIN_KRW
-        for _ in range(HOLD_LOAN_HEADROOM):
-            bridge = _bridge(amount)
-            low = min(end_of_day_balances(opening, [*paid, *bridge], start, days)[HOLD_LOAN_DAY:])
-            if low >= 0:
-                break
-            amount += (-low + HOLD_LOAN_UNIT_KRW - 1) // HOLD_LOAN_UNIT_KRW * HOLD_LOAN_UNIT_KRW
-        return [*events, *_bridge(amount)]
+        hold_window = end_of_day_balances(opening, paid, start, days)[HOLD_LOAN_DAY:(repay_on - start).days]
+        short = max(0, -min(hold_window, default=0))
+        rounded = (short + HOLD_LOAN_UNIT_KRW - 1) // HOLD_LOAN_UNIT_KRW * HOLD_LOAN_UNIT_KRW
+        return [*events, *_bridge(max(HOLD_LOAN_MIN_KRW, rounded))]
 
     def _bridge(amount: int) -> list[Event]:
         desc, code, proceeds_desc, proceeds_code = LENDERS[0]
@@ -229,9 +229,11 @@ def _settlement_hold(case: SyntheticCase, start: date, days: int) -> ScenarioPla
         ]
 
     return ScenarioPlan(
-        hooks=ReceiptHooks(hold=held, release_on=release_on,
-                           advance_platform=_advance_platform(case.persona, platform)),
-        assigned_from=start + timedelta(days=HOLD_ADVANCE_FROM_DAY),
+        # 양도할 다른 오픈마켓이 없으면 선정산을 새로 트지 않는다(보류 플랫폼에 선정산이 붙으면 원인이 흐려진다).
+        # 새로 튼 양도는 보류가 풀리면 끊는다(스펙 §4.2 8~13주 정상 회복). 원래 양도 셀러는 그대로 쓴다.
+        hooks=ReceiptHooks(hold=held, release_on=release_on, advance_platform=advance,
+                           advance_until=None if case.archetype is Archetype.ASSIGNED else release_on),
+        assigned_from=start + timedelta(days=HOLD_ADVANCE_FROM_DAY) if advance else None,
         adjust=adjust,
         cause=AlertCause.SETTLEMENT_HOLD,
         secondary=(AlertCause.HIGH_COST_BORROWING,),

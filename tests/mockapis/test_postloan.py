@@ -15,7 +15,15 @@ from mockapis.postloan import (
     LoanTerms,
     generate_postloan,
 )
-from mockapis.postloan_scenarios import SLUMP_LOAN_FROM_DAY, SLUMP_PAYROLL_DELAY_FROM_DAY, hold_platform
+from mockapis.postloan_scenarios import (
+    HOLD_LOAN_MIN_KRW,
+    HOLD_TO_DAY,
+    SLUMP_LOAN_FROM_DAY,
+    SLUMP_PAYROLL_DELAY_FROM_DAY,
+    _advance_platform,
+    hold_platform,
+)
+from mockapis.sellerdata.channels import DESCRIPTIONS
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.sellerdata.receipts import ADVANCE_DESCRIPTION, OFFSET_PLATFORMS
 from mockapis.synth import Archetype, TxnCategory, generate_case
@@ -26,6 +34,11 @@ AS_OF = date(2026, 11, 2)
 AS_OFS = [date(2026, 11, 2), date(2026, 12, 28), date(2027, 1, 25)]
 TERMS = LoanTerms(amount_krw=30_000_000, installment_krw=2_610_000)
 WEEKS = 13
+# 스펙 §4.2~4.4: 원인은 있지만 부도로 가지 않는 시나리오.
+NO_DEFAULT_SCENARIOS = [FlowScenario.SETTLEMENT_HOLD, FlowScenario.RETURN_SPIKE, FlowScenario.COST_SURGE]
+# 현금 쿠션이 사실상 없는 (셀러, 기준일): streetfit-19는 2026-08-03 STABLE 최저 잔고가 246,902원뿐이라
+# 어떤 원인 시나리오든 조달 비용만으로 마이너스가 된다(보고서 측정값 참조).
+NO_CUSHION = {("seller-streetfit-19", date(2026, 8, 3))}
 
 
 @pytest.fixture(scope="module")
@@ -132,6 +145,49 @@ def test_settlement_hold_ledger_shape(as_of):
     assert flow.cause is AlertCause.SETTLEMENT_HOLD and flow.onset == as_of + timedelta(days=14)
     assert flow.missed_installments == (due_dates(as_of, POSTLOAN_DAYS)[0],)
     assert flow.default_on is None
+
+
+@pytest.mark.parametrize("as_of", [*AS_OFS, date(2026, 8, 3)])
+@pytest.mark.parametrize("scenario", NO_DEFAULT_SCENARIOS)
+def test_cause_scenarios_without_a_default_keep_the_balance_positive(scenario, as_of):
+    # 스펙 §4.2~4.4: 정산 보류·반품 급증·비용 증가는 부도가 없다. 현금이 얇은 셀러에게 걸려도 마찬가지다.
+    for seller, case in build_demo_cases(as_of).items():
+        flow = generate_postloan(case, scenario, as_of, 7)
+        if (seller, as_of) in NO_CUSHION:
+            # 쿠션이 없는 셀러는 긴급 조달 비용(선정산 할인·브릿지 이자·늘어난 반품)만으로도 마이너스가 된다.
+            # 엔진이 "외상 지급 연기"를 흉내 내지 않아 생기는 한계다. 쿠션이 생기면 이 예외를 지워야 한다.
+            assert flow.default_on is not None, (seller, "쿠션이 생겼으면 NO_CUSHION 예외를 지운다")
+            continue
+        assert flow.default_on is None, (seller, flow.default_on)
+
+
+@pytest.mark.parametrize("as_of", [*AS_OFS, date(2026, 8, 3)])
+def test_settlement_hold_bridge_covers_only_the_hold_period(as_of):
+    # 브릿지는 보류 기간 부족분만 메운다. 해제 뒤 구간까지 메우려 들면 일시 상환액이 불어나 꼬리가 더 나빠진다.
+    for seller, case in build_demo_cases(as_of).items():
+        flow = generate_postloan(case, FlowScenario.SETTLEMENT_HOLD, as_of, 7, loan=TERMS)
+        (bridge,) = _new_debt(flow)
+        assert HOLD_LOAN_MIN_KRW <= bridge.amount_krw <= max(HOLD_LOAN_MIN_KRW, sum(_weekly(flow, "held"))), seller
+        assert flow.default_on is None, (seller, bridge.amount_krw, flow.default_on)
+
+
+@pytest.mark.parametrize("as_of", AS_OFS)
+def test_settlement_hold_advance_never_uses_the_held_platform(as_of):
+    for seller, case in build_demo_cases(as_of).items():
+        flow = generate_postloan(case, FlowScenario.SETTLEMENT_HOLD, as_of, 7, loan=TERMS)
+        platform = hold_platform(case.persona)
+        advances = [t for t in flow.transactions if t.description == ADVANCE_DESCRIPTION]
+        if _advance_platform(case.persona, platform) is None and case.archetype is not Archetype.ASSIGNED:
+            assert not advances, seller  # 양도할 다른 오픈마켓이 없으면 선정산을 새로 트지 않는다
+            continue
+        assert advances, seller
+        if case.archetype is not Archetype.ASSIGNED:
+            assert _week(flow, max(t.booked_on for t in advances)) <= 6  # 보류가 풀리면 양도를 끊는다
+        # 선지급은 양도한 플랫폼 지급만 대체한다: 보류 플랫폼 정산은 해제 뒤 제 이름으로 들어온다.
+        descriptions = {d for key, d in DESCRIPTIONS.items() if key.split(":")[0] == platform}
+        after_hold = [t for t in flow.transactions
+                      if t.description in descriptions and (t.booked_on - flow.start).days > HOLD_TO_DAY]
+        assert after_hold, seller
 
 
 @pytest.mark.parametrize("as_of", AS_OFS)

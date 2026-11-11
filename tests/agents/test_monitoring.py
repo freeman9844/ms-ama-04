@@ -17,11 +17,12 @@ from agents.monitoring import (
 from mockapis.demo import STACKING_APPLICANTS, build_demo_cases
 from mockapis.postloan import FlowScenario, generate_postloan
 from mockapis.postloan_scenarios import PROCEEDS_KRW
-from mockapis.sellerdata.receipts import ADVANCE_DESCRIPTION
 from shared.contracts import EVIDENCE_ID_PATTERN
 from shared.segments import SELLER_INDUSTRIES
 
 AS_OF = date(2026, 11, 2)
+# 선정산 양도 셀러: 선지급 입금이 아직 차입으로 분류돼 STABLE에서도 inflow_drop이 뜬다(Task 5에서 해소).
+ADVANCE_FALSE_POSITIVES = {"seller-mugshop-21"}
 
 
 @pytest.fixture(scope="module")
@@ -133,13 +134,20 @@ def _demo_series(case, scenario, as_of):
 @pytest.mark.parametrize("as_of", [date(2026, 9, 14), date(2026, 12, 28), date(2027, 1, 25)])
 def test_stable_sellers_raise_no_revenue_triggers_around_festivals(as_of):
     # 라이브 데모는 오늘 날짜로 흐름을 만든다: 추석·연말·설이 낀 13주에도 데모 셀러 매출이 꺾였다고 보면 안 된다.
-    # 선정산 양도 셀러는 선지급 입금이 규칙상 차입이라 계좌만 보면 매출이 준 것처럼 보인다(원장으로 가려낼 오탐 미끼).
     for seller, case in build_demo_cases(as_of).items():
-        flow, rows, base = _demo_series(case, FlowScenario.STABLE, as_of)
-        if any(t.description == ADVANCE_DESCRIPTION for t in flow.transactions):
-            continue
+        _, rows, base = _demo_series(case, FlowScenario.STABLE, as_of)
         hits = {(w, t) for w in range(1, 14) for t in detect(rows[:w], base)}
-        assert not {h for h in hits if h[1] == "inflow_drop"}, (seller, sorted(hits))
+        drops = {h for h in hits if h[1] == "inflow_drop"}
+        if seller in ADVANCE_FALSE_POSITIVES:
+            # 선정산 양도 셀러는 선지급 입금이 규칙상 차입이라 계좌만 보면 매출이 준 것처럼 보인다(스펙 §5.5 오탐 미끼).
+            # TODO(Task 5): weekly_series가 선정산 입금을 loan_proceeds에서 빼면 오탐이 사라진다. 그때 이 분기를 지운다.
+            assert drops, (seller, "선정산 오탐이 사라졌으면 이 예외를 지워야 한다")
+            continue
+        assert not drops, (seller, sorted(hits))
+        # 스펙 §8: 기존 트리거는 STABLE에서도 울릴 수 있다. 정산이 하루 이틀 밀린 주는 3주 누적 비율을 흔드니
+        # 한 주 튀는 변동성 경보까지는 두고 연속 경보만 막는다.
+        spikes = sorted(w for w, t in hits if t == "volatility_spike")
+        assert all(b - a > 1 for a, b in zip(spikes, spikes[1:])), (seller, spikes)
         # 정산이 하루 이틀 밀린 주는 3주 누적 비율을 흔든다. 한 주 튀는 것까지는 두고 연속 경보만 막는다.
         spikes = sorted(w for w, t in hits if t == "volatility_spike")
         assert all(b - a > 1 for a, b in zip(spikes, spikes[1:])), (seller, spikes)
