@@ -6,15 +6,20 @@ import pytest
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import (
     EW_AGENT,
+    INSTRUCTIONS,
+    TOOLS,
     EwContext,
     EwOutput,
+    fallback_alert,
     investigate,
 )
 from agents.features import compute_underwriting
+from agents.ledger_monitor import ledger_baseline, observe as ledger_observe, platform_weeks
 from agents.monitoring import Baseline, categorize, detect, settlement_for, weekly_series
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
-from mockapis.postloan import FlowScenario, generate_postloan
+from mockapis.postloan import FlowScenario, LoanTerms, generate_postloan
+from shared.contracts import AlertCause
 from shared.pseudonymize import find_pii
 
 AS_OF = date(2026, 11, 2)
@@ -222,3 +227,217 @@ def test_fallback_cites_projected_balance(shortfall_ctx):
 def test_runner_none_uses_fallback(ctx):
     result = investigate(ctx, runner=None, model=MODEL)
     assert result.decision == "fallback_alert" and result.record == {"error": "agents_disabled"}
+
+
+# --- 원인 분류·정산 원장 도구(Task 6) ---
+
+GEARSTORE_WEEK = 5
+GEARSTORE_TERMS = LoanTerms(amount_krw=5_000_000, installment_krw=852_885)
+
+
+@pytest.fixture(scope="module")
+def gearstore():
+    return build_demo_cases(AS_OF)["seller-gearstore-06"]
+
+
+@pytest.fixture(scope="module")
+def gearstore_prepared(gearstore):
+    """gearstore SETTLEMENT_HOLD 흐름을 5주차까지 observe로 돌린 재료. 후보 = [SETTLEMENT_HOLD w3, HIGH_COST_BORROWING w5]."""
+    uw = compute_underwriting(
+        "app-2", gearstore.profile, gearstore.transactions, gearstore.tax_filings,
+        as_of=AS_OF, requested_amount_krw=GEARSTORE_TERMS.amount_krw, requested_tenor_months=6,
+    )
+    base = Baseline.from_underwriting(
+        {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly},
+        installment_krw=GEARSTORE_TERMS.installment_krw,
+    )
+    flow = generate_postloan(gearstore, FlowScenario.SETTLEMENT_HOLD, AS_OF, 7, loan=GEARSTORE_TERMS)
+    pg = flow.pg_flow()
+    lb = ledger_baseline(pg, flow.start, gearstore.profile.industry, gearstore.transactions)
+    cats = categorize(flow.transactions, {})
+    obs = ledger_observe(flow.transactions, cats, flow.start, GEARSTORE_WEEK, base, pg, lb)
+    pg_weeks = platform_weeks(pg, flow.start, 1, GEARSTORE_WEEK)
+    return flow, base, cats, obs, pg_weeks, lb
+
+
+@pytest.fixture
+def ctx_with_candidates(gearstore, gearstore_prepared):
+    flow, base, cats, obs, pg_weeks, lb = gearstore_prepared
+    return EwContext(
+        alert_id=f"ew-loan-2-{GEARSTORE_WEEK}",
+        loan_id="loan-2",
+        week=GEARSTORE_WEEK,
+        start=flow.start,
+        industry=gearstore.profile.industry,
+        triggers=obs.triggers,
+        rows=obs.rows,
+        baseline=base,
+        transactions=flow.transactions,
+        categories=cats,
+        mask=build_pseudonymizer(KEY, gearstore.profile, flow.transactions).mask,
+        terms={"amount_krw": GEARSTORE_TERMS.amount_krw, "tenor_months": 6},
+        candidates=obs.candidates,
+        pg_weeks=pg_weeks,
+        ledger_baseline=lb,
+    )
+
+
+@pytest.fixture(scope="module")
+def stable_prepared(cafe, baseline):
+    """STABLE 셀러 흐름, pg=None. 원인 후보 없음."""
+    flow = generate_postloan(cafe, FlowScenario.STABLE, AS_OF, 7)
+    cats = categorize(flow.transactions, {})
+    obs = ledger_observe(flow.transactions, cats, flow.start, 6, baseline, None, None)
+    return flow, cats, obs
+
+
+@pytest.fixture
+def ctx_without_candidates(cafe, baseline, stable_prepared):
+    flow, cats, obs = stable_prepared
+    return EwContext(
+        alert_id="ew-loan-3-6",
+        loan_id="loan-3",
+        week=6,
+        start=flow.start,
+        industry=cafe.profile.industry,
+        triggers=obs.triggers,
+        rows=obs.rows,
+        baseline=baseline,
+        transactions=flow.transactions,
+        categories=cats,
+        mask=build_pseudonymizer(KEY, cafe.profile, flow.transactions).mask,
+        terms={"amount_krw": 50_000_000, "tenor_months": 36},
+        candidates=obs.candidates,
+        pg_weeks=None,
+        ledger_baseline=None,
+    )
+
+
+def no_cause_alert(ctx, **overrides):
+    """원인 주장이 없는 기본 유효 경보(근거: 그 주 말 잔고). 원장 유무와 무관하게 항상 존재하는 필드를 쓴다."""
+    week = ctx.week
+    value = int(ctx.catalog[f"W:{week}:end_balance"])
+    args = {
+        "severity": "medium",
+        "summary": "이번 주 잔고를 확인했다.",
+        "recommended_action": "monitor",
+        "signals": [
+            {
+                "kind": "other",
+                "text": f"{week}주차 말 잔고는 {value:,}원이다.",
+                "metric_ids": [f"W:{week}:end_balance"],
+                "txn_ids": [],
+            }
+        ],
+    }
+    args.update(overrides)
+    return args
+
+
+def loan_proceeds_alert(ctx, **overrides):
+    """대출금 입금만 인용하는 신호(정산 보류 근거는 없다)."""
+    week = ctx.week
+    value = int(ctx.catalog[f"W:{week}:loan_proceeds"])
+    args = {
+        "severity": "medium",
+        "summary": "이번 주 대출금 입금이 있었다.",
+        "recommended_action": "monitor",
+        "signals": [
+            {
+                "kind": "loan_stacking",
+                "text": f"{week}주차에 대출금 {value:,}원이 입금됐다.",
+                "metric_ids": [f"W:{week}:loan_proceeds"],
+                "txn_ids": [],
+            }
+        ],
+    }
+    args.update(overrides)
+    return args
+
+
+def held_alert(ctx, week=3, **overrides):
+    """정산 보류액을 인용하는 신호."""
+    value = int(ctx.catalog[f"W:{week}:held"])
+    args = {
+        "severity": "medium",
+        "summary": "정산 보류액이 발생했다.",
+        "recommended_action": "monitor",
+        "signals": [
+            {
+                "kind": "settlement_hold",
+                "text": f"{week}주차 정산 보류액이 {value:,}원이다.",
+                "metric_ids": [f"W:{week}:held"],
+                "txn_ids": [],
+            }
+        ],
+    }
+    args.update(overrides)
+    return args
+
+
+def test_raise_alert_requires_candidate_cause(ctx_with_candidates):
+    """후보 = [SETTLEMENT_HOLD w3, HIGH_COST_BORROWING w5]. sales_slump은 후보가 아니다."""
+    r = ctx_with_candidates.raise_alert({**no_cause_alert(ctx_with_candidates), "primary_cause": "sales_slump"})
+    assert r["accepted"] is False and any("후보" in i for i in r["issues"])
+    assert ctx_with_candidates.accepted is None
+
+
+def test_primary_cause_must_cite_its_metric(ctx_with_candidates):
+    bad = {**loan_proceeds_alert(ctx_with_candidates), "primary_cause": "settlement_hold"}
+    r = ctx_with_candidates.raise_alert(bad)
+    assert r["accepted"] is False and any("지표" in i for i in r["issues"])
+
+    ok = {
+        **held_alert(ctx_with_candidates),
+        "primary_cause": "settlement_hold",
+        "secondary_causes": ["high_cost_borrowing"],
+    }
+    r = ctx_with_candidates.raise_alert(ok)
+    assert r["accepted"] is True
+    assert ctx_with_candidates.accepted.primary_cause is AlertCause.SETTLEMENT_HOLD
+    assert ctx_with_candidates.accepted.secondary_causes == (AlertCause.HIGH_COST_BORROWING,)
+
+
+def test_secondary_cause_must_be_candidate_and_exclude_primary(ctx_with_candidates):
+    args = {**held_alert(ctx_with_candidates), "primary_cause": "settlement_hold", "secondary_causes": ["sales_slump"]}
+    r = ctx_with_candidates.raise_alert(args)
+    assert r["accepted"] is False and any("후보" in i for i in r["issues"])
+
+    args = {**held_alert(ctx_with_candidates), "primary_cause": "settlement_hold", "secondary_causes": ["settlement_hold"]}
+    r = ctx_with_candidates.raise_alert(args)
+    assert r["accepted"] is False and any("겹칠 수 없다" in i for i in r["issues"])
+
+
+def test_no_candidates_means_no_primary(ctx_without_candidates):
+    args = no_cause_alert(ctx_without_candidates)
+    assert ctx_without_candidates.raise_alert({**args, "primary_cause": "sales_slump"})["accepted"] is False
+    assert ctx_without_candidates.raise_alert(args)["accepted"] is True
+    assert ctx_without_candidates.accepted.primary_cause is None
+
+
+def test_fallback_uses_earliest_candidate(ctx_with_candidates):
+    a = fallback_alert(ctx_with_candidates, "timeout")
+    assert a.primary_cause is AlertCause.SETTLEMENT_HOLD
+    assert a.secondary_causes == (AlertCause.HIGH_COST_BORROWING,)
+
+
+def test_settlement_ledger_tool(ctx_with_candidates):
+    out = ctx_with_candidates.get_settlement_ledger({"from_week": 3, "to_week": 4})
+    assert out["available"] and {w["week"] for w in out["weeks"]} == {3, 4}
+    assert ctx_with_candidates.get_settlement_ledger({"from_week": 0, "to_week": 99}) == {"error": "invalid_week"}
+
+
+def test_settlement_ledger_tool_without_data(ctx_without_candidates):
+    out = ctx_without_candidates.get_settlement_ledger({"from_week": 1, "to_week": 1})
+    assert out["available"] is False
+
+
+def test_get_baseline_lists_cause_candidates(ctx_with_candidates):
+    out = ctx_with_candidates.get_baseline({})
+    assert out["cause_candidates"] == [c.to_dict() for c in ctx_with_candidates.candidates]
+
+
+def test_tool_schema_lists_causes():
+    raise_alert = next(t for t in TOOLS if t["name"] == "raise_alert")
+    assert "primary_cause" in json.dumps(raise_alert) and "get_settlement_ledger" in {t["name"] for t in TOOLS}
+    assert "차입은 대개 결과다" in INSTRUCTIONS
