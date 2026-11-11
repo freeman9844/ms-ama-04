@@ -22,11 +22,13 @@ DIGESTS = {
 
 
 def _digest(case) -> str:
+    # 심사 원장에는 보류가 없다. 보류 필드(2026-11-11)를 빼고 해시해 이전 고정값과 비교한다.
+    assert all(p.held_krw == p.released_krw == 0 for p in case.pg_settlements)
     body = {
         "profile": case.profile.model_dump(mode="json"),
         "txns": [t.model_dump(mode="json") for t in case.transactions],
         "tax": [t.model_dump(mode="json") for t in case.tax_filings],
-        "pg": [p.model_dump(mode="json") for p in case.pg_settlements],
+        "pg": [p.model_dump(mode="json", exclude={"held_krw", "released_krw"}) for p in case.pg_settlements],
     }
     return hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 

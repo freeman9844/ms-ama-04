@@ -91,13 +91,41 @@ class PgSettlement(Contract):
     gross_krw: int = Field(ge=0)
     fee_krw: int = Field(ge=0)
     deduction_krw: int = Field(default=0, ge=0)  # 광고비·물류비 상계(2026-11-08). 옛 JSON은 0.
+    # 정산 보류·보류 해제(2026-11-11). 옛 JSON은 0.
+    held_krw: int = Field(default=0, ge=0)
+    released_krw: int = Field(default=0, ge=0)
     net_krw: int
 
     @model_validator(mode="after")
     def _net(self) -> "PgSettlement":
-        if self.net_krw != self.gross_krw - self.fee_krw - self.deduction_krw:
-            raise ValueError("net_krw == gross_krw - fee_krw - deduction_krw 이어야 한다")
+        expected = self.gross_krw - self.fee_krw - self.deduction_krw - self.held_krw + self.released_krw
+        if self.net_krw != expected:
+            raise ValueError("net_krw == gross_krw - fee_krw - deduction_krw - held_krw + released_krw 이어야 한다")
         return self
+
+
+class PgOrderDay(Contract):
+    """플랫폼·일자별 주문 총액과 반품액(사후 원장, 2026-11-11)."""
+
+    schema_version: SchemaV1 = "1"
+    order_on: date
+    platform: str = Field(min_length=1)
+    gross_krw: int = Field(ge=0)
+    returns_krw: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _returns(self) -> "PgOrderDay":
+        if self.returns_krw > self.gross_krw:
+            raise ValueError("returns_krw는 gross_krw 이하여야 한다")
+        return self
+
+
+class PgFlow(Contract):
+    """사후 PG 원장(정산)과 주문 묶음. Mock `/pg/flow` 응답."""
+
+    schema_version: SchemaV1 = "1"
+    settlements: tuple[PgSettlement, ...] = ()
+    orders: tuple[PgOrderDay, ...] = ()
 
 
 class CashFlowFeatures(Contract):
@@ -265,6 +293,9 @@ class SignalKind(StrEnum):
     BUFFER_DROP = "buffer_drop"
     VOLATILITY_SPIKE = "volatility_spike"
     PROJECTED_SHORTFALL = "projected_shortfall"
+    SETTLEMENT_HOLD = "settlement_hold"
+    RETURN_SPIKE = "return_spike"
+    COST_SURGE = "cost_surge"
     PAYROLL_DELAY = "payroll_delay"
     SUPPLIER_LOSS = "supplier_loss"
     TAX_ARREARS = "tax_arrears"
@@ -276,6 +307,16 @@ class RecommendedAction(StrEnum):
     CONTACT_BORROWER = "contact_borrower"
     HARDSHIP_REVIEW = "hardship_review"
     OFFICER_REVIEW = "officer_review"
+
+
+class AlertCause(StrEnum):
+    """조기경보 원인(2026-11-11). 라벨: 매출 부진, 정산 보류, 반품 급증, 비용 증가, 고금리 차입."""
+
+    SALES_SLUMP = "sales_slump"
+    SETTLEMENT_HOLD = "settlement_hold"
+    RETURN_SPIKE = "return_spike"
+    COST_SURGE = "cost_surge"
+    HIGH_COST_BORROWING = "high_cost_borrowing"
 
 
 class AlertSignal(Claim):
@@ -298,11 +339,20 @@ class EarlyWarningAlert(Contract):
     recommended_action: RecommendedAction
     triggers: tuple[str, ...]
     models: dict[str, str]
+    # 원인 분류(2026-11-11). 옛 경보는 원인 없음.
+    primary_cause: AlertCause | None = None
+    secondary_causes: tuple[AlertCause, ...] = Field(default=(), max_length=2)
 
     @model_validator(mode="after")
     def _action(self) -> "EarlyWarningAlert":
         if self.severity is AlertSeverity.HIGH and self.recommended_action is RecommendedAction.MONITOR:
             raise ValueError("high 경보는 관찰(monitor)만 권고할 수 없다")
+        if self.primary_cause is None and self.secondary_causes:
+            raise ValueError("주원인 없이 부원인을 둘 수 없다")
+        if self.primary_cause in self.secondary_causes:
+            raise ValueError("부원인은 주원인과 겹칠 수 없다")
+        if len(set(self.secondary_causes)) != len(self.secondary_causes):
+            raise ValueError("부원인은 중복될 수 없다")
         return self
 
 

@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from shared.contracts import (
+    AlertCause,
     AlertSignal,
     EarlyWarningAlert,
     ApplicantProfile,
@@ -14,6 +15,8 @@ from shared.contracts import (
     CreditAssessment,
     Decision,
     OfficerCheck,
+    PgFlow,
+    PgOrderDay,
     PgSettlement,
     PolicyDecision,
     ProposedStructure,
@@ -322,6 +325,54 @@ def test_early_warning_alert_round_trip_and_invariants():
         _alert(severity="high", recommended_action="monitor")
     with pytest.raises(ValidationError):
         _alert(week=0)
+
+
+def test_alert_cause_values():
+    assert [c.value for c in AlertCause] == [
+        "sales_slump", "settlement_hold", "return_spike", "cost_surge", "high_cost_borrowing"]
+
+
+def test_ledger_signal_kinds_accepted():
+    for kind in ("settlement_hold", "return_spike", "cost_surge"):
+        assert _signal(kind=kind).kind == kind
+
+
+def test_old_alert_json_has_no_cause():
+    a = _alert()
+    assert a.primary_cause is None and a.secondary_causes == ()
+
+
+def test_secondary_causes_rules():
+    ok = _alert(primary_cause="settlement_hold", secondary_causes=("high_cost_borrowing",))
+    assert ok.secondary_causes == (AlertCause.HIGH_COST_BORROWING,)
+    assert EarlyWarningAlert.model_validate_json(ok.model_dump_json()) == ok
+    for bad in (
+        {"primary_cause": "settlement_hold", "secondary_causes": ("settlement_hold",)},  # 주원인 중복
+        {"primary_cause": None, "secondary_causes": ("cost_surge",)},  # 주원인 없이 부원인
+        {"primary_cause": "sales_slump", "secondary_causes": ("cost_surge", "return_spike", "settlement_hold")},  # 3개
+    ):
+        with pytest.raises(ValidationError):
+            _alert(**bad)
+
+
+def test_pg_settlement_hold_and_release():
+    held = PgSettlement(settled_on=date(2026, 11, 20), platform="쿠팡", gross_krw=1000, fee_krw=100,
+                        deduction_krw=30, held_krw=870, net_krw=0)
+    rel = PgSettlement(settled_on=date(2026, 12, 4), platform="쿠팡", gross_krw=0, fee_krw=0,
+                       released_krw=870, net_krw=870)
+    assert held.net_krw == 0 and rel.net_krw == 870
+    old = PgSettlement.model_validate({"settled_on": "2026-11-20", "platform": "쿠팡", "gross_krw": 1000,
+                                       "fee_krw": 100, "net_krw": 900})
+    assert old.held_krw == old.released_krw == 0
+    with pytest.raises(ValidationError):
+        PgSettlement(settled_on=date(2026, 11, 20), platform="쿠팡", gross_krw=1000, fee_krw=100, held_krw=900, net_krw=900)
+
+
+def test_pg_flow_round_trip():
+    flow = PgFlow(orders=(PgOrderDay(order_on=date(2026, 11, 2), platform="쿠팡", gross_krw=500, returns_krw=20),))
+    assert PgFlow.model_validate_json(flow.model_dump_json()) == flow
+    with pytest.raises(ValidationError):
+        PgOrderDay(order_on=date(2026, 11, 2), platform="쿠팡", gross_krw=10, returns_krw=11)
 
 
 def test_cash_flow_features_v3_fields_optional_and_bounded():

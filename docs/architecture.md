@@ -223,11 +223,13 @@ flowchart LR
 | `ApplicantProfile` v1 | 사업자 프로필(업종·지역·업력) |
 | `Transaction` v1 | 거래(유형 코드·적요·금액) |
 | `TaxFiling` v1 | 세무 신고 |
-| `PgSettlement` v1 | 카드·PG 정산(`deduction_krw` 광고비·물류비 상계 기본값 0, `net = gross − fee − deduction`) |
+| `PgSettlement` v1 | 카드·PG 정산(`deduction_krw` 광고비·물류비 상계, `held_krw` 정산 보류, `released_krw` 보류 해제, 모두 기본값 0, `net = gross − fee − deduction − held + released`) |
+| `PgOrderDay` v1 | 플랫폼·일자별 주문 총액과 반품액(`returns ≤ gross`, 사후 원장) |
+| `PgFlow` v1 | 사후 PG 원장 묶음(`settlements`·`orders`, Mock `/pg/flow`) |
 | `CashFlowFeatures` v1 | 심사 지표(DSCR·버퍼·변동성 등) |
 | `PolicyDecision` v1 | 정책 판정(자격·한도·금리·`rules_version`·reason code) |
 | `CreditAssessment` v1 | 평가(추천·근거 `Claim`·`ProposedStructure`·`Counterfactual`) |
-| `EarlyWarningAlert` v1 | 경보(심각도·`AlertSignal`·권고 조치) |
+| `EarlyWarningAlert` v1 | 경보(심각도·`AlertSignal`·권고 조치·원인 `primary_cause`/`secondary_causes`(`AlertCause`, 부원인 최대 2개, 옛 경보는 없음)) |
 
 `ReasonCode`, `Claim`, `ProposedStructure`, `Counterfactual`, `ReviewOutcome`, `AlertSignal`은 위 계약의 하위 모델이다.
 
