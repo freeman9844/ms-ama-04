@@ -1,11 +1,15 @@
 """대출 사후 모니터링 처리(스펙 §3.3). 큐·Service Bus 트리거가 부르며 외부 I/O는 Deps 포트로만 한다.
 
 흐름: monitoring-replay 큐 → handle_replay(모니터링 동의·흐름 수집, 상환 원장, 1주차 메시지 발행)
-      → flow.updated(세션=loan_id) → process_week(탐지기 → 새 트리거면 EW 에이전트 → 경보 저장·alert.raised,
+      → flow.updated(세션=loan_id) → process_week(탐지기 → 새 트리거면 EW 에이전트 → 경보 저장·alert.raised
+        → 높음 경보 단계(1: 잔고 부족 예상 알림, 2: 셀프 상환 플랜 안내·제안) 자동 발송,
         상환 원장 → 안내 발송·납부/미납 판정 → 미납이면 추심 건 저장·repayment.updated)
       → repayment.updated(세션=loan_id) → run_collections(추심 에이전트 제안 → 심사역 승인용 제안서. 보내지 않는다)
-      → restructure-decisions 큐 → handle_restructure_decision(kind별 결정: 추심 제안 승인·수정·반려, 재조정 결정).
-EW 경보는 심사역 검토용이고 차주 연락은 미납(추심 건)에서만 한다. alert.raised는 발행만 하고 구독자가 없다.
+      → restructure-decisions 큐 → handle_restructure_decision(kind별 결정: 추심 제안 승인·수정·반려, 재조정 결정,
+        고객 플랜 선택, 플랜 변경 승인·반려, 고객 응답 없이 계속). 승인된 플랜 변경은 _mask_and_flow가 아직 공개되지 않은
+        흐름에 덧씌운다.
+EW 경보 자체는 심사역 검토용이다. 차주 연락은 상환 안내(3일 전, 1단계 뒤 5일 전), 높음 경보 단계 안내(사전 승인 템플릿),
+심사역이 승인한 추심 문구뿐이다. alert.raised는 발행만 하고 구독자가 없다.
 주차가 끝나면(미납이면 추심 제안까지) _after_week가 다음 주차로 갈지 정한다. 대기 항목(journey.holds: 추심 승인·
 고객 응답·플랜 변경 승인·재조정 결정)이 있으면 재생은 paused(또는 awaiting_customer)로 멈추고, 항목이 모두 끝나면
 awaiting_resume에서 resume·stop 요청을 기다린다. 미납이면 추심 제안이 심사역 승인을 기다리므로 항상 멈춘다.
@@ -13,7 +17,7 @@ Service Bus가 꺼져 있으면(deps.events is None) handle_replay가 같은 처
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -22,11 +26,12 @@ from pydantic import ValidationError
 from agents.collections import CollectionsContext, RepaymentCase, act, build_proposal, remind, settle_proposal
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
-from agents.escalation import sim_now
+from agents.escalation import TEMPLATES, auto_contact, next_stage, plan_link, sim_now, stage_message
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
-from agents.repayment import build_schedule, item_amount, item_key, reminder_on, week_events
+from agents.repayment import build_schedule, early_reminder_on, item_amount, item_key, reminder_on, week_events
+from agents.repayment_plan import apply_change, apply_plan, main_platform, payout_days, plan_options
 from journey.activities import (
     _TRANSACTIONS,
     ENDED_CONSENT,
@@ -45,6 +50,9 @@ from journey.models import (
     AlertRaised,
     CollectionsDecision,
     FlowUpdated,
+    OfferExpire,
+    PlanChoice,
+    PlanDecision,
     REPLAY_HELD,
     RepaymentUpdated,
     ReplayRequest,
@@ -64,6 +72,7 @@ class OutOfOrder(RuntimeError):
 
 
 def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, list[Transaction], Any]:
+    """심사 프로필, 승인된 상환 플랜 변경(plan_history)을 덧씌운 사후 흐름, 가명화기(원본 흐름으로 만든다)."""
     mon = loan["monitoring"]
     profile = ApplicantProfile.model_validate(
         deps.raw.get_json(raw_container(loan["underwriting_consent_id"]), "profile.json")
@@ -72,7 +81,8 @@ def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, 
     if flow is None:
         raise RuntimeError(f"사후 흐름 없음: {mon['consent_id']}")
     txns = _TRANSACTIONS.validate_python(flow)
-    return profile, txns, build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
+    history = (loan.get("repayment") or {}).get("plan_history") or []
+    return profile, apply_plan(txns, history), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
 
 
 def _collect_pg_flow(
@@ -149,6 +159,8 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         "stopped_at": None,
         "pg": "missing",
         "ledger_baseline": None,
+        "alert_severities": [],
+        "escalation": {"stage1": None, "stage2": None},
     }
     loan["updated_at"] = now
     if not deps.store.replace(LOANS, loan, loan.get("_etag")):
@@ -470,6 +482,7 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             )
             entry["alert_id"] = alert_id
             mon["alert_ids"].append(alert_id)
+            _escalate(deps, loan_id, replay_id, loan, alert_id, result.alert.severity.value, rows[-1], hi, week, pg, lb)
     _repayment_week(deps, loan_id, replay_id, loan, visible, lo, hi, week, entry)
     mon["processed_week"] = week
     mon["weeks"].append(entry)
@@ -483,6 +496,82 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         if entry["case_id"]:
             _publish_case(deps, loan_id, entry["case_id"])
     return entry
+
+
+def _escalate(
+    deps: Deps,
+    loan_id: str,
+    replay_id: str,
+    loan: dict[str, Any],
+    alert_id: str,
+    severity: str,
+    row: dict[str, Any],
+    hi: date,
+    week: int,
+    pg: PgFlow | None,
+    lb: LedgerBaseline | None,
+) -> None:
+    """경보 심각도로 조기경보 단계(스펙 §5)를 정해 자동 안내를 보낸다. 2단계가 나가면 셀프 상환 플랜 제안을 연다.
+
+    다음 예정 회차가 없으면 보내지 않고 단계도 쓰지 않는다. 같은 주차가 다시 오면(재시도) 같은 ref 연락을 다시 쓰지 않는다.
+    """
+    mon, led = loan["monitoring"], loan.get("repayment")
+    mon.setdefault("alert_severities", []).append(severity)
+    escalation = mon.setdefault("escalation", {"stage1": None, "stage2": None})
+    stage = next_stage(mon["alert_severities"], escalation)
+    if stage is None or not led:
+        return
+    upcoming = sorted(
+        (s for s in led["schedule"] if s["status"] == "scheduled" and date.fromisoformat(s["due_on"]) > hi),
+        key=lambda s: s["due_on"],
+    )
+    if not upcoming:
+        return
+    item = upcoming[0]
+    amount = item_amount(item, led["installment_krw"])
+    # 고객에게 음수 잔고나 상환액 이상의 잔고("부족")를 금액으로 보이지 않는다. 그때는 금액 없는 문구를 쓴다.
+    balance = row.get("due_balance")
+    if balance is None or balance < 0 or balance >= amount:
+        balance = None
+    script_id, text = stage_message(
+        stage, due_on=date.fromisoformat(item["due_on"]), amount=amount, balance=balance,
+        link=plan_link(loan["applicant_id"]),
+    )
+    ref = f"{replay_id}-s{stage}"
+    contacts = _contacts_doc(deps, loan_id, replay_id)
+    sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "early_warning"), None)
+    if sent is None:
+        sent = auto_contact(ref, script_id, text, contacts["contacts"], hi)
+        contacts["contacts"].append(sent)
+        deps.store.upsert(ALERTS, contacts)  # 대출 문서보다 먼저: 재시도 때 같은 ref면 다시 보내지 않는다
+    escalation[f"stage{stage}"] = {
+        "alert_id": alert_id, "on": hi.isoformat(), "status": sent["status"], "reason": sent["reason"],
+    }
+    if stage == 2 and sent["status"] == "sent":
+        _open_offer(replay_id, loan, hi, week, pg, lb)
+
+
+def _open_offer(
+    replay_id: str, loan: dict[str, Any], hi: date, week: int, pg: PgFlow | None, lb: LedgerBaseline | None
+) -> None:
+    """셀프 상환 플랜 제안을 연다. 유지 말고 고를 옵션이 없으면 열지 않는다. 지급일은 이번 주 끝까지 공개된 것만 쓴다."""
+    led, mon = loan["repayment"], loan["monitoring"]
+    flow_end = date.fromisoformat(mon["flow_start"]) + timedelta(days=WEEKS * 7 - 1)
+    options = plan_options(
+        led["schedule"], led["installment_krw"], after=hi, flow_end=flow_end,
+        payouts=payout_days(pg, main_platform(lb), hi),
+    )
+    if not any(o["option"] != "keep" for o in options):
+        return
+    led["offer"] = {
+        "offer_id": f"of-{replay_id}",
+        "week": week,
+        "sent_on": hi.isoformat(),
+        "status": "open",
+        "options": options,
+        "choice": None,
+        "responded_at": None,
+    }
 
 
 def _due_list(loan: dict[str, Any]) -> dict[date, int] | None:
@@ -509,19 +598,34 @@ def _repayment_week(
     week: int,
     entry: dict[str, Any],
 ) -> None:
-    """이번 주 상환 안내 발송, 상환일 납부·미납 판정. 미납이면 추심 건을 연다."""
+    """이번 주 상환 안내(3일 전, 조기경보 1단계 뒤 5일 전) 발송, 상환일 납부·미납 판정. 미납이면 추심 건을 연다."""
     led = loan.get("repayment")
     if not led:
         return
-    ev = week_events(led["schedule"], visible, lo, hi)
+    stage1 = (loan["monitoring"].get("escalation") or {}).get("stage1")
+    early_from = date.fromisoformat(stage1["on"]) if isinstance(stage1, dict) else None
+    ev = week_events(led["schedule"], visible, lo, hi, early_from=early_from)
     by_key = {item_key(s): s for s in led["schedule"]}
-    if ev.reminders:
+    if ev.reminders or ev.early_reminders:
         contacts = _contacts_doc(deps, loan_id, replay_id)
+        # 자동 안내는 시뮬레이션 안내일 10:00 KST에 보낸 것으로 보고 공정 연락 규칙을 적용한다.
+        for key in ev.early_reminders:
+            item, ref = by_key[key], f"{replay_id}-{key}-e"
+            sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "early_reminder"), None)
+            if sent is None:
+                due = date.fromisoformat(item["due_on"])
+                on = early_reminder_on(due)
+                text = TEMPLATES["early_reminder"].format(
+                    due_on=due.isoformat(), amount=f"{item_amount(item, led['installment_krw']):,}원"
+                )
+                sent = remind(ref, contacts["contacts"], on, sim_now(on), script_id="early_reminder",
+                              by="early_reminder", text=text)
+                contacts["contacts"].append(sent)
+            item.update(early_reminded_on=sent["on"], early_reminder_status=sent["status"])
         for key in ev.reminders:
             item, ref = by_key[key], f"{replay_id}-{key}"
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "reminder"), None)
             if sent is None:
-                # 자동 안내는 시뮬레이션 안내일 10:00 KST에 보낸 것으로 보고 공정 연락 규칙을 적용한다.
                 on = reminder_on(date.fromisoformat(item["due_on"]))
                 sent = remind(ref, contacts["contacts"], on, sim_now(on))
                 contacts["contacts"].append(sent)
@@ -691,8 +795,144 @@ def handle_restructure_decision(deps: Deps, body: str) -> bool:
         return _decide_restructure(deps, msg)
     if isinstance(msg, CollectionsDecision):
         return _decide_collections(deps, msg)
+    if isinstance(msg, PlanChoice):
+        return _choose_plan(deps, msg)
+    if isinstance(msg, PlanDecision):
+        return _decide_plan(deps, msg)
+    if isinstance(msg, OfferExpire):
+        return _expire_offer(deps, msg)
     log.warning("아직 처리하지 않는 결정 종류: %s %s", msg.kind, msg.loan_id)
     return False
+
+
+def _decide_on_loan(deps: Deps, loan_id: str, decide: Any) -> bool:
+    """대출 문서에 결정을 etag로 쓰고 대기 항목을 갱신한다. decide(loan)는 True(바꿈)·False(버림)·None(이미 결정됨)을 낸다.
+
+    이미 결정된 건(큐 재전달)은 다시 바꾸지 않고 False지만, 앞선 처리가 대기 항목 갱신 전에 실패했을 수 있어 갱신은 한다.
+    """
+    for _ in range(WRITE_ATTEMPTS):
+        loan = deps.store.read(LOANS, loan_id, loan_id)
+        if loan is None:
+            log.warning("결정 대상 대출 없음: %s", loan_id)
+            return False
+        outcome = decide(loan)
+        if outcome is None:
+            _refresh_hold(deps, loan_id)
+            return False
+        if not outcome:
+            return False
+        loan["updated_at"] = deps.clock().isoformat()
+        if deps.store.replace(LOANS, loan, loan.get("_etag")):
+            _refresh_hold(deps, loan_id)
+            return True
+    log.warning("동시 수정이 이어져 결정을 기록하지 못함: %s", loan_id)
+    return False
+
+
+def _open_offer_of(loan: dict[str, Any], offer_id: str) -> tuple[dict[str, Any] | None, bool | None]:
+    """(제안, 판정). 판정 False면 버림(제안 없음·다른 제안), None이면 이미 닫힌 제안, True면 열린 제안."""
+    offer = (loan.get("repayment") or {}).get("offer")
+    if not offer or offer.get("offer_id") != offer_id:
+        log.warning("해당 플랜 제안 없음: %s %s", loan.get("id"), offer_id)
+        return None, False
+    if offer.get("status") != "open":
+        log.warning("이미 닫힌 플랜 제안(%s): %s", offer.get("status"), offer_id)
+        return offer, None
+    return offer, True
+
+
+def _choose_plan(deps: Deps, msg: PlanChoice) -> bool:
+    """고객의 플랜 선택. 유지면 제안만 닫고, 이동·분할이면 심사역 승인을 기다리는 플랜 변경 요청을 만든다.
+    만료(심사역의 "고객 응답 없이 계속")·응답이 끝난 제안에 온 선택은 버린다."""
+
+    def decide(loan: dict[str, Any]) -> bool | None:
+        offer, state = _open_offer_of(loan, msg.offer_id)
+        if not state:
+            return state
+        option = next((o for o in offer.get("options") or () if o["option"] == msg.option), None)  # type: ignore[union-attr]
+        if option is None:
+            log.warning("제안에 없는 옵션: %s %s", msg.offer_id, msg.option)
+            return False
+        now = deps.clock().isoformat()
+        keep = msg.option == "keep"
+        offer.update(status="kept" if keep else "chosen", choice=msg.option, responded_at=now)  # type: ignore[union-attr]
+        if not keep:
+            loan["repayment"]["plan_change"] = {
+                "change_id": f"pc-{loan['monitoring']['replay_id']}",
+                "option": msg.option,
+                "items": option["items"],
+                "replaces": option["replaces"],
+                "status": "pending_officer",
+                "requested_at": now,
+                "officer_id": None,
+                "decided_at": None,
+                "reason": None,
+            }
+        return True
+
+    return _decide_on_loan(deps, msg.loan_id, decide)
+
+
+def _decide_plan(deps: Deps, msg: PlanDecision) -> bool:
+    """플랜 변경 승인·반려(반려는 사유 필수). 승인하면 일정을 바꾸고 변경 이력을 남긴다. 이력의 applied_from은
+    공개된 주차 다음 날이라 흐름 덧씌우기(apply_plan)가 공개된 주차의 거래·판정을 바꾸지 않는다."""
+    reason = msg.reason.strip()
+    if msg.decision == "decline" and not reason:
+        log.warning("플랜 변경 반려 사유 없음: %s", msg.change_id)
+        return False
+
+    def decide(loan: dict[str, Any]) -> bool | None:
+        led = loan.get("repayment") or {}
+        change = led.get("plan_change")
+        if not change or change.get("change_id") != msg.change_id:
+            log.warning("해당 플랜 변경 요청 없음: %s", msg.change_id)
+            return False
+        if change.get("status") != "pending_officer":
+            log.warning("이미 결정된 플랜 변경 요청: %s", msg.change_id)
+            return None
+        now = deps.clock().isoformat()
+        if msg.decision == "approve":
+            mon = loan["monitoring"]
+            # 멈춘 동안 processed_week == paused_week. 재생이 끝난 뒤에도 공개된 주차는 processed_week까지다.
+            applied_from = date.fromisoformat(mon["flow_start"]) + timedelta(days=7 * mon["processed_week"])
+            by_key = {item_key(s): s for s in led["schedule"]}
+            gone = [by_key.get(k) for k in change["replaces"]]
+            if any(s is None or s["status"] != "scheduled" or date.fromisoformat(s["due_on"]) < applied_from
+                   for s in gone) or any(date.fromisoformat(i["due_on"]) < applied_from for i in change["items"]):
+                log.warning("공개됐거나 판정된 회차라 플랜 변경을 반영할 수 없음: %s", msg.change_id)
+                return False
+            led["schedule"] = apply_change(led["schedule"], change)
+            led.setdefault("plan_history", []).append({
+                "change_id": change["change_id"],
+                "option": change["option"],
+                "applied_from": applied_from.isoformat(),
+                "before": [{"key": item_key(s), "due_on": s["due_on"], "amount_krw": item_amount(s, led["installment_krw"])}
+                           for s in gone],  # type: ignore[union-attr]
+                "after": [{"key": item_key(i), "due_on": i["due_on"], "amount_krw": i["amount_krw"]}
+                          for i in change["items"]],
+                "officer_id": msg.officer_id,
+                "decided_at": now,
+            })
+        change.update(
+            status="approved" if msg.decision == "approve" else "declined",
+            officer_id=msg.officer_id, decided_at=now, reason=reason,
+        )
+        return True
+
+    return _decide_on_loan(deps, msg.loan_id, decide)
+
+
+def _expire_offer(deps: Deps, msg: OfferExpire) -> bool:
+    """심사역의 "고객 응답 없이 계속": 열린 제안을 만료로 닫는다. 그 뒤에 온 고객 선택은 버린다."""
+
+    def decide(loan: dict[str, Any]) -> bool | None:
+        offer, state = _open_offer_of(loan, msg.offer_id)
+        if not state:
+            return state
+        offer.update(status="expired", expired_at=deps.clock().isoformat(), expired_by=msg.officer_id)  # type: ignore[union-attr]
+        return True
+
+    return _decide_on_loan(deps, msg.loan_id, decide)
 
 
 def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:

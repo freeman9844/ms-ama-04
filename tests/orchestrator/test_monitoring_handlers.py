@@ -1,16 +1,18 @@
 import json
 from copy import deepcopy
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agents.collections import COLLECTIONS_AGENT, CollectionsContext, RepaymentCase
 from agents.data_assembly import SourceError
-from agents.early_warning import EW_AGENT
+from agents.early_warning import _TRIGGER_TEXT, EW_AGENT
+from agents.escalation import plan_link, stage_message
 from agents.features import monthly_installment
 from agents.monitoring import WEEKS
+from agents.repayment import item_key
 from agents.runtime import AgentRun
 from journey.activities import Deps, assemble_data, register_monitoring, request_consent, underwrite
 from journey.adapters import HttpMockApi
@@ -158,6 +160,42 @@ class ScriptedAgents:
         return True
 
 
+class HighAgents(ScriptedAgents):
+    """EW: 트리거가 새로 생기는 주마다 경보를 올린다. 심각도는 severities를 차례로 쓰고, 다 쓰면 high다."""
+
+    def __init__(self, severities=()):
+        super().__init__()
+        self.severities = list(severities)
+
+    def run(self, spec, input_text, handlers):
+        if spec.name != EW_AGENT:
+            return super().run(spec, input_text, handlers)
+        self.calls.append(spec.name)
+        base = handlers["get_baseline"]({})
+        week, candidates = base["current_week"], base["cause_candidates"]
+        primary = candidates[0] if candidates else None
+        signals = []
+        if primary is not None:
+            signals.append({"kind": CAUSE_SIGNAL.get(primary["cause"], "loan_stacking"), "text": "주원인 지표가 먼저 움직였다.",
+                            "metric_ids": list(primary["evidence_ids"]), "txn_ids": []})
+        for trigger in base["triggers"]:
+            kind, metric, text = _TRIGGER_TEXT[trigger]
+            signals.append({"kind": kind, "text": text, "metric_ids": [metric.format(week=week)], "txn_ids": []})
+        severity = self.severities.pop(0) if self.severities else "high"
+        out = handlers["raise_alert"]({
+            "severity": severity,
+            "summary": "자금 흐름이 나빠졌다.",
+            "check_action": "다음 상환일 전 계좌 잔고 확인이 필요합니다.",
+            "recommended_action": "contact_borrower",
+            "signals": signals[:6],
+            "primary_cause": primary["cause"] if primary else "",
+            "secondary_causes": [c["cause"] for c in candidates[1:3]],
+        })
+        assert out["accepted"], out
+        output = {"decision": "alert", "reason": "조사 결과다."}
+        return AgentRun(spec.name, "1", f"conv-{len(self.calls)}", spec.output_model.model_validate(output), [], 1, 1)
+
+
 @pytest.fixture(scope="module")
 def mock_app():
     cases = build_demo_cases(AS_OF)
@@ -232,7 +270,7 @@ def flows(outbox):
 def resume_until_done(deps, replay_id, deliver=lambda: None):
     """미납이 다시 나오면 또 멈춘다. 대기 항목 처리·재개를 반복해 끝까지 돌리고 추가로 멈춘 횟수를 돌려준다."""
     pauses = 0
-    while (mon := loan(deps)["monitoring"])["status"] == "paused":
+    while (mon := loan(deps)["monitoring"])["status"] in ("paused", "awaiting_customer"):
         pauses += 1
         settle_holds(deps)
         assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == mon["paused_week"] + 1
@@ -241,11 +279,15 @@ def resume_until_done(deps, replay_id, deliver=lambda: None):
 
 
 def settle_holds(deps):
-    """멈춘 재생의 대기 항목을 순서대로 푼다(추심 승인 → 재조정 결정). 끝나면 재개 대기다."""
-    while (mon := loan(deps)["monitoring"])["status"] == "paused":
+    """멈춘 재생의 대기 항목을 순서대로 푼다(추심 승인 → 재조정 결정 → 고객 플랜 응답은 유지). 끝나면 재개 대기다."""
+    while (mon := loan(deps)["monitoring"])["status"] in ("paused", "awaiting_customer"):
         hold, case_id = mon["holds"][0], mon.get("pause_case_id") or mon.get("pause_alert_id")
         if hold == "collections_proposal":
             assert decide_collections(deps, case_id) is True
+        elif hold == "customer_response":
+            offer_id = loan(deps)["repayment"]["offer"]["offer_id"]
+            assert handle_restructure_decision(deps, json.dumps(
+                {"kind": "plan_choice", "loan_id": LOAN, "offer_id": offer_id, "option": "keep"})) is True
         else:
             assert hold == "restructure"
             assert decide_restructure(deps, case_id) is True
@@ -618,10 +660,11 @@ def test_publish_failure_is_recorded_and_replay_continues(mock_app, topic):
 def test_week13_case_is_decidable_after_completion(mock_app):
     deps = make_deps(mock_app, agents=ScriptedAgents())
     approved_loan(deps)
-    replay(deps)
+    replay_id = replay(deps)["replay_id"]
+    resume_until_done(deps, replay_id)  # 연속 높음 경보로 열린 셀프 플랜 제안은 유지로 답한다
     mon = loan(deps)["monitoring"]
     last = cases(deps)[-1]
-    assert mon["status"] == "completed" and mon["paused_week"] is None
+    assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
     assert last["week"] == WEEKS and last["proposal"]["status"] == "pending_officer"
     assert decide_collections(deps, last["case_id"]) is True
     assert deps.store.read(ALERTS, last["case_id"], LOAN)["restructure"]["status"] == "pending_officer"
@@ -1029,7 +1072,7 @@ def test_collections_decision_for_case_without_proposal_is_dropped(mock_app):
         {"kind": "bogus", "loan_id": LOAN},
     ],
 )
-def test_plan_messages_are_not_handled_yet(mock_app, body):
+def test_plan_messages_without_matching_offer_are_dropped(mock_app, body):
     deps, _, _ = missed_without_agents(mock_app)
     before = loan(deps)["monitoring"]
     assert handle_restructure_decision(deps, json.dumps(body)) is False
@@ -1160,3 +1203,271 @@ def test_week_without_repayment_ledger_skips_due_check(mock_app):
     deps.store.upsert(LOANS, doc)
     entry = process_week(deps, LOAN, started["replay_id"], 1)
     assert "next_due_on" not in entry["row"] and "due_shortfall" not in entry["triggers"]
+
+
+# --- 조기경보 단계 자동 안내와 셀프 상환 플랜(Task 7) ---
+
+
+def high_replay(mock_app, severities=(), applicant_id="seller-dailylook-01", **fields):
+    deps = make_deps(mock_app, agents=HighAgents(severities))
+    if fields:
+        deps = replace(deps, **fields)
+    approved_loan(deps, applicant_id)
+    return deps, replay(deps)["replay_id"]
+
+
+def by_kind(deps, replay_id, by):
+    return [c for c in contacts(deps, replay_id) if c["by"] == by]
+
+
+def week_end(week):
+    return AS_OF + timedelta(days=7 * week - 1)
+
+
+def plan_message(deps, kind, **fields):
+    return handle_restructure_decision(deps, json.dumps({"kind": kind, "loan_id": LOAN} | fields))
+
+
+def choose(deps, option, offer_id=None):
+    offer_id = offer_id or loan(deps)["repayment"]["offer"]["offer_id"]
+    return plan_message(deps, "plan_choice", offer_id=offer_id, option=option)
+
+
+def decide_plan(deps, decision="approve", reason="", change_id=None):
+    change_id = change_id or loan(deps)["repayment"]["plan_change"]["change_id"]
+    return plan_message(deps, "plan_change", change_id=change_id, decision=decision, officer_id="officer-1",
+                        reason=reason)
+
+
+def expire_offer(deps):
+    offer_id = loan(deps)["repayment"]["offer"]["offer_id"]
+    return plan_message(deps, "offer_expire", offer_id=offer_id, officer_id="officer-1")
+
+
+def test_first_high_alert_sends_balance_warning_and_early_reminders(mock_app):
+    deps, replay_id = high_replay(mock_app, ["high", "medium"] * 5)  # 높음이 연속하지 않아 2단계는 없다
+    doc = loan(deps)
+    mon, schedule, installment = doc["monitoring"], doc["repayment"]["schedule"], doc["repayment"]["installment_krw"]
+    assert mon["status"] == "completed" and mon["escalation"]["stage2"] is None
+    first = next(w for w in mon["weeks"] if w["alert_id"])
+    (s1,) = by_kind(deps, replay_id, "early_warning")
+    on = week_end(first["week"])
+    assert (s1["ref"], s1["script_id"], s1["status"], s1["on"]) == (f"{replay_id}-s1", "balance_warning", "sent", on.isoformat())
+    assert mon["escalation"]["stage1"] == {"alert_id": first["alert_id"], "on": on.isoformat(), "status": "sent", "reason": None}
+    upcoming = [s for s in schedule if date.fromisoformat(s["due_on"]) > on]
+    # 5주차 행에는 다음 상환일 예상 잔고가 없다(전망 밖) → 금액 없는 문구.
+    assert "due_balance" not in first["row"]
+    assert s1["text"] == stage_message(1, due_on=date.fromisoformat(upcoming[0]["due_on"]), amount=installment,
+                                       balance=None, link="")[1]
+    early = by_kind(deps, replay_id, "early_reminder")
+    assert [c["ref"] for c in early] == [f"{replay_id}-i{s['no']}-e" for s in upcoming] and early
+    for c, s in zip(early, upcoming):
+        due = date.fromisoformat(s["due_on"])
+        assert (c["script_id"], c["status"], c["on"]) == ("early_reminder", "sent", (due - timedelta(days=5)).isoformat())
+        assert c["at"] == datetime.combine(due - timedelta(days=5), datetime.min.time(), KST).replace(hour=10).isoformat()
+        assert s["due_on"] in c["text"] and f"{installment:,}원" in c["text"]
+        assert (s["early_reminded_on"], s["early_reminder_status"]) == (c["on"], "sent")
+    assert all(s.get("early_reminded_on") is None for s in schedule if s not in upcoming)  # 1단계 전 회차
+    # 기본 3일 전 안내는 그대로다.
+    assert [c["ref"] for c in by_kind(deps, replay_id, "reminder")] == [f"{replay_id}-i{s['no']}" for s in schedule]
+
+
+@pytest.mark.parametrize("balance, shown", [(100_000, True), (-5, False), (5_000_000, False)])
+def test_stage_one_shows_balance_only_when_short_and_not_negative(mock_app, monkeypatch, balance, shown):
+    monkeypatch.setattr(monitoring_module, "due_check", lambda *a: {"next_due_on": FIRST_DUE.isoformat(), "due_balance": balance})
+    deps, replay_id = high_replay(mock_app)
+    s1 = next(c for c in by_kind(deps, replay_id, "early_warning") if c["ref"].endswith("-s1"))
+    assert ("100,000원" in s1["text"]) is shown
+    assert "-5원" not in s1["text"] and "5,000,000원" not in s1["text"]
+
+
+def test_consecutive_high_alerts_open_offer_and_wait_for_customer(mock_app, monkeypatch):
+    uptos = []
+    real = monitoring_module.payout_days
+    monkeypatch.setattr(monitoring_module, "payout_days", lambda pg, platform, upto: uptos.append(upto) or real(pg, platform, upto))
+    deps, replay_id = high_replay(mock_app)
+    doc = loan(deps)
+    mon, offer = doc["monitoring"], doc["repayment"]["offer"]
+    s1, s2 = by_kind(deps, replay_id, "early_warning")
+    assert s1["ref"] == f"{replay_id}-s1" and s2["ref"] == f"{replay_id}-s2"
+    assert (s2["script_id"], s2["status"]) == ("self_plan_offer", "sent") and plan_link(doc["applicant_id"]) in s2["text"]
+    week = mon["processed_week"]
+    assert s2["on"] == week_end(week).isoformat() and mon["escalation"]["stage2"]["status"] == "sent"
+    assert uptos == [week_end(week)]  # 지급일은 이번 주 끝까지 공개된 것만 쓴다
+    assert (offer["offer_id"], offer["week"], offer["sent_on"], offer["status"]) == (f"of-{replay_id}", week, s2["on"], "open")
+    assert offer["choice"] is None and offer["responded_at"] is None
+    assert [o["option"] for o in offer["options"]] == ["move", "split", "keep"]
+    assert (mon["status"], mon["holds"], mon["paused_week"]) == ("awaiting_customer", ["customer_response"], week)
+    assert replay(deps, action="resume", replay_id=replay_id) is None  # 고객 응답 전에는 재개할 수 없다
+
+
+def test_stage_messages_are_sent_once_per_replay(mock_app):
+    deps, replay_id = high_replay(mock_app)
+    assert choose(deps, "keep") is True
+    assert replay(deps, action="resume", replay_id=replay_id) is not None
+    mon = loan(deps)["monitoring"]
+    assert mon["status"] == "completed" and len(mon["alert_severities"]) == len(mon["alert_ids"]) > 2
+    assert set(mon["alert_severities"]) == {"high"}
+    assert [c["ref"] for c in by_kind(deps, replay_id, "early_warning")] == [f"{replay_id}-s1", f"{replay_id}-s2"]
+
+
+def test_auto_sends_ignore_real_night_clock(mock_app):
+    deps, replay_id = high_replay(mock_app, clock=lambda: NOW.replace(hour=23))
+    s1, s2 = by_kind(deps, replay_id, "early_warning")
+    assert (s1["status"], s2["status"]) == ("sent", "sent")
+    assert s1["at"] == datetime.combine(date.fromisoformat(s1["on"]), datetime.min.time(), KST).replace(hour=10).isoformat()
+    assert loan(deps)["monitoring"]["status"] == "awaiting_customer"
+
+
+def test_deferred_stage_two_opens_no_offer(mock_app):
+    outbox = Outbox()
+    deps = make_deps(mock_app, events=outbox, agents=HighAgents())
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    s2_on = week_end(6).isoformat()  # 두 번째 높음 경보 주차(6주차) 끝
+    full = [{"ref": f"x-{i}", "on": s2_on, "at": NOW.isoformat(), "script_id": "missed_payment", "status": "sent",
+             "reason": None, "by": "officer"} for i in range(7)]
+    deps.store.upsert(ALERTS, {"id": f"contacts-{replay_id}", "loan_id": LOAN, "replay_id": replay_id, "contacts": full})
+    pump(deps, outbox)
+    doc = loan(deps)
+    mon = doc["monitoring"]
+    s2 = next(c for c in by_kind(deps, replay_id, "early_warning") if c["ref"] == f"{replay_id}-s2")
+    assert (s2["on"], s2["status"], s2["reason"]) == (s2_on, "deferred", "weekly_limit")
+    assert mon["escalation"]["stage2"]["status"] == "deferred" and mon["escalation"]["stage2"]["reason"] == "weekly_limit"
+    assert doc["repayment"].get("offer") is None
+    assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
+    assert len(by_kind(deps, replay_id, "early_warning")) == 2  # deferred도 쓴 것으로 보고 다시 보내지 않는다
+
+
+def test_plan_choice_then_approval_changes_schedule_and_replay(mock_app):
+    deps, replay_id = high_replay(mock_app)
+    before = loan(deps)
+    week = before["monitoring"]["processed_week"]
+    original_debit = next(t for t in deps.raw.get_json(f"consent-{before['monitoring']['consent_id']}", "flow.json")
+                          if t["description"] == LENDER_DEBIT and t["booked_on"] == before["repayment"]["schedule"][1]["due_on"])
+    move = next(o for o in before["repayment"]["offer"]["options"] if o["option"] == "move")
+    assert move["replaces"] == ["i2"]
+    assert choose(deps, "move") is True
+    doc = loan(deps)
+    change = doc["repayment"]["plan_change"]
+    assert change == {"change_id": f"pc-{replay_id}", "option": "move", "items": move["items"], "replaces": ["i2"],
+                      "status": "pending_officer", "requested_at": NOW.isoformat(), "officer_id": None,
+                      "decided_at": None, "reason": None}
+    assert (doc["repayment"]["offer"]["status"], doc["repayment"]["offer"]["choice"]) == ("chosen", "move")
+    assert doc["repayment"]["offer"]["responded_at"] == NOW.isoformat()
+    assert doc["repayment"]["schedule"] == before["repayment"]["schedule"]  # 승인 전에는 일정 그대로
+    assert (doc["monitoring"]["status"], doc["monitoring"]["holds"]) == ("paused", ["plan_change"])
+
+    assert decide_plan(deps) is True
+    doc = loan(deps)
+    led, mon = doc["repayment"], doc["monitoring"]
+    old = before["repayment"]["schedule"][1]
+    (hist,) = led["plan_history"]
+    assert hist == {
+        "change_id": f"pc-{replay_id}", "option": "move", "applied_from": (AS_OF + timedelta(days=7 * week)).isoformat(),
+        "before": [{"key": "i2", "due_on": old["due_on"], "amount_krw": led["installment_krw"]}],
+        "after": [{"key": item_key(i), "due_on": i["due_on"], "amount_krw": i["amount_krw"]} for i in move["items"]],
+        "officer_id": "officer-1", "decided_at": NOW.isoformat(),
+    }
+    new_due = move["items"][0]["due_on"]
+    assert [s["due_on"] for s in led["schedule"] if s["no"] == 2] == [new_due]
+    assert (led["plan_change"]["status"], led["plan_change"]["officer_id"]) == ("approved", "officer-1")
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+
+    assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == week + 1
+    resume_until_done(deps, replay_id)
+    doc = loan(deps)
+    mon, schedule = doc["monitoring"], doc["repayment"]["schedule"]
+    assert mon["status"] == "completed"
+    moved = next(s for s in schedule if s["no"] == 2)
+    # 옮긴 날짜에 새 출금으로 납부했다. 원래 날짜의 출금은 흐름에서 빠져 판정에 쓰이지 않는다.
+    assert (moved["due_on"], moved["status"], moved["txn_id"]) == (new_due, "paid", f"pc-{replay_id}-i2")
+    assert all(s["due_on"] != old["due_on"] for s in schedule)
+    assert original_debit["txn_id"] not in {s["txn_id"] for s in schedule}
+    # 공개된 주차의 행은 승인 전과 같다.
+    assert [w["row"] for w in mon["weeks"][:week]] == [w["row"] for w in before["monitoring"]["weeks"]]
+
+
+def test_keep_choice_needs_no_officer(mock_app):
+    deps, replay_id = high_replay(mock_app)
+    schedule = loan(deps)["repayment"]["schedule"]
+    assert choose(deps, "keep") is True
+    led, mon = loan(deps)["repayment"], loan(deps)["monitoring"]
+    assert (led["offer"]["status"], led["offer"]["choice"]) == ("kept", "keep")
+    assert led.get("plan_change") is None and led["schedule"] == schedule
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+
+
+def test_plan_decline_keeps_schedule(mock_app):
+    deps, replay_id = high_replay(mock_app)
+    schedule = loan(deps)["repayment"]["schedule"]
+    assert choose(deps, "split") is True
+    assert decide_plan(deps, "decline") is False  # 반려 사유 필수
+    assert decide_plan(deps, "decline", reason="   ") is False
+    assert loan(deps)["repayment"]["plan_change"]["status"] == "pending_officer"
+    assert loan(deps)["monitoring"]["status"] == "paused"
+    assert decide_plan(deps, "decline", reason="분할 대신 통화 상담") is True
+    led, mon = loan(deps)["repayment"], loan(deps)["monitoring"]
+    assert (led["plan_change"]["status"], led["plan_change"]["reason"]) == ("declined", "분할 대신 통화 상담")
+    assert led["schedule"] == schedule and not led.get("plan_history")
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+
+
+def test_offer_expire_then_late_choice_is_dropped(mock_app):
+    deps, replay_id = high_replay(mock_app)
+    assert expire_offer(deps) is True
+    led, mon = loan(deps)["repayment"], loan(deps)["monitoring"]
+    assert (led["offer"]["status"], led["offer"]["expired_by"], led["offer"]["choice"]) == ("expired", "officer-1", None)
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+    assert choose(deps, "move") is False  # 심사역이 "고객 응답 없이 계속"을 누른 뒤 온 선택
+    assert expire_offer(deps) is False
+    assert loan(deps)["repayment"] == led
+    assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+def test_duplicate_plan_decision_applies_once(mock_app):
+    deps, replay_id = high_replay(mock_app)
+    assert choose(deps, "move") is True
+    assert choose(deps, "split") is False  # 이미 고른 제안
+    assert decide_plan(deps) is True
+    led = loan(deps)["repayment"]
+    assert decide_plan(deps) is False  # 큐 재전달
+    assert decide_plan(deps, "decline", reason="중복") is False
+    assert loan(deps)["repayment"] == led and len(led["plan_history"]) == 1
+    assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+@pytest.mark.parametrize("step", ["keep", "approve", "expire"])
+def test_redelivered_plan_message_repairs_hold_after_failure(mock_app, monkeypatch, step):
+    deps, _ = high_replay(mock_app)
+    if step == "approve":
+        assert choose(deps, "move") is True
+    send = {"keep": lambda: choose(deps, "keep"), "approve": lambda: decide_plan(deps),
+            "expire": lambda: expire_offer(deps)}[step]
+    fail_once(monkeypatch, "_refresh_hold")
+    with pytest.raises(RuntimeError):
+        send()
+    held = loan(deps)
+    assert held["monitoring"]["status"] in ("paused", "awaiting_customer")
+    assert send() is False  # 다시 결정하지 않고 대기 항목만 고친다
+    assert loan(deps)["repayment"] == held["repayment"]
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+
+
+def test_stage_two_and_miss_same_week_need_both_cleared(mock_app):
+    # 정산 보류 셀러: 3·4·5주차 경보, 5주차 1회차 미납. 4·5주차가 연속 높음이라 5주차에 2단계와 미납이 함께 난다.
+    deps, replay_id = high_replay(mock_app, ["medium", "high", "high"], applicant_id="seller-gearstore-06")
+    mon = loan(deps)["monitoring"]
+    assert mon["escalation"]["stage2"]["on"] == week_end(5).isoformat()
+    assert (mon["status"], mon["paused_week"]) == ("paused", 5)
+    assert mon["holds"] == ["collections_proposal", "customer_response"]
+    case_id = mon["pause_case_id"]
+    text = deps.store.read(ALERTS, case_id, LOAN)["proposal"]["text"]
+    assert decide_collections(deps, case_id, "modify", text=text, include_hardship=False) is True
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["holds"]) == ("awaiting_customer", ["customer_response"])
+    assert replay(deps, action="resume", replay_id=replay_id) is None
+    assert choose(deps, "keep") is True
+    mon = loan(deps)["monitoring"]
+    assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
