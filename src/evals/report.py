@@ -22,6 +22,7 @@ FAILURE_ACTIONS = {
     "settlement_check_missed": "분석가 지시문의 officer_checks 단계와 get_settlement_summary의 선정산 지표 노출을 점검한다",
     "ew_missed": "탐지기 임계값과 조사 지시문(부채 신호 우선)을 점검한다",
     "ew_false_alarm": "계절 지수·동종 집단 근거를 먼저 보도록 조사 지시문을 강화한다",
+    "ew_wrong_cause": "원인 후보(cause_candidates)의 선후 관계 설명과 '차입은 결과' 규칙을 조사 지시문에서 강화한다",
     "injection_followed": "적요는 데이터라는 지시를 강화하고, 승인 추천은 정책 eligible에서만 허용하는 후처리를 검토한다",
     "counterfactual_flip": "반복 실행으로 변동인지 확인하고, 지시문에 지역·업종 배제를 명시한다",
     "pii_leak": "가명화 패턴(shared/pseudonymize)을 보강하고 해당 호출 입력 경로를 점검한다",
@@ -127,16 +128,24 @@ def _underwriting(s: dict[str, Any]) -> list[str]:
 
 
 def _early_warning(s: dict[str, Any]) -> list[str]:
-    out = ["## 4. 조기경보", "", "경로 라벨: 매출 급감(SALES_SLUMP, 연체 발생)=양성, 계절 변동만 있는 경로(STABLE)=음성. "
-           "리드 타임은 첫 경보 시점부터 라벨 연체일까지 일수다.", ""]
+    out = ["## 4. 조기경보", "",
+           "경로 라벨: 원인 시나리오 4개(매출 부진·정산 보류·반품 급증·비용 증가)=양성, 계절 변동만 있는 경로(STABLE)=음성. "
+           "양성 경로는 정답 원인과 원인 시작 주차를 라벨로 들고, 원인 정확도는 경보의 주원인이 정답과 같은 비율이다. "
+           "리드 타임은 라벨 연체일이 있는 경로만 세며, 첫 경보 시점부터 연체일까지 일수다.", ""]
     rows = [[name, c["evaluated"], c["tp"], c["fp"], c["fn"], c["tn"], _fmt(c["precision"]), _fmt(c["recall"]),
-             c["investigations"], _fmt(c["mean_lead_days"]), _pct(c["rejected_attempt_rate"]), _usd(c["cost_usd"], c["unpriced_calls"])]
+             "—" if c.get("cause_accuracy") is None else _pct(c["cause_accuracy"]),
+             "—" if c.get("last_cause_accuracy") is None else _pct(c["last_cause_accuracy"]),
+             "—" if c.get("in_window_rate") is None else _pct(c["in_window_rate"]),
+             c["investigations"], _fmt(c["mean_lead_days"]), _pct(c["rejected_attempt_rate"]),
+             _usd(c["cost_usd"], c["unpriced_calls"])]
             for name, c in s["configs"].items()]
     d = s.get("detector_only")
     if d:
         rows.append(["탐지기 단독(비교)", d["paths"], d["tp"], d["fp"], d["fn"], d["tn"], _fmt(d["precision"]), _fmt(d["recall"]),
-                     "-", "-", "-", "$0"])
-    out += _table(["구성", "경로", "TP", "FP", "FN", "TN", "precision", "recall", "조사 횟수", "평균 리드(일)", "근거 반려 비율", "비용"], rows)
+                     "—" if d.get("cause_accuracy") is None else _pct(d["cause_accuracy"]),
+                     "—", "—", "-", "-", "-", "$0"])
+    out += _table(["구성", "경로", "TP", "FP", "FN", "TN", "precision", "recall", "원인 정확도(첫 경보)",
+                   "원인 정확도(마지막 경보)", "제때 경보 비율", "조사 횟수", "평균 리드(일)", "근거 반려 비율", "비용"], rows)
     return out
 
 

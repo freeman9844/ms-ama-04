@@ -2,7 +2,8 @@
 
 - 분류: 합성 케이스의 규칙 미분류 거래(거래처 이체) + 사람이 라벨을 붙인 어려운 적요 뱅크.
 - 심사: 아키타입 5개 × (일반, 프롬프트 주입) 10건과 지역·업종만 바꾼 반사실 쌍.
-- 조기경보: 사후 흐름 시나리오(SALES_SLUMP=양성, STABLE=음성) 경로. 라벨 연체일은 default_on.
+- 조기경보: 원인이 다른 사후 흐름 4개(매출 부진·정산 보류·반품 급증·비용 증가) × 아키타입 2개 = 양성 8개와
+  STABLE 음성 2개. 라벨은 정답 원인(`flow.cause`)·원인 시작 주차(`onset_week`)·연체일(`default_on`)이다.
 """
 
 import dataclasses
@@ -10,7 +11,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from mockapis.postloan import FlowScenario, PostLoanFlow, generate_postloan
+from agents.features import monthly_installment
+from mockapis.postloan import FlowScenario, LoanTerms, PostLoanFlow, generate_postloan
 from mockapis.synth import Archetype, SyntheticCase, TxnCategory, generate_case
 from shared.contracts import Transaction, TxnTypeCode
 
@@ -21,7 +23,23 @@ ARCHETYPES = tuple(Archetype)
 CLASSIFY_SEEDS = (101, 102)
 UW_SEED = 201
 EW_SEED = 301
-EW_ARCHETYPES = (Archetype.HEALTHY_SEASONAL, Archetype.TAX_MISMATCH, Archetype.STRESSED)
+# 원인 경로: 원인 4개 × (HEALTHY_SEASONAL, STRESSED). 음성은 STABLE × (HEALTHY_SEASONAL, TAX_MISMATCH).
+EW_CAUSE_SCENARIOS = (
+    FlowScenario.SALES_SLUMP,
+    FlowScenario.SETTLEMENT_HOLD,
+    FlowScenario.RETURN_SPIKE,
+    FlowScenario.COST_SURGE,
+)
+EW_CAUSE_ARCHETYPES = (Archetype.HEALTHY_SEASONAL, Archetype.STRESSED)
+EW_STABLE_ARCHETYPES = (Archetype.HEALTHY_SEASONAL, Archetype.TAX_MISMATCH)
+EW_SCENARIO_TAG = {
+    FlowScenario.SALES_SLUMP: "s",
+    FlowScenario.SETTLEMENT_HOLD: "h",
+    FlowScenario.RETURN_SPIKE: "r",
+    FlowScenario.COST_SURGE: "c",
+    FlowScenario.STABLE: "b",
+}
+EW_LOAN = LoanTerms(REQUESTED_AMOUNT_KRW, round(monthly_installment(REQUESTED_AMOUNT_KRW, REQUESTED_TENOR_MONTHS)))
 # 반사실 쌍: 기준 케이스의 지역·업종을 다른 페르소나의 값으로 바꾼다.
 COUNTERFACTUAL_SWAP = {Archetype.HEALTHY_SEASONAL: Archetype.STRESSED, Archetype.TAX_MISMATCH: Archetype.HEALTHY_SEASONAL}
 
@@ -109,7 +127,12 @@ class EwPath:
 
     @property
     def positive(self) -> bool:
-        return self.flow.scenario is FlowScenario.SALES_SLUMP
+        return self.flow.scenario is not FlowScenario.STABLE
+
+    @property
+    def onset_week(self) -> int | None:
+        """원인이 시작된 주차(1부터). 원인이 없는 경로는 None."""
+        return (self.flow.onset - self.flow.start).days // 7 + 1 if self.flow.onset else None
 
 
 def _bank_txns(app_id: str, part: int, parts: int) -> tuple[list[Transaction], dict[str, str]]:
@@ -178,14 +201,15 @@ def counterfactual_cases(base: list[UwCase]) -> list[UwCase]:
     return out
 
 
+def _ew_path(archetype: Archetype, scenario: FlowScenario) -> EwPath:
+    path_id = f"ev-e{archetype.value[:4]}{EW_SCENARIO_TAG[scenario]}"
+    case = generate_case(path_id, archetype, AS_OF, EW_SEED)
+    return EwPath(path_id, case, generate_postloan(case, scenario, AS_OF, EW_SEED, loan=EW_LOAN))
+
+
 def ew_paths() -> list[EwPath]:
-    paths: list[EwPath] = []
-    for archetype in EW_ARCHETYPES:
-        for scenario in (FlowScenario.SALES_SLUMP, FlowScenario.STABLE):
-            path_id = f"ev-e{archetype.value[:4]}{'k' if scenario is FlowScenario.SALES_SLUMP else 'b'}"
-            case = generate_case(path_id, archetype, AS_OF, EW_SEED)
-            paths.append(EwPath(path_id, case, generate_postloan(case, scenario, AS_OF, EW_SEED)))
-    return paths
+    paths = [_ew_path(a, s) for s in EW_CAUSE_SCENARIOS for a in EW_CAUSE_ARCHETYPES]
+    return paths + [_ew_path(a, FlowScenario.STABLE) for a in EW_STABLE_ARCHETYPES]
 
 
 def summary() -> dict[str, Any]:
@@ -216,6 +240,8 @@ def summary() -> dict[str, Any]:
                     "path_id": p.path_id,
                     "archetype": p.case.archetype.value,
                     "scenario": p.flow.scenario.value,
+                    "cause": p.flow.cause.value if p.flow.cause else None,
+                    "onset_week": p.onset_week,
                     "default_on": p.flow.default_on.isoformat() if p.flow.default_on else None,
                 }
                 for p in ew_paths()

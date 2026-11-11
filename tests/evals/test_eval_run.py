@@ -130,6 +130,14 @@ def test_emitted_log_chunks_rebuild_the_report(tmp_path):
     assert files["report.md"] == (tmp_path / "report.md").read_bytes()
     assert set(summary["suites"]) == {"early_warning"}
 
+
+def test_report_shows_early_warning_cause_columns(tmp_path):
+    summary, _ = _run(tmp_path, "--suite", "early_warning")
+    section = report.render_markdown(summary).split("## 4.")[1].split("## 6.")[0]
+    assert "원인 정확도(첫 경보)" in section and "매출 부진" in section
+    assert next(iter(summary["suites"]["early_warning"]["configs"].values()))["cause_accuracy"] == 1.0
+
+
 def test_case_error_and_judge_failure_do_not_stop_the_suite(monkeypatch):
     # 케이스 하나의 예외는 그 케이스만 error로 남기고, judge 실패는 점수만 비운다(자체 지표는 유지).
     meter = Meter(load_prices(), 5.0)

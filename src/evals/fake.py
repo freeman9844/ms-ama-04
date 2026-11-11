@@ -22,6 +22,13 @@ _KEYWORDS: tuple[tuple[str, str], ...] = (
     ("식", "supplier"), ("대금", "supplier"), ("물품", "supplier"), ("구입", "supplier"),
 )
 _DRAFT = {"eligible": "approve", "refer": "conditional", "ineligible": "decline"}
+_EW_SIGNAL_KIND = {
+    "sales_slump": "inflow_drop",
+    "settlement_hold": "settlement_hold",
+    "return_spike": "return_spike",
+    "cost_surge": "cost_surge",
+    "high_cost_borrowing": "loan_stacking",
+}
 
 
 def guess(description: str) -> str:
@@ -132,19 +139,28 @@ class FakeAzure:
             ],
         }
 
+    def ew_cause(self, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """주원인으로 고를 후보. 테스트에서 덮어써 '원인 오답' 흐름을 만든다. None이면 경보하지 않는다."""
+        return candidates[0] if candidates else None
+
     def _ew_decision(self, state: dict[str, Any], text: str, results: list[Any]) -> Any:
         if not results:
-            return ("get_weekly_series", {})
+            return ("get_baseline", {})
         r = results[0]
-        if "weeks" in r:
-            week = r["current_week"]
-            state["week"] = week
-            if not any(w["high_cost_count"] > 0 or w["loan_proceeds"] > 0 for w in r["weeks"]):
+        if "cause_candidates" in r:
+            candidates = r["cause_candidates"]
+            chosen = self.ew_cause(candidates)
+            if chosen is None:
                 return {"decision": "no_alert", "reason": "계절 변동 범위로 본다."}
+            cause = chosen["cause"]
+            others = [c["cause"] for c in candidates if c["cause"] != cause][:2]
             return ("raise_alert", {
-                "severity": "high", "summary": "대출 실행 후 추가 차입과 매출 감소가 함께 나타났다.",
+                "severity": "medium", "summary": "탐지기가 지목한 원인 후보를 근거로 경보를 올린다.",
                 "recommended_action": "contact_borrower",
-                "signals": [{"kind": "loan_stacking", "text": "추가 차입 흔적이 있다.", "metric_ids": [f"W:{week}:high_cost_count"], "txn_ids": []}],
+                "signals": [{"kind": _EW_SIGNAL_KIND[cause], "text": "원인 후보의 주차 지표가 기준선에서 벗어났다.",
+                             "metric_ids": list(chosen["evidence_ids"]), "txn_ids": []}],
+                "primary_cause": cause,
+                "secondary_causes": others,
             })
         return {"decision": "alert" if r.get("accepted") else "no_alert", "reason": "탐지 신호를 확인했다."}
 
