@@ -854,3 +854,40 @@ def test_repayment_case_carries_alert_cause_to_collections(mock_app):
     got = ctx.get_case({})["recent_alert"]
     assert got["primary_cause"] == last["primary_cause"]
     assert got["secondary_causes"] == list(last["secondary_causes"])
+
+
+def test_due_shortfall_trigger_fires_when_due_balance_below_installment(mock_app, monkeypatch):
+    monkeypatch.setattr(
+        monitoring_module, "due_check", lambda *a: {"next_due_on": FIRST_DUE.isoformat(), "due_balance": 1}
+    )
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    entry = loan(deps)["monitoring"]["weeks"][0]
+    assert "due_shortfall" in entry["triggers"] and entry["row"]["due_balance"] == 1
+    assert "due_shortfall" in entry["new_triggers"] and entry["investigation"]
+
+
+def test_week_row_records_next_due_and_pre_debit_balance(mock_app):
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    mon = loan(deps)["monitoring"]
+    installment = loan(deps)["repayment"]["installment_krw"]
+    week4 = mon["weeks"][3]  # 11/23~11/29: 12/2 상환일이 전망 안에 든다
+    assert week4["row"]["next_due_on"] == FIRST_DUE.isoformat()
+    path = {p["date"]: p["balance"] for p in week4["projection"]["path"]}
+    assert week4["row"]["due_balance"] == path[FIRST_DUE.isoformat()] + installment
+    assert ("due_shortfall" in week4["triggers"]) == (week4["row"]["due_balance"] < installment)
+
+
+def test_week_without_repayment_ledger_skips_due_check(mock_app):
+    outbox = Outbox()
+    deps = make_deps(mock_app, events=outbox)
+    approved_loan(deps)
+    started = replay(deps)
+    doc = loan(deps)
+    doc.pop("repayment")
+    deps.store.upsert(LOANS, doc)
+    entry = process_week(deps, LOAN, started["replay_id"], 1)
+    assert "next_due_on" not in entry["row"] and "due_shortfall" not in entry["triggers"]

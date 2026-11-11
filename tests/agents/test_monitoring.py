@@ -9,11 +9,13 @@ from agents.monitoring import (
     Baseline,
     categorize,
     detect,
+    due_check,
     evidence_catalog,
     settlement_for,
     week_window,
     weekly_series,
 )
+from agents.forecast import project
 from mockapis.demo import POSTLOAN_SCENARIOS, build_demo_cases
 from mockapis.postloan import FlowScenario, generate_postloan
 from mockapis.postloan_scenarios import PROCEEDS_KRW
@@ -202,3 +204,50 @@ def test_catalog_ids_are_evidence_ids(cafe, baseline):
 def test_peer_cohorts_cover_every_seller_industry():
     assert set(PEER_COHORTS) == set(SELLER_INDUSTRIES)
     assert all(set(c["index"]) == set(range(1, 13)) for c in PEER_COHORTS.values())
+
+
+def test_due_check_reports_pre_debit_balance():
+    proj = {"path": [{"date": "2026-12-01", "balance": 900_000}, {"date": "2026-12-02", "balance": -270_000}]}
+    sched = [{"no": 1, "due_on": "2026-12-02", "status": "scheduled"}]
+    assert due_check(proj, sched, 1_170_000, date(2026, 11, 29)) == {"next_due_on": "2026-12-02", "due_balance": 900_000}
+
+
+def test_due_check_uses_item_amount_and_earliest_scheduled():
+    proj = {"path": [{"date": "2026-12-02", "balance": -100_000}, {"date": "2026-12-20", "balance": 0}]}
+    sched = [
+        {"no": 3, "due_on": "2026-12-20", "status": "scheduled", "amount_krw": 1},
+        {"no": 2, "due_on": "2026-12-02", "status": "scheduled", "amount_krw": 400_000},
+    ]
+    assert due_check(proj, sched, 1_170_000, date(2026, 11, 29)) == {"next_due_on": "2026-12-02", "due_balance": 300_000}
+
+
+def test_due_check_outside_horizon_has_no_balance():
+    proj = {"path": [{"date": "2026-12-01", "balance": 5}]}
+    sched = [{"no": 1, "due_on": "2027-01-01", "status": "scheduled"}]
+    assert due_check(proj, sched, 1, date(2026, 11, 29)) == {"next_due_on": "2027-01-01"}
+
+
+def test_due_check_skips_paid_and_past_items():
+    sched = [{"no": 1, "due_on": "2026-11-02", "status": "paid"}, {"no": 2, "due_on": "2026-11-20", "status": "scheduled"}]
+    assert due_check(None, sched, 1, date(2026, 11, 29)) == {}
+
+
+def test_project_uses_per_date_amounts():
+    channel = {"payer": "네이버파이낸셜", "cadence": "business_daily", "anchors": [], "payouts_per_month": 21,
+               "monthly_avg_krw": 2_100_000, "per_payout_krw": 100_000}
+    profile = {"channels": [channel], "seasonal_index": {f"{m:02d}": 1.0 for m in range(1, 13)}, "own_months": [],
+               "outflows": {"items": [], "variable_ratio": 0.0}}
+    row = {"week": 1, "start": "2026-11-02", "end": "2026-11-08", "end_balance": 1_000_000,
+           "revenue": 700_000, "expected_revenue": 700_000}
+    d = date(2026, 11, 20)
+    by_amount = project(profile, [row], [], 1_000_000, installment_due={d: 500_000})
+    by_date = project(profile, [row], [], 1_000_000, installment_due=[d])
+    assert by_amount["totals"]["installment"] == -500_000
+    assert by_date["totals"]["installment"] == -1_000_000
+
+
+def test_due_balance_is_in_evidence_catalog(cafe, baseline):
+    _, rows = _rows(cafe, FlowScenario.STABLE, baseline, 1)
+    rows = [rows[0] | {"next_due_on": "2026-12-02", "due_balance": 900_000}]
+    cat = evidence_catalog(rows, baseline, "fashion")
+    assert cat["F:1:due_balance"] == 900_000 and cat["F:1:next_due_on"] == "2026-12-02"

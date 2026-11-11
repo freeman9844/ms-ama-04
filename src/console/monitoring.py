@@ -37,6 +37,7 @@ TRIGGER_LABELS = {
     "settlement_hold": "정산 보류",
     "return_spike": "반품 급증",
     "cost_surge": "공제 증가",
+    "due_shortfall": "상환일 잔고 부족",
 }
 REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "missed": "미납"}
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.

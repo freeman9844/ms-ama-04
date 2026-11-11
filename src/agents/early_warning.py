@@ -51,6 +51,7 @@ _TRIGGER_TEXT = {
     "settlement_hold": ("settlement_hold", "W:{week}:held", "정산 보류액이 있다"),
     "return_spike": ("return_spike", "W:{week}:return_rate", "반품률이 기준선보다 크게 높다"),
     "cost_surge": ("cost_surge", "W:{week}:deduction_rate", "정산 공제율이 기준선보다 높다"),
+    "due_shortfall": ("projected_shortfall", "F:{week}:due_balance", "다음 상환일 출금 직전 예상 잔고가 상환액보다 적다"),
 }
 # 폴백 경보 문구: 원인값 또는 트리거 이름 → (이유, 확인할 조치). 숫자를 넣지 않는다(grounding 대상 아님).
 _SETTLEMENT_HOLD_TEXT = ("정산 지급이 보류되어 다음 상환일 자금이 부족할 수 있습니다.", "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다.")
@@ -251,7 +252,7 @@ class EwContext:
 
     def get_weekly_series(self, _: dict[str, Any]) -> dict[str, Any]:
         return {
-            "id_format": "W:{week}:{field}; 전망 필드(projected_min_balance, projected_min_date, shortfall_date)는 F:{week}:{field}",
+            "id_format": "W:{week}:{field}; 전망 필드(projected_min_balance, projected_min_date, shortfall_date, next_due_on, due_balance)는 F:{week}:{field}",
             "current_week": self.week,
             "weeks": list(self.rows),
         }

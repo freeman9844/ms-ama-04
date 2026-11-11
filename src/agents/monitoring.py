@@ -8,6 +8,8 @@
   프로필이 없는 과거 대출은 기준선 주평균(revenue_ratio)으로 폴백한다.
 - 정산 프로필에 예정 출금 일정(forecast.outflow_schedule)이 있으면 주차마다 4주 잔고 전망을 계산해
   projected_min_balance·projected_min_date·shortfall_date를 주차 행에 넣는다(스펙 §12.2). 최저 잔고가 0 아래면 projected_shortfall.
+- 상환 원장이 있으면 오케스트레이터가 due_check로 다음 상환일(next_due_on)과 출금 직전 예상 잔고(due_balance)를
+  주차 행에 넣고, 그 잔고가 회차 금액보다 적으면 due_shortfall을 더한다.
 - 탐지기는 결정적 규칙이다. 남는 오탐(명절 이동 등)을 거르는 일은 Early-Warning 에이전트의 몫이다(스펙 §3.3).
 - 자체 대출금 입금(LENDER_CREDIT)과 선정산 선지급은 loan_proceeds에서 빼고 advance_in으로 따로 센다(스펙 §5.5).
   원장 트리거 4개와 주간 원장 필드는 `agents/ledger_monitor.py`가 채운다(detect는 기존 5개만 본다).
@@ -44,6 +46,8 @@ TRIGGERS = (
     "settlement_hold",
     "return_spike",
     "cost_surge",
+    # 다음 상환일 출금 직전 예상 잔고 < 그 회차 금액(오케스트레이터가 상환 원장으로 계산한다, due_check).
+    "due_shortfall",
 )
 WEEK_FIELDS = (
     "revenue",
@@ -69,7 +73,7 @@ WEEK_FIELDS = (
     "deduction_rate",
     "settle_net",
 )
-FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date")
+FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date", "next_due_on", "due_balance")
 ADVANCE_KEYWORD = "선정산"  # 정산 양도 선지급 입금 적요. 매출도 신규 차입도 아니다(스펙 §5.5)
 ASSIGNED_SHARE = 0.4  # 대출 뒤 누적 기대 대비 이만큼도 안 들어온 입금처는 선정산 양도로 보고 기대에서 뺀다
 _UNCLASSIFIED = (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
@@ -188,7 +192,7 @@ def projection(
     transactions: Sequence[Transaction],
     categories: Mapping[str, Category],
     baseline: Baseline,
-    installment_due: Sequence[date] | None = None,
+    installment_due: Sequence[date] | Mapping[date, int] | None = None,
 ) -> dict[str, Any] | None:
     """마지막 주차 행 다음 4주 잔고 전망. 그 주 고금리 상환은 매주 같은 요일에 이어진다고 본다."""
     if not rows:
@@ -197,6 +201,25 @@ def projection(
     high_cost = [t for t in transactions
                  if lo <= t.booked_on <= hi and categories[t.txn_id] is Category.HIGH_COST_LENDER]
     return project(baseline.settlement, rows, high_cost, baseline.installment_krw, installment_due)
+
+
+def due_check(
+    projection: Mapping[str, Any] | None, schedule: Sequence[Mapping[str, Any]], installment_krw: int, after: date
+) -> dict[str, Any]:
+    """after 다음 첫 예정(scheduled) 회차의 상환일과 출금 직전 예상 잔고. 전망 path는 그날 상환액을 이미 뺐으므로
+    회차 금액을 더해 되돌린다. 상환일이 전망 기간 밖이면 due_balance가 없고, 남은 예정 회차가 없으면 {}."""
+    upcoming = sorted(
+        (s for s in schedule if s["status"] == "scheduled" and date.fromisoformat(s["due_on"]) > after),
+        key=lambda s: s["due_on"],
+    )
+    if not upcoming:
+        return {}
+    item = upcoming[0]
+    out: dict[str, Any] = {"next_due_on": item["due_on"]}
+    balance = next((p["balance"] for p in (projection or {}).get("path") or [] if p["date"] == item["due_on"]), None)
+    if balance is not None:
+        out["due_balance"] = balance + (item.get("amount_krw") or installment_krw)
+    return out
 
 
 def _assigned(advance_seen: bool, due_total: Mapping[str, int], paid_total: Mapping[str, int]) -> set[str]:
@@ -311,7 +334,7 @@ def detect(rows: Sequence[Mapping[str, Any]], baseline: Baseline) -> list[str]:
 def evidence_catalog(
     rows: Sequence[Mapping[str, Any]], baseline: Baseline, industry: str
 ) -> dict[str, int | float | str]:
-    """근거 ID → 값. 전망 날짜(F:n:projected_min_date·shortfall_date)만 ISO 날짜 문자열이고 나머지는 수치다."""
+    """근거 ID → 값. 전망 날짜(F:n:projected_min_date·shortfall_date·next_due_on)만 ISO 날짜 문자열이고 나머지는 수치다."""
     catalog: dict[str, int | float | str] = {}
     for row in rows:
         for name in WEEK_FIELDS:

@@ -23,7 +23,7 @@ from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
-from agents.monitoring import WEEKS, Baseline, categorize, projection, week_window
+from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
 from agents.repayment import build_schedule, reminder_on, week_events
 from journey.activities import (
     _TRANSACTIONS,
@@ -394,7 +394,15 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     cats = categorize(visible, mon["overrides"])
     pg, lb = _ledger(deps, loan)
     obs = observe(visible, cats, start, week, baseline, pg, lb)
-    rows, triggers = obs.rows, obs.triggers
+    rows, triggers = obs.rows, list(obs.triggers)
+    proj = projection(rows, visible, cats, baseline, installment_due=_due_list(loan))
+    if led := loan.get("repayment"):
+        fields = due_check(proj, led["schedule"], led["installment_krw"], hi)
+        rows[-1].update(fields)
+        if "due_balance" in fields:
+            item = next(s for s in led["schedule"] if s["due_on"] == fields["next_due_on"])
+            if fields["due_balance"] < (item.get("amount_krw") or led["installment_krw"]):
+                triggers.append("due_shortfall")
     new = [t for t in triggers if t not in mon["seen_triggers"]]
     entry: dict[str, Any] = {
         "week": week,
@@ -403,7 +411,7 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         "new_triggers": new,
         "candidates": [c.to_dict() for c in obs.candidates],
         "classification": (classification or {}).get("metrics") or (classification or {}).get("error"),
-        "projection": projection(rows, visible, cats, baseline, installment_due=_due_list(loan)),
+        "projection": proj,
         "investigation": None,
         "alert_id": None,
         "repayment": None,
@@ -463,9 +471,17 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     return entry
 
 
-def _due_list(loan: dict[str, Any]) -> list[date] | None:
+def _due_list(loan: dict[str, Any]) -> dict[date, int] | None:
+    """전망에서 뺄 예정 회차의 상환일별 금액(같은 날 회차는 합한다). 상환 원장이 없으면 None."""
     led = loan.get("repayment")
-    return [date.fromisoformat(s["due_on"]) for s in led["schedule"]] if led else None
+    if not led:
+        return None
+    out: dict[date, int] = {}
+    for s in led["schedule"]:
+        if s["status"] == "scheduled":
+            d = date.fromisoformat(s["due_on"])
+            out[d] = out.get(d, 0) + (s.get("amount_krw") or led["installment_krw"])
+    return out
 
 
 def _repayment_week(

@@ -126,10 +126,11 @@ def project(
     rows: Sequence[Mapping[str, Any]],
     high_cost: Sequence[Transaction],
     installment_krw: int,
-    installment_due: Sequence[date] | None = None,
+    installment_due: Sequence[date] | Mapping[date, int] | None = None,
 ) -> dict[str, Any] | None:
     """마지막 주차 다음 날부터 HORIZON_DAYS일의 일말 전망 잔고(path)와 항목별 합계(totals, OUTFLOW_LABELS 키 + inflow).
-    installment_due는 상환 원장의 상환일이다(없으면 옛 대출용 매월 INSTALLMENT_DAY). 정산 프로필·예정 출금이 없으면 None."""
+    installment_due는 상환 원장의 상환일이다(없으면 옛 대출용 매월 INSTALLMENT_DAY). Mapping이면 날짜별 금액을 빼고,
+    날짜 목록이면 installment_krw를 뺀다. 정산 프로필·예정 출금이 없으면 None."""
     if not settlement or not settlement.get("outflows") or not rows:
         return None
     schedule = settlement["outflows"]
@@ -145,7 +146,11 @@ def project(
     for item in schedule["items"]:
         for d in _due(item["day"], lo, hi, item.get("months")):
             flows[d][item["key"]] -= item["amount_krw"]
-    if installment_krw:
+    if isinstance(installment_due, Mapping):
+        for d, amount in installment_due.items():
+            if lo <= d <= hi:
+                flows[d]["installment"] -= amount
+    elif installment_krw:
         dates = (
             [d for d in installment_due if lo <= d <= hi]
             if installment_due is not None
