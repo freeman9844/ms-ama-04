@@ -119,6 +119,21 @@
 </table>
 <p><small>노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.</small></p>
 </section>
+<section class="card">
+<h2>주간 정산(PG 원장)</h2>
+{% if v.ledger_rows %}
+<table>
+  <thead><tr><th>주차</th><th>주문액</th><th>반품</th><th>보류</th><th>공제</th><th>지급</th></tr></thead>
+  <tbody>
+{% for r in v.ledger_rows %}
+<tr>
+  <td>{{ r.week }}</td><td>{{ r.order_gross|krw }}</td><td>{{ r.returns|krw }}</td><td>{{ r.held|krw }}</td><td>{{ r.deductions|krw }}</td><td>{{ r.settle_net|krw }}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="note">{{ v.ledger_note }}</p>{% endif %}
+</section>
 {% if l.repayment %}
 <section class="card">
 <h2>상환 원장</h2>
@@ -170,6 +185,7 @@
 {% for a in v.alerts %}
 <section id="{{ a.alert_id }}" class="card alert-card alert-{{ a.severity }}">
 <h2>경보 {{ a.week }}주차 <span class="status sev-{{ a.severity }}">{{ a.severity|severity_label }}</span> <small>{{ a.recommended_action|action_label }} · {{ a.status }}</small></h2>
+<p class="cause"><span class="chip">주원인: {{ a.cause_label }}</span>{% if a.secondary_labels %} <span class="chip">부원인: {{ a.secondary_labels|join(", ") }}</span>{% endif %}</p>
 {% if ui.alert_steps[a.alert_id] %}{{ ch.stepper(ui.alert_steps[a.alert_id], "경보 처리 단계", compact=true) }}{% endif %}
 <p class="summary">{{ a.summary }}</p>
 <ul class="claims">

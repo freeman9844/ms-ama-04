@@ -200,6 +200,13 @@ WEEK_EXPECTED = (1_600_000, 1_610_000, 1_640_000, 1_580_000, 1_560_000, 1_590_00
                  1_650_000, 1_700_000, 1_720_000, 1_690_000, 1_640_000, 1_380_000)  # 13주차는 연말 휴일
 TRIGGERS = {6: ["inflow_drop"], 7: ["inflow_drop"], 8: ["inflow_drop"], 9: ["inflow_drop"],
             **{w: ["inflow_drop", "new_debt", "projected_shortfall"] for w in range(10, 14)}}
+# 미리보기용 합성 원장 기준선(실측 아님, 정산 보류 사례 표시용).
+LEDGER_BASELINE = {
+    "weekly_orders": 1_660_000, "return_rate": 0.05, "deduction_rate": 0.08, "weekly_settle_net": 1_400_000,
+    "platform_weekly_net": {"naver": 900_000, "coupang": 500_000},
+    "platform_weekly_orders": {"naver": 1_000_000, "coupang": 660_000},
+    "prior_advance": False, "month_index": {f"{m:02d}": 1.0 for m in range(1, 13)},
+}
 SCHEDULE = (("rent", 5, 560_000), ("payroll", 10, 900_000), ("social_insurance", 10, 160_000),
             ("installment", 15, 440_000), ("loan_repayment", 25, 167_000), ("owner_transfer", 28, 380_000))
 VARIABLE_RATIO = 0.55
@@ -226,7 +233,19 @@ def _projection(week: int, end: date, end_balance: int) -> dict[str, Any]:
             "totals": {k: v for k, v in totals.items() if v}}
 
 
-def _row(week: int) -> dict[str, Any]:
+def _ledger_fields(week: int, revenue: int) -> dict[str, int]:
+    """미리보기용 합성 PG 원장 주간 집계(실측 아님). 9·10주차에 보류가 몰려 정산 보류 사례를 보여 준다."""
+    order_gross = round(revenue * 1.05)
+    returns = round(order_gross * 0.05)
+    held = 900_000 if week in (9, 10) else 0
+    deductions = round(order_gross * (0.14 if week >= 6 else 0.08))
+    return {
+        "order_gross": order_gross, "returns": returns, "held": held, "deductions": deductions,
+        "settle_net": order_gross - returns - deductions - held,
+    }
+
+
+def _row(week: int, ledger: bool = False) -> dict[str, Any]:
     start = datetime(2026, 11, 2) + timedelta(weeks=week - 1)
     revenue = WEEK_REVENUE[week - 1]
     end = (start + timedelta(days=6)).date()
@@ -242,17 +261,18 @@ def _row(week: int) -> dict[str, Any]:
         "loan_proceeds": 0, "unclassified_in": 0, "end_balance": end_balance,
         "buffer_days": WEEK_BUFFER[week - 1],
         **summarize(_projection(week, end, end_balance)),
+        **(_ledger_fields(week, revenue) if ledger else {}),
     }
 
 
-def _weeks(replay_id: str, count: int) -> list[dict[str, Any]]:
+def _weeks(replay_id: str, count: int, ledger: bool = False) -> list[dict[str, Any]]:
     out, seen = [], set()
     for week in range(1, count + 1):
         triggers = TRIGGERS.get(week, [])
         new = [t for t in triggers if t not in seen]
         seen.update(triggers)
         alert_id = f"ew-{replay_id}-w{week:02d}" if new else None
-        row = _row(week)
+        row = _row(week, ledger)
         out.append({"week": week, "row": row, "triggers": triggers, "new_triggers": new,
                     "classification": None,
                     "projection": _projection(week, date.fromisoformat(row["end"]), row["end_balance"]),
@@ -270,13 +290,15 @@ def _loan(app_id: str, applicant: str, industry: str, amount: int, monitoring: d
     }
 
 
-def _monitoring(replay_id: str, status: str, weeks: int, started: datetime) -> dict[str, Any]:
-    rows = _weeks(replay_id, weeks)
+def _monitoring(replay_id: str, status: str, weeks: int, started: datetime, ledger: bool = False) -> dict[str, Any]:
+    rows = _weeks(replay_id, weeks, ledger)
     return {
         "replay_id": replay_id, "consent_id": None, "flow_start": "2026-11-02", "started_at": started.isoformat(),
         "mode": "inline", "status": status, "processed_week": weeks,
         "seen_triggers": sorted({t for w in rows for t in w["triggers"]}), "overrides": {}, "weeks": rows,
         "alert_ids": [w["alert_id"] for w in rows if w["alert_id"]], "error": None,
+        "pg": "ok" if ledger else "missing",
+        "ledger_baseline": LEDGER_BASELINE if ledger else None,
     }
 
 
@@ -284,7 +306,8 @@ SIGNAL_METRIC = {"inflow_drop": "W:{w}:revenue", "new_debt": "W:{w}:high_cost_le
                  "buffer_drop": "W:{w}:buffer_days", "projected_shortfall": "F:{w}:projected_min_balance"}
 
 
-def _alert(loan_id: str, replay_id: str, week: int, severity: str) -> dict[str, Any]:
+def _alert(loan_id: str, replay_id: str, week: int, severity: str, primary_cause: str | None = None,
+          secondary_causes: tuple[str, ...] = ()) -> dict[str, Any]:
     alert_id = f"ew-{replay_id}-w{week:02d}"
     return {
         "id": alert_id, "schema_version": "1", "alert_id": alert_id, "loan_id": loan_id, "week": week,
@@ -295,6 +318,7 @@ def _alert(loan_id: str, replay_id: str, week: int, severity: str) -> dict[str, 
         "recommended_action": "hardship_review" if severity == "high" else "monitor", "triggers": TRIGGERS[week],
         "models": {"investigator": "gpt-5.4"}, "replay_id": replay_id, "status": "open",
         "created_at": NOW.isoformat(), "event_error": None, "collections": None, "restructure": None,
+        "primary_cause": primary_cause, "secondary_causes": list(secondary_causes),
     }
 
 
@@ -335,14 +359,16 @@ def loans() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         return seller(n).profile.applicant_id, seller(n).profile.industry
 
     done = _loan("app-20261103-p03", *who(3), 5_000_000,
-                 _monitoring("rp-preview-1", "completed", 13, NOW - timedelta(hours=2)))
+                 _monitoring("rp-preview-1", "completed", 13, NOW - timedelta(hours=2), ledger=True))
     running = _loan("app-20261103-p04", *who(4), 4_000_000,
                     _monitoring("rp-preview-2", "replaying", 4, NOW - timedelta(minutes=2)))
     idle = _loan("app-20261103-p11", *who(11), 3_000_000, None)
     done["repayment"] = _repayment("rp-preview-1")
     done["monitoring"]["case_ids"] = ["rc-rp-preview-1-i3"]
     done["monitoring"]["weeks"][12]["case_id"] = "rc-rp-preview-1-i3"
-    alerts = [_alert(done["id"], "rp-preview-1", 6, "medium"), _alert(done["id"], "rp-preview-1", 10, "high")]
+    alerts = [_alert(done["id"], "rp-preview-1", 6, "medium"),
+              _alert(done["id"], "rp-preview-1", 10, "high", primary_cause="settlement_hold",
+                     secondary_causes=("high_cost_borrowing",))]
     alerts.append(_case(done["id"], "rp-preview-1", alerts[1]))
     return [done, running, idle], alerts
 

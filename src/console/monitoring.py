@@ -7,6 +7,7 @@
 from collections.abc import Mapping
 from typing import Any, Protocol
 
+from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
 from console.views import RawData, RawStore, _map_strings, _text_functions, raw_container
 from shared.contracts import ApplicantProfile, Transaction
@@ -32,11 +33,26 @@ TRIGGER_LABELS = {
     "volatility_spike": "변동성 급증",
     "new_debt": "신규 차입",
     "projected_shortfall": "잔고 부족 전망",
+    "sales_slump": "주문 감소",
+    "settlement_hold": "정산 보류",
+    "return_spike": "반품 급증",
+    "cost_surge": "공제 증가",
 }
 REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "missed": "미납"}
+# 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
+CAUSE_LABELS = {
+    "sales_slump": "매출 부진",
+    "settlement_hold": "정산 보류",
+    "return_spike": "반품 급증",
+    "cost_surge": "비용 증가",
+    "high_cost_borrowing": "고금리 차입",
+}
+NO_CAUSE_LABEL = "—"
+NO_LEDGER_LABEL = "정산 원장 없음"
 # collections·restructure는 미납 추심 전환 전에 경보 문서에 붙던 필드다(옛 문서 표시용).
 _SHOWN_FIELDS = ("summary", "signals", "collections", "restructure")
 _CASE_FIELDS = ("recent_alert", "collections", "restructure")
+_LEDGER_ROW_FIELDS = ("week", "order_gross", "returns", "held", "deductions", "settle_net")
 
 
 class MonitoringStore(Protocol):
@@ -66,6 +82,10 @@ def loan_view(
     weeks = mon.get("weeks") or []
     rows = [w["row"] for w in weeks]
     catalog = evidence_catalog(rows, Baseline.from_dict(loan["baseline"]), loan.get("industry", "")) if rows else {}
+    lb = mon.get("ledger_baseline")
+    catalog |= ledger_catalog(LedgerBaseline.from_dict(lb) if lb else None)
+    ledger_rows = [{k: r[k] for k in _LEDGER_ROW_FIELDS} for r in rows if "order_gross" in r]
+    ledger_note = NO_LEDGER_LABEL if weeks and not ledger_rows else None
     shown: list[dict[str, Any]] = []
     cases: list[dict[str, Any]] = []
     wanted: dict[str, None] = {}
@@ -94,6 +114,8 @@ def loan_view(
                 **text,
                 "signals": signals,
                 "decidable": _pending(restructure),
+                "cause_label": CAUSE_LABELS.get(doc.get("primary_cause") or "", NO_CAUSE_LABEL),
+                "secondary_labels": [CAUSE_LABELS[c] for c in doc.get("secondary_causes") or ()],
             }
         )
     transactions = [
@@ -114,6 +136,8 @@ def loan_view(
         "cases": cases,
         "transactions": transactions,
         "pii": pii,
+        "ledger_rows": ledger_rows,
+        "ledger_note": ledger_note,
     }
 
 
