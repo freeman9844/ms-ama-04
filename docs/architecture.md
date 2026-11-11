@@ -89,7 +89,7 @@ flowchart TB
 
 | 구성요소 | 호스팅 | 책임 | 데이터 | 인증 | 코드 경로 |
 |---|---|---|---|---|---|
-| Officer Console | Container Apps internal `cae-int`(진입은 Application Gateway WAF v2) | 고객 신청 페이지(`/apply`), 신청 목록·탭형 상세 근거 열람, 승인/거절, 사후 재생(재조정 대기 시 정지·재개)·4주 잔고 전망, 공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra, 리디렉션 URI는 게이트웨이 이름). 운영자 IP 제한은 WAF 규칙. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
+| Officer Console | Container Apps internal `cae-int`(진입은 Application Gateway WAF v2) | 고객 신청 페이지(`/apply`), 신청 목록·탭형 상세 근거 열람, 승인/거절, 사후 재생(대기 항목 추심 승인·고객 응답·플랜 변경 승인·재조정 결정이 있으면 정지, 끝나면 재개·종료)·추심 제안 승인/수정/반려·플랜 변경 승인/반려·고객 응답 없이 계속·4주 잔고 전망, 차주 시뮬레이터(받은 안내·셀프 상환 플랜 선택), 공정성·이의제기 화면 | Cosmos(읽기), 큐(명령 전송) | Easy Auth(Entra, 리디렉션 URI는 게이트웨이 이름). 운영자 IP 제한은 WAF 규칙. `consoleAuthEnabled=false`면 데모 고정 역할 | `src/console/app.py`, `src/console/auth.py` |
 | Application Gateway WAF v2 | `snet-appgw`, 공용 IP `pip-agw-*`(DNS 레이블), WAF_v2 자동 확장 0–2 | HTTPS 종단(Key Vault 자체 서명 인증서), HTTP→HTTPS 영구 리디렉션, WAF 정책(Prevention, OWASP DRS 2.1, `allowOperatorOnly`), 백엔드 HTTPS·`/healthz` 프로브 | 없음 | 사용자 할당 ID `id-appgw-*`(Key Vault Secrets User) | `infra/modules/appgw.bicep`, `src/ops/appgw_cert.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
@@ -193,17 +193,29 @@ flowchart LR
   replay["monitoring-replay 큐<br/>(시간 압축 재생)"]
   ew["early-warning-investigator (L4)"]
   alert["alert.raised<br/>(심사역 검토, 구독 없음)"]
-  ledger["상환 원장<br/>(안내 D-3 · 납부/미납 대조)"]
+  stage["높음 경보 단계 안내<br/>(결정적 정책 · 사전 승인 템플릿)"]
+  borrower["차주<br/>(콘솔 차주 시뮬레이터)"]
+  ledger["상환 원장<br/>(안내 D-3 · 1단계 뒤 D-5 · 납부/미납 대조)"]
   repay["repayment.updated"]
-  col["collections-agent (L3)"]
-  hardship["restructure-decisions 큐<br/>(재조정은 심사역)"]
+  col["collections-agent (L3, 제안만)"]
+  officer["심사역 콘솔<br/>(승인 · 수정 · 반려)"]
+  decisions["restructure-decisions 큐<br/>(kind별 결정)"]
+  rs["재조정 상담 요청<br/>(심사역 결정)"]
   replay --> ew
   ew -->|raise_alert| alert
+  ew -->|높음 경보| stage
+  stage -->|1단계 부족 안내 · 2단계 셀프 상환 플랜| borrower
+  borrower -->|플랜 선택| decisions
   replay --> ledger
+  ledger -->|상환 안내| borrower
   ledger -->|미납| repay
   repay --> col
   alert -.->|최근 경보 요약| col
-  col -->|route_hardship| hardship
+  col -->|propose| officer
+  officer --> decisions
+  decisions -->|승인 문구 발송| borrower
+  decisions -->|재조정 상담 포함 승인| rs
+  decisions -->|플랜 변경 승인| ledger
 
   subgraph consent["동의 수명주기 (consent_lifecycle 오케스트레이션)"]
     renew["갱신 안내"] --> expire["만료"] --> delete["원천 삭제"] --> proof["삭제 증명"]
@@ -211,7 +223,7 @@ flowchart LR
   grv["grievances 큐"] --> reply["grievance-reply-agent"]
 ```
 
-조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 심사역 검토용이다. `alert.raised`는 발행하지만 현재 구독자가 없다. 같은 주차 처리에서 상환 원장이 상환일 3일 전 안내(LLM 없음)를 보내고, 상환일 당일 대출상환 출금이 없으면 미납 추심 건(`rc-`)을 만들어 `repayment.updated`로 Collections를 부른다(추심 에이전트는 최근 경보 요약을 참고만 한다). 주차는 한 주씩 발행되고(앞 주차와 추심이 끝난 뒤 다음 주차), Collections가 재조정 요청을 만들면 재생이 멈췄다가 심사역 결정 뒤 재개·종료를 고른다(`_after_week`, `src/orchestrator/journey/monitoring.py`). 매주 `agents.forecast`가 심사 시점 정산 프로필(채널별 정산 지연·수수료)과 최근 3개월 고정 지출 일정(임대료·급여·4대보험·원천세·부가세·대표자 인출·기존/이번 대출 원리금, 매출 비례 운영비)으로 다음 28일 잔고를 전망하고(`project`), 0원 아래로 내려가면 `projected_shortfall` 트리거를 건다. 경보 근거는 `F:<주차>:projected_min_balance`처럼 전망 지표를 인용할 수 있다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
+조기경보는 `flow.updated`(활성 시 Service Bus, 평상시 `monitoring-replay` 큐)로 재생되어 통계 탐지기 트리거 시 조사 에이전트가 돈다. 경보는 심사역 검토용이다. `alert.raised`는 발행하지만 현재 구독자가 없다. 경보가 높음이면 오케스트레이터가 LLM 없이 결정적 정책으로 단계 안내를 사전 승인 템플릿으로 보낸다(`src/agents/escalation.py`, 2026-11-11): 재생에서 처음 높음이면 1단계(잔고 부족 예상 알림, 이후 회차 5일 전 추가 안내), 직전 경보도 높음이면 2단계(상환일 이동·분할납부 안내와 셀프 상환 플랜 링크, 고객 응답 대기). 단계마다 재생당 한 번이고 공정 연락 규칙은 시뮬레이션 날짜 10:00 KST 기준으로 검사한다. 고객이 차주 시뮬레이터에서 이동·분할을 고르면 플랜 변경 요청이 되고, 심사역이 승인해야 상환 원장 일정이 바뀐다. 같은 주차 처리에서 상환 원장이 상환일 3일 전 안내(LLM 없음)를 보내고, 상환일 당일 대출상환 출금이 없으면 미납 추심 건(`rc-`)을 만들어 `repayment.updated`로 Collections를 부른다(추심 에이전트는 최근 경보 요약을 참고만 한다). Collections는 보내지 않고 `propose`로 제안서(제안 조치와 이유·판단 근거·정책 확인 결과·고객에게 보낼 문구)만 남긴다. 심사역이 콘솔에서 승인·수정·반려하면 `restructure-decisions` 큐(`kind`로 결정 종류를 가른다)를 거쳐 오케스트레이터가 승인·수정된 문구만 실제 시각 기준 공정 연락 검사 뒤 발송(또는 보류)하고, 제안에 재조정 상담이 들어 있으면 그때 재조정 상담 요청(`rs-<추심 건>`)을 만든다. 재조정은 다시 심사역이 결정한다. 주차는 한 주씩 발행되고(앞 주차와 추심 제안이 끝난 뒤 다음 주차), 대기 항목(추심 승인·고객 응답·플랜 변경 승인·재조정 결정, `src/orchestrator/journey/holds.py`)이 있으면 재생이 멈췄다가 모두 끝난 뒤 재개·종료를 고른다(`_after_week`, `src/orchestrator/journey/monitoring.py`). 미납 주차는 추심 제안이 승인을 기다리므로 항상 멈춘다. 매주 `agents.forecast`가 심사 시점 정산 프로필(채널별 정산 지연·수수료)과 최근 3개월 고정 지출 일정(임대료·급여·4대보험·원천세·부가세·대표자 인출·기존/이번 대출 원리금, 매출 비례 운영비)으로 다음 28일 잔고를 전망하고(`project`), 0원 아래로 내려가면 `projected_shortfall` 트리거를 건다. 경보 근거는 `F:<주차>:projected_min_balance`처럼 전망 지표를 인용할 수 있다. 동의마다 `consent_lifecycle` 오케스트레이션(인스턴스 `consent-<id>`)이 만료까지 기다렸다가 원천 데이터(Blob)·목업 레지스트리·Foundry 대화를 지우고 `deletion_proofs`에 삭제 증명을 남긴다(`src/orchestrator/journey/consent.py`). 이의제기는 `grievances` 큐로 접수되어 회신 초안을 만든다(`src/orchestrator/journey/grievance.py`).
 
 ## 구성요소 계약
 

@@ -116,7 +116,6 @@
 - **재생 정지·재개(P9, 2026-11-11 갱신):** 재생은 대기 항목이 끝날 때까지 그 주에서 멈춘다. 대기 항목은 추심 승인 대기 → 고객 응답 대기 → 플랜 변경 승인 대기 → 재조정 결정 대기 순으로 보인다(`HOLD_ORDER`, `src/orchestrator/journey/holds.py`). 심사역 항목이 하나라도 있으면 `paused`(콘솔 "심사역 결정 대기"), 고객 응답만 남으면 `awaiting_customer`(콘솔 "고객 응답 대기"), 모두 끝나면 `awaiting_resume`으로 바뀌어 "이어서 재생"/"여기서 종료"를 고른다. 기다리는 사이 심사 동의가 만료·철회되면 재개 요청은 이유를 오류로 남기고 재생을 종료한다(`stopped`). 재조정 결과(유예·분할)는 이후 재생 흐름에 반영하지 않는다(셀프 플랜 변경만 반영, `docs/limitations.md`).
 - **실패 시 동작:** 에이전트를 쓸 수 없거나 `propose` 없이 끝나면(`draft_fallback: no_proposal`) 최근 경보가 high면 `hardship_offer`, 아니면 `missed_payment`를 폴백 제안(`by="fallback"`, 재조정 상담 없음)으로 만든다. 폴백 제안도 똑같이 심사역 승인을 거쳐야 보낸다. 에이전트가 실패 전에 `propose`를 했으면 그 제안을 쓴다.
 - **모델 근거:** 스크립트 선택·분류 중심이라 `gpt-5.6-luna`(`COLLECTIONS_MODEL`).
-- **모델 근거:** 스크립트 선택·분류 중심이라 `gpt-5.6-luna`(`COLLECTIONS_MODEL`).
 
 ## 동의 안내
 
