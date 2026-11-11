@@ -10,7 +10,7 @@
 
 import random
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -47,6 +47,16 @@ DESCRIPTIONS = {
 
 
 @dataclass(frozen=True)
+class OrderDay:
+    """플랫폼·일자별 주문 총액·반품액(사후 원장 워밍업용, 2026-11-11). payouts()가 orders 버퍼에 쌓는다."""
+
+    day: date
+    channel: str
+    gross_krw: int
+    returns_krw: int
+
+
+@dataclass(frozen=True)
 class Payout:
     paid_on: date
     channel: str
@@ -55,10 +65,12 @@ class Payout:
     gross_krw: int
     fee_krw: int
     deduction_krw: int = 0  # 광고비 상계(receipts.bank_receipts가 정한다)
+    held_krw: int = 0  # 정산 보류(receipts.bank_receipts의 hooks.hold가 정한다, 2026-11-11)
+    released_krw: int = 0  # 보류 해제(2026-11-11)
 
     @property
     def net_krw(self) -> int:
-        return self.gross_krw - self.fee_krw - self.deduction_krw
+        return self.gross_krw - self.fee_krw - self.deduction_krw - self.held_krw + self.released_krw
 
 
 def fee_rate(channel: Channel, industry: str) -> float:
@@ -90,14 +102,26 @@ def payout_schedule(channel: Channel, order_day: date, rng: random.Random) -> tu
     )
 
 
+def _same_rate(day: date, base: float) -> float:
+    return base
+
+
 def payouts(
-    channel: Channel, industry: str, daily_sales: Mapping[date, int], rng: random.Random
+    channel: Channel, industry: str, daily_sales: Mapping[date, int], rng: random.Random,
+    *, return_rate: Callable[[date, float], float] = _same_rate, orders: list[OrderDay] | None = None,
 ) -> list[Payout]:
-    """채널 일별 주문액(반품 전) → 지급일별 정산(반품·수수료 차감)."""
+    """채널 일별 주문액(반품 전) → 지급일별 정산(반품·수수료 차감).
+
+    return_rate(day, 채널 기준 반품률)로 날짜별 반품률을 바꿀 수 있다(사후 반품 급증 시나리오, 2026-11-11).
+    orders가 있으면 일별 (주문액, 반품액)을 OrderDay로 덧붙인다(난수 호출 없음).
+    """
     rate = fee_rate(channel, industry)
     acc: dict[tuple[date, str], float] = defaultdict(float)
     for day in sorted(daily_sales):
-        kept = daily_sales[day] * (1 - channel.return_rate * rng.uniform(0.6, 1.4))
+        sales = daily_sales[day]
+        kept = sales * (1 - return_rate(day, channel.return_rate) * rng.uniform(0.6, 1.4))
+        if orders is not None:
+            orders.append(OrderDay(day, channel.name, int(sales), int(sales) - int(kept)))
         for paid_on, share, key in payout_schedule(channel, day, rng):
             acc[(paid_on, key)] += kept * share
     out = []
