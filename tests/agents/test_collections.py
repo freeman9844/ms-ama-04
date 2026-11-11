@@ -282,11 +282,19 @@ def test_proposal_masks_evidence_and_old_alert_without_check_action():
     assert p["evidence"]["recent_alert"]["check_action"] is None and p["evidence"]["recent_alert"]["primary_cause"] is None
 
 
-@pytest.mark.parametrize("missed, cause, ok", [(2, None, True), (1, "settlement_hold", True), (1, "none", False)])
-def test_hardship_grounds(missed, cause, ok):
-    c = RepaymentCase("rc-1", "l", 1, ON, 100_000, missed, {"severity": "high", "primary_cause": cause})
+@pytest.mark.parametrize("missed, cause, ok, detail", [
+    (2, None, True, "누적 미납 2회"), (1, "settlement_hold", True, "정산 보류"), (1, "none", False, "근거 없음")])
+def test_hardship_grounds(missed, cause, ok, detail):
+    c = RepaymentCase("rc-1", "l", 1, ON, 100_000, missed, {"severity": "high", "primary_cause": cause,
+                                                             "signals": ["loan_stacking"]})
     p = build_proposal(c, DRAFT_HARDSHIP, [], DAY, [], str)
     assert p["checks"][-1]["id"] == "hardship_grounds" and p["checks"][-1]["ok"] is ok
+    assert detail in p["checks"][-1]["detail"]
+
+
+def test_instructions_ground_restructure_like_the_check():
+    from agents.collections import INSTRUCTIONS
+    assert "loan_stacking" not in INSTRUCTIONS and all(c in INSTRUCTIONS for c in HARDSHIP_CAUSES)
 
 
 def test_hardship_causes():

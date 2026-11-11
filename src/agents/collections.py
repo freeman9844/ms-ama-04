@@ -90,9 +90,8 @@ INSTRUCTIONS = f"""너는 한국 소상공인 대출의 미납 추심 담당 에
 2. 보낼 스크립트와 재조정 상담 여부를 propose로 제안한다. 발송은 심사역이 승인해야 나간다. propose는 한 번만 받는다.
    첫 미납은 missed_payment가 기본이다. 7일에 {MAX_CONTACTS_PER_7_DAYS}회,
    {CONTACT_HOURS[0]:02d}:00~{CONTACT_HOURS[1]:02d}:00(KST) 밖이면 승인 뒤에도 발송이 미뤄진다(deferred).
-3. 누적 미납이 2회 이상이거나, 최근 조기경보 원인(primary_cause)이 {", ".join(sorted(HARDSHIP_CAUSES))} 중 하나이거나
-   신규 고금리 대출 중첩·매출 급감·정산 보류·반품 급증을 가리키면(요약 또는 signals의
-   loan_stacking·inflow_drop·settlement_hold·return_spike) hardship_offer를 고르고 재조정 상담을 함께 제안한다.
+3. 누적 미납이 2회 이상이거나, 최근 조기경보 원인(primary_cause)이 {", ".join(sorted(HARDSHIP_CAUSES))} 중 하나이면
+   hardship_offer를 고르고 재조정 상담을 함께 제안한다. 그 밖의 경우(요약·signals만 있는 경우 포함)는 재조정 근거가 아니다.
    조기경보만으로는 재조정 사유가 아니다. 미납과 함께 볼 때만 근거로 쓴다.
    hardship_category는 {", ".join(_HARDSHIP_CATEGORIES)} 중 하나이고 hardship_note는 근거를 한국어 세 문장 이내로 쓴다.
    재조정 상담을 제안하지 않으면 hardship_category와 hardship_note는 빈 문자열이다. 재조정 조건은 정하지 않는다. 심사역이 정한다.
@@ -118,6 +117,7 @@ TOOLS: tuple[dict[str, Any], ...] = (
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        # "none"은 모델 자기보고용이다. 결과 decision은 제안이 항상 있으므로 늘 "proposed"다.
         "decision": {"type": "string", "enum": ["proposed", "none"]},
         "reason": {"type": "string"},
     },
@@ -169,14 +169,29 @@ class RepaymentCase:
         )
 
 
+def _in_contact_hours(now: datetime) -> bool:
+    return CONTACT_HOURS[0] <= now.astimezone(KST).hour < CONTACT_HOURS[1]
+
+
+def _sent_in_window(contacts: Sequence[Mapping[str, Any]], on: date) -> int:
+    """on까지 7일(on-6일~on) 안에 실제로 보낸(sent) 연락 수."""
+    since = on - timedelta(days=6)
+    return sum(1 for c in contacts if c.get("status") == "sent" and since <= date.fromisoformat(c["on"]) <= on)
+
+
+def _banned_in(text: str) -> list[str]:
+    return [p for p in BANNED_PHRASES if p in text]
+
+
+def _has_pii_token(text: str) -> bool:
+    return "[[PERSON_" in text
+
+
 def fair_check(contacts: Sequence[Mapping[str, Any]], on: date, now: datetime) -> str | None:
     """발송을 막는 사유. 횟수는 시뮬레이션 날짜(상환일·안내일), 시간대는 실제 KST 시각으로 본다."""
-    hour = now.astimezone(KST).hour
-    if not CONTACT_HOURS[0] <= hour < CONTACT_HOURS[1]:
+    if not _in_contact_hours(now):
         return "contact_hours"
-    since = on - timedelta(days=6)
-    sent = [c for c in contacts if c.get("status") == "sent" and since <= date.fromisoformat(c["on"]) <= on]
-    if len(sent) >= MAX_CONTACTS_PER_7_DAYS:
+    if _sent_in_window(contacts, on) >= MAX_CONTACTS_PER_7_DAYS:
         return "weekly_limit"
     return None
 
@@ -188,8 +203,8 @@ def message_issues(text: str) -> list[str]:
     issues = []
     if len(text) > MESSAGE_MAX:
         issues.append(f"문구가 {MESSAGE_MAX}자를 넘습니다({len(text)}자).")
-    issues += [f"금지 표현 '{p}'이(가) 들어 있습니다." for p in BANNED_PHRASES if p in text]
-    if "[[PERSON_" in text:
+    issues += [f"금지 표현 '{p}'이(가) 들어 있습니다." for p in _banned_in(text)]
+    if _has_pii_token(text):
         issues.append("가명 토큰([[PERSON_...]])이 들어 있습니다.")
     return issues
 
@@ -264,7 +279,7 @@ class CollectionsContext:
     def get_contact_history(self, _: dict[str, Any]) -> dict[str, Any]:
         since = self.case.due_on - timedelta(days=6)
         recent = [c for c in self.contacts if since <= date.fromisoformat(c["on"]) <= self.case.due_on]
-        sent = sum(1 for c in recent if c.get("status") == "sent")
+        sent = _sent_in_window(self.contacts, self.case.due_on)
         return {
             "recent": [{k: c.get(k) for k in ("on", "script_id", "status", "reason")} for c in recent[-10:]],
             "remaining_this_week": max(0, MAX_CONTACTS_PER_7_DAYS - sent),
@@ -343,14 +358,8 @@ def act(ctx: CollectionsContext, *, runner: AgentRunner | None, model: str) -> C
         # 에이전트가 제안하지 않아도 심사역 승인 단계는 거친다(폴백 제안).
         ctx.draft = _fallback_draft(ctx.case)
         record["draft_fallback"] = "no_proposal"
-    # 결정은 도구가 실제로 받은 제안에서 정한다(모델 자기보고를 믿지 않는다).
-    decision = "proposed" if ctx.draft else "none"
-    return CollectionsResult(decision, out.reason[:300], ctx.draft, record, session.conversations)
-
-
-def _sent_7d(contacts: Sequence[Mapping[str, Any]], on: date) -> int:
-    since = on - timedelta(days=6)
-    return sum(1 for c in contacts if c.get("status") == "sent" and since <= date.fromisoformat(c["on"]) <= on)
+    # 제안은 항상 있다(없으면 위에서 폴백). 모델이 보고한 decision은 record에만 남긴다.
+    return CollectionsResult("proposed", out.reason[:300], ctx.draft, record, session.conversations)
 
 
 def _check(check_id: str, ok: bool, detail: str) -> dict[str, Any]:
@@ -361,12 +370,13 @@ def _hardship_grounds(case: RepaymentCase) -> tuple[bool, str]:
     cause = (case.recent_alert or {}).get("primary_cause")
     grounds = []
     if case.missed_count >= 2:
-        grounds.append(f"누적 미납 {case.missed_count}회")
+        grounds.append(f"누적 미납 {case.missed_count}회(2회 이상)")
     if cause in HARDSHIP_CAUSES:
         grounds.append(f"최근 경보 원인 {_CAUSE_LABELS[cause]}")
     if grounds:
-        return True, ", ".join(grounds)
-    return False, f"근거 부족: 누적 미납 {case.missed_count}회, 최근 경보 원인이 상환 곤란 원인이 아닙니다."
+        return True, "근거 충족: " + ", ".join(grounds) + "."
+    return False, (f"근거 없음: 누적 미납 {case.missed_count}회(2회 미만)이고 "
+                   "최근 경보 원인이 매출 부진·정산 보류·반품 급증·고금리 차입이 아닙니다.")
 
 
 def build_proposal(
@@ -394,11 +404,12 @@ def build_proposal(
             "summary": mask(str(alert.get("summary") or "")),
             "check_action": mask(str(check_action)) if check_action is not None else None,
         }
-    sent_7d = _sent_7d(contacts, case.due_on)
+    sent_7d = _sent_in_window(contacts, case.due_on)
     local = now.astimezone(KST)
-    in_hours = CONTACT_HOURS[0] <= local.hour < CONTACT_HOURS[1]
+    in_hours = _in_contact_hours(now)
     hours = f"{CONTACT_HOURS[0]:02d}:00~{CONTACT_HOURS[1]:02d}:00"
-    banned = [p for p in BANNED_PHRASES if p in text]
+    banned = _banned_in(text)
+    pii = _has_pii_token(text)
     checks = [
         _check("approved_script", approved,
                f"승인된 스크립트({SCRIPTS[script_id]['purpose']})입니다." if approved else "승인된 스크립트가 아닙니다."),
@@ -408,8 +419,7 @@ def build_proposal(
                f"최근 7일 연락 {sent_7d}회(한도 {MAX_CONTACTS_PER_7_DAYS}회)."),
         _check("banned_words", not banned,
                "금지 표현이 없습니다." if not banned else f"금지 표현: {', '.join(banned)}."),
-        _check("pii_tokens", "[[PERSON_" not in text,
-               "가명 토큰이 없습니다." if "[[PERSON_" not in text else "가명 토큰([[PERSON_...]])이 들어 있습니다."),
+        _check("pii_tokens", not pii, "가명 토큰([[PERSON_...]])이 들어 있습니다." if pii else "가명 토큰이 없습니다."),
     ]
     if hardship:
         checks.append(_check("hardship_grounds", *_hardship_grounds(case)))
