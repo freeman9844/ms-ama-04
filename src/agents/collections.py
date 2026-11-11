@@ -23,6 +23,24 @@ KST = timezone(timedelta(hours=9))  # 한국은 서머타임이 없다
 MAX_CONTACTS_PER_7_DAYS = 7
 CONTACT_HOURS = (8, 21)
 NOTE_MAX = 300
+MESSAGE_MAX = 300
+# 압박·위협이나 회수·한도 축소·부도·금리 변경으로 읽힐 수 있는 표현. 고객 문구에 들어가면 보내지 않는다.
+BANNED_PHRASES: tuple[str, ...] = (
+    "법적 조치",
+    "압류",
+    "소송",
+    "고소",
+    "형사",
+    "신용불량",
+    "가족",
+    "직장",
+    "회수",
+    "한도 축소",
+    "부도",
+    "금리 인상",
+    "즉시 상환",
+    "강제",
+)
 
 # 준법 검토를 거친 스크립트만 쓴다(데모용 고정 카탈로그). 개인 식별 정보 자리표시자는 두지 않는다.
 SCRIPTS: dict[str, dict[str, str]] = {
@@ -151,18 +169,43 @@ def fair_check(contacts: Sequence[Mapping[str, Any]], on: date, now: datetime) -
     return None
 
 
-def remind(ref: str, contacts: Sequence[Mapping[str, Any]], on: date, now: datetime) -> dict[str, Any]:
-    """상환일 3일 전 안내. LLM 없이 공정 추심 규칙만 적용한다."""
+def message_issues(text: str) -> list[str]:
+    """고객 문구가 연락 정책을 어기는 사유(한국어). 비어 있으면 통과."""
+    if not text.strip():
+        return ["문구가 비어 있습니다."]
+    issues = []
+    if len(text) > MESSAGE_MAX:
+        issues.append(f"문구가 {MESSAGE_MAX}자를 넘습니다({len(text)}자).")
+    issues += [f"금지 표현 '{p}'이(가) 들어 있습니다." for p in BANNED_PHRASES if p in text]
+    if "[[PERSON_" in text:
+        issues.append("가명 토큰([[PERSON_...]])이 들어 있습니다.")
+    return issues
+
+
+def remind(
+    ref: str,
+    contacts: Sequence[Mapping[str, Any]],
+    on: date,
+    now: datetime,
+    *,
+    script_id: str = "payment_reminder",
+    by: str = "reminder",
+    text: str | None = None,
+) -> dict[str, Any]:
+    """상환일 3일 전 안내(기본값). LLM 없이 공정 추심 규칙만 적용한다. text가 있으면 기록에 싣는다."""
     reason = fair_check(contacts, on, now)
-    return {
+    entry: dict[str, Any] = {
         "ref": ref,
         "on": on.isoformat(),
         "at": now.isoformat(),
-        "script_id": "payment_reminder",
+        "script_id": script_id,
         "status": "deferred" if reason else "sent",
         "reason": reason,
-        "by": "reminder",
+        "by": by,
     }
+    if text is not None:
+        entry["text"] = text
+    return entry
 
 
 @dataclass

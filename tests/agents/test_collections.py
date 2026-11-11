@@ -11,6 +11,7 @@ from agents.collections import (
     RepaymentCase,
     act,
     fair_check,
+    message_issues,
     remind,
 )
 from agents.runtime import AgentError, AgentRun, ToolCall
@@ -193,3 +194,13 @@ def test_fallback_respects_fair_rules_at_night():
 
 def test_scripts_have_no_pii_placeholders():
     assert all("{" not in s["text"] for s in SCRIPTS.values())
+
+
+@pytest.mark.parametrize("text, needle", [("", "비어"), ("가" * 301, "300자"), ("압류 예정입니다", "압류"), ("[[PERSON_1]]님", "가명")])
+def test_message_issues(text, needle):
+    assert any(needle in i for i in message_issues(text))
+
+
+def test_remind_records_custom_script_and_text():
+    out = remind("rp-1-i1-e", [], ON, DAY, script_id="early_reminder", by="early_warning", text="안내")
+    assert (out["script_id"], out["by"], out["text"], out["status"]) == ("early_reminder", "early_warning", "안내", "sent")
