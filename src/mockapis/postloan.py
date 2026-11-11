@@ -37,10 +37,14 @@ POSTLOAN_DAYS = 91
 PRE_LOAN_DAYS = 56  # 원장 기준선용 대출 전 8주(사후 시뮬레이션 워밍업에서 만든다)
 CAPEX_DAY = 2
 CAPEX_UNIT_KRW = 10_000
-CAPEX_FLOOR_RATIO = 0.08  # 월 주문액 대비, 재고 결제 뒤에도 남겨 두는 최저 잔고
+CAPEX_FLOOR_RATIO = 0.08  # 월 주문액 대비, 선매입 직후(CAPEX_FLOOR_DAYS까지) 남겨 두는 최저 잔고
+CAPEX_LATE_FLOOR_RATIO = 0.02  # 월 주문액 대비, 외상 잔금을 내는 구간의 최저 잔고(잔금이 잔고를 천천히 깎게 둔다)
 CAPEX_WEEK_FLOOR_RATIO = 0.36  # 월 주문액 대비, CAPEX_FLOOR_DAYS까지 주 마감 잔고 하한(잔고 경보보다 주문 하락이 먼저 보이게)
 CAPEX_FLOOR_DAYS = 35  # 이 날까지 주 마감 잔고를 지킨다(모자라면 선매입을 줄이고 외상 잔금으로 뒤로 민다)
 BALANCE_DUE_FROM_DAY = 35  # 선매입 외상 잔금을 6주차 수요일부터 매주 낸다(주 마감 잔고를 지키는 구간 뒤)
+# 잔금은 9주차까지 다 낸다: 심사 때 일정만 보는 전망은 잔금을 못 보므로, 잔금이 부도 직전까지 이어지면
+# 전망이 바닥나는 날을 며칠 늦게 잡아 "전망 부족"이 실제 부도일보다 뒤로 밀린다.
+BALANCE_DUE_TO_DAY = 62
 DEFAULT_WINDOW = (70, 80)  # 첫 부도일 목표 범위(일). 앞선 저점 때문에 잔금을 깎으면 며칠 늦어질 수 있다
 INSTALLMENT_KRW = 287_000  # 330만 원·12개월·연 8% 원리금균등(대출 조건이 없는 옛 재생의 기본값)
 DISBURSE_SHARE = 0.9  # 대출금 중 1~5일차에 쓰는 비율
@@ -109,9 +113,10 @@ def _disbursement(case: SyntheticCase, start: date, loan: "LoanTerms | None") ->
 
 
 def _due_days(start: date, days: int) -> list[int]:
-    """외상 잔금 납부일(대출 시작 기준 일수): BALANCE_DUE_FROM_DAY 이후 매주 수요일, 공휴일이면 다음 영업일."""
+    """외상 잔금 납부일(대출 시작 기준 일수): BALANCE_DUE_FROM_DAY 이후 BALANCE_DUE_TO_DAY까지
+    매주 수요일, 공휴일이면 다음 영업일."""
     out = []
-    for offset in range(BALANCE_DUE_FROM_DAY, days):
+    for offset in range(BALANCE_DUE_FROM_DAY, min(days, BALANCE_DUE_TO_DAY + 1)):
         d = start + timedelta(days=offset)
         if d.weekday() == 2:
             paid = (next_business_day(d) - start).days
@@ -121,17 +126,24 @@ def _due_days(start: date, days: int) -> list[int]:
 
 
 def _capex_plan(
-    opening: int, events: list[Event], start: date, days: int, floor: int, week_floor: int
+    opening: int, events: list[Event], start: date, days: int, floor: int, late_floor: int, week_floor: int
 ) -> tuple[int, dict[int, int]]:
     """(선매입액, 납부일별 외상 잔금). 주간 잔금 W는 DEFAULT_WINDOW 안 어느 날 잔고를 0 아래로 내리는 최소 금액이고,
-    그 전 날들은 0 이상으로 남도록 W를 상한으로 깎는다. 선매입·잔금은 또 잔고를 floor(모든 날)와
-    week_floor(CAPEX_FLOOR_DAYS 전 주 마감일) 아래로는 내리지 않는다 — 주인공 셀러의 이야기는 '주문이 줄어서'
-    위태로워지는 것이라, 매출 부진이 보이기 전에 재고 결제만으로 잔고 경보가 먼저 울리면 안 된다.
+    그 전 날들은 날짜별 하한 위로 남도록 W를 상한으로 깎는다. 하한은 선매입 직후 구간(CAPEX_FLOOR_DAYS 전) floor,
+    그중 주 마감일은 week_floor, 잔금을 내는 뒤 구간은 late_floor다 — 주인공 셀러의 이야기는 '주문이 줄어서'
+    위태로워지는 것이라 매출 부진이 보이기 전에 재고 결제만으로 잔고 경보가 먼저 울리면 안 되고(week_floor),
+    뒤 구간은 잔금이 잔고를 꾸준히 깎아야 부도 전망이 부도보다 먼저 선다(late_floor).
     깎느라 범위 안에서 0 아래로 못 내려가면 (계절 매출이 받쳐 주는 셀러) 범위 안 납부일 한 번에 남은 잔금을 몰아 낸다."""
     balances = end_of_day_balances(opening, events, start, days)
     lo_day, hi_day = DEFAULT_WINDOW
-    closes = [t for t in range(CAPEX_DAY, min(CAPEX_FLOOR_DAYS, days)) if t % 7 == 6]  # 주 마감일(모니터가 보는 잔고)
-    keep = min(min(balances[CAPEX_DAY:lo_day]) - floor, min((balances[t] - week_floor for t in closes), default=0))
+    closes = {t for t in range(CAPEX_DAY, min(CAPEX_FLOOR_DAYS, days)) if t % 7 == 6}  # 주 마감일(모니터가 보는 잔고)
+
+    def day_floor(t: int) -> int:
+        if t in closes:
+            return week_floor
+        return floor if t < CAPEX_FLOOR_DAYS else late_floor
+
+    keep = min(balances[t] - day_floor(t) for t in range(CAPEX_DAY, lo_day))
     upfront = max(keep, 0) // CAPEX_UNIT_KRW * CAPEX_UNIT_KRW
     base = [b - (upfront if t >= CAPEX_DAY else 0) for t, b in enumerate(balances)]
     due = _due_days(start, days)
@@ -142,9 +154,6 @@ def _capex_plan(
 
     def over_unit(amount: float) -> int:
         return (int(amount) // CAPEX_UNIT_KRW + 1) * CAPEX_UNIT_KRW
-
-    def day_floor(t: int) -> int:
-        return week_floor if t in closes else floor
 
     need = min(base[t] / paid_by(t) for t in range(lo_day, hi_day + 1))
     allowed = min(
@@ -164,8 +173,9 @@ def _capex_events(case: SyntheticCase, events: list[Event], start: date, days: i
     """시즌 재고 선매입과 외상 잔금(첫 부도일을 DEFAULT_WINDOW 안에 맞춘다)."""
     opening = case.transactions[-1].balance_after_krw if case.transactions else 0
     floor = round(case.persona.monthly_sales_krw * CAPEX_FLOOR_RATIO)
+    late_floor = round(case.persona.monthly_sales_krw * CAPEX_LATE_FLOOR_RATIO)
     week_floor = round(case.persona.monthly_sales_krw * CAPEX_WEEK_FLOOR_RATIO)
-    upfront, plan = _capex_plan(opening, events, start, days, floor, week_floor)
+    upfront, plan = _capex_plan(opening, events, start, days, floor, late_floor, week_floor)
     out: list[Event] = []
     if upfront:
         out.append(Event(start + timedelta(days=CAPEX_DAY), -upfront, "시즌 재고 대량 선매입", "TRANSFER_OUT",

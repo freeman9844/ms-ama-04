@@ -23,7 +23,7 @@ from typing import Any
 from agents.classify import Category, classify
 from agents.features import DAYS_PER_MONTH, OPERATING_OUT
 from agents.forecast import outflow_schedule, project, summarize
-from agents.settlement import expected_revenue, settlement_profile
+from agents.settlement import expected_payouts, payer_of, settlement_profile
 from shared.contracts import Transaction
 from shared.repayment import LENDER_CREDIT
 
@@ -71,6 +71,7 @@ WEEK_FIELDS = (
 )
 FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date")
 ADVANCE_KEYWORD = "선정산"  # 정산 양도 선지급 입금 적요. 매출도 신규 차입도 아니다(스펙 §5.5)
+ASSIGNED_SHARE = 0.4  # 대출 뒤 누적 기대 대비 이만큼도 안 들어온 입금처는 선정산 양도로 보고 기대에서 뺀다
 _UNCLASSIFIED = (Category.UNCLASSIFIED_IN, Category.UNCLASSIFIED_OUT)
 
 # 합성 업종 집단 통계(데모용 고정 표). 실제 운영에서는 집단 통계 저장소에서 읽는다.
@@ -198,6 +199,17 @@ def projection(
     return project(baseline.settlement, rows, high_cost, baseline.installment_krw, installment_due)
 
 
+def _assigned(advance_seen: bool, due_total: Mapping[str, int], paid_total: Mapping[str, int]) -> set[str]:
+    """선정산사에 양도해 기대 달력에서 빼야 할 입금처. 양도한 플랫폼 정산은 선지급사를 거쳐
+    85% 안팎으로 일찍 들어와 그 입금처 이름으로는 사실상 한 푼도 찍히지 않는다. 대출 전부터 양도한 셀러는
+    심사 프로필에 그 입금처가 그대로 남아 있어, 빼지 않으면 매주 매출이 급감한 것처럼 보인다.
+    대출 뒤 누적 기대의 ASSIGNED_SHARE도 못 들어온 입금처만 뺀다 — 대출 뒤 새로 양도한 셀러(SETTLEMENT_HOLD)는
+    앞 주차 입금이 누적에 남아 한참 뒤에야 빠지고, 양도 직후 매출 급감 트리거는 그대로 울린다."""
+    if not advance_seen:
+        return set()
+    return {p for p, due in due_total.items() if due > 0 and paid_total.get(p, 0) < due * ASSIGNED_SHARE}
+
+
 def weekly_series(
     transactions: Sequence[Transaction],
     categories: Mapping[str, Category],
@@ -208,6 +220,9 @@ def weekly_series(
     rows: list[dict[str, Any]] = []
     balance = None
     window: list[tuple[int, int]] = []  # 최근 EXPECTED_WEEKS주의 (실제, 기대) 입금
+    due_total: dict[str, int] = {}  # 대출 뒤 입금처별 누적 기대 입금
+    paid_total: dict[str, int] = {}  # 대출 뒤 입금처별 누적 실제 입금
+    advance_seen = False
     for week in range(1, upto_week + 1):
         lo, hi = week_window(start, week)
         txns = [t for t in transactions if lo <= t.booked_on <= hi]
@@ -220,6 +235,7 @@ def weekly_series(
         revenue = total(Category.REVENUE)
         # 자체 대출금 입금과 선정산 선지급은 신규 차입이 아니다(스펙 §5.5). 선지급은 따로 센다.
         advance_in = sum(t.amount_krw for t in txns if t.amount_krw > 0 and ADVANCE_KEYWORD in t.description)
+        advance_seen = advance_seen or advance_in > 0
         loan_proceeds = sum(
             t.amount_krw for t in txns
             if categories[t.txn_id] is Category.LOAN_PROCEEDS
@@ -228,10 +244,15 @@ def weekly_series(
         end_balance = balance if balance is not None else 0
         revenue_ratio = round(revenue / baseline.avg_weekly_revenue, 3) if baseline.avg_weekly_revenue else 0.0
         if baseline.settlement:
-            expected = expected_revenue(baseline.settlement, lo, hi)
-            # 선정산 양도분은 정산금이 선지급사를 거쳐 들어온 것이라 기대 입금과 견줄 때는 매출 쪽에 둔다
-            # (빼면 양도 셀러가 13주 내내 매출이 준 것처럼 보인다, 스펙 §5.5).
-            window = [*window, (revenue + advance_in, expected)][-EXPECTED_WEEKS:]
+            payouts = expected_payouts(baseline.settlement, lo, hi)
+            for _, payer, amount in payouts:
+                due_total[payer] = due_total.get(payer, 0) + amount
+            for t in txns:
+                if categories[t.txn_id] is Category.REVENUE and t.amount_krw > 0:
+                    payer = payer_of(t.description)
+                    paid_total[payer] = paid_total.get(payer, 0) + t.amount_krw
+            expected = sum(a for _, p, a in payouts if p not in _assigned(advance_seen, due_total, paid_total))
+            window = [*window, (revenue, expected)][-EXPECTED_WEEKS:]
             total_expected = sum(e for _, e in window)
             vs_expected = round(sum(r for r, _ in window) / total_expected, 3) if total_expected else 0.0
         else:

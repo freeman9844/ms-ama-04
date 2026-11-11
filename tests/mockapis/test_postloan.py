@@ -5,6 +5,8 @@ import pytest
 from agents.classify import Category, classify
 from mockapis.demo import build_demo_cases, build_load_cases
 from mockapis.postloan import (
+    BALANCE_DUE_FROM_DAY,
+    BALANCE_DUE_TO_DAY,
     DEFAULT_WINDOW,
     DISBURSE_SHARE,
     INSTALLMENT_KRW,
@@ -314,10 +316,14 @@ def test_sales_slump_story_on_the_seller_engine(cafe):
     # 주문 하락보다 잔고 경보를 먼저 울리지 않게 한다) 선매입이 잔고를 바닥까지 비우지는 않는다.
     assert capex.booked_on == AS_OF + timedelta(days=2) and capex.amount_krw < -cafe.persona.monthly_sales_krw / 5
     dues = by_desc("시즌 재고 외상 잔금")
-    # 매주 같은 금액이고, 계절 매출이 받쳐 주면 목표 범위 안 한 주만 잔금을 몰아 낸다.
-    assert len(dues) >= 8 and len({t.amount_krw for t in dues}) <= 2
-    # 3주차부터 매주 수요일(공휴일이면 다음 영업일)
-    assert dues[0].booked_on >= AS_OF + timedelta(days=14) and all(t.booked_on.weekday() in (2, 3, 4) for t in dues)
+    # 6주차부터 9주차까지(BALANCE_DUE_TO_DAY) 매주 수요일(공휴일이면 다음 영업일) 같은 금액을 내고,
+    # 계절 매출이 받쳐 주면 목표 범위 안 한 주만 남은 잔금을 몰아 낸다. 잔금이 부도 직전까지 매주 이어지면
+    # 심사 일정만 보는 전망이 바닥나는 날을 늦게 잡아 "전망 부족"이 부도보다 뒤로 밀린다.
+    weekly_dues = [t for t in dues if t.booked_on <= AS_OF + timedelta(days=BALANCE_DUE_TO_DAY)]
+    assert len(weekly_dues) >= 4 and len(dues) - len(weekly_dues) <= 1
+    assert len({t.amount_krw for t in dues}) <= 2
+    assert dues[0].booked_on >= AS_OF + timedelta(days=BALANCE_DUE_FROM_DAY)
+    assert all(t.booked_on.weekday() in (2, 3, 4) for t in dues)
     unpaid_from = AS_OF + timedelta(days=SLUMP_PAYROLL_DELAY_FROM_DAY)
     insurance = [t for t in flow.transactions if flow.labels[t.txn_id] is TxnCategory.SOCIAL_INSURANCE]
     assert insurance and all(t.booked_on < unpaid_from for t in insurance)

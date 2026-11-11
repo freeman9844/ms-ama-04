@@ -141,13 +141,8 @@ def test_stable_sellers_raise_no_revenue_triggers_around_festivals(as_of):
         hits = {(w, t) for w in range(1, 14) for t in detect(rows[:w], base)}
         drops = sorted(w for w, t in hits if t == "inflow_drop")
         spikes = sorted(w for w, t in hits if t == "volatility_spike")
-        # 정산 양도(선정산) 셀러는 양도한 플랫폼 정산이 선지급사를 거쳐 85%만 5~7영업일 일찍 들어와
-        # 심사 시점 정산 프로필(기대 입금)과 금액·시점이 어긋난다. 은행 입금 기준 트리거는 스펙 §8대로
-        # 울릴 수 있어 가끔 울리는 것까지만 허용하고(매주 울리면 양도를 매출 급감으로 읽은 것이다),
-        # 원장 기준 신규 트리거 4종이 0건인지는 test_ledger_monitor.py가 본다.
-        if any("선정산" in t.description for t in case.transactions):
-            assert len(drops) <= 3, (seller, drops)
-            continue
+        # 선정산 셀러(mugshop-21)도 예외가 아니다: 양도한 입금처를 기대 달력에서 빼므로(_assigned)
+        # 85%만 일찍 들어오는 선지급을 매출 급감으로 읽지 않는다.
         assert not drops, (seller, sorted(hits))
         # 스펙 §8: 기존 트리거는 STABLE에서도 울릴 수 있다. 정산이 하루 이틀 밀린 주는 3주 누적 비율을 흔드니
         # 한 주 튀는 변동성 경보까지는 두고 연속 경보만 막는다.
@@ -172,10 +167,10 @@ def test_stable_projection_never_runs_short(cafe, baseline):
 def test_sales_slump_projected_shortfall_comes_before_default(cafe, baseline):
     flow, rows = _rows(cafe, FlowScenario.SALES_SLUMP, baseline, 13)
     first = next(r for r in rows if "projected_shortfall" in detect(rows[: r["week"]], baseline))
-    # 부도보다 앞서 "잔고가 바닥난다"는 전망이 나온다. 다만 전망은 심사 때 본 고정 지출 일정만 쓰므로
-    # 설비 선투자의 외상 잔금(사후에 새로 생긴 주간 분납)은 못 보고, 바닥나는 날짜는 실제 부도일보다
-    # 조금 뒤로 잡힌다(측정: 전망 2027-01-28 vs 부도 2027-01-20).
+    # 부도보다 앞서 "잔고가 바닥난다"는 전망이 나오고, 바닥나는 날짜도 실제 부도일보다 앞선다
+    # (측정: 9주차 전망 2027-01-11 vs 부도 2027-01-21).
     assert first["shortfall_date"] and date.fromisoformat(first["end"]) < flow.default_on
+    assert date.fromisoformat(first["shortfall_date"]) <= flow.default_on
     assert first["projected_min_balance"] < 0
 
 
