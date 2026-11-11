@@ -6,7 +6,7 @@ from datetime import date, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from agents.collections import COLLECTIONS_AGENT
+from agents.collections import COLLECTIONS_AGENT, CollectionsContext, RepaymentCase
 from agents.data_assembly import SourceError
 from agents.early_warning import EW_AGENT
 from agents.features import monthly_installment
@@ -837,3 +837,20 @@ def test_week_entry_records_candidates_and_alert_cause(mock_app):
     assert alert["primary_cause"] == "settlement_hold"
     assert "settlement_hold" in {c["cause"] for c in first["candidates"]}
     assert first["row"]["held"] > 0
+
+
+def test_repayment_case_carries_alert_cause_to_collections(mock_app):
+    """경보 원인이 추심 건 recent_alert와 추심 에이전트 입력(get_case)까지 간다(스펙 §7.4)."""
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    mon = loan(deps)["monitoring"]
+    last = deps.store.read(ALERTS, mon["alert_ids"][-1], LOAN)
+    (case,) = cases(deps)
+    assert last["primary_cause"]
+    assert case["recent_alert"]["primary_cause"] == last["primary_cause"]
+    assert case["recent_alert"]["secondary_causes"] == list(last["secondary_causes"])
+    ctx = CollectionsContext(case=RepaymentCase.from_doc(case), contacts=[], now=NOW, mask=lambda s: s)
+    got = ctx.get_case({})["recent_alert"]
+    assert got["primary_cause"] == last["primary_cause"]
+    assert got["secondary_causes"] == list(last["secondary_causes"])

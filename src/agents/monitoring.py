@@ -315,7 +315,8 @@ def evidence_catalog(
     catalog: dict[str, int | float | str] = {}
     for row in rows:
         for name in WEEK_FIELDS:
-            if name in row:  # 기대 입금 이전에 저장된 주차 행에는 없다
+            # 기대 입금 이전에 저장된 주차 행에는 없고, 비교가 성립하지 않는 값(orders_vs_expected=None)도 뺀다.
+            if row.get(name) is not None:
                 catalog[f"W:{row['week']}:{name}"] = row[name]
         for name in FORECAST_FIELDS:
             if row.get(name) is not None:

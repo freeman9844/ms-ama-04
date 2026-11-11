@@ -201,6 +201,8 @@ def _settlement_hold(case: SyntheticCase, start: date, days: int) -> ScenarioPla
     advance = _advance_platform(case.persona, platform)
     release_on = next_business_day(start + timedelta(days=HOLD_RELEASE_DAY))
     opening = case.transactions[-1].balance_after_krw if case.transactions else 0
+    # 요청 start 기준 첫 상환일이다. LoanTerms가 있으면 첫 거래(실행)가 start에 잡혀 앵커 == start라
+    # 운영·평가 경로는 generate_postloan의 앵커 기준 상환일과 같다(loan=None 옛 경로에서만 어긋날 수 있다).
     first_due = due_dates(start, days)[0]
     repay_on = next_business_day(release_on + timedelta(days=1))
 

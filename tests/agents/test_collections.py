@@ -113,6 +113,15 @@ def test_tool_outputs_are_masked():
     assert c.get_contact_history({})["remaining_this_week"] == MAX_CONTACTS_PER_7_DAYS
 
 
+def test_get_case_carries_alert_cause():
+    """경보 원인은 참고 정보로 그대로 실린다. 옛 경보 문서(원인 없음)는 None·[]."""
+    with_cause = {**recent_alert(), "primary_cause": "settlement_hold", "secondary_causes": ["high_cost_borrowing"]}
+    got = ctx(c=case(recent=with_cause)).get_case({})["recent_alert"]
+    assert got["primary_cause"] == "settlement_hold" and got["secondary_causes"] == ["high_cost_borrowing"]
+    old = ctx(c=case(recent=recent_alert())).get_case({})["recent_alert"]
+    assert old["primary_cause"] is None and old["secondary_causes"] == []
+
+
 def test_from_doc():
     doc = {"case_id": "rc-r-i2", "loan_id": "loan-1", "missed_count": 2, "recent_alert": None,
            "installment": {"no": 2, "due_on": "2027-01-04", "amount_krw": 287_000}}

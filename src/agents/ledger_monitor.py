@@ -241,8 +241,9 @@ def _ledger_rows(rows: Sequence[dict[str, Any]], pg: PgFlow, start: date, lb: Le
             }
         )
         row["return_rate"] = _rate(row["returns"], order_gross)
+        # 기대 주문이 0이면 비교가 성립하지 않는다(None). 0.0으로 두면 sales_slump가 헛발화한다.
         row["orders_vs_expected"] = (
-            round((sum(r["order_gross"] for r in recent[:-1]) + order_gross) / expected, 3) if expected else 0.0
+            round((sum(r["order_gross"] for r in recent[:-1]) + order_gross) / expected, 3) if expected else None
         )
 
 
@@ -302,7 +303,7 @@ def _ledger_triggers(
     """마지막 주차 행에 걸린 원장 트리거."""
     row = rows[-1]
     out: list[str] = []
-    if len(rows) >= SLUMP_WEEKS and row["orders_vs_expected"] < SLUMP_RATIO:
+    if len(rows) >= SLUMP_WEEKS and (ratio := row["orders_vs_expected"]) is not None and ratio < SLUMP_RATIO:
         out.append("sales_slump")
     if (lb.weekly_settle_net > 0 and row["held"] >= HOLD_SHARE * lb.weekly_settle_net) or _zero_payout_platform(
         rows, lb, by_week, steady
@@ -335,7 +336,7 @@ def _candidates(history: Mapping[int, Sequence[str]], rows: Sequence[Mapping[str
             CauseCandidate(
                 cause=cause,
                 first_week=week,
-                evidence_ids=tuple(f"W:{week}:{f}" for f in CAUSE_FIELDS[cause] if f in row),
+                evidence_ids=tuple(f"W:{week}:{f}" for f in CAUSE_FIELDS[cause] if row.get(f) is not None),
                 consequence=cause is AlertCause.HIGH_COST_BORROWING and any(w <= week for w in others),
             )
         )

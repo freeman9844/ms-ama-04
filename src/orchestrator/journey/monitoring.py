@@ -514,6 +514,9 @@ def _repayment_week(
                     "severity": a.get("severity"),
                     "summary": a.get("summary"),
                     "signals": [s["kind"] for s in a.get("signals") or []],
+                    # 경보 원인은 추심 입력에 그대로 싣는다(스펙 §7.4). 옛 경보 문서엔 없어 None·[]가 된다.
+                    "primary_cause": a.get("primary_cause"),
+                    "secondary_causes": list(a.get("secondary_causes") or []),
                 }
         deps.store.upsert(
             ALERTS,

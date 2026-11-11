@@ -22,7 +22,7 @@ from evals.runner import EvalRunner
 from evals.suites import budget_left, cost_of, failure
 
 SUITE = "early_warning"
-ALERT_WINDOW_WEEKS = 3  # 원인 시작 주차로부터 이 주 안에 올린 경보만 '제때'로 본다
+ALERT_WINDOW_WEEKS = 3  # 원인 시작 주차로부터 이 주 안에 올린 경보만 '제때'로 본다(하한은 없다: 원인 시작보다 이른 경보도 '제때'다)
 
 
 def baseline_for(p: EwPath) -> Baseline:
@@ -105,7 +105,7 @@ def replay(p: EwPath, model: str, *, meter: Meter, runner: EvalRunner, pseudonym
         "first_alert_cause": first["primary_cause"] if first else None,
         "last_alert_cause": last["primary_cause"] if last else None,
         "detector_cause": detector_cause,
-        "in_window": bool(first and onset_week and first["week"] <= onset_week + ALERT_WINDOW_WEEKS),
+        "in_window": bool(first and onset_week and first["week"] <= onset_week + ALERT_WINDOW_WEEKS),  # 조기 경보 포함
         "default_on": default_on.isoformat() if default_on else None,
         "lead_days": (default_on - date.fromisoformat(first["as_of"])).days if first and default_on else None,
         "weeks": weeks,
