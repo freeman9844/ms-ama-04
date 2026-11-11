@@ -8,9 +8,10 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from mockapis.consent import ConsentError, ConsentRegistry, issue_token, verify_token
-from mockapis.postloan import PostLoanFlow
+from mockapis.demo import FlowStore
+from mockapis.postloan import LoanTerms, PostLoanFlow
 from mockapis.synth import SyntheticCase
-from shared.contracts import ApplicantProfile, ConsentScope, PgSettlement, TaxFiling, Transaction
+from shared.contracts import ApplicantProfile, ConsentScope, PgFlow, PgSettlement, TaxFiling, Transaction
 
 AuthHeader = Annotated[str | None, Header()]
 
@@ -47,7 +48,7 @@ def create_app(
     cases: Mapping[str, SyntheticCase],
     secret: bytes,
     clock: Callable[[], datetime],
-    flows: Mapping[str, PostLoanFlow] | None = None,
+    flows: Mapping[str, PostLoanFlow] | FlowStore | None = None,
     fault: str = "none",
 ) -> FastAPI:
     if fault not in FAULT_MODES:
@@ -72,6 +73,21 @@ def create_app(
             seen.add((grant.consent_id, path))
             raise _error(503, "flaky")
         return cases[grant.applicant_id]
+
+    def loan_terms(amount_krw: int | None, installment_krw: int | None) -> LoanTerms | None:
+        if (amount_krw is None) != (installment_krw is None):
+            raise _error(422, "loan_terms")
+        if amount_krw is None:
+            return None
+        if amount_krw <= 0 or installment_krw <= 0 or installment_krw > amount_krw:
+            raise _error(422, "loan_terms")
+        return LoanTerms(amount_krw, installment_krw)
+
+    def flow_for(applicant_id: str, loan: LoanTerms | None) -> PostLoanFlow | None:
+        # Mapping이면(기존 테스트 호환) loan 인자를 무시하고 그대로 쓴다. FlowStore만 loan으로 재생성한다.
+        if isinstance(flows, FlowStore):
+            return flows.flow(applicant_id, loan)
+        return (flows or {}).get(applicant_id)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -104,11 +120,16 @@ def create_app(
 
     @app.get("/mydata/flow")
     def get_flow(
-        authorization: AuthHeader = None, start: date | None = None, end: date | None = None
+        authorization: AuthHeader = None,
+        start: date | None = None,
+        end: date | None = None,
+        amount_krw: int | None = None,
+        installment_krw: int | None = None,
     ) -> list[Transaction]:
         """대출 실행 이후 거래(조기경보 재생용). start·end는 포함 구간이다."""
         case = authorize(authorization, ConsentScope.ACCOUNT, "/mydata/flow")
-        flow = (flows or {}).get(case.profile.applicant_id)
+        loan = loan_terms(amount_krw, installment_krw)
+        flow = flow_for(case.profile.applicant_id, loan)
         if flow is None:
             raise _error(404, "no_flow")
         return [
@@ -116,6 +137,32 @@ def create_app(
             for t in flow.transactions
             if (start is None or t.booked_on >= start) and (end is None or t.booked_on <= end)
         ]
+
+    @app.get("/pg/flow")
+    def get_pg_flow(
+        authorization: AuthHeader = None,
+        start: date | None = None,
+        end: date | None = None,
+        amount_krw: int | None = None,
+        installment_krw: int | None = None,
+    ) -> PgFlow:
+        """대출 실행 이후 PG 정산·주문 원장(조기경보 재생용). start·end는 settled_on/order_on 포함 구간이다."""
+        case = authorize(authorization, ConsentScope.PG, "/pg/flow")
+        loan = loan_terms(amount_krw, installment_krw)
+        flow = flow_for(case.profile.applicant_id, loan)
+        if flow is None:
+            raise _error(404, "no_flow")
+        pg = flow.pg_flow()
+        return PgFlow(
+            settlements=tuple(
+                s for s in pg.settlements
+                if (start is None or s.settled_on >= start) and (end is None or s.settled_on <= end)
+            ),
+            orders=tuple(
+                o for o in pg.orders
+                if (start is None or o.order_on >= start) and (end is None or o.order_on <= end)
+            ),
+        )
 
     @app.get("/tax/filings")
     def get_tax_filings(authorization: AuthHeader = None) -> list[TaxFiling]:

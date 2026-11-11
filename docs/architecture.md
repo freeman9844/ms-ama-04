@@ -114,7 +114,7 @@ Mock API는 우리 시스템 구성요소가 아니라 **외부 기관의 대역
 | `POST /consents`, `POST /consents/{id}/revoke` | 제공기관의 동의·토큰 발급과 철회 | 제공기관 표준 인증·동의 절차와 토큰 수명 관리 |
 | `/mydata/profile`, `/mydata/transactions`, `/mydata/flow` | 마이데이터 사업자(은행 계좌 프로필·거래, 대출 후 거래) | 마이데이터 표준 API |
 | `/tax/filings` | 홈택스(세금 신고) | 세무 데이터 제공 경로 |
-| `/pg/settlements` | PG사(카드·간편결제 정산) | PG사 정산 API |
+| `/pg/settlements`, `/pg/flow` | PG사(카드·간편결제 정산, 대출 후 정산·주문) | PG사 정산 API |
 | `/admin/faults`, `FAULT_MODE` | 제공기관 장애(503 전부·원천별 첫 요청) | 없음(시연·장애 시나리오 전용) |
 
 동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 Mock API의 메모리 레지스트리로, 외부 기관 내부를 흉내 낸 것이라 영속화하지 않았다. 토큰은 HMAC 서명과 만료를 스스로 담아 재시작 뒤에도 유효하지만 철회 목록은 사라진다. 그래서 복제본을 1개로 고정하고, 재시작 뒤 철회는 `absent`로 기록한다([ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md)).

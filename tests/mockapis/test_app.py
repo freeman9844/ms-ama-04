@@ -4,8 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mockapis.app import create_app
+from mockapis.demo import FlowStore
+from mockapis.postloan import FlowScenario, generate_postloan
 from mockapis.synth import INJECTION_TEXT, Archetype, generate_case
 from shared.contracts import ApplicantProfile, PgSettlement, TaxFiling, Transaction
+from shared.krcalendar import next_business_day
 
 KST = timezone(timedelta(hours=9))
 AS_OF = date(2026, 10, 1)
@@ -133,8 +136,6 @@ def test_fault_injection_503(client):
 
 
 def test_postloan_flow_needs_account_scope_and_filters_by_window(clock):
-    from mockapis.postloan import FlowScenario, generate_postloan
-
     case = generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)
     flow = generate_postloan(case, FlowScenario.SALES_SLUMP, AS_OF, 1)
     c = TestClient(create_app({"a1": case}, SECRET, clock, flows={"a1": flow}))
@@ -150,6 +151,62 @@ def test_postloan_flow_needs_account_scope_and_filters_by_window(clock):
 def test_postloan_flow_missing_is_404(client):
     h = _auth(_consent(client)["token"])
     assert client.get("/mydata/flow", headers=h).json()["detail"] == {"code": "no_flow"}
+
+
+@pytest.fixture
+def client_with_store(clock):
+    case = generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)
+    store = FlowStore({"a1": case}, AS_OF)
+    return TestClient(create_app({"a1": case}, SECRET, clock, flows=store))
+
+
+def test_pg_flow_endpoint_requires_pg_scope(client_with_store):
+    h_account = _auth(_consent(client_with_store, scopes=("account",))["token"])
+    assert client_with_store.get("/pg/flow", headers=h_account).status_code == 403
+    h_pg = _auth(_consent(client_with_store, scopes=("pg",))["token"])
+    r = client_with_store.get("/pg/flow", headers=h_pg)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["settlements"] and body["orders"]
+    for s in body["settlements"]:
+        PgSettlement.model_validate(s)
+
+
+def test_flow_endpoints_pass_terms(client_with_store):
+    params = {"amount_krw": 30_000_000, "installment_krw": 2_610_000}
+    h_account = _auth(_consent(client_with_store, scopes=("account",))["token"])
+    txns = client_with_store.get("/mydata/flow", headers=h_account, params=params).json()
+    assert any(t["amount_krw"] == -2_610_000 for t in txns)
+
+    h_pg = _auth(_consent(client_with_store, scopes=("pg",))["token"])
+    pg = client_with_store.get("/pg/flow", headers=h_pg, params=params).json()
+    start = next_business_day(AS_OF)
+    assert min(o["order_on"] for o in pg["orders"]) == str(start - timedelta(days=56))
+
+
+def test_half_terms_rejected(client_with_store):
+    h_account = _auth(_consent(client_with_store, scopes=("account",))["token"])
+    r = client_with_store.get("/mydata/flow", headers=h_account, params={"amount_krw": 1000})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "loan_terms"
+    h_pg = _auth(_consent(client_with_store, scopes=("pg",))["token"])
+    r = client_with_store.get("/pg/flow", headers=h_pg, params={"installment_krw": 1000})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "loan_terms"
+    r = client_with_store.get("/mydata/flow", headers=h_account, params={"amount_krw": 0, "installment_krw": 0})
+    assert r.status_code == 422
+    r = client_with_store.get(
+        "/mydata/flow", headers=h_account, params={"amount_krw": 100, "installment_krw": 200}
+    )
+    assert r.status_code == 422
+
+
+def test_dict_flows_still_work(clock):
+    case = generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)
+    flow = generate_postloan(case, FlowScenario.SALES_SLUMP, AS_OF, 1)
+    c = TestClient(create_app({"a1": case}, SECRET, clock, flows={"a1": flow}))
+    h = _auth(_consent(c, scopes=("account",))["token"])
+    r = c.get("/mydata/flow", headers=h, params={"amount_krw": 1_000_000, "installment_krw": 1_000_000})
+    assert r.status_code == 200 and len(r.json()) == len(flow.transactions)  # loan 인자는 무시되고 dict 값 그대로
+
 
 def test_flaky_fails_first_request_per_consent_and_path(clock):
     cases = {"a1": generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)}

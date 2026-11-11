@@ -14,7 +14,7 @@ from agents.monitoring import (
     week_window,
     weekly_series,
 )
-from mockapis.demo import STACKING_APPLICANTS, build_demo_cases
+from mockapis.demo import POSTLOAN_SCENARIOS, build_demo_cases
 from mockapis.postloan import FlowScenario, generate_postloan
 from mockapis.postloan_scenarios import PROCEEDS_KRW
 from shared.contracts import EVIDENCE_ID_PATTERN
@@ -154,7 +154,7 @@ def test_stable_sellers_raise_no_revenue_triggers_around_festivals(as_of):
 
 
 @pytest.mark.parametrize("as_of", [AS_OF, date(2026, 12, 28), date(2027, 1, 25)])
-@pytest.mark.parametrize("seller", sorted(STACKING_APPLICANTS))
+@pytest.mark.parametrize("seller", sorted(POSTLOAN_SCENARIOS))
 def test_sales_slump_sellers_warn_before_default(seller, as_of):
     # 매출 부진 셀러는 업종과 시작일에 관계없이 신규 차입을 잡고, 잔고 부족 전망이 부도보다 먼저 나온다.
     flow, rows, base = _demo_series(build_demo_cases(as_of)[seller], FlowScenario.SALES_SLUMP, as_of)

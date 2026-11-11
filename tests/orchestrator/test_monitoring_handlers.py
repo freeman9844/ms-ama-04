@@ -29,7 +29,7 @@ from journey.monitoring import (
     process_week,
 )
 from mockapis.app import create_app as create_mock_app
-from mockapis.demo import build_demo_cases, build_postloan_flows
+from mockapis.demo import FlowStore, build_demo_cases
 from shared.repayment import LENDER_DEBIT, due_dates
 
 AS_OF = date(2026, 11, 2)
@@ -137,7 +137,7 @@ class ScriptedAgents:
 @pytest.fixture(scope="module")
 def mock_app():
     cases = build_demo_cases(AS_OF)
-    return create_mock_app(cases, SECRET, lambda: NOW, flows=build_postloan_flows(cases, AS_OF))
+    return create_mock_app(cases, SECRET, lambda: NOW, flows=FlowStore(cases, AS_OF))
 
 
 def make_deps(mock_app, events=None, agents=None):

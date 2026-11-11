@@ -3,8 +3,9 @@
 import os
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 
-from mockapis.postloan import FlowScenario, PostLoanFlow, generate_postloan
+from mockapis.postloan import FlowScenario, LoanTerms, PostLoanFlow, generate_postloan
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, SyntheticCase, generate_case, load_persona
 from shared.krcalendar import next_business_day
@@ -71,26 +72,39 @@ def build_load_cases(as_of: date) -> dict[str, SyntheticCase]:
         )
     return cases
 
-# 대출 실행 이후 흐름: 심사 때 건강했던 셀러가 시즌 재고를 선매입했는데 주문이 꺾여 고금리 대출을 쌓는다(조기경보 데모).
-# 주인공은 패션의류 seller-dailylook-01이고, 업종이 다른 건강 셀러 3곳도 같은 흐름을 탄다. 나머지는 정상 상환.
-STACKING_APPLICANTS = frozenset({"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"})
+# 대출 실행 이후 흐름: 심사 때 건강했던 셀러 네 곳이 각자 다른 원인으로 스트레스를 겪는다(조기경보 데모).
+# 업종이 다른 건강 셀러 네 곳이 매출 부진·정산 보류·반품 급증·비용 증가를 하나씩 맡는다. 나머지는 정상 상환.
+POSTLOAN_SCENARIOS: dict[str, FlowScenario] = {
+    "seller-dailylook-01": FlowScenario.SALES_SLUMP,
+    "seller-gearstore-06": FlowScenario.SETTLEMENT_HOLD,
+    "seller-linen-10": FlowScenario.RETURN_SPIKE,
+    "seller-tangerine-15": FlowScenario.COST_SURGE,
+}
 POSTLOAN_SEED_OFFSET = 1000
 
 
-def build_postloan_flows(cases: Mapping[str, SyntheticCase], as_of: date) -> dict[str, PostLoanFlow]:
-    seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
-    seeds.update({a.applicant_id: a.seed for a in LOAD_GRID})
-    # 대출은 영업일에 실행된다. 오케스트레이터가 첫 거래일로 상환 원장을 만들므로 시작일에 거래가 있어야 상환일이 맞는다.
-    start = next_business_day(as_of)
-    return {
-        applicant_id: generate_postloan(
-            case,
-            FlowScenario.SALES_SLUMP if applicant_id in STACKING_APPLICANTS else FlowScenario.STABLE,
-            start,
-            seeds.get(applicant_id, 0) + POSTLOAN_SEED_OFFSET,
-        )
-        for applicant_id, case in cases.items()
-    }
+class FlowStore:
+    """신청 세트·기준일로 사후 흐름을 요청 시 생성하는 LRU 캐시. 키는 `(applicant_id, loan)`."""
+
+    def __init__(self, cases: Mapping[str, SyntheticCase], as_of: date, maxsize: int = 256) -> None:
+        self._cases = dict(cases)
+        # 대출은 영업일에 실행된다. 오케스트레이터가 첫 거래일로 상환 원장을 만들므로 시작일에 거래가 있어야 상환일이 맞는다.
+        self._start = next_business_day(as_of)
+        seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
+        seeds.update({a.applicant_id: a.seed for a in LOAD_GRID})
+        self._seeds = seeds
+        self._generate = lru_cache(maxsize=maxsize)(self._build)
+
+    def _build(self, applicant_id: str, loan: LoanTerms | None) -> PostLoanFlow:
+        case = self._cases[applicant_id]
+        scenario = POSTLOAN_SCENARIOS.get(applicant_id, FlowScenario.STABLE)
+        seed = self._seeds.get(applicant_id, 0) + POSTLOAN_SEED_OFFSET
+        return generate_postloan(case, scenario, self._start, seed, loan=loan)
+
+    def flow(self, applicant_id: str, loan: LoanTerms | None) -> PostLoanFlow | None:
+        if applicant_id not in self._cases:
+            return None
+        return self._generate(applicant_id, loan)
 
 
 def load_secret(env: Mapping[str, str] = os.environ) -> bytes:

@@ -7,7 +7,17 @@ from datetime import date, datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from mockapis.demo import DEMO_APPLICANTS, LOAD_ARCHETYPE, build_demo_cases, build_load_cases, load_secret, resolve_as_of
+from mockapis.demo import (
+    DEMO_APPLICANTS,
+    LOAD_ARCHETYPE,
+    POSTLOAN_SCENARIOS,
+    FlowStore,
+    build_demo_cases,
+    build_load_cases,
+    load_secret,
+    resolve_as_of,
+)
+from mockapis.postloan import FlowScenario, LoanTerms
 from mockapis.synth import INJECTION_TEXT, Archetype
 from shared.segments import LOAD_GRID, SELLER_INDUSTRIES
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
@@ -93,14 +103,30 @@ def test_main_builds_app(monkeypatch):
     assert TestClient(module.app).get("/healthz").status_code == 200
 
 
-def test_postloan_flows_cast_the_healthy_seller_as_the_slump_hero():
-    from mockapis.demo import build_postloan_flows
-    from mockapis.postloan import FlowScenario
+def test_scenario_map_covers_four_sellers():
+    assert {k: v.value for k, v in POSTLOAN_SCENARIOS.items()} == {
+        "seller-dailylook-01": "sales_slump",
+        "seller-gearstore-06": "settlement_hold",
+        "seller-linen-10": "return_spike",
+        "seller-tangerine-15": "cost_surge",
+    }
 
+
+def test_flow_store_caches_by_terms():
     as_of = date(2026, 11, 2)
-    flows = build_postloan_flows(build_demo_cases(as_of), as_of)
-    slumping = {"seller-dailylook-01", "seller-gearstore-06", "seller-linen-10", "seller-tangerine-15"}
-    assert {k for k, f in flows.items() if f.scenario is FlowScenario.SALES_SLUMP} == slumping
+    store = FlowStore(build_demo_cases(as_of), as_of)
+    t = LoanTerms(30_000_000, 2_610_000)
+    assert store.flow("seller-gearstore-06", t) is store.flow("seller-gearstore-06", t)
+    assert store.flow("seller-gearstore-06", None) != store.flow("seller-gearstore-06", t)
+    assert store.flow("nobody", None) is None
+
+
+def test_postloan_flows_cast_the_healthy_seller_in_four_different_causes():
+    as_of = date(2026, 11, 2)
+    store = FlowStore(build_demo_cases(as_of), as_of)
+    flows = {applicant_id: store.flow(applicant_id, None) for applicant_id, *_ in DEMO_APPLICANTS}
+    assert {k: f.scenario for k, f in flows.items() if k in POSTLOAN_SCENARIOS} == POSTLOAN_SCENARIOS
+    assert {f.scenario for k, f in flows.items() if k not in POSTLOAN_SCENARIOS} == {FlowScenario.STABLE}
     assert set(flows) == {a for a, *_ in DEMO_APPLICANTS}
     assert all(f.start == as_of for f in flows.values())
 
@@ -153,13 +179,14 @@ def test_seller_name_matches_generated_business_names():
 
 def test_postloan_ledger_start_matches_mock_dues_on_weekend_as_of():
     # 오케스트레이터는 첫 거래일로 원장을 만든다. 주말 as_of에서도 Mock 상환일과 같아야 납부 건이 미납이 되지 않는다.
-    from mockapis.demo import build_postloan_flows
     from mockapis.postloan import POSTLOAN_DAYS
     from shared.repayment import LENDER_DEBIT, due_dates
 
     saturday = date(2026, 11, 7)
-    flows = build_postloan_flows(build_demo_cases(saturday), saturday)
-    for applicant_id, flow in flows.items():
+    cases = build_demo_cases(saturday)
+    store = FlowStore(cases, saturday)
+    for applicant_id in cases:
+        flow = store.flow(applicant_id, None)
         flow_start = min(t.booked_on for t in flow.transactions)
         debits = {t.booked_on for t in flow.transactions if t.description == LENDER_DEBIT}
         assert debits | set(flow.missed_installments) == set(due_dates(flow_start, POSTLOAN_DAYS)), applicant_id
