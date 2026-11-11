@@ -513,7 +513,8 @@ def _escalate(
 ) -> None:
     """경보 심각도로 조기경보 단계(스펙 §5)를 정해 자동 안내를 보낸다. 2단계가 나가면 셀프 상환 플랜 제안을 연다.
 
-    다음 예정 회차가 없으면 보내지 않고 단계도 쓰지 않는다. 같은 주차가 다시 오면(재시도) 같은 ref 연락을 다시 쓰지 않는다.
+    다음 예정 회차가 없으면 보내지 않고 단계도 쓰지 않는다. 2단계에 유지 말고 고를 옵션이 없으면 보내지 않고
+    skipped(no_options)로 남긴다. 같은 주차가 다시 오면(재시도) 같은 ref 연락을 다시 쓰지 않는다.
     """
     mon, led = loan["monitoring"], loan.get("repayment")
     mon.setdefault("alert_severities", []).append(severity)
@@ -527,6 +528,13 @@ def _escalate(
     )
     if not upcoming:
         return
+    options: list[dict[str, Any]] = []
+    if stage == 2:
+        # 이동·분할을 약속하는 링크라 고를 옵션이 없으면 보내지 않는다. 쓴 단계로 남겨 다시 시도하지 않는다.
+        options = _plan_options(loan, hi, pg, lb)
+        if not any(o["option"] != "keep" for o in options):
+            escalation["stage2"] = {"alert_id": alert_id, "on": hi.isoformat(), "status": "skipped", "reason": "no_options"}
+            return
     item = upcoming[0]
     amount = item_amount(item, led["installment_krw"])
     # 고객에게 음수 잔고나 상환액 이상의 잔고("부족")를 금액으로 보이지 않는다. 그때는 금액 없는 문구를 쓴다.
@@ -548,30 +556,25 @@ def _escalate(
         "alert_id": alert_id, "on": hi.isoformat(), "status": sent["status"], "reason": sent["reason"],
     }
     if stage == 2 and sent["status"] == "sent":
-        _open_offer(replay_id, loan, hi, week, pg, lb)
+        led["offer"] = {
+            "offer_id": f"of-{replay_id}",
+            "week": week,
+            "sent_on": hi.isoformat(),
+            "status": "open",
+            "options": options,
+            "choice": None,
+            "responded_at": None,
+        }
 
 
-def _open_offer(
-    replay_id: str, loan: dict[str, Any], hi: date, week: int, pg: PgFlow | None, lb: LedgerBaseline | None
-) -> None:
-    """셀프 상환 플랜 제안을 연다. 유지 말고 고를 옵션이 없으면 열지 않는다. 지급일은 이번 주 끝까지 공개된 것만 쓴다."""
+def _plan_options(loan: dict[str, Any], hi: date, pg: PgFlow | None, lb: LedgerBaseline | None) -> list[dict[str, Any]]:
+    """셀프 상환 플랜 옵션. 지급일은 이번 주 끝까지 공개된 것만 쓴다."""
     led, mon = loan["repayment"], loan["monitoring"]
     flow_end = date.fromisoformat(mon["flow_start"]) + timedelta(days=WEEKS * 7 - 1)
-    options = plan_options(
+    return plan_options(
         led["schedule"], led["installment_krw"], after=hi, flow_end=flow_end,
         payouts=payout_days(pg, main_platform(lb), hi),
     )
-    if not any(o["option"] != "keep" for o in options):
-        return
-    led["offer"] = {
-        "offer_id": f"of-{replay_id}",
-        "week": week,
-        "sent_on": hi.isoformat(),
-        "status": "open",
-        "options": options,
-        "choice": None,
-        "responded_at": None,
-    }
 
 
 def _due_list(loan: dict[str, Any]) -> dict[date, int] | None:
@@ -585,6 +588,31 @@ def _due_list(loan: dict[str, Any]) -> dict[date, int] | None:
             d = date.fromisoformat(s["due_on"])
             out[d] = out.get(d, 0) + item_amount(s, led["installment_krw"])
     return out
+
+
+def _reminder_ref(replay_id: str, item: dict[str, Any]) -> str:
+    """상환 안내 ref. 옮기거나 나눈 회차(from_due_on)는 키가 원래 회차와 겹칠 수 있어 따로 둔다(옛 날짜 안내를 다시 쓰지 않게)."""
+    return f"{replay_id}-{item_key(item)}{'-m' if item.get('from_due_on') else ''}"
+
+
+def _due_reminders(
+    schedule: list[dict[str, Any]], ev: Any, lo: date, early_from: date | None
+) -> tuple[list[tuple[str, date]], list[tuple[str, date]]]:
+    """이번 주 (5일 전, 3일 전) 안내 [(키, 안내일)]. 플랜 변경으로 옮긴 회차는 안내일이 이미 공개된 주차로 지나갔으면
+    이번 주 첫날에 늦게라도 보낸다(상환일까지). 5일 전 안내는 3일 전 안내일이 아직 오지 않았을 때만 늦게 보낸다."""
+    due_of = {item_key(s): date.fromisoformat(s["due_on"]) for s in schedule}
+    early = [(k, early_reminder_on(due_of[k])) for k in ev.early_reminders]
+    regular = [(k, reminder_on(due_of[k])) for k in ev.reminders]
+    for s in schedule:
+        key, due = item_key(s), due_of[item_key(s)]
+        if not s.get("from_due_on") or s["status"] != "scheduled" or due < lo:
+            continue
+        if s.get("reminded_on") is None and reminder_on(due) < lo:
+            regular.append((key, lo))
+        if (early_from is not None and early_from <= lo and s.get("early_reminded_on") is None
+                and early_reminder_on(due) < lo < reminder_on(due)):
+            early.append((key, lo))
+    return early, regular
 
 
 def _repayment_week(
@@ -606,27 +634,26 @@ def _repayment_week(
     early_from = date.fromisoformat(stage1["on"]) if isinstance(stage1, dict) else None
     ev = week_events(led["schedule"], visible, lo, hi, early_from=early_from)
     by_key = {item_key(s): s for s in led["schedule"]}
-    if ev.reminders or ev.early_reminders:
+    early, regular = _due_reminders(led["schedule"], ev, lo, early_from)
+    if early or regular:
         contacts = _contacts_doc(deps, loan_id, replay_id)
         # 자동 안내는 시뮬레이션 안내일 10:00 KST에 보낸 것으로 보고 공정 연락 규칙을 적용한다.
-        for key in ev.early_reminders:
-            item, ref = by_key[key], f"{replay_id}-{key}-e"
+        for key, on in early:
+            item = by_key[key]
+            ref = f"{_reminder_ref(replay_id, item)}-e"
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "early_reminder"), None)
             if sent is None:
-                due = date.fromisoformat(item["due_on"])
-                on = early_reminder_on(due)
                 text = TEMPLATES["early_reminder"].format(
-                    due_on=due.isoformat(), amount=f"{item_amount(item, led['installment_krw']):,}원"
+                    due_on=item["due_on"], amount=f"{item_amount(item, led['installment_krw']):,}원"
                 )
                 sent = remind(ref, contacts["contacts"], on, sim_now(on), script_id="early_reminder",
                               by="early_reminder", text=text)
                 contacts["contacts"].append(sent)
             item.update(early_reminded_on=sent["on"], early_reminder_status=sent["status"])
-        for key in ev.reminders:
-            item, ref = by_key[key], f"{replay_id}-{key}"
+        for key, on in regular:
+            item, ref = by_key[key], _reminder_ref(replay_id, by_key[key])
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "reminder"), None)
             if sent is None:
-                on = reminder_on(date.fromisoformat(item["due_on"]))
                 sent = remind(ref, contacts["contacts"], on, sim_now(on))
                 contacts["contacts"].append(sent)
             item.update(reminded_on=sent["on"], reminder_status=sent["status"])

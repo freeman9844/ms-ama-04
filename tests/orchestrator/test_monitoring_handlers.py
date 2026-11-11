@@ -1471,3 +1471,50 @@ def test_stage_two_and_miss_same_week_need_both_cleared(mock_app):
     assert choose(deps, "keep") is True
     mon = loan(deps)["monitoring"]
     assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
+
+
+@pytest.mark.parametrize("new_due, early_on, remind_on", [
+    ("2027-01-12", "2027-01-07", "2027-01-09"),  # 새 안내일이 재개 뒤 주차에 온다
+    ("2027-01-06", None, "2027-01-04"),  # 새 안내일이 공개된 주차로 지나갔다 → 재개 주 첫날에 늦게라도
+])
+def test_moved_installment_gets_reminders_for_new_due_date(mock_app, monkeypatch, new_due, early_on, remind_on):
+    real = monitoring_module.plan_options
+
+    def options(schedule, installment, **kw):
+        out = real(schedule, installment, **kw)
+        return [dict(o, items=[dict(o["items"][0], due_on=new_due)]) if o["option"] == "move" else o for o in out]
+
+    monkeypatch.setattr(monitoring_module, "plan_options", options)
+    # 7주차 1단계, 9주차(~1/3) 2단계. 2회차 상환일(1/4)이 2단계 주 끝 사흘 안이라 옛 날짜 안내가 이미 나갔다.
+    deps, replay_id = high_replay(mock_app, ["medium", "medium", "high", "high"])
+    assert loan(deps)["monitoring"]["escalation"]["stage2"]["on"] == "2027-01-03"
+    old = {c["ref"]: c for c in contacts(deps, replay_id)}
+    assert old[f"{replay_id}-i2"]["on"] == "2027-01-01" and old[f"{replay_id}-i2-e"]["on"] == "2026-12-30"
+    assert choose(deps, "move") is True and decide_plan(deps) is True
+    assert replay(deps, action="resume", replay_id=replay_id)["from_week"] == 10
+    resume_until_done(deps, replay_id)
+    item = next(s for s in loan(deps)["repayment"]["schedule"] if s["no"] == 2)
+    assert (item["due_on"], item["status"], item["txn_id"]) == (new_due, "paid", f"pc-{replay_id}-i2")
+    sent = {c["ref"]: c for c in contacts(deps, replay_id)}
+    assert {r: sent[r] for r in old} == old  # 옛 날짜 안내는 그대로 두고 새 날짜 안내를 따로 보낸다
+    moved = sent[f"{replay_id}-i2-m"]
+    assert (moved["on"], moved["status"], moved["by"]) == (remind_on, "sent", "reminder")
+    assert (item["reminded_on"], item["reminder_status"]) == (remind_on, "sent")
+    if early_on:
+        early = sent[f"{replay_id}-i2-m-e"]
+        assert (early["on"], early["status"]) == (early_on, "sent") and new_due in early["text"]
+        assert (item["early_reminded_on"], item["early_reminder_status"]) == (early_on, "sent")
+    else:  # 3일 전 안내일까지 지나 5일 전 안내는 늦게 보내지 않는다
+        assert f"{replay_id}-i2-m-e" not in sent and item["early_reminded_on"] is None
+
+
+def test_stage_two_without_plan_options_is_skipped(mock_app):
+    # 9주차 1단계, 10주차 2단계: 다음 회차(3회차 1/29)는 옮기거나 나눌 지급일이 흐름 안에 없다.
+    deps, replay_id = high_replay(mock_app, ["medium"] * 3 + ["high", "high"])
+    doc = loan(deps)
+    mon = doc["monitoring"]
+    assert mon["status"] == "completed" and doc["repayment"].get("offer") is None
+    assert mon["escalation"]["stage2"] == {"alert_id": mon["weeks"][9]["alert_id"], "on": week_end(10).isoformat(),
+                                           "status": "skipped", "reason": "no_options"}
+    assert mon["escalation"]["stage1"]["on"] == week_end(9).isoformat()
+    assert [c["ref"] for c in by_kind(deps, replay_id, "early_warning")] == [f"{replay_id}-s1"]
