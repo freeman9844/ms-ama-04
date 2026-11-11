@@ -38,6 +38,7 @@ SOURCE_PATHS = {
     "tax": "/tax/filings",
     "pg": "/pg/settlements",
     "flow": "/mydata/flow",
+    "pg_flow": "/pg/flow",
 }
 
 
@@ -65,9 +66,13 @@ class HttpMockApi:
         r.raise_for_status()
         return "revoked"
 
-    def fetch(self, source: str, token: str) -> Any:
+    def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any:
         try:
-            r = self._client.get(SOURCE_PATHS[source], headers={"Authorization": f"Bearer {token}"})
+            r = self._client.get(
+                SOURCE_PATHS[source],
+                headers={"Authorization": f"Bearer {token}"},
+                params=dict(params) if params else None,
+            )
         except httpx.HTTPError as e:
             raise SourceError(None, type(e).__name__) from e
         if r.status_code >= 400:

@@ -3,7 +3,7 @@
 활동은 (deps, payload) -> JSON 직렬화 가능한 값. function_app이 Deps를 주입한다.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Protocol
@@ -60,7 +60,7 @@ class RawStore(Protocol):
 
 class MockApi(Protocol):
     def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int) -> dict[str, Any]: ...
-    def fetch(self, source: str, token: str) -> Any: ...
+    def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any: ...
     def revoke(self, consent_id: str) -> str:
         """revoked | absent(레지스트리에 없음)."""
         ...

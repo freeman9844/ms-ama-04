@@ -12,7 +12,7 @@ APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
 CONSENT_SCOPES = ("account", "tax", "pg")
 CONSENT_PURPOSE = "운전자금 대출 심사"
 CONSENT_TTL_DAYS = 90
-MONITORING_SCOPES = ("account",)
+MONITORING_SCOPES = ("account", "pg")
 MONITORING_PURPOSE = "대출 사후 모니터링"
 LOAN_ID_PATTERN = APPLICATION_ID_PATTERN
 # 진행 중인 재생을 새 재생이 덮어쓰지 못하게 막는 시간. 멈춘 재생은 이 시간이 지나면 다시 시작할 수 있다.

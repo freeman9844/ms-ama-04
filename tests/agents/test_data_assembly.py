@@ -34,7 +34,7 @@ class CaseApi:
         self.payloads = payloads or {}
         self.calls: list[str] = []
 
-    def fetch(self, source, token):
+    def fetch(self, source, token, params=None):
         assert token == "tok"
         self.calls.append(source)
         if self.failures.get(source):

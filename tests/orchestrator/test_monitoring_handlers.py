@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agents.collections import COLLECTIONS_AGENT
+from agents.data_assembly import SourceError
 from agents.early_warning import EW_AGENT
 from agents.features import monthly_installment
 from agents.monitoring import WEEKS
@@ -38,6 +39,12 @@ KEY = b"k" * 32
 NOW = datetime(2026, 11, 2, 9, 0, tzinfo=KST)
 LOAN = "app-1"
 FIRST_DUE = due_dates(AS_OF, WEEKS * 7)[0]  # 2026-12-02, 5주차
+CAUSE_SIGNAL = {
+    "sales_slump": "inflow_drop",
+    "settlement_hold": "settlement_hold",
+    "return_spike": "return_spike",
+    "cost_surge": "cost_surge",
+}
 
 
 class MemoryStore:
@@ -94,7 +101,7 @@ class Outbox:
 
 
 class ScriptedAgents:
-    """EW: new_debt 트리거가 있으면 근거 있는 경보를 올린다. Collections: 상담 안내 + 재조정 요청."""
+    """EW: new_debt 트리거가 있으면 원인 후보를 붙인 경보를 올린다. Collections: 상담 안내 + 재조정 요청."""
 
     def __init__(self):
         self.calls = []
@@ -106,19 +113,33 @@ class ScriptedAgents:
             week = base["current_week"]
             decision = "no_alert"
             if "new_debt" in base["triggers"]:
+                candidates = base["cause_candidates"]
+                primary = candidates[0] if candidates else None
+                signals = [
+                    {
+                        "kind": "loan_stacking",
+                        "text": "고금리 상환이 새로 나타났다.",
+                        "metric_ids": [f"W:{week}:high_cost_lender"],
+                        "txn_ids": [],
+                    }
+                ]
+                if primary is not None and primary["cause"] != "high_cost_borrowing":
+                    signals.append(
+                        {
+                            "kind": CAUSE_SIGNAL[primary["cause"]],
+                            "text": "주원인 지표가 먼저 움직였다.",
+                            "metric_ids": list(primary["evidence_ids"]),
+                            "txn_ids": [],
+                        }
+                    )
                 out = handlers["raise_alert"](
                     {
                         "severity": "high",
                         "summary": "실행 직후 고금리 대부 상환이 시작됐다.",
                         "recommended_action": "contact_borrower",
-                        "signals": [
-                            {
-                                "kind": "loan_stacking",
-                                "text": "고금리 상환이 새로 나타났다.",
-                                "metric_ids": [f"W:{week}:high_cost_lender"],
-                                "txn_ids": [],
-                            }
-                        ],
+                        "signals": signals,
+                        "primary_cause": primary["cause"] if primary else "",
+                        "secondary_causes": [c["cause"] for c in candidates[1:3]],
                     }
                 )
                 assert out["accepted"], out
@@ -247,8 +268,8 @@ class DropDebits:
     def __getattr__(self, name):
         return getattr(self.inner, name)
 
-    def fetch(self, kind, token):
-        out = self.inner.fetch(kind, token)
+    def fetch(self, kind, token, params=None):
+        out = self.inner.fetch(kind, token, params)
         if kind != "flow":
             return out
         return [t for t in out if not (t["description"] == LENDER_DEBIT and t["booked_on"] in self.dates)]
@@ -256,6 +277,30 @@ class DropDebits:
 
 def missing_first_due(deps):
     return replace(deps, mock=DropDebits(deps.mock, [FIRST_DUE]))
+
+
+class RecordingMock:
+    """fetch 호출(원천·params)과 동의 범위를 기록한다. fail_on에 든 원천은 SourceError를 낸다."""
+
+    def __init__(self, inner, fail_on=()):
+        self.inner, self.fail_on = inner, set(fail_on)
+        self.calls, self.consent_scopes = [], []
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def create_consent(self, applicant_id, scopes, purpose, ttl_days):
+        self.consent_scopes.append(list(scopes))
+        return self.inner.create_consent(applicant_id, scopes, purpose, ttl_days)
+
+    def fetch(self, kind, token, params=None):
+        self.calls.append((kind, params))
+        if kind in self.fail_on:
+            raise SourceError(503, "pg down")
+        return self.inner.fetch(kind, token, params)
+
+    def params_by_source(self):
+        return dict(self.calls)
 
 
 def test_register_monitoring_builds_baseline_and_keeps_replay_state(mock_app):
@@ -279,7 +324,7 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     assert started["mode"] == mon["mode"] == "inline"
     assert mon["processed_week"] == WEEKS and mon["status"] == "completed" and len(mon["weeks"]) == WEEKS
     consent = deps.store.read("consents", mon["consent_id"], mon["consent_id"])
-    assert consent["purpose"] == MONITORING_PURPOSE and consent["scopes"] == ["account"]
+    assert consent["purpose"] == MONITORING_PURPOSE and consent["scopes"] == ["account", "pg"]
     assert deps.raw.get_json(f"consent-{mon['consent_id']}", "flow.json")
     # 매출 부진 셀러의 차입은 6주차 이후 결과로 나온다(원인 → 차입 순서).
     debt_week = next(w for w in mon["weeks"] if "new_debt" in w["new_triggers"])
@@ -462,7 +507,7 @@ def test_failure_after_claim_is_recorded_and_not_blocking(mock_app):
         def __getattr__(self, name):
             return getattr(self.inner, name)
 
-        def fetch(self, kind, token):
+        def fetch(self, kind, token, params=None):
             raise RuntimeError("mock flow down")
 
     broken = replace(deps, mock=FlowDown(deps.mock))
@@ -738,3 +783,57 @@ def test_invalid_resume_stop_requests_are_dropped(mock_app, fields):
     before = loan(deps)["monitoring"]
     assert replay(deps, **fields) is None
     assert loan(deps)["monitoring"] == before
+
+
+def recording_deps(mock_app, fail_on=(), **fields):
+    deps = make_deps(mock_app, **fields)
+    return replace(deps, mock=RecordingMock(deps.mock, fail_on))
+
+
+def test_replay_passes_terms_and_pg_scope(mock_app):
+    deps = recording_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    expected = round(monthly_installment(3_300_000, 12))
+    assert deps.mock.consent_scopes[-1] == ["account", "pg"]
+    params = deps.mock.params_by_source()
+    terms = {"amount_krw": 3_300_000, "installment_krw": expected}
+    assert params["flow"] == params["pg_flow"] == terms
+    assert params["transactions"] is None  # 심사 수집은 그대로 params 없이 부른다
+    doc = loan(deps)
+    mon = doc["monitoring"]
+    assert mon["pg"] == "ok" and mon["ledger_baseline"]["weekly_orders"] > 0
+    assert mon["ledger_baseline"]["deduction_rate"] >= 0 and mon["ledger_baseline"]["platform_weekly_net"]
+    assert deps.raw.get_json(f"consent-{mon['consent_id']}", "pg_flow.json")["settlements"]
+    # 원장 상환액과 Mock에 넘긴 상환액은 같은 값이다(같아야 상환일 출금이 원장과 맞는다).
+    assert doc["repayment"]["installment_krw"] == expected
+    assert all(w["row"].get("order_gross", 0) >= 0 for w in mon["weeks"])
+
+
+def test_replay_continues_without_pg_flow(mock_app):
+    deps = recording_deps(mock_app, fail_on={"pg_flow"})
+    approved_loan(deps)
+    started = replay(deps)
+    mon = loan(deps)["monitoring"]
+    assert mon["pg"] == "missing" and mon["ledger_baseline"] is None
+    assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
+    assert [w["week"] for w in mon["weeks"]] == list(range(1, WEEKS + 1))
+    assert all("order_gross" not in w["row"] for w in mon["weeks"])
+    assert all(not w["candidates"] or all(c["cause"] for c in w["candidates"]) for w in mon["weeks"])
+    assert deps.raw.get_json(f"consent-{mon['consent_id']}", "pg_flow.json") is None
+    assert started["replay_id"] == mon["replay_id"]
+
+
+def test_week_entry_records_candidates_and_alert_cause(mock_app):
+    # 정산 보류 셀러. runner가 없어 조사 에이전트는 폴백 경보를 올리고 주원인은 첫 후보에서 온다.
+    deps = recording_deps(mock_app)
+    approved_loan(deps, "seller-gearstore-06")
+    replay(deps)
+    mon = loan(deps)["monitoring"]
+    first = next(w for w in mon["weeks"] if w["alert_id"])
+    assert first["candidates"][0]["cause"] == "settlement_hold"
+    assert first["candidates"][0]["evidence_ids"]
+    alert = deps.store.read(ALERTS, first["alert_id"], LOAN)
+    assert alert["primary_cause"] == "settlement_hold"
+    assert "settlement_hold" in {c["cause"] for c in first["candidates"]}
+    assert first["row"]["held"] > 0

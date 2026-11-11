@@ -22,7 +22,8 @@ from agents.collections import CollectionsContext, RepaymentCase, act, remind
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
 from agents.features import monthly_installment
-from agents.monitoring import WEEKS, Baseline, categorize, detect, projection, week_window, weekly_series
+from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
+from agents.monitoring import WEEKS, Baseline, categorize, projection, week_window
 from agents.repayment import build_schedule, reminder_on, week_events
 from journey.activities import (
     _TRANSACTIONS,
@@ -46,7 +47,7 @@ from journey.models import (
     replay_held,
     replay_in_progress,
 )
-from shared.contracts import ApplicantProfile, Transaction
+from shared.contracts import ApplicantProfile, PgFlow, Transaction
 
 log = logging.getLogger("journey.monitoring")
 LOANS, ALERTS = "loans", "alerts"
@@ -67,6 +68,41 @@ def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, 
         raise RuntimeError(f"사후 흐름 없음: {mon['consent_id']}")
     txns = _TRANSACTIONS.validate_python(flow)
     return profile, txns, build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
+
+
+def _collect_pg_flow(
+    deps: Deps, token: str, terms: dict[str, Any], consent_id: str, loan_id: str
+) -> PgFlow | None:
+    """사후 PG 원장을 받아 원본 그대로 저장한다. 실패하면 경고만 남기고 계좌 데이터만으로 재생한다."""
+    try:
+        raw = deps.mock.fetch("pg_flow", token, terms)
+        pg = PgFlow.model_validate(raw)
+    except Exception as e:
+        log.warning("사후 PG 원장 수집 실패(계좌 데이터로 계속): %s %s", loan_id, f"{type(e).__name__}: {e}"[:200])
+        return None
+    deps.raw.put_json(raw_container(consent_id), "pg_flow.json", raw)
+    return pg
+
+
+def _ledger_baseline(
+    deps: Deps, loan: dict[str, Any], pg: PgFlow | None, flow_start: date
+) -> dict[str, Any] | None:
+    """대출 전 8주 원장 기준선. 기준선 구간 주문은 심사 원천(transactions.json)으로 선정산 여부만 본다."""
+    if pg is None:
+        return None
+    prior = deps.raw.get_json(raw_container(loan["underwriting_consent_id"]), "transactions.json") or []
+    lb = ledger_baseline(pg, flow_start, loan["industry"], _TRANSACTIONS.validate_python(prior))
+    return lb.to_dict() if lb is not None else None
+
+
+def _ledger(deps: Deps, loan: dict[str, Any]) -> tuple[PgFlow | None, LedgerBaseline | None]:
+    """저장된 PG 원장과 원장 기준선. 둘 중 하나라도 없으면 계좌 지표만 쓴다(옛 재생 문서 포함)."""
+    mon = loan["monitoring"]
+    raw = deps.raw.get_json(raw_container(mon["consent_id"]), "pg_flow.json")
+    saved = mon.get("ledger_baseline")
+    if raw is None or not saved:
+        return None, None
+    return PgFlow.model_validate(raw), LedgerBaseline.from_dict(saved)
 
 
 def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
@@ -105,6 +141,8 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         "case_ids": [],
         "resumed_at": [],
         "stopped_at": None,
+        "pg": "missing",
+        "ledger_baseline": None,
     }
     loan["updated_at"] = now
     if not deps.store.replace(LOANS, loan, loan.get("_etag")):
@@ -130,17 +168,25 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
                 "foundry_conversations": [],
             },
         )
-        flow = deps.mock.fetch("flow", grant["token"])
+        terms = {
+            "amount_krw": loan["amount_krw"],
+            "installment_krw": round(monthly_installment(loan["amount_krw"], loan["tenor_months"])),
+        }
+        flow = deps.mock.fetch("flow", grant["token"], terms)
         txns = _TRANSACTIONS.validate_python(flow)
         if not txns:
             raise RuntimeError(f"사후 흐름이 비어 있다: {loan_id}")
         deps.raw.put_json(raw_container(consent_id), "flow.json", flow)
         flow_start = min(t.booked_on for t in txns)
-        loan["monitoring"].update(consent_id=consent_id, flow_start=flow_start.isoformat())
-        # 재생마다 원장을 새로 만든다(이전 재생의 납부·미납 판정을 지운다).
-        loan["repayment"] = build_schedule(
-            flow_start, WEEKS * 7, round(monthly_installment(loan["amount_krw"], loan["tenor_months"]))
+        pg = _collect_pg_flow(deps, grant["token"], terms, consent_id, loan_id)
+        loan["monitoring"].update(
+            consent_id=consent_id,
+            flow_start=flow_start.isoformat(),
+            pg="ok" if pg is not None else "missing",
+            ledger_baseline=_ledger_baseline(deps, loan, pg, flow_start),
         )
+        # 재생마다 원장을 새로 만든다(이전 재생의 납부·미납 판정을 지운다). 상환액은 Mock에 넘긴 값과 같아야 한다.
+        loan["repayment"] = build_schedule(flow_start, WEEKS * 7, terms["installment_krw"])
         deps.store.upsert(LOANS, loan)
     except Exception as e:
         # 선점한 문서가 replaying으로 남으면 30분(REPLAY_GUARD) 동안 콘솔·큐가 막힌다. 실패를 기록하고 원래 예외를 다시 던진다
@@ -346,14 +392,16 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     mon["overrides"].update({k: v.value for k, v in overrides.items()})
     baseline = Baseline.from_dict(loan["baseline"])
     cats = categorize(visible, mon["overrides"])
-    rows = weekly_series(visible, cats, start, week, baseline)
-    triggers = detect(rows, baseline)
+    pg, lb = _ledger(deps, loan)
+    obs = observe(visible, cats, start, week, baseline, pg, lb)
+    rows, triggers = obs.rows, obs.triggers
     new = [t for t in triggers if t not in mon["seen_triggers"]]
     entry: dict[str, Any] = {
         "week": week,
         "row": rows[-1],
         "triggers": triggers,
         "new_triggers": new,
+        "candidates": [c.to_dict() for c in obs.candidates],
         "classification": (classification or {}).get("metrics") or (classification or {}).get("error"),
         "projection": projection(rows, visible, cats, baseline, installment_due=_due_list(loan)),
         "investigation": None,
@@ -376,6 +424,9 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             categories=cats,
             mask=mask,
             terms={"amount_krw": loan["amount_krw"], "tenor_months": loan["tenor_months"]},
+            candidates=obs.candidates,
+            pg_weeks=platform_weeks(pg, start, 1, week),
+            ledger_baseline=lb,
         )
         result = investigate(ctx, runner=deps.agents, model=deps.ew_model)
         _remember_foundry(deps, mon["consent_id"], result.conversations, [])
