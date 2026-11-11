@@ -3,11 +3,12 @@
 흐름: monitoring-replay 큐 → handle_replay(모니터링 동의·흐름 수집, 상환 원장, 1주차 메시지 발행)
       → flow.updated(세션=loan_id) → process_week(탐지기 → 새 트리거면 EW 에이전트 → 경보 저장·alert.raised,
         상환 원장 → 안내 발송·납부/미납 판정 → 미납이면 추심 건 저장·repayment.updated)
-      → repayment.updated(세션=loan_id) → run_collections(공정 추심 규칙 안에서 연락·재조정 요청)
-      → restructure-decisions 큐 → handle_restructure_decision(심사역 결정 기록).
+      → repayment.updated(세션=loan_id) → run_collections(추심 에이전트 제안 → 심사역 승인용 제안서. 보내지 않는다)
+      → restructure-decisions 큐 → handle_restructure_decision(kind별 결정: 추심 제안 승인·수정·반려, 재조정 결정).
 EW 경보는 심사역 검토용이고 차주 연락은 미납(추심 건)에서만 한다. alert.raised는 발행만 하고 구독자가 없다.
-주차가 끝나면(미납이면 추심까지) _after_week가 다음 주차로 갈지 정한다. 추심이 재조정 요청을 만들면
-재생은 paused로 멈추고, 심사역 결정 뒤 awaiting_resume에서 resume·stop 요청을 기다린다.
+주차가 끝나면(미납이면 추심 제안까지) _after_week가 다음 주차로 갈지 정한다. 대기 항목(journey.holds: 추심 승인·
+고객 응답·플랜 변경 승인·재조정 결정)이 있으면 재생은 paused(또는 awaiting_customer)로 멈추고, 항목이 모두 끝나면
+awaiting_resume에서 resume·stop 요청을 기다린다. 미납이면 추심 제안이 심사역 승인을 기다리므로 항상 멈춘다.
 Service Bus가 꺼져 있으면(deps.events is None) handle_replay가 같은 처리를 순서대로 직접 한다.
 """
 
@@ -18,9 +19,10 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from agents.collections import CollectionsContext, RepaymentCase, act, remind
+from agents.collections import CollectionsContext, RepaymentCase, act, build_proposal, remind, settle_proposal
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
+from agents.escalation import sim_now
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
@@ -34,11 +36,14 @@ from journey.activities import (
     raw_container,
     schedule_lifecycle,
 )
+from journey.holds import held_status, pending_holds
 from journey.models import (
     CONSENT_TTL_DAYS,
     MONITORING_PURPOSE,
     MONITORING_SCOPES,
+    OFFICER_MESSAGE,
     AlertRaised,
+    CollectionsDecision,
     FlowUpdated,
     REPLAY_HELD,
     RepaymentUpdated,
@@ -114,7 +119,7 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         log.warning("재생 진행 중이라 새 재생 요청 무시: %s", loan_id)
         return None
     if replay_held(loan.get("monitoring")):
-        log.warning("재조정으로 멈춘 재생이 있어 새 재생 요청 무시: %s", loan_id)
+        log.warning("대기 항목으로 멈춘 재생이 있어 새 재생 요청 무시: %s", loan_id)
         return None
     ended = _underwriting_consent_ended(deps, loan)
     if ended:
@@ -138,6 +143,7 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         "error": None,
         "paused_week": None,
         "pause_case_id": None,
+        "holds": [],
         "case_ids": [],
         "resumed_at": [],
         "stopped_at": None,
@@ -316,7 +322,7 @@ WRITE_ATTEMPTS = 3  # 동시 수정(etag 불일치) 때 다시 읽고 판단하�
 
 
 def _after_week(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: str | None) -> str:
-    """주차 처리(미납이면 추심까지) 뒤 "next"|"paused"|"done"을 정한다. 재조정 요청이 생기면 멈춘다.
+    """주차 처리(미납이면 추심 제안까지) 뒤 "next"|"paused"|"done"을 정한다. 대기 항목이 있으면 멈춘다.
 
     지난 주차·지난 재생의 중복 메시지는 processed_week가 이미 앞서 있어 "done"이 된다(다음 주차를 두 번 내지 않는다).
     """
@@ -330,37 +336,44 @@ def _after_week(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: st
         if mon["status"] != "replaying":
             return "done"
         case = deps.store.read(ALERTS, case_id, loan_id) if case_id else None
-        if ((case or {}).get("restructure") or {}).get("status") != "pending_officer":
+        holds = pending_holds(loan, case)  # type: ignore[arg-type]
+        if not holds:
             return "next"
-        mon.update(status="paused", paused_week=week, pause_case_id=case_id)
+        mon.update(status=held_status(holds), paused_week=week, pause_case_id=case_id, holds=holds)
         loan["updated_at"] = deps.clock().isoformat()  # type: ignore[index]
         if deps.store.replace(LOANS, loan, loan.get("_etag")):  # type: ignore[union-attr]
-            # 요청을 읽은 뒤 멈춤을 쓰기 전에 결정이 끝났으면 결정 쪽은 멈춤을 못 봤다. 여기서 재개 대기로 올린다.
-            _promote_if_decided(deps, loan_id, case_id)  # type: ignore[arg-type]
+            # 대기 항목을 읽은 뒤 멈춤을 쓰기 전에 결정이 끝났으면 결정 쪽은 멈춤을 못 봤다. 여기서 다시 계산한다.
+            _refresh_hold(deps, loan_id)
             return "paused"
     log.warning("동시 수정이 이어져 멈춤을 기록하지 못함: %s 주차 %s", loan_id, week)
     return "done"
 
 
-def _promote_if_decided(deps: Deps, loan_id: str, case_id: str) -> None:
-    """이 요청 때문에 멈춘 재생이고 심사역 결정이 끝났으면 재개 대기로 올린다.
+def _refresh_hold(deps: Deps, loan_id: str) -> None:
+    """멈춘(paused·awaiting_customer) 재생의 대기 항목을 다시 계산해 상태를 갱신한다(모두 끝나면 awaiting_resume).
 
     결정 처리와 주차 처리는 각자 자기 쓰기를 마친 뒤 이 함수를 부른다. 어느 순서로 겹쳐도 나중 쪽이 앞쪽의 쓰기를 본다.
     """
     for _ in range(WRITE_ATTEMPTS):
         loan = deps.store.read(LOANS, loan_id, loan_id)
         mon = (loan or {}).get("monitoring") or {}
+        if mon.get("status") not in ("paused", "awaiting_customer"):
+            return
         # pause_alert_id: 미납 추심 배포 전에 멈춘 대출 문서의 키
-        if mon.get("status") != "paused" or (mon.get("pause_case_id") or mon.get("pause_alert_id")) != case_id:
+        case_id = mon.get("pause_case_id") or mon.get("pause_alert_id")
+        case = deps.store.read(ALERTS, case_id, loan_id) if case_id else None
+        if case_id and case is None:
+            log.warning("멈춤 사유 문서가 없어 대기 항목을 갱신하지 않음: %s %s", loan_id, case_id)
             return
-        case = deps.store.read(ALERTS, case_id, loan_id)
-        if ((case or {}).get("restructure") or {}).get("status") not in ("approved", "declined"):
+        holds = pending_holds(loan, case)  # type: ignore[arg-type]
+        status = held_status(holds)
+        if status == mon["status"] and holds == mon.get("holds"):
             return
-        mon["status"] = "awaiting_resume"
+        mon.update(status=status, holds=holds)
         loan["updated_at"] = deps.clock().isoformat()  # type: ignore[index]
         if deps.store.replace(LOANS, loan, loan.get("_etag")):  # type: ignore[union-attr]
             return
-    log.warning("동시 수정이 이어져 재개 대기로 올리지 못함: %s", loan_id)
+    log.warning("동시 수정이 이어져 대기 항목을 갱신하지 못함: %s", loan_id)
 
 
 def _continue(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: str | None) -> None:
@@ -503,15 +516,14 @@ def _repayment_week(
     ev = week_events(led["schedule"], visible, lo, hi)
     by_key = {item_key(s): s for s in led["schedule"]}
     if ev.reminders:
-        cid = f"contacts-{replay_id}"
-        contacts = deps.store.read(ALERTS, cid, loan_id) or {
-            "id": cid, "loan_id": loan_id, "replay_id": replay_id, "contacts": []
-        }
+        contacts = _contacts_doc(deps, loan_id, replay_id)
         for key in ev.reminders:
             item, ref = by_key[key], f"{replay_id}-{key}"
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "reminder"), None)
             if sent is None:
-                sent = remind(ref, contacts["contacts"], reminder_on(date.fromisoformat(item["due_on"])), deps.clock())
+                # 자동 안내는 시뮬레이션 안내일 10:00 KST에 보낸 것으로 보고 공정 연락 규칙을 적용한다.
+                on = reminder_on(date.fromisoformat(item["due_on"]))
+                sent = remind(ref, contacts["contacts"], on, sim_now(on))
                 contacts["contacts"].append(sent)
             item.update(reminded_on=sent["on"], reminder_status=sent["status"])
         deps.store.upsert(ALERTS, contacts)  # 대출 문서보다 먼저: 재시도 때 같은 ref면 다시 보내지 않는다
@@ -534,6 +546,8 @@ def _repayment_week(
                     # 경보 원인은 추심 입력에 그대로 싣는다(스펙 §7.4). 옛 경보 문서엔 없어 None·[]가 된다.
                     "primary_cause": a.get("primary_cause"),
                     "secondary_causes": list(a.get("secondary_causes") or []),
+                    # 확인할 조치는 추심 제안서 근거에 싣는다. 옛 경보 문서엔 없어 None이 된다.
+                    "check_action": a.get("check_action"),
                 }
         deps.store.upsert(
             ALERTS,
@@ -552,6 +566,7 @@ def _repayment_week(
                 "status": "open",
                 "created_at": deps.clock().isoformat(),
                 "collections": None,
+                "proposal": None,
                 "restructure": None,
                 "event_error": None,
             },
@@ -620,36 +635,35 @@ def _week_entry(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[str
     return mon["weeks"][-1]
 
 
+def _contacts_doc(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any]:
+    cid = f"contacts-{replay_id}"
+    return deps.store.read(ALERTS, cid, loan_id) or {"id": cid, "loan_id": loan_id, "replay_id": replay_id, "contacts": []}
+
+
 def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | None:
+    """추심 에이전트 제안을 심사역 승인용 제안서로 저장한다. 아무것도 보내지 않는다(발송은 심사역 결정 뒤)."""
     doc = deps.store.read(ALERTS, case_id, loan_id)
     loan = deps.store.read(LOANS, loan_id, loan_id)
     if doc is None or loan is None or doc.get("kind") != "repayment_case" or doc.get("collections") is not None:
         return None
-    contacts_id = f"contacts-{doc['replay_id']}"
-    contacts = deps.store.read(ALERTS, contacts_id, loan_id) or {
-        "id": contacts_id,
-        "loan_id": loan_id,
-        "replay_id": doc["replay_id"],
-        "contacts": [],
-    }
+    contacts = _contacts_doc(deps, loan_id, doc["replay_id"])["contacts"]
     _, _, mask = _mask_and_flow(deps, loan)
-    ctx = CollectionsContext(case=RepaymentCase.from_doc(doc), contacts=contacts["contacts"], now=deps.clock(), mask=mask)
+    case, now = RepaymentCase.from_doc(doc), deps.clock()
+    ctx = CollectionsContext(case=case, contacts=contacts, now=now, mask=mask)
     result = act(ctx, runner=deps.agents, model=deps.collections_model)
     _remember_foundry(deps, loan["monitoring"]["consent_id"], result.conversations, [])
+    escalation = [c for c in contacts if c.get("by") == "early_warning"]
+    doc["proposal"] = build_proposal(case, result.draft or {}, contacts, now, escalation, mask)
     doc["collections"] = {
         "decision": result.decision,
         "reason": result.reason,
-        "contacts": result.contacts,
+        "contacts": [],
         "record": result.record,
-        "at": deps.clock().isoformat(),
+        "at": now.isoformat(),
     }
-    doc["restructure"] = result.restructure
-    if result.restructure is not None:
-        doc["status"] = "restructure_pending"
-    # 추심 건 문서를 먼저 쓴다: 재시도 시 collections가 있으면 다시 연락하지 않는다(중복 발송 방지).
+    doc["status"] = "proposal_pending"
+    # 재시도 때 collections가 있으면 다시 제안하지 않는다(에이전트를 두 번 부르지 않는다).
     deps.store.upsert(ALERTS, doc)
-    contacts["contacts"].extend(result.contacts)
-    deps.store.upsert(ALERTS, contacts)
     return doc["collections"]
 
 
@@ -667,11 +681,21 @@ def handle_repayment_updated(deps: Deps, body: str) -> dict[str, Any] | None:
 
 
 def handle_restructure_decision(deps: Deps, body: str) -> bool:
+    """restructure-decisions 큐 메시지를 kind별로 처리한다. 반영했으면 True, 버렸으면(중복·형식 오류 등) False."""
     try:
-        msg = RestructureDecision.model_validate_json(body)
+        msg = OFFICER_MESSAGE.validate_json(body)
     except ValidationError as e:
-        log.warning("잘못된 재조정 결정 폐기: %s", e.errors(include_input=False)[:3])
+        log.warning("잘못된 결정 메시지 폐기: %s", e.errors(include_input=False)[:3])
         return False
+    if isinstance(msg, RestructureDecision):
+        return _decide_restructure(deps, msg)
+    if isinstance(msg, CollectionsDecision):
+        return _decide_collections(deps, msg)
+    log.warning("아직 처리하지 않는 결정 종류: %s %s", msg.kind, msg.loan_id)
+    return False
+
+
+def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
     doc = deps.store.read(ALERTS, msg.alert_id, msg.loan_id)
     request = (doc or {}).get("restructure")
     if not request or request.get("status") != "pending_officer":
@@ -683,5 +707,65 @@ def handle_restructure_decision(deps: Deps, body: str) -> bool:
     )
     doc["status"] = f"restructure_{status}"  # type: ignore[index]
     deps.store.upsert(ALERTS, doc)  # type: ignore[arg-type]
-    _promote_if_decided(deps, msg.loan_id, msg.alert_id)
+    _refresh_hold(deps, msg.loan_id)
     return True
+
+
+def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
+    """추심 제안 승인·수정·반려. 추심 건 문서(제안·상태·재조정 요청)를 먼저 쓰고 연락을 기록한 뒤 대기 항목을 갱신한다.
+
+    제안이 대기 중이 아니면(큐 재전달·이미 결정) 아무것도 하지 않는다. 결정 오류(금지 표현 등)면 문서를 바꾸지 않는다.
+    """
+    for _ in range(WRITE_ATTEMPTS):
+        doc = deps.store.read(ALERTS, msg.case_id, msg.loan_id)
+        if (doc or {}).get("kind") != "repayment_case" or ((doc or {}).get("proposal") or {}).get("status") != "pending_officer":
+            log.warning("대기 중인 추심 제안 없음: %s", msg.case_id)
+            return False
+        settled = settle_proposal(
+            doc["proposal"],  # type: ignore[index]
+            msg.decision,
+            text=msg.text,
+            include_hardship=msg.include_hardship,
+            reason=msg.reason,
+            contacts=_contacts_doc(deps, msg.loan_id, doc["replay_id"])["contacts"],  # type: ignore[index]
+            now=deps.clock(),
+            officer_id=msg.officer_id,
+            case=RepaymentCase.from_doc(doc),  # type: ignore[arg-type]
+        )
+        if settled.errors:
+            log.warning("추심 결정 반영 불가: %s %s", msg.case_id, settled.errors)
+            return False
+        doc["proposal"] = settled.proposal  # type: ignore[index]
+        if settled.restructure is not None:
+            doc["restructure"] = settled.restructure  # type: ignore[index]
+            doc["status"] = "restructure_pending"  # type: ignore[index]
+        elif settled.contact is None:
+            doc["status"] = "rejected"  # type: ignore[index]
+        else:
+            doc["status"] = "contacted" if settled.contact["status"] == "sent" else "deferred"  # type: ignore[index]
+        # 문서를 먼저 쓴다: 같은 결정이 다시 와도 제안이 이미 결정돼 연락을 두 번 남기지 않는다.
+        if deps.store.replace(ALERTS, doc, doc.get("_etag")):  # type: ignore[union-attr]
+            break
+    else:
+        log.warning("동시 수정이 이어져 추심 결정을 기록하지 못함: %s", msg.case_id)
+        return False
+    if settled.contact is not None:
+        _append_contact(deps, msg.loan_id, doc["replay_id"], settled.contact)
+    _refresh_hold(deps, msg.loan_id)
+    return True
+
+
+def _append_contact(deps: Deps, loan_id: str, replay_id: str, contact: dict[str, Any]) -> None:
+    for _ in range(WRITE_ATTEMPTS):
+        doc = deps.store.read(ALERTS, f"contacts-{replay_id}", loan_id)
+        if doc is None:
+            deps.store.upsert(
+                ALERTS, {"id": f"contacts-{replay_id}", "loan_id": loan_id, "replay_id": replay_id, "contacts": [contact]}
+            )
+            return
+        if any(c.get("ref") == contact["ref"] and c.get("by") == contact["by"] for c in doc["contacts"]):
+            return
+        doc["contacts"].append(contact)
+        if deps.store.replace(ALERTS, doc, doc.get("_etag")):
+            return
+    log.warning("동시 수정이 이어져 연락 기록을 남기지 못함: %s %s", loan_id, contact["ref"])

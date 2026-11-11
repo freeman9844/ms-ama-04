@@ -3,9 +3,19 @@
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    Tag,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 KST = timezone(timedelta(hours=9), "KST")
 APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
@@ -39,8 +49,9 @@ def next_wake(now: datetime, target: datetime) -> datetime:
     return max(now, min(target, now + MAX_TIMER))
 
 
-# 재조정 요청으로 멈춘 재생. 새 재생(start)이 이 재생을 덮지 않게 막고, resume·stop만 받는다.
-REPLAY_HELD = frozenset({"paused", "awaiting_resume"})
+# 대기 항목(추심 승인·고객 응답·플랜 변경 승인·재조정 결정)으로 멈춘 재생. 새 재생(start)이 이 재생을 덮지 않게 막는다.
+# paused·awaiting_customer는 대기 항목이 끝나기를, awaiting_resume은 resume·stop을 기다린다.
+REPLAY_HELD = frozenset({"paused", "awaiting_resume", "awaiting_customer"})
 
 
 def replay_held(monitoring: Mapping[str, Any] | None) -> bool:
@@ -163,15 +174,87 @@ class RepaymentUpdated(BaseModel):
 
 
 class RestructureDecision(BaseModel):
-    """restructure-decisions 큐 메시지. 재조정 상담 요청에 대한 심사역 결정."""
+    """restructure-decisions 큐 메시지. 재조정 상담 요청에 대한 심사역 결정(kind가 없는 옛 메시지도 이것이다)."""
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["restructure"] = "restructure"
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
     alert_id: str = Field(min_length=1, max_length=128)
     decision: Literal["approve", "decline"]
     officer_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(default="", max_length=500)
+
+
+class CollectionsDecision(BaseModel):
+    """추심 제안에 대한 심사역 결정(승인·수정·반려). 수정이면 text·include_hardship을 쓴다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["collections"]
+    loan_id: str = Field(pattern=LOAN_ID_PATTERN)
+    case_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["approve", "modify", "reject"]
+    officer_id: str = Field(min_length=1, max_length=64)
+    text: str | None = Field(default=None, max_length=300)
+    include_hardship: bool | None = None
+    reason: str = Field(default="", max_length=500)
+
+
+class PlanChoice(BaseModel):
+    """셀프 상환 플랜 제안에 대한 고객 선택."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["plan_choice"]
+    loan_id: str = Field(pattern=LOAN_ID_PATTERN)
+    offer_id: str = Field(min_length=1, max_length=128)
+    option: Literal["move", "split", "keep"]
+
+
+class PlanDecision(BaseModel):
+    """고객이 고른 플랜 변경 요청에 대한 심사역 결정."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["plan_change"]
+    loan_id: str = Field(pattern=LOAN_ID_PATTERN)
+    change_id: str = Field(min_length=1, max_length=128)
+    decision: Literal["approve", "decline"]
+    officer_id: str = Field(min_length=1, max_length=64)
+    reason: str = Field(default="", max_length=500)
+
+
+class OfferExpire(BaseModel):
+    """심사역의 "고객 응답 없이 계속": 열린 플랜 제안을 닫는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["offer_expire"]
+    loan_id: str = Field(pattern=LOAN_ID_PATTERN)
+    offer_id: str = Field(min_length=1, max_length=128)
+    officer_id: str = Field(min_length=1, max_length=64)
+
+
+def _message_kind(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return value.get("kind", "restructure")
+    return getattr(value, "kind", "restructure")
+
+
+# restructure-decisions 큐 메시지(kind로 가른다. kind가 없으면 옛 재조정 결정).
+OFFICER_MESSAGE: TypeAdapter[
+    RestructureDecision | CollectionsDecision | PlanChoice | PlanDecision | OfferExpire
+] = TypeAdapter(
+    Annotated[
+        Annotated[RestructureDecision, Tag("restructure")]
+        | Annotated[CollectionsDecision, Tag("collections")]
+        | Annotated[PlanChoice, Tag("plan_choice")]
+        | Annotated[PlanDecision, Tag("plan_change")]
+        | Annotated[OfferExpire, Tag("offer_expire")],
+        Discriminator(_message_kind),
+    ]
+)
 
 
 class LifecycleStart(BaseModel):
