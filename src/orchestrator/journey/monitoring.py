@@ -24,7 +24,7 @@ from agents.early_warning import EwContext, investigate
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
-from agents.repayment import build_schedule, reminder_on, week_events
+from agents.repayment import build_schedule, item_amount, item_key, reminder_on, week_events
 from journey.activities import (
     _TRANSACTIONS,
     ENDED_CONSENT,
@@ -395,13 +395,14 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     pg, lb = _ledger(deps, loan)
     obs = observe(visible, cats, start, week, baseline, pg, lb)
     rows, triggers = obs.rows, list(obs.triggers)
-    proj = projection(rows, visible, cats, baseline, installment_due=_due_list(loan))
+    due_amounts = _due_list(loan)
+    proj = projection(rows, visible, cats, baseline, installment_due=due_amounts)
     if led := loan.get("repayment"):
         fields = due_check(proj, led["schedule"], led["installment_krw"], hi)
         rows[-1].update(fields)
         if "due_balance" in fields:
-            item = next(s for s in led["schedule"] if s["due_on"] == fields["next_due_on"])
-            if fields["due_balance"] < (item.get("amount_krw") or led["installment_krw"]):
+            due_total = (due_amounts or {}).get(date.fromisoformat(fields["next_due_on"]), 0)
+            if fields["due_balance"] < due_total:
                 triggers.append("due_shortfall")
     new = [t for t in triggers if t not in mon["seen_triggers"]]
     entry: dict[str, Any] = {
@@ -480,7 +481,7 @@ def _due_list(loan: dict[str, Any]) -> dict[date, int] | None:
     for s in led["schedule"]:
         if s["status"] == "scheduled":
             d = date.fromisoformat(s["due_on"])
-            out[d] = out.get(d, 0) + (s.get("amount_krw") or led["installment_krw"])
+            out[d] = out.get(d, 0) + item_amount(s, led["installment_krw"])
     return out
 
 
@@ -500,25 +501,25 @@ def _repayment_week(
     if not led:
         return
     ev = week_events(led["schedule"], visible, lo, hi)
-    by_no = {s["no"]: s for s in led["schedule"]}
+    by_key = {item_key(s): s for s in led["schedule"]}
     if ev.reminders:
         cid = f"contacts-{replay_id}"
         contacts = deps.store.read(ALERTS, cid, loan_id) or {
             "id": cid, "loan_id": loan_id, "replay_id": replay_id, "contacts": []
         }
-        for no in ev.reminders:
-            item, ref = by_no[no], f"{replay_id}-i{no}"
+        for key in ev.reminders:
+            item, ref = by_key[key], f"{replay_id}-{key}"
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "reminder"), None)
             if sent is None:
                 sent = remind(ref, contacts["contacts"], reminder_on(date.fromisoformat(item["due_on"])), deps.clock())
                 contacts["contacts"].append(sent)
             item.update(reminded_on=sent["on"], reminder_status=sent["status"])
         deps.store.upsert(ALERTS, contacts)  # 대출 문서보다 먼저: 재시도 때 같은 ref면 다시 보내지 않는다
-    for no, txn_id in ev.paid:
-        by_no[no].update(status="paid", txn_id=txn_id)
+    for key, txn_id in ev.paid:
+        by_key[key].update(status="paid", txn_id=txn_id)
     mon = loan["monitoring"]
-    for no in ev.missed:  # 30일 주기라 한 주에 최대 하나
-        item, case_id = by_no[no], f"rc-{replay_id}-i{no}"
+    for key in ev.missed:  # 30일 주기라 한 주에 최대 하나
+        item, case_id = by_key[key], f"rc-{replay_id}-{key}"
         item.update(status="missed", case_id=case_id)
         recent = None
         if mon["alert_ids"]:
@@ -544,7 +545,8 @@ def _repayment_week(
                 "replay_id": replay_id,
                 "week": week,
                 "as_of": item["due_on"],
-                "installment": {"no": no, "due_on": item["due_on"], "amount_krw": led["installment_krw"]},
+                "installment": {"no": item["no"], "due_on": item["due_on"],
+                                "amount_krw": item_amount(item, led["installment_krw"])},
                 "missed_count": sum(s["status"] == "missed" for s in led["schedule"]),
                 "recent_alert": recent,
                 "status": "open",
@@ -556,7 +558,12 @@ def _repayment_week(
         )
         mon.setdefault("case_ids", []).append(case_id)
         entry["case_id"] = case_id
-    entry["repayment"] = {"reminders": list(ev.reminders), "paid": [n for n, _ in ev.paid], "missed": list(ev.missed)}
+    # 주차 기록은 회차 번호로 남긴다(옛 주차 기록과 같은 형태).
+    entry["repayment"] = {
+        "reminders": [by_key[k]["no"] for k in ev.reminders],
+        "paid": [by_key[k]["no"] for k, _ in ev.paid],
+        "missed": [by_key[k]["no"] for k in ev.missed],
+    }
 
 
 def _publish_alert(deps: Deps, loan_id: str, alert_id: str) -> None:

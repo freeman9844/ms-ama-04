@@ -221,6 +221,16 @@ def test_due_check_uses_item_amount_and_earliest_scheduled():
     assert due_check(proj, sched, 1_170_000, date(2026, 11, 29)) == {"next_due_on": "2026-12-02", "due_balance": 300_000}
 
 
+def test_due_check_adds_back_every_item_due_that_day():
+    proj = {"path": [{"date": "2026-12-02", "balance": -100_000}]}
+    sched = [
+        {"no": 2, "part": 1, "due_on": "2026-12-02", "status": "scheduled", "amount_krw": 400_000},
+        {"no": 3, "due_on": "2026-12-02", "status": "scheduled"},
+        {"no": 1, "due_on": "2026-12-02", "status": "paid"},
+    ]
+    assert due_check(proj, sched, 1_000_000, date(2026, 11, 29)) == {"next_due_on": "2026-12-02", "due_balance": 1_300_000}
+
+
 def test_due_check_outside_horizon_has_no_balance():
     proj = {"path": [{"date": "2026-12-01", "balance": 5}]}
     sched = [{"no": 1, "due_on": "2027-01-01", "status": "scheduled"}]

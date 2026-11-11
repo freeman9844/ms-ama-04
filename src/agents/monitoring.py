@@ -9,7 +9,7 @@
 - 정산 프로필에 예정 출금 일정(forecast.outflow_schedule)이 있으면 주차마다 4주 잔고 전망을 계산해
   projected_min_balance·projected_min_date·shortfall_date를 주차 행에 넣는다(스펙 §12.2). 최저 잔고가 0 아래면 projected_shortfall.
 - 상환 원장이 있으면 오케스트레이터가 due_check로 다음 상환일(next_due_on)과 출금 직전 예상 잔고(due_balance)를
-  주차 행에 넣고, 그 잔고가 회차 금액보다 적으면 due_shortfall을 더한다.
+  주차 행에 넣고, 그 잔고가 그날 예정 회차 금액 합보다 적으면 due_shortfall을 더한다.
 - 탐지기는 결정적 규칙이다. 남는 오탐(명절 이동 등)을 거르는 일은 Early-Warning 에이전트의 몫이다(스펙 §3.3).
 - 자체 대출금 입금(LENDER_CREDIT)과 선정산 선지급은 loan_proceeds에서 빼고 advance_in으로 따로 센다(스펙 §5.5).
   원장 트리거 4개와 주간 원장 필드는 `agents/ledger_monitor.py`가 채운다(detect는 기존 5개만 본다).
@@ -25,6 +25,7 @@ from typing import Any
 from agents.classify import Category, classify
 from agents.features import DAYS_PER_MONTH, OPERATING_OUT
 from agents.forecast import outflow_schedule, project, summarize
+from agents.repayment import item_amount
 from agents.settlement import expected_payouts, payer_of, settlement_profile
 from shared.contracts import Transaction
 from shared.repayment import LENDER_CREDIT
@@ -206,19 +207,20 @@ def projection(
 def due_check(
     projection: Mapping[str, Any] | None, schedule: Sequence[Mapping[str, Any]], installment_krw: int, after: date
 ) -> dict[str, Any]:
-    """after 다음 첫 예정(scheduled) 회차의 상환일과 출금 직전 예상 잔고. 전망 path는 그날 상환액을 이미 뺐으므로
-    회차 금액을 더해 되돌린다. 상환일이 전망 기간 밖이면 due_balance가 없고, 남은 예정 회차가 없으면 {}."""
+    """after 다음 첫 예정(scheduled) 회차의 상환일과 출금 직전 예상 잔고. 전망 path는 그날 예정 회차 금액을
+    모두 뺐으므로(같은 날 회차는 합산) 그 합을 더해 되돌린다. 상환일이 전망 기간 밖이면 due_balance가 없고,
+    남은 예정 회차가 없으면 {}."""
     upcoming = sorted(
         (s for s in schedule if s["status"] == "scheduled" and date.fromisoformat(s["due_on"]) > after),
         key=lambda s: s["due_on"],
     )
     if not upcoming:
         return {}
-    item = upcoming[0]
-    out: dict[str, Any] = {"next_due_on": item["due_on"]}
-    balance = next((p["balance"] for p in (projection or {}).get("path") or [] if p["date"] == item["due_on"]), None)
+    due_on = upcoming[0]["due_on"]
+    out: dict[str, Any] = {"next_due_on": due_on}
+    balance = next((p["balance"] for p in (projection or {}).get("path") or [] if p["date"] == due_on), None)
     if balance is not None:
-        out["due_balance"] = balance + (item.get("amount_krw") or installment_krw)
+        out["due_balance"] = balance + sum(item_amount(s, installment_krw) for s in upcoming if s["due_on"] == due_on)
     return out
 
 

@@ -868,6 +868,15 @@ def test_due_shortfall_trigger_fires_when_due_balance_below_installment(mock_app
     assert "due_shortfall" in entry["new_triggers"] and entry["investigation"]
 
 
+def test_due_shortfall_ignores_due_date_without_scheduled_items(mock_app, monkeypatch):
+    monkeypatch.setattr(monitoring_module, "due_check", lambda *a: {"next_due_on": "2026-12-25", "due_balance": 1})
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    entry = loan(deps)["monitoring"]["weeks"][0]
+    assert entry["row"]["due_balance"] == 1 and "due_shortfall" not in entry["triggers"]
+
+
 def test_week_row_records_next_due_and_pre_debit_balance(mock_app):
     deps = make_deps(mock_app)
     approved_loan(deps)
