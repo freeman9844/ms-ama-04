@@ -270,6 +270,18 @@ def test_reviewer_sees_checks_with_evidence(cases):
     assert "check_verdicts" in REVIEWER_OUTPUT_SCHEMA["required"]
 
 
+def test_reviewer_gets_full_seasonal_index_when_claim_cites_index(cases):
+    ctx = context(cases)
+    month = ctx.monthly[0]["month"]
+    claim = {"text": "계절 지수가 가장 낮은 달이다.", "metric_ids": [f"S:{month}:index"], "txn_ids": []}
+    payload = json.loads(_reviewer_input(ctx, draft(claims=[claim])).split("\n", 1)[1])
+    series = payload["seasonal_index"]
+    assert "1.0" in series["basis"]
+    assert series["months"] == {r["month"]: ctx.catalog[f"S:{r['month']}:index"] for r in ctx.monthly}
+    plain = json.loads(_reviewer_input(ctx, draft()).split("\n", 1)[1])
+    assert "seasonal_index" not in plain
+
+
 def test_supported_check_is_kept_with_verdict(cases):
     result = run_assess(context(cases), FakeRunner([WITH_CHECK], [CHECK_OK]))
     assert result.assessment.review.passed and result.assessment.officer_checks[0].supported is True
