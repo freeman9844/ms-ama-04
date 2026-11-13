@@ -629,7 +629,7 @@ def test_restructure_decision_requires_pending_request(mock_app):
     handle_repayment_updated(deps, outbox.bodies(TOPIC_REPAYMENT)[0])
     assert loan(deps)["monitoring"]["status"] == "paused"
     assert handle_restructure_decision(deps, json.dumps(decision)) is False  # 추심 승인 전에는 재조정 요청이 없다
-    assert decide_collections(deps, case_id) is True
+    assert decide_collections(deps, case_id, include_hardship=True) is True
     mon = loan(deps)["monitoring"]
     assert (mon["status"], mon["holds"]) == ("paused", ["restructure"])
     assert handle_restructure_decision(deps, json.dumps(decision)) is True
@@ -666,7 +666,7 @@ def test_week13_case_is_decidable_after_completion(mock_app):
     last = cases(deps)[-1]
     assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
     assert last["week"] == WEEKS and last["proposal"]["status"] == "pending_officer"
-    assert decide_collections(deps, last["case_id"]) is True
+    assert decide_collections(deps, last["case_id"], include_hardship=True) is True
     assert deps.store.read(ALERTS, last["case_id"], LOAN)["restructure"]["status"] == "pending_officer"
     assert decide_restructure(deps, last["case_id"]) is True
     assert deps.store.read(ALERTS, last["case_id"], LOAN)["restructure"]["status"] == "approved"
@@ -681,7 +681,7 @@ def test_legacy_pause_alert_id_still_promotes(mock_app):
     doc["monitoring"].pop("holds")
     doc["monitoring"]["pause_alert_id"] = case_id
     deps.store.upsert(LOANS, doc)
-    assert decide_collections(deps, case_id) is True
+    assert decide_collections(deps, case_id, include_hardship=True) is True
     assert loan(deps)["monitoring"]["status"] == "paused"  # 재조정 상담이 들어 있어 재조정 결정까지 멈춘다
     assert decide_restructure(deps, case_id, "decline") is True
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
@@ -772,7 +772,7 @@ def test_inline_replay_pauses_on_restructure_request_and_resumes(mock_app):
     assert replay(deps) is None  # 멈춘 재생을 새 재생이 덮지 않는다
     assert replay(deps, action="resume", replay_id=replay_id) is None  # 결정 전에는 재개할 수 없다
     assert process_week(deps, LOAN, replay_id, 6) is None  # 멈춘 동안 들어온 주차 메시지는 무시
-    assert decide_collections(deps, mon["pause_case_id"]) is True
+    assert decide_collections(deps, mon["pause_case_id"], include_hardship=True) is True
     assert replay(deps, action="resume", replay_id=replay_id) is None  # 재조정 결정 전에도 재개할 수 없다
     assert decide_restructure(deps, mon["pause_case_id"], "decline") is True
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
@@ -837,7 +837,7 @@ def test_decision_landing_between_pause_check_and_pause_write_still_awaits_resum
     deps, replay_id = paused_inline(mock_app)
     doc = loan(deps)
     case_id = doc["monitoring"]["pause_case_id"]
-    assert decide_collections(deps, case_id) is True  # 재조정 상담이 들어 있어 재조정 요청이 대기 중이다
+    assert decide_collections(deps, case_id, include_hardship=True) is True  # 재조정 상담이 들어 있어 재조정 요청이 대기 중이다
     doc = loan(deps)
     doc["monitoring"].update(status="replaying", paused_week=None, pause_case_id=None, holds=[])
     deps.store.upsert(LOANS, doc)
@@ -866,7 +866,7 @@ def test_restructure_decision_for_other_alert_does_not_unpause(mock_app):
     doc = loan(deps)
     doc["monitoring"]["pause_case_id"] = "rc-elsewhere"
     deps.store.upsert(LOANS, doc)
-    assert decide_collections(deps, case_id) is True
+    assert decide_collections(deps, case_id, include_hardship=True) is True
     assert decide_restructure(deps, case_id) is True
     mon = loan(deps)["monitoring"]
     assert mon["status"] == "paused" and mon["holds"][0] == "collections_proposal"
@@ -928,7 +928,7 @@ def test_contact_write_conflicts_raise_so_redelivery_repairs(mock_app, monkeypat
 def test_redelivered_restructure_decision_repairs_hold(mock_app, monkeypatch):
     deps, _ = paused_inline(mock_app)
     case_id = loan(deps)["monitoring"]["pause_case_id"]
-    assert decide_collections(deps, case_id) is True
+    assert decide_collections(deps, case_id, include_hardship=True) is True
     fail_once(monkeypatch, "_refresh_hold")
     with pytest.raises(RuntimeError):
         decide_restructure(deps, case_id)
@@ -1006,10 +1006,21 @@ def test_reject_sends_nothing_and_awaits_resume(mock_app):
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
 
 
+def test_approve_sends_text_only_and_skips_restructure_by_default(mock_app):
+    deps, replay_id = paused_inline(mock_app)
+    case_id = loan(deps)["monitoring"]["pause_case_id"]
+    assert deps.store.read(ALERTS, case_id, LOAN)["proposal"]["hardship"]
+    assert decide_collections(deps, case_id) is True
+    doc = deps.store.read(ALERTS, case_id, LOAN)
+    assert doc["restructure"] is None and doc["status"] == "contacted"
+    assert [c["script_id"] for c in officer_contacts(deps, replay_id)] == ["hardship_offer"]
+    assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
 def test_approve_with_hardship_waits_for_restructure(mock_app):
     deps, replay_id = paused_inline(mock_app)
     case_id = loan(deps)["monitoring"]["pause_case_id"]
-    assert decide_collections(deps, case_id) is True
+    assert decide_collections(deps, case_id, include_hardship=True) is True
     doc = deps.store.read(ALERTS, case_id, LOAN)
     assert doc["status"] == "restructure_pending" and doc["restructure"]["request_id"] == f"rs-{case_id}"
     assert doc["restructure"]["status"] == "pending_officer"
@@ -1044,7 +1055,7 @@ def test_officer_approval_at_night_is_deferred_but_decided(mock_app):
 def test_legacy_restructure_message_without_kind_still_decides(mock_app):
     deps, _ = paused_inline(mock_app)
     case_id = loan(deps)["monitoring"]["pause_case_id"]
-    assert decide_collections(deps, case_id) is True
+    assert decide_collections(deps, case_id, include_hardship=True) is True
     body = {"loan_id": LOAN, "alert_id": case_id, "decision": "approve", "officer_id": "officer-1", "reason": "유예"}
     assert "kind" not in body
     assert handle_restructure_decision(deps, json.dumps(body)) is True

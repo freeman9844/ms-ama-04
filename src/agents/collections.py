@@ -466,15 +466,14 @@ def settle_proposal(
     if proposal.get("status") != "pending_officer":
         return Settled(unchanged, None, None, ["이미 결정된 제안입니다."])
     reason = (reason or "").strip()
-    hardship = proposal.get("hardship")
+    # 재조정 상담은 에이전트 권고일 뿐, 심사역이 명시적으로 포함할 때만 요청을 만든다(기본은 문구만 발송).
+    hardship = proposal.get("hardship") if include_hardship is True else None
+    if include_hardship is True and not hardship and decision in ("approve", "modify"):
+        return Settled(unchanged, None, None, ["제안에 재조정 상담이 없어 포함할 수 없습니다."])
     if decision == "approve":
         send_text = str(proposal.get("text") or "")
     elif decision == "modify":
         send_text = text or ""
-        if include_hardship is False:
-            hardship = None
-        elif include_hardship and not hardship:
-            return Settled(unchanged, None, None, ["제안에 재조정 상담이 없어 포함할 수 없습니다."])
     elif decision == "reject":
         if not reason:
             return Settled(unchanged, None, None, ["반려 사유를 입력해 주세요."])

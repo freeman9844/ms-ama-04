@@ -602,7 +602,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 return loan_page(user, loan, 422, error="고객 문구를 보낼 수 없습니다: " + " ".join(issues))
         if decision == "reject" and not reason:
             return loan_page(user, loan, 422, error="반려 사유를 입력해야 합니다.")
-        include = form.get("include_hardship") == "1" if decision == "modify" and proposal.get("hardship") else None
+        include = form.get("include_hardship") == "1" if decision in ("approve", "modify") and proposal.get("hardship") else None
         try:
             message = CollectionsDecision(
                 kind="collections", loan_id=loan["id"], case_id=case_id, decision=decision,

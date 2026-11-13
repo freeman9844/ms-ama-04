@@ -437,7 +437,8 @@ def test_proposal_card_shows_actions_evidence_checks_and_exact_text(setup, mask)
         assert s in card, s
     assert case["proposal"]["text"] in card and "✔" in card
     assert f'action="{PROPOSAL_PATH}"' in card and 'value="modify"' in card and 'value="reject"' in card
-    assert 'name="include_hardship" value="1" checked' in card and 'maxlength="300"' in card
+    assert 'name="include_hardship" value="1">' in card and 'maxlength="300"' in card
+    assert 'name="include_hardship" value="1" checked' not in card
     # 고객 문구에는 실명 토큰이 없고, 이유는 심사역에게만 복원된다.
     assert "[[PERSON_" not in card
     auditor = client.get("/loans/app-1", headers=AUDITOR_H).text
@@ -458,7 +459,10 @@ def test_proposal_approve_queues_collections_decision(setup, mask):
     assert r.status_code == 202, r.text
     assert queue.sent == [(RESTRUCTURE_QUEUE, {
         "kind": "collections", "loan_id": "app-1", "case_id": "rc-rp-1-i1", "decision": "approve",
-        "officer_id": "oid-officer", "text": None, "include_hardship": None, "reason": "규칙대로"})]
+        "officer_id": "oid-officer", "text": None, "include_hardship": True, "reason": "규칙대로"})]
+    form = {"csrf": csrf(client), "decision": "approve"}
+    assert client.post(PROPOSAL_PATH, data=form, headers=OFFICER).status_code == 202
+    assert queue.sent[-1][1]["include_hardship"] is False
 
 
 def test_proposal_modify_sends_text_and_hardship_choice(setup, mask):

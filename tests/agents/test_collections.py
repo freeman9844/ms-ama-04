@@ -318,8 +318,11 @@ def test_approve_sends_exact_text_with_officer():
     assert "sent_text" not in s.proposal and P["status"] == "pending_officer"
 
 
-def test_approve_with_hardship_creates_restructure_request():
-    s = settle_proposal(P_HARDSHIP, "approve", text=None, include_hardship=None, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
+def test_approve_sends_text_only_unless_officer_includes_hardship():
+    plain = settle_proposal(P_HARDSHIP, "approve", text=None, include_hardship=None, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
+    assert plain.restructure is None and plain.contact["script_id"] == "hardship_offer"
+    assert plain.proposal["status"] == "approved"
+    s = settle_proposal(P_HARDSHIP, "approve", text=None, include_hardship=True, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
     assert s.restructure == {"request_id": "rs-rc-r-i3", "category": "revenue_shock", "note": "정산 보류로 매출 감소",
                              "status": "pending_officer", "created_at": DAY.isoformat()}
 
@@ -336,8 +339,10 @@ def test_modify_can_drop_hardship():
     assert s.proposal["status"] == "modified" and s.proposal["sent_text"] == "고객님, 안내드립니다."
 
 
-def test_modify_keeps_hardship_by_default_and_cannot_add_one():
-    kept = settle_proposal(P_HARDSHIP, "modify", text="고객님, 안내드립니다.", include_hardship=None, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
+def test_modify_drops_hardship_by_default_and_cannot_add_one():
+    plain = settle_proposal(P_HARDSHIP, "modify", text="고객님, 안내드립니다.", include_hardship=None, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
+    assert plain.restructure is None and plain.contact is not None
+    kept = settle_proposal(P_HARDSHIP, "modify", text="고객님, 안내드립니다.", include_hardship=True, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
     assert kept.restructure["category"] == "revenue_shock"
     added = settle_proposal(P, "modify", text="고객님, 안내드립니다.", include_hardship=True, reason="", contacts=[], now=DAY, officer_id="o", case=CASE)
     assert added.errors and added.contact is None and added.proposal["status"] == "pending_officer"

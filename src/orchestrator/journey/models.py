@@ -187,7 +187,10 @@ class RestructureDecision(BaseModel):
 
 
 class CollectionsDecision(BaseModel):
-    """추심 제안에 대한 심사역 결정(승인·수정·반려). 수정이면 text·include_hardship을 쓴다."""
+    """추심 제안에 대한 심사역 결정(승인·수정·반려). 수정이면 text를 쓴다.
+
+    include_hardship이 True일 때만 재조정 상담 요청을 만든다(승인·수정 공통, 기본은 문구만 발송).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
