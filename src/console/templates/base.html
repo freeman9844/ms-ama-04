@@ -1,35 +1,36 @@
 <!doctype html>
-<html lang="ko">
+<html lang="{{ locale() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
 {% block head %}{% endblock %}
-<title>{% block title %}AMA Lending 심사 콘솔{% endblock %}</title>
+<title>{% block title %}AMA Lending {{ _("심사 콘솔") }}{% endblock %}</title>
 <link rel="stylesheet" href="/static/console.css">
 <script src="{{ htmx_src }}" integrity="{{ htmx_sri }}" crossorigin="anonymous"></script>
 </head>
 <body>
 <div class="shell">
 <aside class="sidebar">
-  <a class="brand" href="/">AMA Lending <small>심사 콘솔</small></a>
-  <nav aria-label="주 메뉴">
+  <a class="brand" href="/">AMA Lending <small>{{ _("심사 콘솔") }}</small></a>
+  <nav aria-label="{{ _('주 메뉴') }}">
     <ul>
-      <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="/">신청</a></li>
-      <li class="n-loans{% if nav == 'loans' %} active{% endif %}"><a href="/loans">사후 모니터링</a></li>
-      <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="/grievances">이의제기</a></li>
-      <li class="n-borrower{% if nav == 'borrower' %} active{% endif %}"><a href="/borrower">차주 시뮬레이터</a></li>
-      <li class="n-ops{% if nav == 'ops' %} active{% endif %}"><a href="/ops">운영 지표</a></li>
+      <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="/">{{ _("신청") }}</a></li>
+      <li class="n-loans{% if nav == 'loans' %} active{% endif %}"><a href="/loans">{{ _("사후 모니터링") }}</a></li>
+      <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="/grievances">{{ _("이의제기") }}</a></li>
+      <li class="n-borrower{% if nav == 'borrower' %} active{% endif %}"><a href="/borrower">{{ _("차주 시뮬레이터") }}</a></li>
+      <li class="n-ops{% if nav == 'ops' %} active{% endif %}"><a href="/ops">{{ _("운영 지표") }}</a></li>
     </ul>
   </nav>
   <div class="who">
     <span class="who-name">{{ user.name }}</span>
     <span class="who-roles">{{ user.roles|sort|join(", ") }}</span>
-    {% if not demo %}<a href="/.auth/logout">로그아웃</a>{% endif %}
+    {% if not demo %}<a href="/.auth/logout">{{ _("로그아웃") }}</a>{% endif %}
+    {% include "_lang.html" %}
   </div>
 </aside>
 <div class="content">
-{% if demo %}<p class="demo-banner">데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.</p>{% endif %}
+{% if demo %}<p class="demo-banner">{{ _("데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.") }}</p>{% endif %}
 <main>
 {% block main %}{% endblock %}
 </main>

@@ -7,6 +7,9 @@ import math
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from console import i18n
+from console.i18n import _
+
 PAD_L, PAD_R, PAD_T, PAD_B = 56, 48, 10, 26
 GAUGE_ARC = "M 10 64 A 50 50 0 0 1 110 64"
 
@@ -31,6 +34,18 @@ def _plain(v: float) -> str:
     return f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}"
 
 
+def won(v: Any) -> str:
+    """금액 표시(원). 영문은 ₩ 앞붙임."""
+    return _("%(n)s원", n=f"{v:,.0f}") if is_num(v) else "-"
+
+
+def man_won(v: Any) -> str:
+    """만 원 단위로 반올림해 둔 값의 표시. 영문은 원 단위로 풀어 쓴다."""
+    if not is_num(v):
+        return "-"
+    return f"₩{v * 10_000:,.0f}" if i18n.current() == "en" else _("%(n)s만", n=f"{v:,}")
+
+
 def _top(values: Sequence[float], vmax: Any) -> float:
     top = float(vmax) if is_num(vmax) and vmax > 0 else max(values, default=0.0)
     return top if top > 0 else 1.0
@@ -44,7 +59,7 @@ def donut(segments: Sequence[Segment], r: float = 46.0) -> dict[str, Any]:
     """도넛 호. 0·음수·결측 값은 건너뛴다. 호는 `rotate(-90)`으로 12시 방향에서 시작한다."""
     c = 2 * math.pi * r
     kept = [(label, v, color) for label, v, color in segments if _pos(v) > 0]
-    total = sum(v for _, v, _ in kept)
+    total = sum(v for _label, v, _color in kept)
     arcs, acc = [], 0.0
     for label, v, color in kept:
         dash = c * v / total
@@ -58,7 +73,7 @@ def hbars(items: Sequence[Segment], width: int = 360, label_w: int = 104, row: i
           bar: int = 16) -> dict[str, Any]:
     """가로 막대. 최댓값 기준 비율이고, 최댓값이 0이면 모든 막대 너비가 0이다."""
     span = width - label_w - 48
-    vals = [_pos(v) for _, v, _ in items]
+    vals = [_pos(v) for _label, v, _color in items]
     vmax = max(vals, default=0.0)
     bars = []
     for i, ((label, v, color), pv) in enumerate(zip(items, vals, strict=True)):
@@ -78,8 +93,8 @@ def columns(groups: Sequence[tuple[str, Sequence[Sequence[Part]]]], width: int =
     """
     x0, x1, top_y, base = PAD_L, width - PAD_R, PAD_T, height - PAD_B
     plot_h = base - top_y
-    stacks = [sum(_pos(p[1]) for p in bar) for _, bars in groups for bar in bars]
-    top = _top(stacks + [_pos(v) for _, v, _ in refs], vmax)
+    stacks = [sum(_pos(p[1]) for p in bar) for _label, bars in groups for bar in bars]
+    top = _top(stacks + [_pos(v) for _label, v, _color in refs], vmax)
     slot = (x1 - x0) / len(groups) if groups else 0.0
     out_groups = []
     for i, (label, bars) in enumerate(groups):
@@ -128,7 +143,7 @@ def signed_line(points: Sequence[tuple[str, Any]], width: int = 640, height: int
     """음수를 자르지 않는 꺾은선(왼쪽 축)과 0 기준선. `points`는 `(x 라벨, 값)`이고 결측 값에서 선을 끊는다."""
     x0, x1, top_y, base = PAD_L, width - PAD_R, PAD_T, height - PAD_B
     plot_h = base - top_y
-    vals = [float(v) for _, v in points if is_num(v)]
+    vals = [float(v) for _label, v in points if is_num(v)]
     hi, lo = max([*vals, 0.0]), min([*vals, 0.0])
     span = (hi - lo) or 1.0
 
@@ -175,7 +190,7 @@ def stacked(rows: Sequence[tuple[str, Sequence[Segment]]]) -> list[dict[str, Any
     """100% 누적 가로 막대(x·w는 %). 행 합계가 0이면 `empty`."""
     out = []
     for label, parts in rows:
-        vals = [_pos(v) for _, v, _ in parts]
+        vals = [_pos(v) for _label, v, _color in parts]
         total = sum(vals)
         segs, x = [], 0.0
         for (part, v, color), pv in zip(parts, vals, strict=True):

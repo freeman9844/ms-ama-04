@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% import "_seller.html" as sl %}
 {% set nav = "grievances" %}
-{% block title %}이의제기 · AMA Lending 심사 콘솔{% endblock %}
+{% block title %}{{ _("이의제기") }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
 {% block main %}
-<h1>이의제기</h1>
+<h1>{{ _("이의제기") }}</h1>
 <table>
-  <thead><tr><th>이의제기 ID</th><th>신청</th><th>신청인</th><th>상태</th><th>접수</th><th>처리</th></tr></thead>
+  <thead><tr><th>{{ _("이의제기 ID") }}</th><th>{{ _("신청") }}</th><th>{{ _("신청인") }}</th><th>{{ _("상태") }}</th><th>{{ _("접수") }}</th><th>{{ _("처리") }}</th></tr></thead>
   <tbody>
 {% for r in rows %}
 <tr>
@@ -17,7 +17,7 @@
   <td>{{ r.resolved_at or "" }}</td>
 </tr>
 {% else %}
-<tr><td colspan="6">이의제기가 없습니다. 차주 시뮬레이터에서 제출할 수 있습니다.</td></tr>
+<tr><td colspan="6">{{ _("이의제기가 없습니다. 차주 시뮬레이터에서 제출할 수 있습니다.") }}</td></tr>
 {% endfor %}
   </tbody>
 </table>

@@ -12,6 +12,8 @@ from agents.collections import SCRIPTS
 from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
 from agents.repayment import item_amount, item_key
+from console import i18n
+from console.i18n import _
 from console.views import RawData, RawStore, _map_strings, _text_functions, raw_container
 from shared.contracts import ApplicantProfile, Transaction
 
@@ -158,7 +160,7 @@ def loan_view(
     lb = mon.get("ledger_baseline")
     catalog |= ledger_catalog(LedgerBaseline.from_dict(lb) if lb else None)
     ledger_rows = [{k: r[k] for k in _LEDGER_ROW_FIELDS} for r in rows if "order_gross" in r]
-    ledger_note = NO_LEDGER_LABEL if weeks and not ledger_rows else None
+    ledger_note = _(NO_LEDGER_LABEL) if weeks and not ledger_rows else None
     shown: list[dict[str, Any]] = []
     cases: list[dict[str, Any]] = []
     wanted: dict[str, None] = {}
@@ -198,8 +200,8 @@ def loan_view(
                 **text,
                 "signals": signals,
                 "decidable": _pending(restructure),
-                "cause_label": CAUSE_LABELS.get(doc.get("primary_cause") or "", NO_CAUSE_LABEL),
-                "secondary_labels": [CAUSE_LABELS[c] for c in doc.get("secondary_causes") or ()],
+                "cause_label": i18n.label(CAUSE_LABELS, doc.get("primary_cause"), NO_CAUSE_LABEL),
+                "secondary_labels": [i18n.label(CAUSE_LABELS, c) for c in doc.get("secondary_causes") or ()],
                 "auto_contacts": _auto_contacts(mon, doc.get("alert_id"), contacts),
             }
         )
@@ -231,7 +233,7 @@ def loan_view(
 def installment_label(item: Mapping[str, Any]) -> str:
     """회차 표시: 분할 회차는 "2-1회차"처럼."""
     part = item.get("part")
-    return f"{item['no']}-{part}회차" if part else f"{item['no']}회차"
+    return _("%(no)s-%(part)s회차", no=item["no"], part=part) if part else _("%(no)s회차", no=item["no"])
 
 
 def _key_label(key: str) -> str:

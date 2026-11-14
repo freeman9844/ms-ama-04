@@ -16,27 +16,40 @@
 </ul>
 {%- endmacro %}
 
-{% macro empty() -%}<p class="note">표시할 데이터가 없습니다.</p>{%- endmacro %}
+{% macro empty() -%}<p class="note">{{ _("표시할 데이터가 없습니다.") }}</p>{%- endmacro %}
 
-{% macro donut(d, label, caption="건") -%}
+{# 값+단위 표시. unit: none=건수, "krw"=원, "krw10k"=만 원(영문은 원으로 풀어 씀), "times"=회, 그 밖은 문자열을 그대로 붙인다. #}
+{% macro amount(value, unit=none) -%}
+{%- if unit is none -%}{{ _("%(n)s건", n=value) }}
+{%- elif unit == "krw" -%}{{ _("%(n)s원", n="{:,.0f}".format(value)) }}
+{%- elif unit == "krw10k" -%}{% if locale() == "en" %}₩{{ "{:,.0f}".format(value * 10000) }}{% else %}{{ _("%(n)s만 원", n=value) }}{% endif %}
+{%- elif unit == "times" -%}{{ _("%(n)s회", n=value) }}
+{%- else -%}{{ value }}{{ unit }}{%- endif -%}
+{%- endmacro %}
+
+{% macro donut(d, label, caption=none) -%}
 {% if d.arcs %}
 <svg class="chart donut" viewBox="0 0 120 120" role="img" aria-label="{{ label }}">
   <circle class="donut-track" cx="60" cy="60" r="{{ d.r }}"></circle>
-  {% for a in d.arcs %}<circle class="arc stroke-{{ a.color }}" cx="60" cy="60" r="{{ d.r }}" stroke-dasharray="{{ a.dash }} {{ a.gap }}" stroke-dashoffset="{{ a.offset }}" transform="rotate(-90 60 60)"><title>{{ a.label }} {{ a.value }}{{ caption }} ({{ a.pct }}%)</title></circle>{% endfor %}
+  {% for a in d.arcs %}<circle class="arc stroke-{{ a.color }}" cx="60" cy="60" r="{{ d.r }}" stroke-dasharray="{{ a.dash }} {{ a.gap }}" stroke-dashoffset="{{ a.offset }}" transform="rotate(-90 60 60)"><title>{{ a.label }} {{ amount(a.value, caption) }} ({{ a.pct }}%)</title></circle>{% endfor %}
+  {% if caption == "krw10k" and locale() == "en" %}
+  <text class="donut-total" x="60" y="62" text-anchor="middle">₩{{ "{:,.1f}".format(d.total / 100) }}M</text>
+  {% else %}
   <text class="donut-total" x="60" y="62" text-anchor="middle">{{ d.total }}</text>
-  <text class="donut-caption" x="60" y="78" text-anchor="middle">{{ caption }}</text>
+  <text class="donut-caption" x="60" y="78" text-anchor="middle">{% if caption is none %}{{ _("건") }}{% elif caption == "krw10k" %}{{ _("만 원") }}{% else %}{{ caption }}{% endif %}</text>
+  {% endif %}
 </svg>
 {% else %}{{ empty() }}{% endif %}
 {%- endmacro %}
 
-{% macro hbars(h, label, unit="건") -%}
+{% macro hbars(h, label, unit=none) -%}
 {% if h.bars %}
 <svg class="chart hbars" viewBox="0 0 {{ h.width }} {{ h.height }}" role="img" aria-label="{{ label }}">
 {% for b in h.bars %}
   <text class="axis-label" x="{{ b.x - 8 }}" y="{{ b.ty }}" text-anchor="end">{{ b.label }}</text>
   <rect class="track" x="{{ b.x }}" y="{{ b.y }}" width="{{ h.width - b.x - 48 }}" height="{{ b.h }}" rx="3"></rect>
-  <rect class="bar-h fill-{{ b.color }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"><title>{{ b.label }} {{ b.value }}{{ unit }}</title></rect>
-  <text class="value-label" x="{{ b.vx }}" y="{{ b.ty }}">{{ b.value }}{{ unit }}</text>
+  <rect class="bar-h fill-{{ b.color }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="3"><title>{{ b.label }} {{ amount(b.value, unit) }}</title></rect>
+  <text class="value-label" x="{{ b.vx }}" y="{{ b.ty }}">{{ amount(b.value, unit) }}</text>
 {% endfor %}
 </svg>
 {% else %}{{ empty() }}{% endif %}
@@ -56,16 +69,16 @@
 
 {% macro line_overlay(l, label, color="purple", axis=true, unit="") -%}
 {% for d in l.segments %}<path class="line stroke-{{ color }}" d="{{ d }}" pathLength="100"></path>{% endfor %}
-{% for p in l.points %}<circle class="dot fill-{{ 'red' if p.negative else color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {% if unit %}{{ "{:,.0f}".format(p.value) }}{{ unit }}{% else %}{{ p.value }}{% endif %}</title></circle>{% endfor %}
+{% for p in l.points %}<circle class="dot fill-{{ 'red' if p.negative else color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {% if unit %}{{ amount(p.value, unit) if unit == "krw" else "{:,.0f}".format(p.value) ~ unit }}{% else %}{{ p.value }}{% endif %}</title></circle>{% endfor %}
 {% if axis %}{% for t in l.ticks %}<text class="axis-label" x="{{ l.x + 6 }}" y="{{ t.y + 4 }}">{{ t.text }}</text>{% endfor %}{% endif %}
 {%- endmacro %}
 
-{% macro signed_line(s, label, unit="원") -%}
+{% macro signed_line(s, label, unit="krw") -%}
 <svg class="chart columns" viewBox="0 0 {{ s.width }} {{ s.height }}" role="img" aria-label="{{ label }}">
   {% for t in s.ticks %}<line class="gridline" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"></line><text class="axis-label" x="{{ s.x0 - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.text }}</text>{% endfor %}
-  <line class="ref stroke-red" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ s.zero_y }}" y2="{{ s.zero_y }}"><title>0{{ unit }}</title></line>
+  <line class="ref stroke-red" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ s.zero_y }}" y2="{{ s.zero_y }}"><title>{{ amount(0, unit) }}</title></line>
   {% for d in s.segments %}<path class="line stroke-purple" d="{{ d }}" pathLength="100"></path>{% endfor %}
-  {% for p in s.points %}<circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"><title>{{ p.label }} {{ "{:,.0f}".format(p.value) }}{{ unit }}</title></circle>{% endfor %}
+  {% for p in s.points %}<circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"><title>{{ p.label }} {{ amount(p.value, unit) if unit == "krw" else "{:,.0f}".format(p.value) ~ unit }}</title></circle>{% endfor %}
   {% for lb in s.labels %}<text class="axis-label" x="{{ lb.x }}" y="{{ s.label_y }}" text-anchor="middle">{{ lb.text }}</text>{% endfor %}
 </svg>
 {%- endmacro %}
@@ -98,9 +111,9 @@
     <span class="stacked-label">{{ r.label }}</span>
     <svg class="chart stacked-bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="{{ r.label }}">
       {% if r.empty %}<rect class="track" x="0" y="0" width="100" height="10"></rect>{% endif %}
-      {% for p in r.parts %}<rect class="bar-h fill-{{ p.color }}" x="{{ p.x }}" y="0" width="{{ p.w }}" height="10"><title>{{ r.label }} {{ p.part }} {{ p.value }}건 ({{ p.pct }}%)</title></rect>{% endfor %}
+      {% for p in r.parts %}<rect class="bar-h fill-{{ p.color }}" x="{{ p.x }}" y="0" width="{{ p.w }}" height="10"><title>{{ r.label }} {{ p.part }} {{ amount(p.value) }} ({{ p.pct }}%)</title></rect>{% endfor %}
     </svg>
-    <span class="stacked-total">{{ r.total|int }}건</span>
+    <span class="stacked-total">{{ amount(r.total|int) }}</span>
   </div>
 {% endfor %}
 </div>

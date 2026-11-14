@@ -7,8 +7,9 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from console import charts
-from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, krw_text, man
+from console import charts, i18n
+from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, man
+from console.i18n import _
 from console.statuses import FLAG_LABELS
 
 PRODUCT_MAX_KRW = 10_000_000
@@ -32,26 +33,27 @@ SIGNAL_RULES: dict[str, tuple[str, float]] = {
 # 값이 없으면(정산 자료 없음, 옛 심사분) 신호등에 올리지 않는다.
 OPTIONAL_SIGNALS = frozenset({"high_cost_lender_count", "revenue_trend_ratio", "pg_top_platform_share",
                               "pg_reconciliation_ratio"})
-# (지표, 이름, 방향, 강점 기준, 쉬운 설명). 설명의 {v}·{pct}·{t}는 관측값·백분율·정책 기준으로 채운다.
+# (지표, 이름, 방향, 강점 기준, 쉬운 설명). 설명의 %(v)s·%(pct)s·%(t)s는 관측값·백분율·정책 기준으로 채운다.
+# 이름·설명은 화면에 낼 때 번역한다.
 SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
-    ("dscr", "DSCR", "min", 1.5, "DSCR {v} — 벌어들이는 돈이 매달 갚을 돈의 {v}배입니다(기준 {t} 이상)."),
+    ("dscr", "DSCR", "min", 1.5, "DSCR %(v)s — 벌어들이는 돈이 매달 갚을 돈의 %(v)s배입니다(기준 %(t)s 이상)."),
     ("cash_buffer_days", "현금 완충일수", "min", 30,
-     "현금 완충일수 {v}일 — 매출이 끊겨도 통장 잔고로 운영비를 {v}일 버팁니다(기준 {t}일 이상)."),
+     "현금 완충일수 %(v)s일 — 매출이 끊겨도 통장 잔고로 운영비를 %(v)s일 버팁니다(기준 %(t)s일 이상)."),
     ("revenue_volatility", "매출 변동성", "max", 0.3,
-     "매출 변동성 {v} — 월 매출이 평균에서 약 {pct}% 흔들립니다(기준 {t} 이하)."),
+     "매출 변동성 %(v)s — 월 매출이 평균에서 약 %(pct)s%% 흔들립니다(기준 %(t)s 이하)."),
     ("tax_bank_match_ratio", "세금·계좌 일치율", "min", 0.9,
-     "세금·계좌 일치율 {v} — 신고 매출의 {pct}%가 계좌 입금으로 확인됩니다(참고 지표, {t} 이상 권장)."),
-    ("business_age_months", "업력", "min", 24, "업력 {v}개월 — 사업을 {v}개월째 하고 있습니다(기준 {t}개월 이상)."),
+     "세금·계좌 일치율 %(v)s — 신고 매출의 %(pct)s%%가 계좌 입금으로 확인됩니다(참고 지표, %(t)s 이상 권장)."),
+    ("business_age_months", "업력", "min", 24, "업력 %(v)s개월 — 사업을 %(v)s개월째 하고 있습니다(기준 %(t)s개월 이상)."),
     ("months_of_history", "거래 이력", "min", 12,
-     "거래 이력 {v}개월 — 심사에 쓴 계좌 거래가 {v}개월치입니다(기준 {t}개월 이상)."),
+     "거래 이력 %(v)s개월 — 심사에 쓴 계좌 거래가 %(v)s개월치입니다(기준 %(t)s개월 이상)."),
     ("revenue_trend_ratio", "최근 매출 추세", "min", 1.0,
-     "최근 매출 추세 {v} — 최근 60일 하루 매출이 그 전보다 {pct}% 수준입니다(기준 {t} 이상)."),
+     "최근 매출 추세 %(v)s — 최근 60일 하루 매출이 그 전보다 %(pct)s%% 수준입니다(기준 %(t)s 이상)."),
     ("high_cost_lender_count", "고비용 대출 상환", "max", -1,
-     "고비용 대출 상환 {v}건 — 대부업·고금리 대출 상환 거래가 계좌에서 보입니다(기준 {t}건)."),
+     "고비용 대출 상환 %(v)s건 — 대부업·고금리 대출 상환 거래가 계좌에서 보입니다(기준 %(t)s건)."),
     ("pg_reconciliation_ratio", "정산금 계좌 입금", "min", 0.98,
-     "정산금 계좌 입금 {v} — 플랫폼 정산금의 {pct}%가 이 계좌로 들어왔습니다(기준 {t} 이상)."),
+     "정산금 계좌 입금 %(v)s — 플랫폼 정산금의 %(pct)s%%가 이 계좌로 들어왔습니다(기준 %(t)s 이상)."),
     ("pg_top_platform_share", "최대 채널 비중", "max", 0.6,
-     "최대 채널 비중 {v} — 정산 매출의 {pct}%가 한 플랫폼에서 나옵니다(기준 {t} 이하)."),
+     "최대 채널 비중 %(v)s — 정산 매출의 %(pct)s%%가 한 플랫폼에서 나옵니다(기준 %(t)s 이하)."),
 )
 SIGNAL_TONES = {"pass": "green", "refer": "amber", "watch": "amber", "knockout": "red", "unknown": "grey"}
 SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "watch": "주의(참고 지표)",
@@ -59,6 +61,7 @@ SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "watc
 RECOMMENDATION_TONES = {"approve": "green", "conditional": "blue", "refer": "purple", "decline": "red"}
 # 요약 탭 심사역 결정 카드. 옛 문서의 conditional은 승인으로 본다(심사역 결정에 조건부 승인 없음).
 OFFICER_DECISIONS = {"approve": ("승인", "green"), "conditional": ("승인", "green"), "decline": ("거절", "red")}
+APPROVED = frozenset({"approve", "conditional"})
 LEFTOVER = ("leftover", "남는 돈", "green")
 
 
@@ -66,20 +69,28 @@ def _num_text(v: float) -> str:
     return str(int(v)) if float(v).is_integer() else f"{v:g}"
 
 
+def man_tick(v: float) -> str:
+    """금액 축 눈금. 국문은 만 원 단위, 영문은 백만 원(M) 단위."""
+    if i18n.current() == "en":
+        return f"₩{v / 1_000_000:,.1f}M" if abs(v) >= 1_000_000 else f"₩{v:,.0f}"
+    return man(v)
+
+
 def _signal(field: str, name: str, direction: str, strong: float, text: str, features: Mapping[str, Any]) -> dict:
     kind, threshold = SIGNAL_RULES[field]
     v = features.get(field)
+    name = _(name)
     if not charts.is_num(v):
         return {"field": field, "name": name, "value": None, "state": "unknown", "tone": "grey", "strong": False,
-                "label": SIGNAL_STATE_LABELS["unknown"], "text": f"{name} — 값이 없습니다.", "bar": None,
-                "threshold": threshold}
+                "label": i18n.label(SIGNAL_STATE_LABELS, "unknown"), "text": _("%(name)s — 값이 없습니다.", name=name),
+                "bar": None, "threshold": threshold}
     violated = v < threshold if direction == "min" else v > threshold
     state = kind if violated else "pass"
     return {
         "field": field, "name": name, "value": v, "state": state, "tone": SIGNAL_TONES[state],
-        "label": SIGNAL_STATE_LABELS[state], "threshold": threshold,
+        "label": i18n.label(SIGNAL_STATE_LABELS, state), "threshold": threshold,
         "strong": not violated and (v >= strong if direction == "min" else v <= strong),
-        "text": text.format(v=_num_text(v), pct=round(v * 100), t=threshold),
+        "text": _(text, v=_num_text(v), pct=round(v * 100), t=threshold),
         "bar": charts.marker_bar(v, threshold),
     }
 
@@ -92,18 +103,19 @@ def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
     review = assessment.get("review") or {}
     review_text = "-"
     if review:
-        review_text = ("통과" if review.get("passed") else "미통과") + (
-            f" · {review['rounds']}회" if charts.is_num(review.get("rounds")) else "")
+        review_text = _("통과") if review.get("passed") else _("미통과")
+        if charts.is_num(review.get("rounds")):
+            review_text = _("%(result)s · %(n)s회", result=review_text, n=review["rounds"])
     requested, limit = doc.get("requested_amount_krw"), policy.get("max_amount_krw")
     gauge = charts.gauge(limit, requested)
     return {
-        "decision": decision_label, "decision_tone": decision_tone,
-        "recommendation": RECOMMENDATION_LABELS.get(rec, rec) if rec else "권고 없음",
+        "decision": _(decision_label), "decision_tone": decision_tone,
+        "recommendation": i18n.label(RECOMMENDATION_LABELS, rec) if rec else _("권고 없음"),
         "recommendation_tone": RECOMMENDATION_TONES.get(rec or "", "neutral"),
         "review": review_text, "review_tone": "green" if review.get("passed") else ("red" if review else "neutral"),
         "gauge": gauge,
         "gauge_text": f"{gauge['pct']:.0f}%" if gauge["frac"] is not None else "-",
-        "gauge_sub": f"한도 {krw_text(limit)} / 신청 {krw_text(requested)}",
+        "gauge_sub": _("한도 %(limit)s / 신청 %(requested)s", limit=charts.won(limit), requested=charts.won(requested)),
     }
 
 
@@ -113,9 +125,9 @@ def _officer(doc: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     label, tone = OFFICER_DECISIONS[od["decision"]]
     return {
-        "label": label, "tone": tone,
+        "label": _(label), "tone": tone,
         "requested": doc.get("requested_amount_krw"), "tenor": doc.get("requested_tenor_months"),
-        "approved": od.get("amount_krw") if label == "승인" else None,
+        "approved": od.get("amount_krw") if od["decision"] in APPROVED else None,
         "override": bool(od.get("policy_override")), "at": od.get("at"),
     }
 
@@ -131,16 +143,17 @@ def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any) -> dict[st
         cap = (rev - opex) if charts.is_num(rev) and charts.is_num(opex) else None
         owed = (debt if charts.is_num(debt) else 0) + new
         short = cap is None or cap < owed
-        tip = f"{month} 매출−운영비 {krw_text(cap)} · 갚을 돈 {krw_text(owed)}"
+        tip = _("%(month)s 매출−운영비 %(cap)s · 갚을 돈 %(owed)s", month=month, cap=charts.won(cap),
+                owed=charts.won(owed))
         groups.append((month[2:] if len(month) == 7 else month, [[("capacity", cap, "red" if short else "green", tip)]]))
         obligations.append(owed)
-    chart = charts.columns(groups, tick_fmt=man, **CAPACITY_CHART)
+    chart = charts.columns(groups, tick_fmt=man_tick, **CAPACITY_CHART)
     return {
-        "chart": chart, "line": charts.line(obligations, vmax=chart["vmax"], tick_fmt=man, **CAPACITY_CHART),
-        "short_months": sum(1 for _, bars in groups if bars[0][0][2] == "red"), "months": len(groups),
+        "chart": chart, "line": charts.line(obligations, vmax=chart["vmax"], tick_fmt=man_tick, **CAPACITY_CHART),
+        "short_months": sum(1 for _label, bars in groups if bars[0][0][2] == "red"), "months": len(groups),
         "installment": new,
-        "legend": [("매출 − 운영비(여유)", "green"), ("갚을 돈보다 적은 달", "red"),
-                   ("기존 상환 + 이번 대출 월 상환액(선)", "purple")],
+        "legend": [(_("매출 − 운영비(여유)"), "green"), (_("갚을 돈보다 적은 달"), "red"),
+                   (_("기존 상환 + 이번 대출 월 상환액(선)"), "purple")],
     }
 
 
@@ -148,9 +161,10 @@ def _limit(doc: Mapping[str, Any], features: Mapping[str, Any], policy: Mapping[
     requested, inflow = doc.get("requested_amount_krw"), features.get("avg_monthly_inflow_krw")
     if not (charts.is_num(requested) and charts.is_num(inflow)):
         return None
-    candidates = [("신청액", requested), (f"월평균 입금×{INFLOW_MULTIPLIER:g}", int(inflow * INFLOW_MULTIPLIER)),
-                  ("상품 최대", PRODUCT_MAX_KRW)]
-    low = min(v for _, v in candidates)
+    candidates = [(_("신청액"), requested),
+                  (_("월평균 입금×%(m)s", m=f"{INFLOW_MULTIPLIER:g}"), int(inflow * INFLOW_MULTIPLIER)),
+                  (_("상품 최대"), PRODUCT_MAX_KRW)]
+    low = min(v for _label, v in candidates)
     computed = low - low % LIMIT_UNIT_KRW
     items = [(label, round(v / 10_000), "blue" if v == low else "grey") for label, v in candidates]
     return {
@@ -164,8 +178,8 @@ def _limit(doc: Mapping[str, Any], features: Mapping[str, Any], policy: Mapping[
 def _expenses(uw: Mapping[str, Any], features: Mapping[str, Any]) -> dict[str, Any] | None:
     breakdown = uw.get("expense_breakdown")
     if breakdown:
-        parts = [(g.get("label") or g.get("group"), g.get("monthly_avg_krw"), EXPENSE_COLORS.get(g.get("group"), "grey"))
-                 for g in breakdown if isinstance(g, Mapping)]
+        parts = [(_(g.get("label") or g.get("group") or ""), g.get("monthly_avg_krw"),
+                  EXPENSE_COLORS.get(g.get("group"), "grey")) for g in breakdown if isinstance(g, Mapping)]
         revenue, source = features.get("avg_monthly_inflow_krw"), "breakdown"
     else:
         monthly = [m for m in uw.get("monthly") or [] if isinstance(m, Mapping)]
@@ -176,16 +190,16 @@ def _expenses(uw: Mapping[str, Any], features: Mapping[str, Any]) -> dict[str, A
             vals = [m[key] for m in monthly if charts.is_num(m.get(key))]
             return sum(vals) / len(vals) if vals else 0.0
 
-        parts = [(label, avg(key), color) for key, label, color in EXPENSES]
+        parts = [(_(label), avg(key), color) for key, label, color in EXPENSES]
         revenue, source = avg("revenue"), "monthly"
-    spent = sum(v for _, v, _ in parts if charts.is_num(v) and v > 0)
+    spent = sum(v for _label, v, _color in parts if charts.is_num(v) and v > 0)
     leftover = revenue - spent if charts.is_num(revenue) else 0
     segments = [(label, round(v / 10_000), color) for label, v, color in parts if charts.is_num(v)]
-    segments.append((LEFTOVER[1], round(max(leftover, 0) / 10_000), LEFTOVER[2]))
+    segments.append((_(LEFTOVER[1]), round(max(leftover, 0) / 10_000), LEFTOVER[2]))
     donut = charts.donut(segments)
     return {
         "donut": donut, "source": source, "leftover": leftover,
-        "legend": [(label, color, f"{v:,}만") for label, v, color in segments if v > 0],
+        "legend": [(label, color, charts.man_won(v)) for label, v, color in segments if v > 0],
     }
 
 
@@ -205,7 +219,7 @@ def _strengths_risks(signals: Sequence[Mapping[str, Any]], policy: Mapping[str, 
     for r in policy.get("reason_codes") or []:
         if r.get("field") not in covered:
             risks.append(f"{r.get('code')} {r.get('message')}")
-    risks.extend(FLAG_LABELS.get(f, f) for f in dict.fromkeys(flags))
+    risks.extend(i18n.label(FLAG_LABELS, f) for f in dict.fromkeys(flags))
     return strengths, risks
 
 

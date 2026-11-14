@@ -3,130 +3,130 @@
 {% set nav = "loans" %}
 {% import "_charts.html" as ch %}
 {% macro collections_block(c) -%}
-<h3>추심 에이전트 <small>{{ c.decision }}</small></h3>
+<h3>{{ _("추심 에이전트") }} <small>{{ c.decision }}</small></h3>
 <p>{{ c.reason }}</p>
 {% if c.contacts %}<table>
-  <thead><tr><th>일자</th><th>스크립트</th><th>상태</th><th>사유</th></tr></thead>
+  <thead><tr><th>{{ _("일자") }}</th><th>{{ _("스크립트") }}</th><th>{{ _("상태") }}</th><th>{{ _("사유") }}</th></tr></thead>
   <tbody>{% for x in c.contacts %}<tr><td>{{ x.at }}</td><td>{{ x.script_id }}</td><td>{{ x.status }}</td><td>{{ x.reason or "" }}</td></tr>{% endfor %}</tbody>
 </table>{% endif %}
 {%- endmacro %}
 {% macro restructure_block(doc_id, rs, decidable) -%}
-<h3>재조정 상담 요청 <small>{{ rs.status }}</small></h3>
+<h3>{{ _("재조정 상담 요청") }} <small>{{ rs.status }}</small></h3>
 <p>{{ rs.category }} · {{ rs.note }}</p>
 {% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason }}</p>{% endif %}
 {% if decidable and user.can_decide and replay_blocked %}
-<p><small>재생이 끝나면 재조정 결정을 내릴 수 있습니다.</small></p>
+<p><small>{{ _("재생이 끝나면 재조정 결정을 내릴 수 있습니다.") }}</small></p>
 {% elif decidable and user.can_decide %}
 {% set locked = " disabled" if watch_url else "" %}
 <form method="post" action="/loans/{{ v.loan.id|path }}/alerts/{{ doc_id|path }}/restructure" class="decision" data-decision-form>
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <fieldset><legend>재조정 결정</legend>
-    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> 승인</label>
-    <label><input type="radio" name="decision" value="decline"{{ locked }}> 거절</label>
+  <fieldset><legend>{{ _("재조정 결정") }}</legend>
+    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> {{ pgettext("button", "승인") }}</label>
+    <label><input type="radio" name="decision" value="decline"{{ locked }}> {{ pgettext("button", "거절") }}</label>
   </fieldset>
-  <label>사유 <textarea name="reason" rows="2"{{ locked }}></textarea></label>
-  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "결정 보내기" }}</button>
+  <label>{{ _("사유") }} <textarea name="reason" rows="2"{{ locked }}></textarea></label>
+  <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("결정 보내기") }}</button>
 </form>
 {% endif %}
 {%- endmacro %}
 {% macro proposal_block(doc_id, p, decidable) -%}{% set ev = p.evidence or {} %}
-<h3>추심 제안 <small>{{ p.status|proposal_label }}</small></h3>
+<h3>{{ _("추심 제안") }} <small>{{ p.status|proposal_label }}</small></h3>
 <div class="decision-layout">
 <div>
-<h4>제안 조치와 이유</h4>
-<p><span class="chip">{{ p.script_id|script_label }}</span>{% if p.hardship %} <span class="chip warn">재조정 상담 권고</span>{% endif %}</p>
+<h4>{{ _("제안 조치와 이유") }}</h4>
+<p><span class="chip">{{ p.script_id|script_label }}</span>{% if p.hardship %} <span class="chip warn">{{ _("재조정 상담 권고") }}</span>{% endif %}</p>
 <p>{{ p.reason }}</p>
-{% if p.hardship %}<p>재조정 상담 권고: {{ p.hardship.category }} · {{ p.hardship.note }}</p>{% endif %}
-<h4>판단 근거</h4>
+{% if p.hardship %}<p>{{ _("재조정 상담 권고") }}: {{ p.hardship.category }} · {{ p.hardship.note }}</p>{% endif %}
+<h4>{{ _("판단 근거") }}</h4>
 <ul>
-  <li>{{ ev.installment_no }}회차 {{ ev.due_on }} · {{ ev.amount_krw|krw }} · 누적 미납 {{ ev.missed_count }}회</li>
-  {% if ev.recent_alert %}<li>최근 경보 {{ ev.recent_alert.severity|severity_label }}: {{ ev.recent_alert.summary }}{% if ev.recent_alert.check_action %}<br>확인할 조치: {{ ev.recent_alert.check_action }}{% endif %}</li>{% endif %}
-  <li>최근 7일 차주 연락 {{ ev.contacts_7d }}회</li>
-  {% for e in ev.escalation or () %}<li>단계 자동 안내: {{ e.script_id|script_label }} · {{ e.on }} · {{ e.status|contact_status_label }}</li>{% endfor %}
+  <li>{{ _("%(no)s회차", no=ev.installment_no) }} {{ ev.due_on }} · {{ ev.amount_krw|krw }} · {{ _("누적 미납 %(n)s회", n=ev.missed_count) }}</li>
+  {% if ev.recent_alert %}<li>{{ _("최근 경보") }} {{ ev.recent_alert.severity|severity_label }}: {{ ev.recent_alert.summary }}{% if ev.recent_alert.check_action %}<br>{{ _("확인할 조치") }}: {{ ev.recent_alert.check_action }}{% endif %}</li>{% endif %}
+  <li>{{ _("최근 7일 차주 연락 %(n)s회", n=ev.contacts_7d) }}</li>
+  {% for e in ev.escalation or () %}<li>{{ _("단계 자동 안내") }}: {{ e.script_id|script_label }} · {{ e.on }} · {{ e.status|contact_status_label }}</li>{% endfor %}
 </ul>
 </div>
 <div>
-<h4>정책 확인 결과</h4>
+<h4>{{ _("정책 확인 결과") }}</h4>
 <ul class="checks">{% for k in p.checks or () %}
   <li><span class="{{ 'ok' if k.ok else 'error' }}">{{ "✔" if k.ok else "✖" }}</span> {{ k.id|check_label }} · {{ k.detail }}</li>
 {% endfor %}</ul>
-<h4>{{ "고객에게 보낼 문구" if p.status == "pending_officer" else "제안한 문구" }}</h4>
+<h4>{{ _("고객에게 보낼 문구") if p.status == "pending_officer" else _("제안한 문구") }}</h4>
 <blockquote>{{ p.text }}</blockquote>
 </div>
 </div>
 {% if p.status != "pending_officer" %}
-<h4>심사역 결정</h4>
+<h4>{{ _("심사역 결정") }}</h4>
 <p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason }}{% endif %}</p>
-{% if p.contact %}<p>발송 결과: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
+{% if p.contact %}<p>{{ _("발송 결과") }}: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
 <blockquote>{{ p.sent_text or p.contact.text }}</blockquote>{% endif %}
 {% elif decidable and user.can_decide and replay_blocked %}
-<p><small>재생이 멈추면 결정할 수 있습니다.</small></p>
+<p><small>{{ _("재생이 멈추면 결정할 수 있습니다.") }}</small></p>
 {% elif decidable and user.can_decide %}
 {% set locked = " disabled" if watch_url else "" %}
 <form method="post" action="/loans/{{ v.loan.id|path }}/cases/{{ doc_id|path }}/proposal" class="decision" data-decision-form>
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <fieldset><legend>추심 제안 결정</legend>
-    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> 승인(제안 문구 그대로 발송)</label>
-    <label><input type="radio" name="decision" value="modify"{{ locked }}> 수정 후 승인</label>
-    <label><input type="radio" name="decision" value="reject"{{ locked }}> 반려(발송 안 함)</label>
+  <fieldset><legend>{{ _("추심 제안 결정") }}</legend>
+    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> {{ _("승인(제안 문구 그대로 발송)") }}</label>
+    <label><input type="radio" name="decision" value="modify"{{ locked }}> {{ pgettext("button", "수정 후 승인") }}</label>
+    <label><input type="radio" name="decision" value="reject"{{ locked }}> {{ _("반려(발송 안 함)") }}</label>
   </fieldset>
-  <label>수정 문구(수정 후 승인일 때 이 문구로 발송, 300자 이하) <textarea name="text" rows="4" maxlength="300"{{ locked }}>{{ p.text }}</textarea></label>
-  {% if p.hardship %}<label><input type="checkbox" name="include_hardship" value="1"{{ locked }}> 재조정 상담 요청도 만들기(체크할 때만 생성, 기본은 문구만 발송)</label>{% endif %}
-  <label>사유(반려할 때 필수) <textarea name="reason" rows="2"{{ locked }}></textarea></label>
-  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "결정 보내기" }}</button>
+  <label>{{ _("수정 문구(수정 후 승인일 때 이 문구로 발송, 300자 이하)") }} <textarea name="text" rows="4" maxlength="300"{{ locked }}>{{ p.text }}</textarea></label>
+  {% if p.hardship %}<label><input type="checkbox" name="include_hardship" value="1"{{ locked }}> {{ _("재조정 상담 요청도 만들기(체크할 때만 생성, 기본은 문구만 발송)") }}</label>{% endif %}
+  <label>{{ _("사유(반려할 때 필수)") }} <textarea name="reason" rows="2"{{ locked }}></textarea></label>
+  <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("결정 보내기") }}</button>
 </form>
-<p><small>승인·수정한 문구는 보낼 때 실제 시각으로 연락 시간(08~21시)·7일 7회를 다시 검사하고, 걸리면 보류합니다.</small></p>
+<p><small>{{ _("승인·수정한 문구는 보낼 때 실제 시각으로 연락 시간(08~21시)·7일 7회를 다시 검사하고, 걸리면 보류합니다.") }}</small></p>
 {% endif %}
 {%- endmacro %}
 {% from "_plan.html" import plan_items %}
 {% set l = v.loan %}{% set m = v.monitoring %}
 {% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }}">{% endif %}<script src="/static/decision.js" defer></script>{% endblock %}
-{% block title %}{{ l.id }} 사후 모니터링 · AMA Lending 심사 콘솔{% endblock %}
+{% block title %}{{ l.id }} {{ _("사후 모니터링") }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
 {% block main %}
 <div class="page-head">
   <div>
-    <p class="crumb"><a href="/loans">홈 › 사후 모니터링</a> › {{ l.id }}</p>
+    <p class="crumb"><a href="/loans">{{ _("홈") }} › {{ _("사후 모니터링") }}</a> › {{ l.id }}</p>
     <h1>{{ l.id }} <span class="status m-{{ m.status or 'none' }}">{{ m.status|monitoring_label }}</span></h1>
   </div>
   <div class="actions">
-    <a class="button secondary" href="/applications/{{ l.application_id|path }}">신청 상세</a>
+    <a class="button secondary" href="/applications/{{ l.application_id|path }}">{{ _("신청 상세") }}</a>
     {% if user.can_decide %}
     <form method="post" action="/loans/{{ l.id|path }}/replay">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit"{% if replay_blocked or replay_held %} disabled{% endif %}>사후 13주 재생{% if m.replay_id %}(다시){% endif %}</button>
+      <button type="submit"{% if replay_blocked or replay_held %} disabled{% endif %}>{{ _("사후 13주 재생") }}{% if m.replay_id %}{{ _("(다시)") }}{% endif %}</button>
     </form>
     {% endif %}
   </div>
 </div>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
-{% if watch_url %}<p class="note" role="status">요청 반영을 기다리는 중입니다. {{ monitoring_refresh_seconds }}초마다 다시 확인합니다.</p>
-{% elif replay_blocked %}<p class="note">재생이 진행 중입니다. {{ monitoring_refresh_seconds }}초마다 새로 고칩니다.</p>{% endif %}
+{% if watch_url %}<p class="note" role="status">{{ _("요청 반영을 기다리는 중입니다. %(n)s초마다 다시 확인합니다.", n=monitoring_refresh_seconds) }}</p>
+{% elif replay_blocked %}<p class="note">{{ _("재생이 진행 중입니다. %(n)s초마다 새로 고칩니다.", n=monitoring_refresh_seconds) }}</p>{% endif %}
 {% set hold_anchor = {"collections_proposal": m.pause_case_id or m.pause_alert_id, "restructure": m.pause_case_id or m.pause_alert_id, "customer_response": "plan-offer", "plan_change": "plan-change"} %}
 {% if m.status in ("paused", "awaiting_customer") and v.holds %}
-<section class="card resume-card" aria-label="재생 일시정지">
-  <h2>{{ m.status|monitoring_label }}: 아래 항목이 끝나야 재생을 이어갈 수 있습니다</h2>
-  <p>{{ m.paused_week }}주차 처리 뒤 재생을 멈췄습니다. 대기 항목:</p>
+<section class="card resume-card" aria-label="{{ _('재생 일시정지') }}">
+  <h2>{{ m.status|monitoring_label }}: {{ _("아래 항목이 끝나야 재생을 이어갈 수 있습니다") }}</h2>
+  <p>{{ _("%(week)s주차 처리 뒤 재생을 멈췄습니다. 대기 항목:", week=m.paused_week) }}</p>
   <ol>{% for h in v.holds %}<li>{% if hold_anchor[h] %}<a href="#{{ hold_anchor[h] }}">{{ h|hold_label }}</a>{% else %}{{ h|hold_label }}{% endif %}</li>{% endfor %}</ol>
-  <p>모두 끝나면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
+  <p>{{ _("모두 끝나면 남은 %(n)s주 재생을 이어갈지 고를 수 있습니다.", n=weeks_left) }}</p>
 </section>
 {% elif m.status == "paused" %}
-<section class="card resume-card" aria-label="재생 일시정지">
-  <h2>재조정 요청으로 재생을 멈췄습니다</h2>
-  <p>{{ m.paused_week }}주차 미납 추심 건에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 추심 건에서 재조정을 승인하거나 거절하면 남은 {{ weeks_left }}주 재생을 이어갈지 고를 수 있습니다.</p>
+<section class="card resume-card" aria-label="{{ _('재생 일시정지') }}">
+  <h2>{{ _("재조정 요청으로 재생을 멈췄습니다") }}</h2>
+  <p>{{ _("%(week)s주차 미납 추심 건에서 추심 에이전트가 재조정 상담을 요청했습니다. 아래 추심 건에서 재조정을 승인하거나 거절하면 남은 %(n)s주 재생을 이어갈지 고를 수 있습니다.", week=m.paused_week, n=weeks_left) }}</p>
 </section>
 {% elif m.status == "awaiting_resume" %}
-<section class="card resume-card" aria-label="재생 재개 확인">
-  <h2>재생을 이어갈까요?</h2>
-  <p>{% if m.holds is defined %}대기 중이던 결정이 모두 끝났습니다.{% else %}재조정 결정(승인/거절)이 기록되었습니다.{% endif %} 남은 {{ weeks_left }}주 재생을 이어갈까요?</p>
+<section class="card resume-card" aria-label="{{ _('재생 재개 확인') }}">
+  <h2>{{ _("재생을 이어갈까요?") }}</h2>
+  <p>{% if m.holds is defined %}{{ _("대기 중이던 결정이 모두 끝났습니다.") }}{% else %}{{ _("재조정 결정(승인/거절)이 기록되었습니다.") }}{% endif %} {{ _("남은 %(n)s주 재생을 이어갈까요?", n=weeks_left) }}</p>
   {% if user.can_decide %}
   <div class="actions">
     <form method="post" action="/loans/{{ l.id|path }}/replay/resume">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit">이어서 재생</button>
+      <button type="submit">{{ _("이어서 재생") }}</button>
     </form>
     <form method="post" action="/loans/{{ l.id|path }}/replay/stop">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit" class="button secondary">여기서 종료</button>
+      <button type="submit" class="button secondary">{{ _("여기서 종료") }}</button>
     </form>
   </div>
   {% endif %}
@@ -134,54 +134,54 @@
 {% endif %}
 <div class="grid-4">
   {% set rp = ui.repayment %}
-  {{ ch.kpi("대출", l.amount_krw|krw, l.tenor_months ~ "개월 · " ~ l.decision ~ ((" · 상환 " ~ rp.paid ~ "/" ~ rp.total ~ "회" ~ (" · 미납 " ~ rp.missed if rp.missed else "")) if rp else ""), "red" if rp and rp.missed else "neutral") }}
-  {% call ch.kpi("재생 진행", ui.processed ~ "/" ~ ui.weeks_total ~ "주", m.mode or "재생 전", "blue") %}{{ ch.progress(ui.progress_pct, "재생 진행률") }}{% endcall %}
-  {{ ch.kpi("경보", ui.alerts ~ "건", "높음 " ~ ui.severity.high ~ " · 중간 " ~ ui.severity.medium ~ " · 낮음 " ~ ui.severity.low, "red" if ui.severity.high else ("amber" if ui.alerts else "neutral")) }}
-  {{ ch.kpi("최저 현금 버퍼", "-" if ui.min_buffer is none else ui.min_buffer ~ "일", ("" if ui.min_buffer_week is none else ui.min_buffer_week ~ "주차 · ") ~ "기준 " ~ ("-" if ui.baseline_buffer is none else ui.baseline_buffer ~ "일"), "purple") }}
+  {{ ch.kpi(_("대출"), l.amount_krw|krw, _("%(n)s개월", n=l.tenor_months) ~ " · " ~ l.decision ~ ((" · " ~ _("상환 %(paid)s/%(total)s회", paid=rp.paid, total=rp.total) ~ ((" · " ~ _("미납 %(n)s", n=rp.missed)) if rp.missed else "")) if rp else ""), "red" if rp and rp.missed else "neutral") }}
+  {% call ch.kpi(_("재생 진행"), _("%(done)s/%(total)s주", done=ui.processed, total=ui.weeks_total), m.mode or _("재생 전"), "blue") %}{{ ch.progress(ui.progress_pct, _("재생 진행률")) }}{% endcall %}
+  {{ ch.kpi(_("경보"), _("%(n)s건", n=ui.alerts), _("높음 %(high)s · 중간 %(medium)s · 낮음 %(low)s", high=ui.severity.high, medium=ui.severity.medium, low=ui.severity.low), "red" if ui.severity.high else ("amber" if ui.alerts else "neutral")) }}
+  {{ ch.kpi(_("최저 현금 버퍼"), "-" if ui.min_buffer is none else _("%(n)s일", n=ui.min_buffer), ("" if ui.min_buffer_week is none else _("%(n)s주차", n=ui.min_buffer_week) ~ " · ") ~ _("기준 %(value)s", value=("-" if ui.baseline_buffer is none else _("%(n)s일", n=ui.baseline_buffer))), "purple") }}
 </div>
 <section class="card">
 <dl class="facts">
-  <dt>신청인</dt><dd>{{ sl.applicant(l.applicant_id, user.can_restore) }} · {{ l.industry }}</dd>
-  <dt>대출</dt><dd>{{ l.amount_krw|krw }} / {{ l.tenor_months }}개월 · {{ l.decision }} · {{ l.approved_at }}</dd>
-  <dt>기준선</dt><dd>주 평균 매출 {{ l.baseline.avg_weekly_revenue|krw }} · 현금 버퍼 {{ l.baseline.cash_buffer_days }}일</dd>
-  {% if m.replay_id %}<dt>재생</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ m.processed_week }}/13주 · 시작 {{ m.started_at }}{% if m.resumed_at %} · 재개 {{ m.resumed_at|length }}회{% endif %}{% if m.stopped_at %} · 종료 {{ m.stopped_at }}{% endif %}</dd>{% endif %}
-  {% if m.error %}<dt>오류</dt><dd class="error">{{ m.error }}</dd>{% endif %}
+  <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(l.applicant_id, user.can_restore) }} · {{ l.industry }}</dd>
+  <dt>{{ _("대출") }}</dt><dd>{{ l.amount_krw|krw }} / {{ _("%(n)s개월", n=l.tenor_months) }} · {{ l.decision }} · {{ l.approved_at }}</dd>
+  <dt>{{ _("기준선") }}</dt><dd>{{ _("주 평균 매출 %(revenue)s · 현금 버퍼 %(days)s일", revenue=l.baseline.avg_weekly_revenue|krw, days=l.baseline.cash_buffer_days) }}</dd>
+  {% if m.replay_id %}<dt>{{ _("재생") }}</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ _("%(done)s/%(total)s주", done=m.processed_week, total=13) }} · {{ _("시작 %(at)s", at=m.started_at) }}{% if m.resumed_at %} · {{ _("재개 %(n)s회", n=m.resumed_at|length) }}{% endif %}{% if m.stopped_at %} · {{ _("종료 %(at)s", at=m.stopped_at) }}{% endif %}</dd>{% endif %}
+  {% if m.error %}<dt>{{ _("오류") }}</dt><dd class="error">{{ m.error }}</dd>{% endif %}
 </dl>
 </section>
-{% if v.pii == "restored" %}<p class="pii restored">실명 복원 표시 중(CreditOfficer·CreditManager 권한).</p>
-{% elif v.pii == "unavailable" %}<p class="pii">원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.</p>
-{% else %}<p class="pii">가명 표시 중.</p>{% endif %}
+{% if v.pii == "restored" %}<p class="pii restored">{{ _("실명 복원 표시 중(CreditOfficer·CreditManager 권한).") }}</p>
+{% elif v.pii == "unavailable" %}<p class="pii">{{ _("원천 데이터가 없어 가명 토큰을 복원하지 못했습니다.") }}</p>
+{% else %}<p class="pii">{{ _("가명 표시 중.") }}</p>{% endif %}
 
 {% if v.weeks %}
 <section class="card">
-<h2>주간 흐름과 탐지기</h2>
+<h2>{{ _("주간 흐름과 탐지기") }}</h2>
 {% if ui.chart %}
-{% call ch.columns(ui.chart, "주간 매출과 현금 버퍼") %}
-{{ ch.line_overlay(ui.line, "현금 버퍼(일)") }}
+{% call ch.columns(ui.chart, _("주간 매출과 현금 버퍼")) %}
+{{ ch.line_overlay(ui.line, _("현금 버퍼(일)")) }}
 {% for mk in ui.markers %}<text class="trigger-mark" x="{{ mk.x }}" y="{{ mk.y }}" text-anchor="middle">▲<title>{{ mk.tip }}</title></text>{% endfor %}
 {% endcall %}
 {{ ch.legend(ui.legend) }}
 {% endif %}
 <table>
-  <thead><tr><th>주차</th><th>기간</th><th>매출(W:n:revenue)</th><th>기대 입금</th><th>기대 대비(3주)</th><th>버퍼(일)</th><th>전망 최저 잔고</th><th>고금리 거래</th><th>트리거</th><th>조사</th></tr></thead>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("기간") }}</th><th>{{ _("매출(W:n:revenue)") }}</th><th>{{ _("기대 입금") }}</th><th>{{ _("기대 대비(3주)") }}</th><th>{{ _("버퍼(일)") }}</th><th>{{ _("전망 최저 잔고") }}</th><th>{{ _("고금리 거래") }}</th><th>{{ _("트리거") }}</th><th>{{ _("조사") }}</th></tr></thead>
   <tbody>
 {% for w in v.weeks %}{% set r = w.row %}
 <tr>
   <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
-  <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ r.shortfall_date }} 부족)</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
+  <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
-  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">경보</a>{% endif %}{% else %}-{% endif %}{% if w.case_id %} · <a href="#{{ w.case_id }}">미납</a>{% endif %}</td>
+  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% if w.case_id %} · <a href="#{{ w.case_id }}">{{ _("미납") }}</a>{% endif %}</td>
 </tr>
 {% endfor %}
   </tbody>
 </table>
-<p><small>노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.</small></p>
+<p><small>{{ _("노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.") }}</small></p>
 </section>
 <section class="card">
-<h2>주간 정산(PG 원장)</h2>
+<h2>{{ _("주간 정산(PG 원장)") }}</h2>
 {% if v.ledger_rows %}
 <table>
-  <thead><tr><th>주차</th><th>주문액</th><th>반품</th><th>보류</th><th>공제</th><th>지급</th></tr></thead>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("반품") }}</th><th>{{ _("보류") }}</th><th>{{ _("공제") }}</th><th>{{ _("지급") }}</th></tr></thead>
   <tbody>
 {% for r in v.ledger_rows %}
 <tr>
@@ -194,17 +194,17 @@
 </section>
 {% if l.repayment %}
 <section class="card">
-<h2>상환 원장</h2>
-<p class="note">상환일 당일 <code>에이엠에이렌딩 대출상환</code> 출금이 있으면 납부로 봅니다. 안내는 상환일 3일 전에 자동 발송하고, 높음 경보로 잔고 부족 예상 알림이 나간 뒤에는 5일 전에도 추가 안내를 보냅니다. 자동 안내는 시뮬레이션 날짜 10시 기준으로 공정 추심 규칙(연락 시간·7일 7회)을 검사하고, 걸리면 보류합니다. 미납이면 추심 건이 생겨 추심 에이전트가 연락 문구를 제안하고, 심사역 승인을 받아야 보냅니다.</p>
+<h2>{{ _("상환 원장") }}</h2>
+<p class="note">{{ _("상환일 당일 <code>에이엠에이렌딩 대출상환</code> 출금이 있으면 납부로 봅니다. 안내는 상환일 3일 전에 자동 발송하고, 높음 경보로 잔고 부족 예상 알림이 나간 뒤에는 5일 전에도 추가 안내를 보냅니다. 자동 안내는 시뮬레이션 날짜 10시 기준으로 공정 추심 규칙(연락 시간·7일 7회)을 검사하고, 걸리면 보류합니다. 미납이면 추심 건이 생겨 추심 에이전트가 연락 문구를 제안하고, 심사역 승인을 받아야 보냅니다.") }}</p>
 <table>
-  <thead><tr><th>회차</th><th>상환일</th><th>금액</th><th>상태</th><th>5일 전 안내</th><th>안내일</th><th>출금 거래</th><th>추심 건</th></tr></thead>
+  <thead><tr><th>{{ _("회차") }}</th><th>{{ _("상환일") }}</th><th>{{ _("금액") }}</th><th>{{ _("상태") }}</th><th>{{ _("5일 전 안내") }}</th><th>{{ _("안내일") }}</th><th>{{ _("출금 거래") }}</th><th>{{ _("추심 건") }}</th></tr></thead>
   <tbody>
 {% for s in l.repayment.schedule %}
 <tr>
-  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>(원래 {{ s.from_due_on }})</small>{% endif %}</td><td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
+  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>({{ _("원래 %(date)s", date=s.from_due_on) }})</small>{% endif %}</td><td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
   <td class="r-{{ s.status }}">{{ s.status|repayment_label }}</td>
-  <td>{{ s.early_reminded_on or "-" }}{% if s.early_reminder_status == "deferred" %} (보류){% endif %}</td>
-  <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} (보류){% endif %}</td>
+  <td>{{ s.early_reminded_on or "-" }}{% if s.early_reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
+  <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
   <td>{{ s.txn_id or "-" }}</td>
   <td>{% if s.case_id %}<a href="#{{ s.case_id }}">{{ s.case_id }}</a>{% else %}-{% endif %}</td>
 </tr>
@@ -215,34 +215,34 @@
 {% endif %}
 {% if v.offer %}{% set o = v.offer %}
 <section id="plan-offer" class="card">
-<h2>상환 플랜 제안 <small>{{ o.status|offer_label }}</small></h2>
-<p class="note">높음 경보 2단계 안내로 {{ o.sent_on }}({{ o.week }}주차)에 고객에게 보낸 셀프 상환 플랜입니다. 고객이 이동·분할을 고르면 심사역이 승인해야 일정이 바뀝니다.</p>
+<h2>{{ _("상환 플랜 제안") }} <small>{{ o.status|offer_label }}</small></h2>
+<p class="note">{{ _("높음 경보 2단계 안내로 %(on)s(%(week)s주차)에 고객에게 보낸 셀프 상환 플랜입니다. 고객이 이동·분할을 고르면 심사역이 승인해야 일정이 바뀝니다.", on=o.sent_on, week=o.week) }}</p>
 <table>
-  <thead><tr><th>옵션</th><th>바뀌는 일정</th></tr></thead>
+  <thead><tr><th>{{ _("옵션") }}</th><th>{{ _("바뀌는 일정") }}</th></tr></thead>
   <tbody>{% for op in o.options or () %}
-<tr><td>{{ op.option|plan_option_label }}{% if op.option == o.choice %} <span class="chip">고객 선택</span>{% endif %}</td>
-<td>{% if op["items"] %}{{ plan_items(op["items"]) }}{% else %}지금 일정 그대로{% endif %}</td></tr>
+<tr><td>{{ op.option|plan_option_label }}{% if op.option == o.choice %} <span class="chip">{{ _("고객 선택") }}</span>{% endif %}</td>
+<td>{% if op["items"] %}{{ plan_items(op["items"]) }}{% else %}{{ _("지금 일정 그대로") }}{% endif %}</td></tr>
 {% endfor %}</tbody>
 </table>
-{% if o.responded_at %}<p>고객 응답: {{ o.responded_at }}</p>{% endif %}
-{% if o.expired_at %}<p>고객 응답 없이 계속: {{ o.expired_by }} · {{ o.expired_at }}</p>{% endif %}
+{% if o.responded_at %}<p>{{ _("고객 응답") }}: {{ o.responded_at }}</p>{% endif %}
+{% if o.expired_at %}<p>{{ _("고객 응답 없이 계속") }}: {{ o.expired_by }} · {{ o.expired_at }}</p>{% endif %}
 {% if o.status == "open" and user.can_decide and replay_blocked %}
-<p><small>재생이 멈추면 고객 응답 없이 계속할 수 있습니다.</small></p>
+<p><small>{{ _("재생이 멈추면 고객 응답 없이 계속할 수 있습니다.") }}</small></p>
 {% elif o.status == "open" and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}
 <form method="post" action="/loans/{{ l.id|path }}/offer/expire" class="decision" data-decision-form>
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <p><small>제안을 만료로 닫고 지금 일정대로 진행합니다. 그 뒤 들어온 고객 선택은 반영하지 않습니다.</small></p>
-  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "고객 응답 없이 계속" }}</button>
+  <p><small>{{ _("제안을 만료로 닫고 지금 일정대로 진행합니다. 그 뒤 들어온 고객 선택은 반영하지 않습니다.") }}</small></p>
+  <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("고객 응답 없이 계속") }}</button>
 </form>
 {% endif %}
 </section>
 {% endif %}
 {% if v.plan_change %}{% set pc = v.plan_change %}
 <section id="plan-change" class="card">
-<h2>플랜 변경 요청 <small>{{ pc.option|plan_option_label }} · {{ pc.status|plan_change_label }}</small></h2>
-<p class="note">고객이 {{ pc.requested_at }}에 고른 플랜입니다. 승인하면 아래처럼 상환 일정이 바뀌고, 이미 공개된 주차의 거래·판정은 바뀌지 않습니다.</p>
+<h2>{{ _("플랜 변경 요청") }} <small>{{ pc.option|plan_option_label }} · {{ pc.status|plan_change_label }}</small></h2>
+<p class="note">{{ _("고객이 %(at)s에 고른 플랜입니다. 승인하면 아래처럼 상환 일정이 바뀌고, 이미 공개된 주차의 거래·판정은 바뀌지 않습니다.", at=pc.requested_at) }}</p>
 <table>
-  <thead><tr><th>지금</th><th>바뀐 뒤</th></tr></thead>
+  <thead><tr><th>{{ _("지금") }}</th><th>{{ _("바뀐 뒤") }}</th></tr></thead>
   <tbody><tr>
     <td>{% for b in pc.before %}{{ b.label }} {{ b.due_on or "-" }} · {{ b.amount_krw|krw if b.amount_krw is not none else "-" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
     <td>{% for a in pc.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
@@ -250,25 +250,25 @@
 </table>
 {% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason }}{% endif %}</p>
 {% elif v.plan_decidable and user.can_decide and replay_blocked %}
-<p><small>재생이 멈추면 결정할 수 있습니다.</small></p>
+<p><small>{{ _("재생이 멈추면 결정할 수 있습니다.") }}</small></p>
 {% elif v.plan_decidable and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}
 <form method="post" action="/loans/{{ l.id|path }}/plan/{{ pc.change_id|path }}" class="decision" data-decision-form>
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <fieldset><legend>플랜 변경 결정</legend>
-    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> 승인</label>
-    <label><input type="radio" name="decision" value="decline"{{ locked }}> 반려</label>
+  <fieldset><legend>{{ _("플랜 변경 결정") }}</legend>
+    <label><input type="radio" name="decision" value="approve" checked{{ locked }}> {{ pgettext("button", "승인") }}</label>
+    <label><input type="radio" name="decision" value="decline"{{ locked }}> {{ pgettext("button", "반려") }}</label>
   </fieldset>
-  <label>사유(반려할 때 필수) <textarea name="reason" rows="2"{{ locked }}></textarea></label>
-  <button type="submit"{{ locked }}>{{ "결정 반영 대기 중" if watch_url else "결정 보내기" }}</button>
+  <label>{{ _("사유(반려할 때 필수)") }} <textarea name="reason" rows="2"{{ locked }}></textarea></label>
+  <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("결정 보내기") }}</button>
 </form>
 {% endif %}
 </section>
 {% endif %}
 {% if v.plan_history %}
 <section class="card">
-<h2>상환 일정 변경 이력</h2>
+<h2>{{ _("상환 일정 변경 이력") }}</h2>
 <table>
-  <thead><tr><th>변경</th><th>지금이던 일정</th><th>바뀐 일정</th><th>적용 시작</th><th>심사역</th></tr></thead>
+  <thead><tr><th>{{ _("변경") }}</th><th>{{ _("지금이던 일정") }}</th><th>{{ _("바뀐 일정") }}</th><th>{{ _("적용 시작") }}</th><th>{{ _("심사역") }}</th></tr></thead>
   <tbody>{% for h in v.plan_history %}
 <tr><td>{{ h.option|plan_option_label }}</td>
 <td>{% for b in h.before %}{{ b.label }} {{ b.due_on }} · {{ b.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
@@ -280,67 +280,67 @@
 {% endif %}
 {% if ui.expected_chart %}
 <section class="card">
-<h2>기대 입금 대비 실제</h2>
-<p class="note">정산 채널별 주기·영업일·계절 지수로 만든 주차별 기대 입금(선)과 실제 정산 입금(막대)입니다. 기대의 85% 아래인 주는 주황색입니다.</p>
-{% call ch.columns(ui.expected_chart, "주차별 기대 입금 대비 실제 입금") %}{{ ch.line_overlay(ui.expected_line, "기대 입금", "teal", false) }}{% endcall %}
-{{ ch.legend([("실제 입금", "blue"), ("기대의 85% 미만", "amber"), ("기대 입금", "teal")]) }}
+<h2>{{ _("기대 입금 대비 실제") }}</h2>
+<p class="note">{{ _("정산 채널별 주기·영업일·계절 지수로 만든 주차별 기대 입금(선)과 실제 정산 입금(막대)입니다. 기대의 85%% 아래인 주는 주황색입니다.") }}</p>
+{% call ch.columns(ui.expected_chart, _("주차별 기대 입금 대비 실제 입금")) %}{{ ch.line_overlay(ui.expected_line, _("기대 입금"), "teal", false) }}{% endcall %}
+{{ ch.legend([(_("실제 입금"), "blue"), (_("기대의 85%% 미만"), "amber"), (_("기대 입금"), "teal")]) }}
 </section>
 {% endif %}
 {% if ui.forecast %}{% set f = ui.forecast %}
 <section class="card">
-<h2>4주 잔고 전망 <small>{{ f.week }}주차 말 기준</small></h2>
+<h2>{{ _("4주 잔고 전망") }} <small>{{ _("%(week)s주차 말 기준", week=f.week) }}</small></h2>
 <div class="grid-4">
-  {{ ch.kpi("시작 잔고", f.start_balance|krw, f.week ~ "주차 마지막 날", "neutral") }}
-  {{ ch.kpi("최근 4주 달성률", f.attainment_pct ~ "%", "기대 입금 대비 실제(전망 입금에 반영)", "blue") }}
-  {{ ch.kpi("전망 최저 잔고", f.min_balance|krw if f.min_balance is not none else "-", f.min_date or "", "red" if f.shortfall_date else "green") }}
-  {{ ch.kpi("부족 예상일", f.shortfall_date or "없음", "잔고가 처음 0원 아래로 내려가는 날" if f.shortfall_date else "28일 안에 0원 아래로 내려가지 않음", "red" if f.shortfall_date else "green") }}
+  {{ ch.kpi(_("시작 잔고"), f.start_balance|krw, _("%(week)s주차 마지막 날", week=f.week), "neutral") }}
+  {{ ch.kpi(_("최근 4주 달성률"), f.attainment_pct ~ "%", _("기대 입금 대비 실제(전망 입금에 반영)"), "blue") }}
+  {{ ch.kpi(_("전망 최저 잔고"), f.min_balance|krw if f.min_balance is not none else "-", f.min_date or "", "red" if f.shortfall_date else "green") }}
+  {{ ch.kpi(_("부족 예상일"), f.shortfall_date or _("없음"), _("잔고가 처음 0원 아래로 내려가는 날") if f.shortfall_date else _("28일 안에 0원 아래로 내려가지 않음"), "red" if f.shortfall_date else "green") }}
 </div>
-{{ ch.signed_line(f.chart, "다음 28일 일별 잔고 전망") }}
-{{ ch.legend([("전망 잔고", "purple"), ("0원 아래", "red")]) }}
+{{ ch.signed_line(f.chart, _("다음 28일 일별 잔고 전망")) }}
+{{ ch.legend([(_("전망 잔고"), "purple"), (_("0원 아래"), "red")]) }}
 {% if f.totals %}<table>
-  <thead><tr><th>28일 합계</th><th>금액</th></tr></thead>
+  <thead><tr><th>{{ _("28일 합계") }}</th><th>{{ _("금액") }}</th></tr></thead>
   <tbody>{% for label, value in f.totals %}<tr><td>{{ label }}</td><td>{{ value|krw }}</td></tr>{% endfor %}</tbody>
 </table>{% endif %}
-<p><small>예정 출금 일정은 심사 시점 거래의 반복 패턴에서 뽑았습니다. 고금리 상환은 그 주 금액이 매주 반복된다고 가정합니다. 전망 최저 잔고가 0원 아래면 <span class="chip">잔고 부족 전망</span> 트리거가 걸립니다.</small></p>
+<p><small>{{ _('예정 출금 일정은 심사 시점 거래의 반복 패턴에서 뽑았습니다. 고금리 상환은 그 주 금액이 매주 반복된다고 가정합니다. 전망 최저 잔고가 0원 아래면 <span class="chip">잔고 부족 전망</span> 트리거가 걸립니다.') }}</small></p>
 </section>
 {% endif %}
 {% endif %}
 
 {% for a in v.alerts %}
 <section id="{{ a.alert_id }}" class="card alert-card alert-{{ a.severity }}">
-<h2>경보 {{ a.week }}주차 <span class="status sev-{{ a.severity }}">{{ a.severity|severity_label }}</span> <small>{{ a.recommended_action|action_label }} · {{ a.status }}</small></h2>
-<p class="cause"><span class="chip">주원인: {{ a.cause_label }}</span>{% if a.secondary_labels %} <span class="chip">부원인: {{ a.secondary_labels|join(", ") }}</span>{% endif %}</p>
-{% if ui.alert_steps[a.alert_id] %}{{ ch.stepper(ui.alert_steps[a.alert_id], "경보 처리 단계", compact=true) }}{% endif %}
+<h2>{{ _("경보 %(week)s주차", week=a.week) }} <span class="status sev-{{ a.severity }}">{{ a.severity|severity_label }}</span> <small>{{ a.recommended_action|action_label }} · {{ a.status }}</small></h2>
+<p class="cause"><span class="chip">{{ _("주원인: %(cause)s", cause=a.cause_label) }}</span>{% if a.secondary_labels %} <span class="chip">{{ _("부원인: %(causes)s", causes=a.secondary_labels|join(", ")) }}</span>{% endif %}</p>
+{% if ui.alert_steps[a.alert_id] %}{{ ch.stepper(ui.alert_steps[a.alert_id], _("경보 처리 단계"), compact=true) }}{% endif %}
 {% if a.check_action %}<div class="decision-layout">
-  <div><h3>이유</h3><p class="summary">{{ a.summary }}</p></div>
-  <div><h3>확인할 조치</h3><p>{{ a.check_action }}</p></div>
+  <div><h3>{{ _("이유") }}</h3><p class="summary">{{ a.summary }}</p></div>
+  <div><h3>{{ _("확인할 조치") }}</h3><p>{{ a.check_action }}</p></div>
 </div>
 {% else %}<p class="summary">{{ a.summary }}</p>{% endif %}
 <ul class="claims">
 {% for s in a.signals %}
   <li><strong>{{ s.kind }}</strong> {{ s.text }}
-    <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else "없음" }}</span>{% endfor %}
+    <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else _("없음") }}</span>{% endfor %}
     {% for t in s.txn_ids %}<span class="chip txn">{{ t }}</span>{% endfor %}</div>
   </li>
 {% endfor %}
 </ul>
-<p class="review">조사 모델: {% for role, model in a.models|dictsort %}{{ role }}={{ model }} {% endfor %}{% if a.event_error %} · <span class="error">이벤트 발행 실패: {{ a.event_error }}</span>{% endif %}</p>
-{% if a.auto_contacts %}<h3>이 경보로 자동 발송된 안내</h3>
+<p class="review">{{ _("조사 모델") }}: {% for role, model in a.models|dictsort %}{{ role }}={{ model }} {% endfor %}{% if a.event_error %} · <span class="error">{{ _("이벤트 발행 실패") }}: {{ a.event_error }}</span>{% endif %}</p>
+{% if a.auto_contacts %}<h3>{{ _("이 경보로 자동 발송된 안내") }}</h3>
 <table>
-  <thead><tr><th>단계</th><th>스크립트</th><th>날짜</th><th>상태</th><th>문구</th></tr></thead>
-  <tbody>{% for x in a.auto_contacts %}<tr><td>{{ x.stage }}단계</td><td>{{ x.script_id|script_label }}</td><td>{{ x.on }}</td><td>{{ x.status|contact_status_label }}{% if x.reason %} ({{ x.reason|contact_reason_label }}){% endif %}</td><td>{{ x.text or "-" }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th>{{ _("단계") }}</th><th>{{ _("스크립트") }}</th><th>{{ _("날짜") }}</th><th>{{ _("상태") }}</th><th>{{ _("문구") }}</th></tr></thead>
+  <tbody>{% for x in a.auto_contacts %}<tr><td>{{ _("%(n)s단계", n=x.stage) }}</td><td>{{ x.script_id|script_label }}</td><td>{{ x.on }}</td><td>{{ x.status|contact_status_label }}{% if x.reason %} ({{ x.reason|contact_reason_label }}){% endif %}</td><td>{{ x.text or "-" }}</td></tr>{% endfor %}</tbody>
 </table>{% endif %}
 {% if a.collections %}{{ collections_block(a.collections) }}
 {% elif not a.restructure %}{% set links = ui.alert_followups.get(a.alert_id) or [] %}
-{% if links %}<h3>이 경보를 근거로 한 차주 연락</h3>
+{% if links %}<h3>{{ _("이 경보를 근거로 한 차주 연락") }}</h3>
 <ul class="followups">{% for f in links %}
-  <li><a href="#{{ f.case_id }}">{{ f.no }}회차 미납 추심</a>{% if f.decision %} · 추심 에이전트 {{ f.decision }}{% else %} · 추심 에이전트 처리 대기 중{% endif %}
-  {% if f.proposal %} · 추심 제안 {{ f.proposal|proposal_label }}{% endif %}
+  <li><a href="#{{ f.case_id }}">{{ _("%(no)s회차 미납 추심", no=f.no) }}</a>{% if f.decision %} · {{ _("추심 에이전트") }} {{ f.decision }}{% else %} · {{ _("추심 에이전트 처리 대기 중") }}{% endif %}
+  {% if f.proposal %} · {{ _("추심 제안") }} {{ f.proposal|proposal_label }}{% endif %}
   {% for x in f.contacts %} · {{ x.at }} {{ x.script_id }} {{ x.status }}{% endfor %}
-  {% if f.restructure %} · 재조정 상담 요청 {{ f.restructure }}{% endif %}</li>
+  {% if f.restructure %} · {{ _("재조정 상담 요청") }} {{ f.restructure }}{% endif %}</li>
 {% endfor %}</ul>
-{% elif not a.auto_contacts %}<p class="note">심사역 검토 대상 · 이 경보로 나간 차주 연락 없음</p>{% endif %}
-<p class="note"><small>높음 경보가 처음 나면 잔고 부족 예상 알림(1단계)을, 높음 경보가 두 번 이어지면 상환 플랜 제안(2단계)을 자동으로 보냅니다(단계마다 재생에서 한 번). 미납이 생기면 추심 에이전트가 이 경보를 참고해 연락 문구를 제안하고, 심사역이 승인해야 보냅니다. 재조정 결정은 추심 카드에서 합니다.</small></p>
+{% elif not a.auto_contacts %}<p class="note">{{ _("심사역 검토 대상 · 이 경보로 나간 차주 연락 없음") }}</p>{% endif %}
+<p class="note"><small>{{ _("높음 경보가 처음 나면 잔고 부족 예상 알림(1단계)을, 높음 경보가 두 번 이어지면 상환 플랜 제안(2단계)을 자동으로 보냅니다(단계마다 재생에서 한 번). 미납이 생기면 추심 에이전트가 이 경보를 참고해 연락 문구를 제안하고, 심사역이 승인해야 보냅니다. 재조정 결정은 추심 카드에서 합니다.") }}</small></p>
 {% endif %}
 {% if a.restructure %}{{ restructure_block(a.id, a.restructure, a.decidable) }}{% endif %}
 </section>
@@ -348,22 +348,22 @@
 
 {% for c in v.cases %}{% set inst = c.installment %}
 <section id="{{ c.case_id }}" class="card alert-card">
-<h2>{{ inst.no }}회차 미납 · {{ inst.due_on }} · {{ inst.amount_krw|krw }} <small>누적 미납 {{ c.missed_count }}회 · {{ c.status }}</small></h2>
-{% if ui.case_steps[c.case_id] %}{{ ch.stepper(ui.case_steps[c.case_id], "미납 추심 단계", compact=true) }}{% endif %}
-{% if c.recent_alert %}<p>최근 경보: <a href="#{{ c.recent_alert.alert_id }}">{{ c.recent_alert.week }}주차 {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary }}</p>
-{% else %}<p class="note">이번 재생에 앞선 경보 없음.</p>{% endif %}
-{% if c.event_error %}<p class="error">이벤트 발행 실패: {{ c.event_error }}</p>{% endif %}
+<h2>{{ _("%(no)s회차 미납", no=inst.no) }} · {{ inst.due_on }} · {{ inst.amount_krw|krw }} <small>{{ _("누적 미납 %(n)s회", n=c.missed_count) }} · {{ c.status }}</small></h2>
+{% if ui.case_steps[c.case_id] %}{{ ch.stepper(ui.case_steps[c.case_id], _("미납 추심 단계"), compact=true) }}{% endif %}
+{% if c.recent_alert %}<p>{{ _("최근 경보") }}: <a href="#{{ c.recent_alert.alert_id }}">{{ _("%(n)s주차", n=c.recent_alert.week) }} {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary }}</p>
+{% else %}<p class="note">{{ _("이번 재생에 앞선 경보 없음.") }}</p>{% endif %}
+{% if c.event_error %}<p class="error">{{ _("이벤트 발행 실패") }}: {{ c.event_error }}</p>{% endif %}
 {% if c.proposal %}{{ proposal_block(c.id, c.proposal, c.proposal_decidable) }}
-{% elif c.collections %}{{ collections_block(c.collections) }}{% else %}<p>추심 에이전트 처리 대기 중.</p>{% endif %}
+{% elif c.collections %}{{ collections_block(c.collections) }}{% else %}<p>{{ _("추심 에이전트 처리 대기 중.") }}</p>{% endif %}
 {% if c.restructure %}{{ restructure_block(c.id, c.restructure, c.decidable) }}{% endif %}
 </section>
 {% endfor %}
 
 {% if v.transactions %}
 <section class="card">
-<h2>근거 거래</h2>
+<h2>{{ _("근거 거래") }}</h2>
 <table>
-  <thead><tr><th>거래 ID</th><th>일자</th><th>금액</th><th>적요</th></tr></thead>
+  <thead><tr><th>{{ _("거래 ID") }}</th><th>{{ _("일자") }}</th><th>{{ _("금액") }}</th><th>{{ _("적요") }}</th></tr></thead>
   <tbody>{% for t in v.transactions %}<tr><td>{{ t.txn_id }}</td><td>{{ t.booked_on }}</td><td>{{ t.amount_krw|krw }}</td><td>{{ t.description }}</td></tr>{% endfor %}</tbody>
 </table>
 </section>

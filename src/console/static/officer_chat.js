@@ -2,6 +2,10 @@
 (() => {
   const MAX_MESSAGES = 12; // 최근 6턴
   const MAX_TEXT = 2000;
+  const TEXT = {
+    ko: { busy: "답변 작성 중…", send: "보내기", failed: "답변을 받지 못했습니다." },
+    en: { busy: "Writing answer…", send: "Send", failed: "Could not get an answer." },
+  }[document.documentElement.lang === "en" ? "en" : "ko"];
   const form = document.querySelector("form[data-officer-chat]");
   if (!form) return;
   const log = document.querySelector("[data-chat-log]");
@@ -22,7 +26,7 @@
     input.disabled = busy;
     button.disabled = busy;
     suggestions.forEach((b) => { b.disabled = busy; });
-    button.textContent = busy ? "답변 작성 중…" : "보내기";
+    button.textContent = busy ? TEXT.busy : TEXT.send;
   };
 
   const ask = async (raw) => {
@@ -44,10 +48,10 @@
                      { role: "assistant", text: body.answer.slice(0, MAX_TEXT) });
         input.value = "";
       } else {
-        append("system", body.error || "답변을 받지 못했습니다.");
+        append("system", body.error || TEXT.failed);
       }
     } catch {
-      append("system", "답변을 받지 못했습니다.");
+      append("system", TEXT.failed);
     } finally {
       setBusy(false);
       input.focus();

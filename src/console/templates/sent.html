@@ -3,7 +3,7 @@
 {% block head %}<meta http-equiv="refresh" content="1;url=/applications/{{ application_id|path }}?since={{ since }}">{% endblock %}
 {% block main %}
 <h1>{{ application_id }}</h1>
-<p class="ok">{% if decision.policy_override %}<span class="badge badge-red">정책 예외 승인</span> {% endif %}결정({{ decision.decision }})을 큐에 보냈습니다. 오케스트레이터가 정책 한도를 다시 검증한 뒤 상태를 바꿉니다.</p>
-<p class="note" role="status">잠시 후 신청 상세로 이동해 반영될 때까지 자동으로 확인합니다.</p>
-<p><a href="/applications/{{ application_id|path }}?since={{ since }}">신청 상세로</a> · <a href="/">목록으로</a></p>
+<p class="ok">{% if decision.policy_override %}<span class="badge badge-red">{{ _("정책 예외 승인") }}</span> {% endif %}{{ _("결정(%(decision)s)을 큐에 보냈습니다. 오케스트레이터가 정책 한도를 다시 검증한 뒤 상태를 바꿉니다.", decision=decision.decision) }}</p>
+<p class="note" role="status">{{ _("잠시 후 신청 상세로 이동해 반영될 때까지 자동으로 확인합니다.") }}</p>
+<p><a href="/applications/{{ application_id|path }}?since={{ since }}">{{ _("신청 상세로") }}</a> · <a href="/">{{ _("목록으로") }}</a></p>
 {% endblock %}

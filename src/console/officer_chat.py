@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agents.features import ANNUAL_RATE
+from console.i18n import _
 from policy.engine import LIMIT_UNIT_KRW, explain
 from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
 from shared.contracts import CashFlowFeatures
@@ -26,6 +27,7 @@ SETTLEMENT_KEYS = ("available", "pg_reconciliation_ratio", "pg_top_platform_shar
                    "pg_cash_conversion_days", "pg_offset_rate_trend_pp", "pg_advance_share",
                    "pg_advance_suspected_count", "unmatched_count", "settlement_count", "period")
 STRUCTURE_KEYS = ("amount_krw", "tenor_months", "schedule", "reduced_payment_months", "rationale")
+# 추천 질문·오류 문구는 화면에 낼 때 번역한다(템플릿 `_()`, `chat_error`). TRACE_NOTES는 모델 입력이라 번역하지 않는다.
 CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?")
 TRACE_NOTES = {
     "unknown_version": "적용 규정 버전을 콘솔에서 찾을 수 없어 계산 과정을 만들지 않았습니다.",
@@ -42,6 +44,12 @@ CHAT_ERRORS: dict[str, tuple[int, str]] = {
     "failed": (502, "답변을 받지 못했습니다."),
     "disabled": (503, "채팅을 쓸 수 없습니다."),
 }
+
+
+def chat_error(code: str) -> tuple[int, str]:
+    """(HTTP 상태, 지금 언어로 번역한 안내 문구)."""
+    status, message = CHAT_ERRORS[code]
+    return status, _(message)
 
 
 def _num(value: Any) -> bool:

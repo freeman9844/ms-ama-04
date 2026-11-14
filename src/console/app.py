@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import time
 from collections.abc import Callable
@@ -27,6 +28,8 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from agents.collections import message_issues
+from console import i18n
+from console.i18n import _
 from agents.monitoring import WEEKS
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
@@ -185,24 +188,28 @@ def watch_url(request: Request, path: str, tag: str) -> str | None:
 
 
 def _krw(value: Any) -> str:
-    return f"{value:,}원" if isinstance(value, int) and not isinstance(value, bool) else "-"
+    if not isinstance(value, int) or isinstance(value, bool):
+        return "-"
+    return f"₩{value:,}" if i18n.current() == "en" else f"{value:,}원"
 
 
 def _templates() -> Environment:
-    env = Environment(loader=FileSystemLoader(HERE / "templates"), autoescape=True)
+    env = Environment(loader=FileSystemLoader(HERE / "templates"), autoescape=True, extensions=["jinja2.ext.i18n"])
+    env.install_gettext_callables(gettext=i18n.gettext, ngettext=lambda s, p, n: i18n.gettext(s if n == 1 else p),
+                                  pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
-    env.filters["status_label"] = lambda s: STATUS_LABELS.get(s or "", s or "-")
+    env.filters["status_label"] = lambda s: i18n.label(STATUS_LABELS, s)
     env.filters["path"] = lambda s: quote(str(s), safe="")
-    env.filters["monitoring_label"] = lambda s: MONITORING_LABELS.get(s or "", "재생 전")
-    env.filters["severity_label"] = lambda s: SEVERITY_LABELS.get(s or "", s or "-")
-    env.filters["action_label"] = lambda s: ACTION_LABELS.get(s or "", s or "-")
-    env.filters["trigger_label"] = lambda s: TRIGGER_LABELS.get(s or "", s or "-")
-    env.filters["repayment_label"] = lambda s: REPAYMENT_LABELS.get(s or "", s or "-")
+    env.filters["monitoring_label"] = lambda s: i18n.label(MONITORING_LABELS, s, "재생 전")
+    env.filters["severity_label"] = lambda s: i18n.label(SEVERITY_LABELS, s)
+    env.filters["action_label"] = lambda s: i18n.label(ACTION_LABELS, s)
+    env.filters["trigger_label"] = lambda s: i18n.label(TRIGGER_LABELS, s)
+    env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
     env.filters["seller_label"] = seller_label
     env.filters["seller_name"] = seller_name
-    env.filters["recommendation_label"] = lambda s: RECOMMENDATION_LABELS.get(s or "", s or "-")
+    env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
     for name, labels in (LABEL_FILTERS | MONITORING_FILTERS).items():
-        env.filters[name] = lambda s, labels=labels: labels.get(s or "", s or "-")
+        env.filters[name] = lambda s, labels=labels: i18n.label(labels, s)
     env.filters["installment_label"] = installment_label
     env.filters["pct"] = lambda v: f"{v * 100:.1f}%" if isinstance(v, int | float) else "-"
     env.filters["usd"] = lambda v: f"${v:,.4f}" if isinstance(v, int | float) else "-"
@@ -210,6 +217,7 @@ def _templates() -> Environment:
     env.globals.update(
         htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS,
         monitoring_refresh_seconds=MONITORING_REFRESH_SECONDS, detail_refresh_seconds=DETAIL_REFRESH_SECONDS,
+        locale=i18n.current, lang_url=i18n.lang_url,
     )
     return env
 
@@ -257,7 +265,20 @@ async def _json_body(request: Request) -> dict[str, Any]:
 
 def _chat_error(code: str) -> JSONResponse:
     status, message = CHAT_ERRORS[code]
-    return JSONResponse({"error": message}, status_code=status)
+    return JSONResponse({"error": i18n.gettext(message)}, status_code=status)
+
+
+_TOO_LONG = re.compile(r"문구가 (\d+)자를 넘습니다\((\d+)자\)\.")
+_BANNED = re.compile(r"금지 표현 '(.+)'이\(가\) 들어 있습니다\.")
+
+
+def _issue_text(issue: str) -> str:
+    """agents.collections.message_issues의 한국어 사유를 화면 언어로. 금지 표현 자체는 고객 문구라 그대로 둔다."""
+    if m := _TOO_LONG.fullmatch(issue):
+        return _("문구가 %(max)s자를 넘습니다(%(n)s자).", max=m.group(1), n=m.group(2))
+    if m := _BANNED.fullmatch(issue):
+        return _("금지 표현 '%(phrase)s'이(가) 들어 있습니다.", phrase=m.group(1))
+    return _(issue)
 
 
 def create_app(deps: ConsoleDeps) -> FastAPI:
@@ -267,6 +288,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     # 레플리카가 여러 개여도 같은 토큰을 쓰도록 가명처리 키에서 파생한다.
     csrf_key = hmac.new(deps.pseudonym_key, b"console-csrf", hashlib.sha256).digest()
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+    app.add_middleware(i18n.LocaleMiddleware)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -346,9 +368,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 source="console",
             )
         except ValidationError:
-            return render("new.html", user, 422, error="신청 정보가 올바르지 않습니다.", form=form)
+            return render("new.html", user, 422, error=_("신청 정보가 올바르지 않습니다."), form=form)
         if not MIN_TENOR_MONTHS <= req.requested_tenor_months <= MAX_TENOR_MONTHS:
-            return render("new.html", user, 422, error=APPLY_ERRORS["tenor_invalid"], form=form)
+            return render("new.html", user, 422, error=_(APPLY_ERRORS["tenor_invalid"]), form=form)
         deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
 
@@ -373,7 +395,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         form = await checked_form(request, user)
         code = validate_apply(form, DEMO_APPLICANTS)
         if code:
-            return apply_form(user, 422, error=APPLY_ERRORS[code], error_code=code, form=form)
+            return apply_form(user, 422, error=_(APPLY_ERRORS[code]), error_code=code, form=form)
         req = StartRequest(
             application_id=deps.new_application_id(),
             applicant_id=form["applicant_id"].strip(),
@@ -429,7 +451,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         else:
             decision, error = validate_officer_decision(raw_decision, doc.get("policy"))
         if error:
-            return detail(user, doc, 422, error=DECISION_ERRORS.get(error, error), error_code=error, form=form)
+            return detail(user, doc, 422, error=_(DECISION_ERRORS.get(error, error)), error_code=error, form=form)
         message = OfficerMessage(application_id=application_id, decision=decision.model_dump(mode="json"))
         deps.queue.send(DECISION_QUEUE, message.model_dump(mode="json"))
         return render("sent.html", user, 202, application_id=application_id, decision=decision, since=state_tag(doc))
@@ -523,12 +545,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         await checked_form(request, user)
         loan = loan_or_404(loan_id)
         if replay_in_progress(loan.get("monitoring"), deps.clock()):
-            return loan_page(user, loan, 409, error="이미 재생이 진행 중입니다.")
+            return loan_page(user, loan, 409, error=_("이미 재생이 진행 중입니다."))
         if replay_held(loan.get("monitoring")):
-            return loan_page(user, loan, 409, error="대기 중인 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다.")
+            return loan_page(user, loan, 409, error=_("대기 중인 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다."))
         # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
         deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
-        return loan_sent(user, loan, "사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다.")
+        return loan_sent(user, loan, _("사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다."))
 
     @app.post("/loans/{loan_id}/replay/{action}", response_class=HTMLResponse)
     async def replay_resume_or_stop(loan_id: str, action: str, request: Request) -> HTMLResponse:
@@ -539,11 +561,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         loan = loan_or_404(loan_id)
         mon = loan.get("monitoring") or {}
         if mon.get("status") != "awaiting_resume":
-            return loan_page(user, loan, 409, error="재개 확인을 기다리는 재생이 없습니다.")
+            return loan_page(user, loan, 409, error=_("재개 확인을 기다리는 재생이 없습니다."))
         message = ReplayRequest(loan_id=loan["id"], action=action, replay_id=mon["replay_id"])
         deps.queue.send(REPLAY_QUEUE, message.model_dump(mode="json"))
         weeks_left = WEEKS - (mon.get("paused_week") or 0)
-        text = f"남은 {weeks_left}주 재생을 이어서 요청했습니다." if action == "resume" else "남은 재생을 종료하도록 요청했습니다."
+        text = (_("남은 %(n)s주 재생을 이어서 요청했습니다.", n=weeks_left) if action == "resume"
+                else _("남은 재생을 종료하도록 요청했습니다."))
         return loan_sent(user, loan, text)
 
     @app.post("/loans/{loan_id}/alerts/{alert_id}/restructure", response_class=HTMLResponse)
@@ -565,19 +588,19 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 officer_id=user.user_id, reason=reason,
             )
         except ValidationError:
-            return loan_page(user, loan, 422, error="재조정 결정 형식이 올바르지 않습니다.")
+            return loan_page(user, loan, 422, error=_("재조정 결정 형식이 올바르지 않습니다."))
         if not reason:
-            return loan_page(user, loan, 422, error="사유를 입력해야 합니다.")
+            return loan_page(user, loan, 422, error=_("사유를 입력해야 합니다."))
         # kind(기본값 restructure)는 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
         return loan_sent(
-            user, loan, f"재조정 결정({message.decision})을 큐에 보냈습니다.",
-            note="결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요." if replay_held(loan.get("monitoring")) else None,
+            user, loan, _("재조정 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision),
+            note=_("결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요.") if replay_held(loan.get("monitoring")) else None,
         )
 
     def held_note(loan: dict[str, Any]) -> str | None:
         if replay_held(loan.get("monitoring")):
-            return "다른 대기 항목이 없으면 대출 화면에서 재생을 이어갈지 선택하세요."
+            return _("다른 대기 항목이 없으면 대출 화면에서 재생을 이어갈지 선택하세요.")
         return None
 
     @app.post("/loans/{loan_id}/cases/{case_id}/proposal", response_class=HTMLResponse)
@@ -592,16 +615,16 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "case not found")
         proposal = case.get("proposal") or {}
         if proposal.get("status") != "pending_officer":
-            return loan_page(user, loan, 409, error="심사역 승인을 기다리는 추심 제안이 없습니다.")
+            return loan_page(user, loan, 409, error=_("심사역 승인을 기다리는 추심 제안이 없습니다."))
         decision = form.get("decision", "")
         reason = form.get("reason", "").strip()
         text = form.get("text", "").strip() if decision == "modify" else None
         if decision in ("approve", "modify"):
             issues = message_issues(str(proposal.get("text") or "") if text is None else text)
             if issues:
-                return loan_page(user, loan, 422, error="고객 문구를 보낼 수 없습니다: " + " ".join(issues))
+                return loan_page(user, loan, 422, error=_("고객 문구를 보낼 수 없습니다: ") + " ".join(_issue_text(i) for i in issues))
         if decision == "reject" and not reason:
-            return loan_page(user, loan, 422, error="반려 사유를 입력해야 합니다.")
+            return loan_page(user, loan, 422, error=_("반려 사유를 입력해야 합니다."))
         include = form.get("include_hardship") == "1" if decision in ("approve", "modify") and proposal.get("hardship") else None
         try:
             message = CollectionsDecision(
@@ -609,9 +632,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 officer_id=user.user_id, text=text, include_hardship=include, reason=reason,
             )
         except ValidationError:
-            return loan_page(user, loan, 422, error="추심 결정 형식이 올바르지 않습니다.")
+            return loan_page(user, loan, 422, error=_("추심 결정 형식이 올바르지 않습니다."))
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
-        return loan_sent(user, loan, f"추심 제안 결정({message.decision})을 큐에 보냈습니다.", note=held_note(loan))
+        return loan_sent(user, loan, _("추심 제안 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision), note=held_note(loan))
 
     @app.post("/loans/{loan_id}/plan/{change_id}", response_class=HTMLResponse)
     async def plan_change(loan_id: str, change_id: str, request: Request) -> HTMLResponse:
@@ -622,7 +645,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if not change or change.get("change_id") != change_id:
             raise HTTPException(404, "plan change not found")
         if change.get("status") != "pending_officer":
-            return loan_page(user, loan, 409, error="심사역 승인을 기다리는 플랜 변경 요청이 없습니다.")
+            return loan_page(user, loan, 409, error=_("심사역 승인을 기다리는 플랜 변경 요청이 없습니다."))
         reason = form.get("reason", "").strip()
         try:
             message = PlanDecision(
@@ -630,11 +653,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 officer_id=user.user_id, reason=reason,
             )
         except ValidationError:
-            return loan_page(user, loan, 422, error="플랜 변경 결정 형식이 올바르지 않습니다.")
+            return loan_page(user, loan, 422, error=_("플랜 변경 결정 형식이 올바르지 않습니다."))
         if message.decision == "decline" and not reason:
-            return loan_page(user, loan, 422, error="반려 사유를 입력해야 합니다.")
+            return loan_page(user, loan, 422, error=_("반려 사유를 입력해야 합니다."))
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
-        return loan_sent(user, loan, f"플랜 변경 결정({message.decision})을 큐에 보냈습니다.", note=held_note(loan))
+        return loan_sent(user, loan, _("플랜 변경 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision), note=held_note(loan))
 
     @app.post("/loans/{loan_id}/offer/expire", response_class=HTMLResponse)
     async def offer_expire(loan_id: str, request: Request) -> HTMLResponse:
@@ -644,11 +667,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         loan = loan_or_404(loan_id)
         offer = (loan.get("repayment") or {}).get("offer")
         if not offer or offer.get("status") != "open":
-            return loan_page(user, loan, 409, error="고객 응답을 기다리는 플랜 제안이 없습니다.")
+            return loan_page(user, loan, 409, error=_("고객 응답을 기다리는 플랜 제안이 없습니다."))
         message = OfferExpire(kind="offer_expire", loan_id=loan["id"], offer_id=offer["offer_id"],
                               officer_id=user.user_id)
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
-        return loan_sent(user, loan, "고객 응답 없이 계속하도록 플랜 제안 만료를 큐에 보냈습니다.", note=held_note(loan))
+        return loan_sent(user, loan, _("고객 응답 없이 계속하도록 플랜 제안 만료를 큐에 보냈습니다."), note=held_note(loan))
 
     # ── 동의 수명주기·이의제기(P5b) ──
 
@@ -713,8 +736,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         )
         deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
         back = f"/borrower/{quote(applicant_id, safe='')}"
-        return sent(user, f"동의 {consent_id} 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.",
-                    back, "차주 화면으로")
+        return sent(user, _("동의 %(id)s 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.", id=consent_id),
+                    back, _("차주 화면으로"))
 
     @app.post("/borrower/{applicant_id}/grievances", response_class=HTMLResponse)
     async def borrower_grievance(applicant_id: str, request: Request) -> HTMLResponse:
@@ -733,11 +756,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 text=form.get("text", ""),
             )
         except ValidationError:
-            return borrower_page(user, applicant_id, 422, error="이의 내용은 1~1000자로 입력해야 합니다.", form=form)
+            return borrower_page(user, applicant_id, 422, error=_("이의 내용은 1~1000자로 입력해야 합니다."), form=form)
         deps.queue.send(GRIEVANCE_QUEUE, message.model_dump(mode="json"))
         back = f"/borrower/{quote(applicant_id, safe='')}"
-        return sent(user, f"이의제기 {message.grievance_id}를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.",
-                    back, "차주 화면으로")
+        return sent(user, _("이의제기 %(id)s를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.", id=message.grievance_id),
+                    back, _("차주 화면으로"))
 
     @app.post("/borrower/{applicant_id}/plan", response_class=HTMLResponse)
     async def borrower_plan_choice(applicant_id: str, request: Request) -> HTMLResponse:
@@ -749,19 +772,19 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "loan not found")
         offer = (loan.get("repayment") or {}).get("offer")
         if not offer or offer.get("status") != "open" or offer.get("offer_id") != form.get("offer_id"):
-            return borrower_page(user, applicant_id, 409, error="이미 마감된 상환 플랜 제안입니다.")
+            return borrower_page(user, applicant_id, 409, error=_("이미 마감된 상환 플랜 제안입니다."))
         option = form.get("option", "")
         if option not in {o.get("option") for o in offer.get("options") or ()}:
-            return borrower_page(user, applicant_id, 422, error="제안에 없는 플랜입니다.")
+            return borrower_page(user, applicant_id, 422, error=_("제안에 없는 플랜입니다."))
         try:
             message = PlanChoice(kind="plan_choice", loan_id=loan["id"], offer_id=offer["offer_id"], option=option)
         except ValidationError:
-            return borrower_page(user, applicant_id, 422, error="제안에 없는 플랜입니다.")
+            return borrower_page(user, applicant_id, 422, error=_("제안에 없는 플랜입니다."))
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
-        label = PLAN_OPTION_LABELS[message.option]
-        text = (f"플랜({label})을 선택했습니다. 지금 일정대로 상환합니다." if message.option == "keep"
-                else f"플랜({label})을 선택했습니다. 심사역이 확인하면 결과가 차주 화면에 표시됩니다.")
-        return sent(user, text, f"/borrower/{quote(applicant_id, safe='')}#self-plan", "차주 화면으로")
+        label = i18n.label(PLAN_OPTION_LABELS, message.option)
+        text = (_("플랜(%(label)s)을 선택했습니다. 지금 일정대로 상환합니다.", label=label) if message.option == "keep"
+                else _("플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 차주 화면에 표시됩니다.", label=label))
+        return sent(user, text, f"/borrower/{quote(applicant_id, safe='')}#self-plan", _("차주 화면으로"))
 
     @app.post("/applications/{application_id}/consents/{consent_id}/{action}", response_class=HTMLResponse)
     async def consent_demo(application_id: str, consent_id: str, action: str, request: Request) -> HTMLResponse:
@@ -779,8 +802,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             consent_id=consent_id, action=action, requested_by=user.user_id, application_id=application_id
         )
         deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
-        return sent(user, f"동의 {consent_id}에 '{DEMO_ACTIONS[action]}' 명령을 보냈습니다.",
-                    f"/applications/{quote(application_id, safe='')}", "신청 상세로")
+        return sent(user, _("동의 %(id)s에 '%(action)s' 명령을 보냈습니다.", id=consent_id, action=i18n.label(DEMO_ACTIONS, action)),
+                    f"/applications/{quote(application_id, safe='')}", _("신청 상세로"))
 
     @app.get("/consents/{consent_id}/proof", response_class=HTMLResponse)
     def proof(consent_id: str, request: Request) -> HTMLResponse:
@@ -813,7 +836,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return render("ops.html", user, runs=runs, options=run_options(runs), selected=selected,
                       recent=selected == RECENT_RUN, s=summary,
                       ui=ops_summary(summary, STEP_LABELS) if summary else None,
-                      AXIS_LABELS=AXIS_LABELS, STEP_LABELS=STEP_LABELS)
+                      AXIS_LABELS={k: i18n.label(AXIS_LABELS, k) for k in AXIS_LABELS},
+                      STEP_LABELS={k: i18n.label(STEP_LABELS, k) for k in STEP_LABELS})
 
     def grievance_or_404(application_id: str, grievance_id: str) -> dict[str, Any]:
         doc = privacy().get_grievance(application_id, grievance_id)
@@ -843,7 +867,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return render("grievance.html", user, 422, g=doc, error=message, error_code=code, form=form)
 
         if amount_text and amount is None:
-            return invalid(DECISION_ERRORS["invalid_payload"])
+            return invalid(_(DECISION_ERRORS["invalid_payload"]))
         try:
             # 심사역 ID는 폼이 아니라 로그인 주체에서만 가져온다.
             message = GrievanceDecision(
@@ -853,16 +877,16 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 conditions=[c.strip() for c in form.get("conditions", "").splitlines() if c.strip()] if rereview else [],
             )
         except ValidationError:
-            return invalid("처리 결과와 사유를 확인하세요(재심사에는 새 결정이 필요합니다).")
+            return invalid(_("처리 결과와 사유를 확인하세요(재심사에는 새 결정이 필요합니다)."))
         if rereview:
             proposed = message.model_dump(include={"officer_id", "amount_krw", "conditions", "reason"})
-            _, error = validate_officer_decision(
+            _proposed, error = validate_officer_decision(
                 {**proposed, "decision": message.new_decision}, (doc.get("record") or {}).get("policy")
             )
             if error:
-                return invalid(DECISION_ERRORS.get(error, error), error)
+                return invalid(_(DECISION_ERRORS.get(error, error)), error)
         deps.queue.send(GRIEVANCE_DECISION_QUEUE, message.model_dump(mode="json"))
-        return sent(user, f"이의제기 {grievance_id} 처리({outcome})를 보냈습니다. 회신 초안이 곧 기록됩니다.",
-                    f"/grievances/{quote(application_id, safe='')}/{quote(grievance_id, safe='')}", "이의제기로")
+        return sent(user, _("이의제기 %(id)s 처리(%(outcome)s)를 보냈습니다. 회신 초안이 곧 기록됩니다.", id=grievance_id, outcome=outcome),
+                    f"/grievances/{quote(application_id, safe='')}/{quote(grievance_id, safe='')}", _("이의제기로"))
 
     return app

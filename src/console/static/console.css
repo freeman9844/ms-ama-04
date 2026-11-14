@@ -32,6 +32,11 @@ a:hover { color: var(--accent-dark); }
 .who span { display: block; }
 .who-name { color: #fff; font-weight: 600; }
 .who a { color: #9cc7f0; }
+.lang-switch { display: block; margin-top: .4rem; color: var(--nav-fg); }
+.lang-switch strong { color: #fff; font-weight: 600; }
+.apply-top { display: flex; justify-content: space-between; align-items: center; }
+.apply-top .lang-switch { margin: 0; color: #dbe9f7; font-size: .85rem; }
+.apply-top .lang-switch a { font-weight: 400; text-decoration: underline; }
 .content { min-width: 0; }
 .demo-banner { margin: 0; padding: .5rem 1.5rem; background: #fff4ce; color: #5c4400; border-bottom: 1px solid #e6c84f; }
 main { max-width: 1280px; padding: 1.2rem 1.5rem 3rem; }

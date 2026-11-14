@@ -3,6 +3,6 @@
 {% block head %}<meta http-equiv="refresh" content="{{ detail_refresh_seconds }}">{% endblock %}
 {% block main %}
 <h1>{{ application_id }}</h1>
-<p>신청 문서가 아직 없습니다. 오케스트레이터가 큐 메시지를 처리하면 자동으로 표시됩니다({{ detail_refresh_seconds }}초마다 새로 고침).</p>
-<p><a href="/">목록으로</a></p>
+<p>{{ _("신청 문서가 아직 없습니다. 오케스트레이터가 큐 메시지를 처리하면 자동으로 표시됩니다(%(n)s초마다 새로 고침).", n=detail_refresh_seconds) }}</p>
+<p><a href="/">{{ _("목록으로") }}</a></p>
 {% endblock %}

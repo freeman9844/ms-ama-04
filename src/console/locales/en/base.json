@@ -1,0 +1,18 @@
+{
+  "심사 콘솔": "Underwriting Console",
+  "주 메뉴": "Main menu",
+  "신청": "Applications",
+  "사후 모니터링": "Post-loan monitoring",
+  "이의제기": "Grievances",
+  "차주 시뮬레이터": "Borrower simulator",
+  "운영 지표": "Ops metrics",
+  "로그아웃": "Sign out",
+  "데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.": "Demo mode: Entra sign-in is off. Only the operator IP can connect.",
+  "AMA 셀러 운전자금 대출 신청": "AMA seller working-capital loan application",
+  "AMA 셀러 운전자금 대출": "AMA seller working-capital loan",
+  "데모 환경입니다. 실제 대출이 실행되지 않으며 데이터는 모두 가상입니다.": "This is a demo. No real loan is made and all data is synthetic.",
+  "button|승인": "Approve",
+  "button|거절": "Decline",
+  "button|반려": "Reject",
+  "button|수정 후 승인": "Approve with edits"
+}

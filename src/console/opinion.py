@@ -7,9 +7,10 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from console import charts
+from console import charts, i18n
 from console.assessment import RECOMMENDATION_TONES
-from console.dashboard import POLICY_DECISIONS, RECOMMENDATION_LABELS, krw_text
+from console.dashboard import POLICY_DECISIONS, RECOMMENDATION_LABELS
+from console.i18n import _
 
 RECOMMENDATION_MEANINGS = {
     "approve": "정책 판정과 현금흐름 근거가 모두 대출을 지지합니다. 제안 구조대로 승인할 것을 권합니다.",
@@ -41,7 +42,7 @@ METRIC_LABELS = {
 MONTHLY_LABELS = {"revenue": "매출", "operating_out": "운영비", "debt_service": "상환", "owner_draw": "대표자 인출",
                   "index": "매출 지수"}
 KRW_MONTHLY = frozenset({"revenue", "operating_out", "debt_service", "owner_draw"})
-# 근거 출처: (키, 이름, 색). 표·도넛·범례가 같은 순서를 쓴다.
+# 근거 출처: (키, 이름, 색). 표·도넛·범례가 같은 순서를 쓴다. 이름은 화면에 낼 때 번역한다.
 SOURCES = (("M", "현금흐름 지표", "blue"), ("S", "월별 흐름", "teal"), ("P", "정책 결과", "purple"),
            ("txn", "근거 거래", "orange"), ("missing", "확인 안 됨", "red"))
 TOOL_LABELS = {"get_metrics": "지표 조회", "get_monthly_series": "월별 흐름 조회",
@@ -61,22 +62,24 @@ def evidence_label(metric_id: str) -> str:
     """근거 ID → 사람이 읽는 이름. 모르는 형식은 ID 그대로."""
     parts = metric_id.split(":")
     if parts[0] == "M" and len(parts) == 2:
-        return METRIC_LABELS.get(parts[1], parts[1])
+        return i18n.label(METRIC_LABELS, parts[1])
     if parts[0] == "S" and len(parts) == 3:
-        return f"{parts[1]} {MONTHLY_LABELS.get(parts[2], parts[2])}"
+        return f"{parts[1]} {i18n.label(MONTHLY_LABELS, parts[2])}"
     if parts[0] == "P" and len(parts) == 2:
-        return METRIC_LABELS.get(parts[1], parts[1])
+        return i18n.label(METRIC_LABELS, parts[1])
     if parts[0] == "P" and len(parts) == 3:
-        return f"정책 {parts[1]} {'관측값' if parts[2] == 'observed' else '기준값'}"
+        if parts[2] == "observed":
+            return _("정책 %(code)s 관측값", code=parts[1])
+        return _("정책 %(code)s 기준값", code=parts[1])
     return metric_id
 
 
 def evidence_value(metric_id: str, value: Any) -> str:
     if not charts.is_num(value):
-        return "없음"
+        return _("없음")
     field = metric_id.split(":")[-1]
     if field.endswith("_krw") or field in KRW_MONTHLY:
-        return krw_text(value)
+        return charts.won(value)
     return _num_text(value)
 
 
@@ -91,20 +94,22 @@ def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any]) ->
     decision_label, decision_tone = POLICY_DECISIONS.get(decision, (decision or "판정 없음", "neutral"))
     aligned = rec in ALIGNED.get(decision, set())
     if not decision:
-        relation = "정책 판정이 없어 권고만 참고합니다."
+        relation = _("정책 판정이 없어 권고만 참고합니다.")
     elif aligned:
-        relation = "정책 판정과 에이전트 권고가 같은 방향입니다."
+        relation = _("정책 판정과 에이전트 권고가 같은 방향입니다.")
     else:
-        relation = "정책 판정과 에이전트 권고가 엇갈립니다. 근거 표와 근거 거래를 먼저 확인하세요."
+        relation = _("정책 판정과 에이전트 권고가 엇갈립니다. 근거 표와 근거 거래를 먼저 확인하세요.")
     return {
-        "label": RECOMMENDATION_LABELS.get(rec, rec or "권고 없음"), "tone": RECOMMENDATION_TONES.get(rec, "neutral"),
-        "meaning": RECOMMENDATION_MEANINGS.get(rec, ""), "policy": decision_label, "policy_tone": decision_tone,
+        "label": i18n.label(RECOMMENDATION_LABELS, rec, rec or "권고 없음"),
+        "tone": RECOMMENDATION_TONES.get(rec, "neutral"),
+        "meaning": _(RECOMMENDATION_MEANINGS[rec]) if rec in RECOMMENDATION_MEANINGS else "",
+        "policy": _(decision_label), "policy_tone": decision_tone,
         "aligned": aligned, "relation": relation,
     }
 
 
 def _claims(claims: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    counts = {key: 0 for key, _, _ in SOURCES}
+    counts = {key: 0 for key, _label, _color in SOURCES}
     rows = []
     for i, c in enumerate(claims, start=1):
         evidence = []
@@ -121,10 +126,11 @@ def _claims(claims: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], 
 
 
 def _evidence_mix(counts: Mapping[str, int]) -> dict[str, Any] | None:
-    segments = [(label, counts[key], color) for key, label, color in SOURCES]
-    if not any(v for _, v, _ in segments):
+    segments = [(_(label), counts[key], color) for key, label, color in SOURCES]
+    if not any(v for _label, v, _color in segments):
         return None
-    return {"donut": charts.donut(segments), "legend": [(label, color, f"{v}건") for label, v, color in segments if v]}
+    return {"donut": charts.donut(segments),
+            "legend": [(label, color, _("%(n)s건", n=v)) for label, v, color in segments if v]}
 
 
 def _season(monthly: Sequence[Mapping[str, Any]], reduced: Sequence[int]) -> dict[str, Any] | None:
@@ -140,13 +146,16 @@ def _season(monthly: Sequence[Mapping[str, Any]], reduced: Sequence[int]) -> dic
         cal = int(month[5:7]) if len(month) == 7 and month[5:7].isdigit() else None
         is_reduced = cal in reduced
         color = "amber" if is_reduced else ("red" if idx is not None and idx < LOW_INDEX else "blue")
-        tip = f"{month} 매출 지수 {idx if idx is not None else '-'}" + (" · 감액 월" if is_reduced else "")
+        tip = _("%(month)s 매출 지수 %(index)s", month=month, index=idx if idx is not None else "-")
+        if is_reduced:
+            tip = _("%(tip)s · 감액 월", tip=tip)
         groups.append((month[2:] if len(month) == 7 else month, [[("index", idx, color, tip)]]))
-    chart = charts.columns(groups, refs=[("평균", 1.0, "purple")], **INDEX_CHART)
-    used = {bar[0][2] for _, bars in groups for bar in bars}
-    legend = [(label, color) for label, color in (("평소 달", "blue"), (f"평균의 {LOW_INDEX:.0%} 미만", "red"),
-                                                  ("제안된 감액 월", "amber")) if color in used]
-    return {"chart": chart, "legend": [*legend, ("평균 = 1.0(선)", "purple")]}
+    chart = charts.columns(groups, refs=[(_("평균"), 1.0, "purple")], **INDEX_CHART)
+    used = {bar[0][2] for _label, bars in groups for bar in bars}
+    legend = [(label, color) for label, color in ((_("평소 달"), "blue"),
+                                                  (_("평균의 %(pct)s 미만", pct=f"{LOW_INDEX:.0%}"), "red"),
+                                                  (_("제안된 감액 월"), "amber")) if color in used]
+    return {"chart": chart, "legend": [*legend, (_("평균 = 1.0(선)"), "purple")]}
 
 
 def _structure(assessment: Mapping[str, Any], doc: Mapping[str, Any], policy: Mapping[str, Any],
@@ -159,16 +168,16 @@ def _structure(assessment: Mapping[str, Any], doc: Mapping[str, Any], policy: Ma
     reduced = [m for m in st.get("reduced_payment_months") or () if isinstance(m, int)]
     principal = amount / tenor if charts.is_num(amount) and charts.is_num(tenor) and tenor > 0 else None
     bars = [(label, round(v / 10_000), color) for label, v, color in
-            (("신청액", requested, "grey"), ("정책 한도", limit, "purple"), ("제안 금액", amount, "blue"))
+            ((_("신청액"), requested, "grey"), (_("정책 한도"), limit, "purple"), (_("제안 금액"), amount, "blue"))
             if charts.is_num(v)]
     rows = [
-        ("제안 금액", krw_text(amount)),
-        ("신청액 대비", f"{amount / requested:.0%}" if charts.is_num(amount) and charts.is_num(requested)
+        (_("제안 금액"), charts.won(amount)),
+        (_("신청액 대비"), f"{amount / requested:.0%}" if charts.is_num(amount) and charts.is_num(requested)
          and requested > 0 else "-"),
-        ("기간", f"{tenor}개월" if charts.is_num(tenor) else "-"),
-        ("상환 방식", SCHEDULE_LABELS.get(st.get("schedule"), st.get("schedule") or "-")),
-        ("감액 월", ", ".join(f"{m}월" for m in reduced) or "없음"),
-        ("월 원금(균등 기준)", krw_text(round(principal)) if principal is not None else "-"),
+        (_("기간"), _("%(n)s개월", n=tenor) if charts.is_num(tenor) else "-"),
+        (_("상환 방식"), i18n.label(SCHEDULE_LABELS, st.get("schedule"), st.get("schedule") or "-")),
+        (_("감액 월"), ", ".join(_("%(n)s월", n=m) for m in reduced) or _("없음")),
+        (_("월 원금(균등 기준)"), charts.won(round(principal)) if principal is not None else "-"),
     ]
     return {"rows": rows, "bars": charts.hbars(bars, width=420, label_w=80) if bars else None,
             "rationale": st.get("rationale") or "", "season": _season(monthly, reduced)}
@@ -188,7 +197,7 @@ def _counterfactuals(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
             "change": ("+" if delta and delta > 0 else "") + evidence_value(metric_id, delta) if delta is not None
             else "-",
             "pct": f"{pct:+.0f}%" if pct is not None else "-",
-            "direction": "올리기" if delta and delta > 0 else "낮추기" if delta and delta < 0 else "유지",
+            "direction": _("올리기") if delta and delta > 0 else _("낮추기") if delta and delta < 0 else _("유지"),
             "explanation": cf.get("explanation") or "",
         })
     return rows
@@ -200,27 +209,27 @@ def _round(entry: Mapping[str, Any]) -> dict[str, Any]:
     grounding = list(entry.get("grounding_issues") or [])
     review = list(entry.get("review_issues") or [])
     if entry.get("analyst_error"):
-        outcome, tone = "분석 실패", "red"
+        outcome, tone = _("분석 실패"), "red"
     elif grounding:
-        outcome, tone = "근거 보완 요청", "amber"
+        outcome, tone = _("근거 보완 요청"), "amber"
     elif entry.get("reviewer_error"):
-        outcome, tone = "검토 실패", "red"
+        outcome, tone = _("검토 실패"), "red"
     elif review:
-        outcome, tone = "검토 지적", "amber"
+        outcome, tone = _("검토 지적"), "amber"
     elif "reviewer" in entry:
-        outcome, tone = "통과", "green"
+        outcome, tone = _("통과"), "green"
     else:
         outcome, tone = "-", "neutral"
-    reviewer_text = ("건너뜀(근거 검사 미통과)" if grounding else "실패" if entry.get("reviewer_error")
-                     else f"지적 {len(review)}건" if "reviewer" in entry else "-")
+    reviewer_text = (_("건너뜀(근거 검사 미통과)") if grounding else _("실패") if entry.get("reviewer_error")
+                     else _("지적 %(n)s건", n=len(review)) if "reviewer" in entry else "-")
     return {
         "n": entry.get("round"), "tools": len(analyst.get("tool_calls") or ()),
         "tokens": int(analyst.get("total_tokens") or 0) + int(reviewer.get("total_tokens") or 0),
         "grounding": len(grounding), "review": len(review), "reviewer": reviewer_text,
         "outcome": outcome, "tone": tone,
-        "issues": [("근거 검사", i) for i in grounding] + [("검토", i) for i in review]
-        + ([("오류", str(entry["analyst_error"]))] if entry.get("analyst_error") else [])
-        + ([("오류", str(entry["reviewer_error"]))] if entry.get("reviewer_error") else []),
+        "issues": [(_("근거 검사"), i) for i in grounding] + [(_("검토"), i) for i in review]
+        + ([(_("오류"), str(entry["analyst_error"]))] if entry.get("analyst_error") else [])
+        + ([(_("오류"), str(entry["reviewer_error"]))] if entry.get("reviewer_error") else []),
     }
 
 
@@ -233,10 +242,12 @@ def _loop(run: Mapping[str, Any] | None) -> dict[str, Any] | None:
         for call in ((r.get("analyst") or {}).get("tool_calls") or ()):
             name = str((call or {}).get("name") or "")
             tools[name] = tools.get(name, 0) + 1
-    tool_bars = [(TOOL_LABELS.get(n, n), c, "blue") for n, c in sorted(tools.items(), key=lambda kv: -kv[1])]
+    tool_bars = [(i18n.label(TOOL_LABELS, n), c, "blue") for n, c in sorted(tools.items(), key=lambda kv: -kv[1])]
     rows = [_round(r) for r in rounds]
-    groups = [(f"{r['n']}라운드", [[("grounding", r["grounding"], "amber", f"{r['n']}라운드 근거 검사 {r['grounding']}건"),
-                                     ("review", r["review"], "red", f"{r['n']}라운드 검토 지적 {r['review']}건")]])
+    groups = [(_("%(n)s라운드", n=r["n"]),
+               [[("grounding", r["grounding"], "amber",
+                  _("%(n)s라운드 근거 검사 %(count)s건", n=r["n"], count=r["grounding"])),
+                 ("review", r["review"], "red", _("%(n)s라운드 검토 지적 %(count)s건", n=r["n"], count=r["review"]))]])
               for r in rows]
     return {
         "rows": rows,
@@ -259,7 +270,7 @@ def _usage(doc: Mapping[str, Any], models: Mapping[str, str]) -> dict[str, Any] 
         agg["calls"] += int(u.get("calls") or 0)
         agg["input"] += int(u.get("input_tokens") or 0)
         agg["output"] += int(u.get("output_tokens") or 0)
-    roles = {"analyst": "분석", "reviewer": "검토"}
+    roles = {"analyst": _("분석"), "reviewer": _("검토")}
     rows = [{"model": m, "role": roles.get(role_of.get(m, ""), "-"), **v} for m, v in by_model.items()]
     colors = ("blue", "purple", "teal", "orange")
     bars = [(r["model"], r["input"] + r["output"], colors[i % len(colors)]) for i, r in enumerate(rows)]
@@ -271,7 +282,7 @@ def _usage(doc: Mapping[str, Any], models: Mapping[str, str]) -> dict[str, Any] 
     }
 
 
-OFFICER_CHECK_STATUS = {True: ("ok", "검토 통과"), False: ("failed", "검토 미통과")}
+OFFICER_CHECK_STATUS = {True: ("ok", "검토 통과"), False: ("failed", "검토 미통과")}  # 문구는 화면에 낼 때 번역
 
 
 def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
@@ -284,6 +295,7 @@ def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
     items = []
     for i, c in enumerate(checks, start=1):
         status, status_text = OFFICER_CHECK_STATUS.get(c.get("supported"), ("unknown", "검토 결과 없음"))
+        status_text = _(status_text)
         evidence = [{"label": evidence_label(m), "value": evidence_value(m, val), "missing": val is None}
                     for m, val in c.get("evidence") or ()]
         items.append({"n": i, "text": c.get("text", ""), "evidence": evidence, "status": status,
@@ -307,11 +319,12 @@ def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
         "recommendation": _recommendation(assessment, policy),
         "kpi": {
             "grounded": f"{ok}/{len(claims)}", "grounded_tone": "green" if claims and ok == len(claims) else "amber",
-            "review": ("통과" if review.get("passed") else "미통과") if review else "-",
-            "review_sub": f"{review['rounds']}라운드" if charts.is_num(review.get("rounds")) else "",
+            "review": (_("통과") if review.get("passed") else _("미통과")) if review else "-",
+            "review_sub": _("%(n)s라운드", n=review["rounds"]) if charts.is_num(review.get("rounds")) else "",
             "review_tone": "green" if review.get("passed") else ("red" if review else "neutral"),
             "tokens": f"{usage['tokens']:,}" if usage else "-",
-            "tokens_sub": f"에이전트 단계 {usage['seconds']}초" if usage and usage["seconds"] is not None else "",
+            "tokens_sub": _("에이전트 단계 %(s)s초", s=usage["seconds"]) if usage and usage["seconds"] is not None
+            else "",
         },
         "claims": claims,
         "mix": _evidence_mix(counts),

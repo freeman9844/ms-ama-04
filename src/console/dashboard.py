@@ -9,7 +9,8 @@ from typing import Any
 
 from agents.features import EXPENSE_GROUPS
 from agents.forecast import OUTFLOW_LABELS
-from console import charts
+from console import charts, i18n
+from console.i18n import _
 from console.monitoring import CONTACT_STATUS_LABELS, PROPOSAL_LABELS, SEVERITY_LABELS, TRIGGER_LABELS
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from opsmetrics.labels import STEP_LABELS
@@ -32,7 +33,7 @@ RECOMMENDATIONS = (
     ("decline", "거절", "red"),
     ("none", "권고 없음", "neutral"),
 )
-RECOMMENDATION_LABELS = {key: label for key, label, _ in RECOMMENDATIONS}
+RECOMMENDATION_LABELS = {key: label for key, label, _color in RECOMMENDATIONS}
 POLICY_DECISIONS = {"eligible": ("적격", "green"), "refer": ("심사역 회부", "amber"), "ineligible": ("부적격", "red")}
 OFFICER_DECISIONS = {"approve": ("승인", "green"), "decline": ("거절", "red")}
 FUNNEL_NONE = {"policy": "판정 없음", "recommendation": "권고 없음", "officer": "미결정"}
@@ -93,19 +94,21 @@ def elapsed_text(seconds: int | None) -> str:
     if seconds is None:
         return ""
     if seconds < 60:
-        return f"+{seconds}초"
+        return _("+%(s)s초", s=seconds)
     if seconds < 3600:
-        return f"+{seconds // 60}분 {seconds % 60}초"
-    return f"+{seconds // 3600}시간 {seconds % 3600 // 60}분"
+        return _("+%(m)s분 %(s)s초", m=seconds // 60, s=seconds % 60)
+    return _("+%(h)s시간 %(m)s분", h=seconds // 3600, m=seconds % 3600 // 60)
 
 
 def krw_text(v: Any) -> str:
-    return f"{v:,.0f}원" if charts.is_num(v) else "-"
+    return _("%(n)s원", n=f"{v:,.0f}") if charts.is_num(v) else "-"
 
 
 def man(v: float) -> str:
-    """금액 축 눈금(만 원 단위)."""
-    return f"{v / 10_000:,.0f}만" if abs(v) >= 10_000 else f"{v:,.0f}"
+    """금액 축 눈금(만 원 단위, 영문은 천 원 단위 K)."""
+    if abs(v) < 10_000:
+        return f"{v:,.0f}"
+    return f"{v / 1_000:,.0f}K" if i18n.current() == "en" else f"{v / 10_000:,.0f}만"
 
 
 def _int(v: Any) -> int:
@@ -130,8 +133,8 @@ def _group(status: Any) -> str:
 
 
 def home_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    counts = dict.fromkeys((k for k, _, _ in GROUPS), 0)
-    recs = dict.fromkeys((k for k, _, _ in RECOMMENDATIONS), 0)
+    counts = dict.fromkeys((k for k, _label, _color in GROUPS), 0)
+    recs = dict.fromkeys((k for k, _label, _color in RECOMMENDATIONS), 0)
     escalated = 0
     for r in rows:
         counts[_group(r.get("status"))] += 1
@@ -139,8 +142,8 @@ def home_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         rec = r.get("recommendation")
         recs[rec if rec in recs else "none"] += 1
     decided = counts["approved"] + counts["declined"]
-    groups = [(label, color, counts[k]) for k, label, color in GROUPS]
-    recommendations = [(label, recs[k], color) for k, label, color in RECOMMENDATIONS]
+    groups = [(_(label), color, counts[k]) for k, label, color in GROUPS]
+    recommendations = [(_(label), recs[k], color) for k, label, color in RECOMMENDATIONS]
     return {
         "total": len(rows),
         "awaiting": counts["awaiting"],
@@ -176,14 +179,15 @@ def journey_steps(doc: Mapping[str, Any]) -> list[dict[str, Any]]:
         first_at.setdefault(i, t.get("at"))
         last = max(last, i)
         if s in STEP_NOTES:
-            notes[i] = STEP_NOTES[s]
+            notes[i] = _(STEP_NOTES[s])
     fail_at = min(last + 1, len(STEPS) - 1) if status in CLOSED else None
     finished = status in DECIDED or fail_at is not None
     steps, prev = [], None
     for i, (key, label) in enumerate(STEPS):
         at = first_at.get(i)
+        label = _(label)
         if fail_at is not None and i == fail_at:
-            state, label, at = "failed", STATUS_LABELS.get(status, status), closed_at
+            state, label, at = "failed", i18n.label(STATUS_LABELS, status), closed_at
         elif fail_at is not None and i > fail_at:
             state = "todo"
         elif i < last or (i == last and finished):
@@ -193,7 +197,7 @@ def journey_steps(doc: Mapping[str, Any]) -> list[dict[str, Any]]:
         else:
             state = "todo"
         if i == len(STEPS) - 1 and status in DECIDED:
-            label = STATUS_LABELS[status]
+            label = i18n.label(STATUS_LABELS, status)
         note = notes.get(i, "")
         if note and state in ("done", "current"):
             state = "warn"
@@ -218,7 +222,7 @@ def gateway_blocks(doc: Mapping[str, Any]) -> list[str]:
     labels: list[str] = []
     for step in doc.get("steps") or []:
         if any(u.get("gateway") == "content_blocked" for u in step.get("usage") or [] if isinstance(u, Mapping)):
-            label = STEP_LABELS.get(step.get("step"), str(step.get("step")))
+            label = i18n.label(STEP_LABELS, step.get("step"), str(step.get("step")))
             if label not in labels:
                 labels.append(label)
     return labels
@@ -254,11 +258,11 @@ def _unmatched_cause(u: Mapping[str, Any]) -> str:
         return "—"
     advance = u["advance"]
     if not isinstance(advance, Mapping):
-        return "원인 미상 — 지연·다른 계좌·상계 확인"
+        return _("원인 미상 — 지연·다른 계좌·상계 확인")
     lead, amount, net = advance.get("lead_days"), advance.get("amount_krw"), u.get("net_krw")
     if not (charts.is_num(lead) and charts.is_num(amount) and charts.is_num(net) and net):
-        return "원인 미상 — 지연·다른 계좌·상계 확인"
-    return f"선지급 추정({lead}일 전, 정산액의 {round(amount / net * 100)}%)"
+        return _("원인 미상 — 지연·다른 계좌·상계 확인")
+    return _("선지급 추정(%(lead)s일 전, 정산액의 %(pct)s%%)", lead=lead, pct=round(amount / net * 100))
 
 
 def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -269,48 +273,51 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
     cash_days, advance_n, advance_share = (pg.get("pg_cash_conversion_days"), pg.get("pg_advance_suspected_count"),
                                            pg.get("pg_advance_share"))
     pct = lambda v: f"{round(v * 100)}%" if charts.is_num(v) else "—"  # noqa: E731
-    advance_sub = ("미입금 중 선지급 짝" if not charts.is_num(advance_share)
-                  else f"미입금액의 {round(advance_share * 100)}%")
+    advance_sub = (_("미입금 중 선지급 짝") if not charts.is_num(advance_share)
+                   else _("미입금액의 %(pct)s%%", pct=round(advance_share * 100)))
     kpis = [
-        {"label": "정산금 계좌 입금", "value": pct(recon), "sub": "기준 90% 이상",
+        {"label": _("정산금 계좌 입금"), "value": pct(recon), "sub": _("기준 90% 이상"),
          "tone": "red" if charts.is_num(recon) and recon < RECONCILIATION_WARN else "green"},
-        {"label": "최대 채널 비중", "value": pct(share), "sub": "기준 80% 이하",
+        {"label": _("최대 채널 비중"), "value": pct(share), "sub": _("기준 80% 이하"),
          "tone": "amber" if charts.is_num(share) and share > TOP_SHARE_WARN else "blue"},
-        {"label": "현금화 일수", "value": f"{cash_days:.1f}일" if charts.is_num(cash_days) else "—",
-         "sub": "표준 정산 주기 기준 추정", "tone": "blue" if charts.is_num(cash_days) else "neutral"},
-        {"label": "공제율 변화(6개월)", "value": f"{trend:+.1f}%p" if charts.is_num(trend) else "—",
-         "sub": "수수료+광고비 상계", "tone": "amber" if charts.is_num(trend) and trend >= 1.0 else "blue"},
-        {"label": "선정산 추정", "value": f"{advance_n}건" if charts.is_num(advance_n) else "—",
+        {"label": _("현금화 일수"), "value": _("%(n)s일", n=f"{cash_days:.1f}") if charts.is_num(cash_days) else "—",
+         "sub": _("표준 정산 주기 기준 추정"), "tone": "blue" if charts.is_num(cash_days) else "neutral"},
+        {"label": _("공제율 변화(6개월)"), "value": f"{trend:+.1f}%p" if charts.is_num(trend) else "—",
+         "sub": _("수수료+광고비 상계"), "tone": "amber" if charts.is_num(trend) and trend >= 1.0 else "blue"},
+        {"label": _("선정산 추정"), "value": _("%(n)s건", n=advance_n) if charts.is_num(advance_n) else "—",
          "sub": advance_sub if charts.is_num(advance_n) else "",
          "tone": ("red" if advance_n >= 1 else "green") if charts.is_num(advance_n) else "neutral"},
     ]
     platforms_list = list(pg.get("platforms") or ())
     platforms = charts.hbars([(p["platform"], round(p["share"] * 100, 1), "blue") for p in platforms_list],
                              width=320, label_w=88)
-    cycles = [{"platform": p["platform"], "cycle": PLATFORM_CYCLES.get(p["platform"], "—"),
+    cycles = [{"platform": p["platform"], "cycle": _(PLATFORM_CYCLES.get(p["platform"], "—")),
                "lag_days": p.get("lag_days")} for p in platforms_list]
     monthly = list(pg.get("monthly_take_rate") or ())
     split = bool(monthly) and all(charts.is_num(m.get("fee_rate")) and charts.is_num(m.get("offset_rate"))
                                   for m in monthly)
     if split:
         groups = []
+        fee, offset = _("수수료"), _("광고비 상계")
         for m in monthly:
             fee_pct, offset_pct = round(m["fee_rate"] * 100, 2), round(m["offset_rate"] * 100, 2)
             month = m["month"][2:]
-            groups.append((month, [[("수수료", fee_pct, "purple", f"{month} 수수료 {fee_pct}%"),
-                                    ("광고비 상계", offset_pct, "orange", f"{month} 광고비 상계 {offset_pct}%")]]))
+            groups.append((month, [[(fee, fee_pct, "purple", f"{month} {fee} {fee_pct}%"),
+                                    (offset, offset_pct, "orange", f"{month} {offset} {offset_pct}%")]]))
         take = charts.columns(groups, width=320, height=200, tick_fmt=lambda v: f"{v:.1f}%")
-        take_rate_legend = [("수수료", "purple"), ("광고비 상계", "orange")]
+        take_rate_legend = [(fee, "purple"), (offset, "orange")]
     else:
         take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple") for m in monthly],
                             width=320, label_w=56)
         take_rate_legend = []
     unmatched = [{**u, "cause": _unmatched_cause(u)} for u in pg.get("unmatched") or ()]
     period = pg.get("period") or {}
-    return {"available": True, "kpis": kpis, "guide": SETTLEMENT_GUIDE, "platforms": platforms, "cycles": cycles,
+    return {"available": True, "kpis": kpis, "guide": [(_(title), _(text)) for title, text in SETTLEMENT_GUIDE],
+            "platforms": platforms, "cycles": cycles,
             "take_rate_kind": "split" if split else "single", "take_rate": take, "take_rate_legend": take_rate_legend,
             "unmatched": unmatched, "unmatched_count": pg.get("unmatched_count", 0),
-            "note": f"{period.get('from', '')} ~ {period.get('to', '')} 정산 {pg.get('settlement_count', 0)}건"}
+            "note": _("%(start)s ~ %(end)s 정산 %(n)s건", start=period.get("from", ""), end=period.get("to", ""),
+                      n=pg.get("settlement_count", 0))}
 
 
 def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
@@ -320,16 +327,18 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     # 세부 그룹(expense_monthly)은 2026-11-08 이후 심사분에만 있다. 한 달이라도 없으면 3구분으로 그린다.
     by_month = {r.get("month"): r for r in uw.get("expense_monthly") or [] if isinstance(r, Mapping)}
     detailed = bool(monthly) and all(m.get("month") in by_month for m in monthly)
-    spec = [(g, label, EXPENSE_COLORS[g]) for g, label in EXPENSE_GROUPS] if detailed else EXPENSES
+    spec = ([(g, _(label), EXPENSE_COLORS[g]) for g, label in EXPENSE_GROUPS] if detailed
+            else [(k, _(label), color) for k, label, color in EXPENSES])
     groups, net = [], []
+    revenue_label = _("매출")
     for m in monthly:
         month = str(m.get("month") or "")
         src = by_month[m.get("month")] if detailed else m
-        revenue = [("revenue", m.get("revenue"), "blue", f"{month} 매출 {krw_text(m.get('revenue'))}")]
+        revenue = [("revenue", m.get("revenue"), "blue", f"{month} {revenue_label} {krw_text(m.get('revenue'))}")]
         expenses = [(k, src.get(k), color, f"{month} {label} {krw_text(src.get(k))}") for k, label, color in spec]
         groups.append((month[2:] if len(month) == 7 else month, [revenue, expenses]))
         rev = m.get("revenue")
-        net.append(rev - sum(v for _, v, _, _ in expenses if charts.is_num(v)) if charts.is_num(rev) else None)
+        net.append(rev - sum(v for _k, v, _c, _t in expenses if charts.is_num(v)) if charts.is_num(rev) else None)
     monthly_chart = charts.columns(groups, tick_fmt=man) if groups else None
     markers = []
     for r in (view.get("policy") or {}).get("reason_codes") or []:
@@ -342,22 +351,23 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     for cf in assessment.get("counterfactuals") or []:
         cur, tgt = cf.get("current"), cf.get("target")
         comparable = charts.is_num(cur) and charts.is_num(tgt) and cur >= 0 and tgt >= 0
-        bar = charts.hbars([("현재", cur, "neutral"), ("목표", tgt, "blue")], width=300, label_w=48)
+        bar = charts.hbars([(_("현재"), cur, "neutral"), (_("목표"), tgt, "blue")], width=300, label_w=48)
         counterfactuals.append({**cf, "bar": bar if comparable else None})
     review = None
     if assessment.get("review"):
         rv = assessment["review"]
         rounds = rv.get("rounds")
         review = [
-            _step("analyst", "분석 에이전트", "done", (assessment.get("models") or {}).get("analyst") or ""),
-            _step("reviewer", "검토 에이전트", "done" if rv.get("passed") else "failed",
-                  f"{rounds}회" if rounds is not None else ""),
+            _step("analyst", _("분석 에이전트"), "done", (assessment.get("models") or {}).get("analyst") or ""),
+            _step("reviewer", _("검토 에이전트"), "done" if rv.get("passed") else "failed",
+                  _("%(n)s회", n=rounds) if rounds is not None else ""),
         ]
     return {
         "steps": journey_steps(doc),
         "monthly": monthly_chart,
         "monthly_net": charts.line(net, vmax=monthly_chart["vmax"], tick_fmt=man) if monthly_chart else None,
-        "monthly_legend": [("매출", "blue")] + [(label, color) for _, label, color in spec] + [(NET_LABEL, "green")],
+        "monthly_legend": ([(_("매출"), "blue")] + [(label, color) for _k, label, color in spec]
+                           + [(_(NET_LABEL), "green")]),
         "markers": markers,
         "counterfactuals": counterfactuals,
         "review": review,
@@ -399,41 +409,47 @@ def alert_followups(cases: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[s
     return links
 
 
+def _restructure_note(status: str | None) -> str:
+    return _(RESTRUCTURE_NOTES[status]) if status in RESTRUCTURE_NOTES else status or ""
+
+
 def _proposal_step(status: str | None) -> dict[str, Any]:
-    return _step("proposal", "심사역 승인", "current" if status == "pending_officer" else "done",
-                 PROPOSAL_LABELS.get(status or "", status or ""))
+    return _step("proposal", _("심사역 승인"), "current" if status == "pending_officer" else "done",
+                 i18n.label(PROPOSAL_LABELS, status, status or ""))
 
 
 def _restructure_step(status: str | None) -> dict[str, Any]:
-    return _step("restructure", "재조정 결정", "current" if status == "pending_officer" else "done",
-                 RESTRUCTURE_NOTES.get(status, status or ""))
+    return _step("restructure", _("재조정 결정"), "current" if status == "pending_officer" else "done",
+                 _restructure_note(status))
 
 
 def alert_steps(alert: Mapping[str, Any], followups: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, Any]]:
     collections = alert.get("collections") or {}
     head = [
-        _step("detect", "탐지", "done", f"{alert.get('week')}주차"),
-        _step("investigate", "조기경보 조사", "done", SEVERITY_LABELS.get(alert.get("severity") or "", "")),
+        _step("detect", _("탐지"), "done", _("%(n)s주차", n=alert.get("week"))),
+        _step("investigate", _("조기경보 조사"), "done", i18n.label(SEVERITY_LABELS, alert.get("severity"), "")),
     ]
     if not collections and not alert.get("restructure"):
         # 높음 경보는 단계 자동 안내(잔고 부족 예상 알림·상환 플랜 제안)를 보낼 수 있다. 그 밖의 차주 연락은
         # 상환 원장의 미납 추심 건이 맡고(제안 → 심사역 승인), 그 건이 이 경보를 근거로 보면 잇는다.
         auto = alert.get("auto_contacts") or ()
         if auto:
-            notes = " · ".join(f"{a['stage']}단계 {CONTACT_STATUS_LABELS.get(a['status'], a['status'])}" for a in auto)
-            head.append(_step("escalation", "단계 자동 안내", "done", notes))
+            notes = " · ".join(_("%(stage)s단계 %(status)s", stage=a["stage"],
+                                 status=i18n.label(CONTACT_STATUS_LABELS, a["status"])) for a in auto)
+            head.append(_step("escalation", _("단계 자동 안내"), "done", notes))
         if not followups:
-            return [*head, _step("review", "심사역 검토", "done", "미납 추심 없음" if auto else "연락 없음")]
+            return [*head, _step("review", _("심사역 검토"), "done", _("미납 추심 없음") if auto else _("연락 없음"))]
         f = followups[-1]
         scripts = ", ".join(x["script_id"] for x in f["contacts"] if x.get("script_id"))
-        steps = [*head, _step("followup", "미납 추심 연락", "done" if f["decision"] else "current",
-                              f"{f['no']}회차" + (f" · {scripts}" if scripts else ""))]
+        steps = [*head, _step("followup", _("미납 추심 연락"), "done" if f["decision"] else "current",
+                              _("%(n)s회차", n=f["no"]) + (f" · {scripts}" if scripts else ""))]
         if f.get("proposal"):
             steps.append(_proposal_step(f["proposal"]))
         if f["restructure"]:
             steps.append(_restructure_step(f["restructure"]))
         return steps
-    steps = [*head, _step("collections", "추심 에이전트", "done" if collections else "current", collections.get("decision") or "")]
+    steps = [*head, _step("collections", _("추심 에이전트"), "done" if collections else "current",
+                          collections.get("decision") or "")]
     restructure = alert.get("restructure")
     if restructure:
         steps.append(_restructure_step(restructure.get("status")))
@@ -444,17 +460,16 @@ def case_steps(case: Mapping[str, Any]) -> list[dict[str, Any]]:
     inst = case.get("installment") or {}
     collections = case.get("collections") or {}
     steps = [
-        _step("missed", "미납", "done", f"{inst.get('no')}회차 {inst.get('due_on')}"),
-        _step("collections", "추심 에이전트", "done" if collections else "current", collections.get("decision") or ""),
+        _step("missed", _("미납"), "done", _("%(n)s회차 %(due)s", n=inst.get("no"), due=inst.get("due_on"))),
+        _step("collections", _("추심 에이전트"), "done" if collections else "current",
+              collections.get("decision") or ""),
     ]
     proposal = case.get("proposal")
     if proposal:
         steps.append(_proposal_step(proposal.get("status")))
     restructure = case.get("restructure")
     if restructure:
-        st = restructure.get("status")
-        steps.append(_step("restructure", "재조정 결정", "current" if st == "pending_officer" else "done",
-                           RESTRUCTURE_NOTES.get(st, st or "")))
+        steps.append(_restructure_step(restructure.get("status")))
     return steps
 
 
@@ -483,21 +498,23 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         r = w.get("row") or {}
         triggers = w.get("triggers") or []
         buffer = r.get("buffer_days")
-        tip = (f"{w.get('week')}주차 {r.get('start', '')}~{r.get('end', '')} · 매출 {krw_text(r.get('revenue'))}"
-               f" · 버퍼 {buffer if charts.is_num(buffer) else '-'}일")
+        tip = _("%(week)s주차 %(start)s~%(end)s · 매출 %(revenue)s · 버퍼 %(buffer)s일", week=w.get("week"),
+                start=r.get("start", ""), end=r.get("end", ""), revenue=krw_text(r.get("revenue")),
+                buffer=buffer if charts.is_num(buffer) else "-")
         if triggers:
-            tip += " · " + ", ".join(TRIGGER_LABELS.get(t, t) for t in triggers)
-        groups.append((f"{w.get('week')}주", [[("revenue", r.get("revenue"), "red" if triggers else "blue", tip)]]))
+            tip += " · " + ", ".join(i18n.label(TRIGGER_LABELS, t) for t in triggers)
+        bar_color = "red" if triggers else "blue"
+        groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", r.get("revenue"), bar_color, tip)]]))
     base_rev = baseline.get("avg_weekly_revenue")
-    refs = [("기준 주매출", base_rev, "neutral")] if charts.is_num(base_rev) else []
+    refs = [(_("기준 주매출"), base_rev, "neutral")] if charts.is_num(base_rev) else []
     chart = charts.columns(groups, refs=refs, tick_fmt=man, **LOAN_CHART) if groups else None
     markers = []
     if chart:
         for w, g in zip(weeks, chart["groups"], strict=True):
             if w.get("new_triggers"):
-                names = ", ".join(TRIGGER_LABELS.get(t, t) for t in w["new_triggers"])
+                names = ", ".join(i18n.label(TRIGGER_LABELS, t) for t in w["new_triggers"])
                 markers.append({"x": g["cx"], "y": round(g["bars"][0]["top"] - 6, 2), "week": w.get("week"),
-                                "tip": f"{w.get('week')}주차 새 트리거: {names}"})
+                                "tip": _("%(week)s주차 새 트리거: %(names)s", week=w.get("week"), names=names)})
     return {
         "processed": processed,
         "weeks_total": REPLAY_WEEKS,
@@ -508,9 +525,10 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "min_buffer_week": min_week,
         "baseline_buffer": baseline.get("cash_buffer_days"),
         "chart": chart,
-        "line": charts.line([b for _, b in buffers], **LOAN_CHART) if groups else None,
+        "line": charts.line([b for _week, b in buffers], **LOAN_CHART) if groups else None,
         "markers": markers,
-        "legend": [("매출", "blue"), ("트리거 주", "red"), ("기준 주매출", "neutral"), ("현금 버퍼(일, 오른쪽 축)", "purple")],
+        "legend": [(_("매출"), "blue"), (_("트리거 주"), "red"), (_("기준 주매출"), "neutral"),
+                   (_("현금 버퍼(일, 오른쪽 축)"), "purple")],
         "alert_followups": followups,
         "alert_steps": {a.get("alert_id"): alert_steps(a, followups.get(a.get("alert_id"), ())) for a in alerts},
         "case_steps": {c.get("case_id"): case_steps(c) for c in view.get("cases") or ()},
@@ -530,8 +548,9 @@ def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for w, r, exp in zip(weeks, rows, expected, strict=True):
         rev = r.get("revenue")
         short = charts.is_num(exp) and charts.is_num(rev) and rev < exp * SHORT_OF_EXPECTED
-        tip = f"{w.get('week')}주차 실제 {krw_text(rev)} · 기대 {krw_text(exp)}"
-        groups.append((f"{w.get('week')}주", [[("revenue", rev, "amber" if short else "blue", tip)]]))
+        tip = _("%(week)s주차 실제 %(actual)s · 기대 %(expected)s", week=w.get("week"), actual=krw_text(rev),
+                expected=krw_text(exp))
+        groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", rev, "amber" if short else "blue", tip)]]))
     top = max([v for v in expected + [r.get("revenue") for r in rows] if charts.is_num(v)], default=0)
     chart = charts.columns(groups, vmax=top or None, tick_fmt=man, **LOAN_CHART)
     return {"expected_chart": chart, "expected_line": charts.line(expected, vmax=chart["vmax"], **LOAN_CHART)}
@@ -553,7 +572,8 @@ def _forecast(weeks: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
         "shortfall_date": r.get("shortfall_date"),
         "chart": charts.signed_line([(d["date"][5:], d["balance"]) for d in p.get("path") or []],
                                     tick_fmt=man, **FORECAST_CHART),
-        "totals": [(label, totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items() if k in totals],
+        "totals": [(_(label), totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items()
+                   if k in totals],
     }
 
 
@@ -567,7 +587,7 @@ def _funnel_parts(kind: str, counts: Mapping[str, int]) -> list[tuple[str, Any, 
     parts = []
     for key, n in counts.items():
         label, color = (FUNNEL_NONE[kind], "neutral") if key == "none" else labels.get(key, (key, "grey"))
-        parts.append((label, n, color))
+        parts.append((_(label), n, color))
     return parts
 
 
@@ -576,7 +596,7 @@ def _seconds(ms: Any) -> float | None:
 
 
 def _sec_text(v: float) -> str:
-    return f"{v:,.0f}초" if v >= 10 else f"{v:,.1f}초"
+    return _("%(n)s초", n=f"{v:,.0f}" if v >= 10 else f"{v:,.1f}")
 
 
 def _bucket_label(iso: str, index: int) -> str:
@@ -587,31 +607,35 @@ def _bucket_label(iso: str, index: int) -> str:
 def ops_insights(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[str, Any]:
     """P9 §8 운영 패널 기하: 결정 퍼널, 단계별 처리 시간, AI 비용, 사유 코드·플래그 빈도, 10분 처리량."""
     funnel = s.get("funnel") or {}
-    funnel_rows = charts.stacked([(title, _funnel_parts(kind, funnel.get(kind) or {}))
+    funnel_rows = charts.stacked([(_(title), _funnel_parts(kind, funnel.get(kind) or {}))
                                   for kind, title in (("policy", "정책 판정"), ("recommendation", "에이전트 권고"),
                                                       ("officer", "심사역 결정"))])
     lat_groups = []
     for step, r in (s.get("step_latency") or {}).items():
-        name, p50, p95 = step_labels.get(step, step), _seconds(r.get("p50_ms")), _seconds(r.get("p95_ms"))
-        lat_groups.append((name, [[("p50", p50, "blue", f"{name} p50 {p50}초 · {r.get('n')}회")],
-                                  [("p95", p95, "purple", f"{name} p95 {p95}초 · {r.get('n')}회")]]))
+        name, p50, p95 = _(step_labels.get(step, step)), _seconds(r.get("p50_ms")), _seconds(r.get("p95_ms"))
+        lat_groups.append((name, [[("p50", p50, "blue", _("%(name)s p50 %(sec)s초 · %(n)s회", name=name, sec=p50,
+                                                          n=r.get("n")))],
+                                  [("p95", p95, "purple", _("%(name)s p95 %(sec)s초 · %(n)s회", name=name, sec=p95,
+                                                            n=r.get("n")))]]))
     cost = s.get("ai_cost") or {}
     priced = [(m, round(v["cost_usd"], 4)) for m, v in (cost.get("by_model") or {}).items()
               if charts.is_num(v.get("cost_usd"))]
     model_donut = charts.donut([(m, c, MODEL_COLORS[i % len(MODEL_COLORS)]) for i, (m, c) in enumerate(priced)])
     model_donut["total"] = round(model_donut["total"], 4)
-    step_cost = charts.hbars([(step_labels.get(k, k), round(v.get("cost_usd") or 0.0, 4), "purple")
+    step_cost = charts.hbars([(_(step_labels.get(k, k)), round(v.get("cost_usd") or 0.0, 4), "purple")
                               for k, v in (cost.get("by_step") or {}).items()], width=480, label_w=120)
     reasons = charts.hbars([(r["key"], r["count"], "amber" if r["key"].startswith("R1") else "red")
                             for r in s.get("reason_codes") or []], width=480, label_w=72)
-    flags = charts.hbars([(FLAG_LABELS.get(f["key"], f["key"]), f["count"], "orange") for f in s.get("flags") or []],
+    flags = charts.hbars([(i18n.label(FLAG_LABELS, f["key"]), f["count"], "orange") for f in s.get("flags") or []],
                          width=560, label_w=232)
     groups = []
+    received, reached = _("접수"), _("심사역 대기 도달")
     for i, b in enumerate((s.get("throughput") or {}).get("buckets") or []):
         at = _bucket_label(b["start"], 0)
-        groups.append((_bucket_label(b["start"], i), [[("접수", b["received"], "blue", f"{at} 접수 {b['received']}건")],
-                                                      [("심사역 대기 도달", b["reached"], "green",
-                                                        f"{at} 심사역 대기 도달 {b['reached']}건")]]))
+        groups.append((_bucket_label(b["start"], i),
+                       [[(received, b["received"], "blue", _("%(at)s 접수 %(n)s건", at=at, n=b["received"]))],
+                        [(reached, b["reached"], "green",
+                          _("%(at)s 심사역 대기 도달 %(n)s건", at=at, n=b["reached"]))]]))
     throughput = charts.columns(groups, width=720, height=220) if groups else None
     return {
         "funnel": funnel_rows,
@@ -632,8 +656,8 @@ def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[st
     success_src = s.get("agent_success") or {}
     success = charts.gauge(success_src.get("rate"), 1.0)
     steps = charts.stacked([
-        (step_labels.get(name, name), [("ok", c.get("ok"), "green"), ("degraded", c.get("degraded"), "amber"),
-                                       ("failed", c.get("failed"), "red")])
+        (_(step_labels.get(name, name)), [("ok", c.get("ok"), "green"), ("degraded", c.get("degraded"), "amber"),
+                                          ("failed", c.get("failed"), "red")])
         for name, c in sorted((success_src.get("by_step") or {}).items())
     ])
     fairness = {}
@@ -644,16 +668,17 @@ def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[st
             rate = r.get("approve_rate")
             pct = rate * 100 if charts.is_num(rate) else None
             if pct is None:
-                tip = f"{value} 추천 없음"
+                tip = _("%(value)s 추천 없음", value=value)
             else:
-                tip = f"{value} 추천 approve율 {pct:.1f}% · 추천 완료 {r.get('assessed')}건"
+                tip = _("%(value)s 추천 approve율 %(pct)s%% · 추천 완료 %(n)s건", value=value, pct=f"{pct:.1f}",
+                        n=r.get("assessed"))
                 if r.get("insufficient"):
-                    tip += " · 표본 부족"
+                    tip += " · " + _("표본 부족")
                 else:
                     sufficient.append(pct)
             groups.append((value, [[("approve_rate", pct, "grey" if r.get("insufficient") else "blue", tip)]]))
         tone = "red" if a.get("alert") else "neutral"
-        refs = [("최대", max(sufficient), tone), ("최소", min(sufficient), tone)] if len(sufficient) >= 2 else []
+        refs = [(_("최대"), max(sufficient), tone), (_("최소"), min(sufficient), tone)] if len(sufficient) >= 2 else []
         fairness[axis] = (charts.columns(groups, height=200, refs=refs, vmax=100, tick_fmt=_pct_text)
                           if groups else None)
     return {

@@ -74,6 +74,8 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN>/
 
 콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서·게이트웨이를 만들려고 두 번 프로비저닝하므로 smoke는 그 뒤에 실행한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)). 게이트웨이 서브넷은 `Microsoft.Network/applicationGateways`로 위임하고 NSG `nsg-appgw`(인터넷 80/443 허용)를 둔다. IP 제한은 WAF 규칙이 맡는다. 모바일 회선 등으로 공인 IP가 바뀌어 콘솔이 403이면 `CONSOLE_IP`를 갱신한다([deploy](docs/runbook/deploy.md#콘솔-waf-운영자-ip-규칙)).
 
+콘솔 화면은 한국어·영어를 지원한다. 사이드바(고객 화면은 상단)의 `한국어 · English` 링크나 `?lang=en`으로 바꾸고 선택은 `lang` 쿠키에 1년 남는다. 쿠키가 없으면 브라우저 `Accept-Language`를 따른다. 번역 규칙·용어집은 [src/console/locales/README.md](src/console/locales/README.md)에 있다.
+
 ## 문서 지도
 
 | 문서 | 내용 |

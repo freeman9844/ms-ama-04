@@ -2,12 +2,12 @@
 {% for r in rows %}
 <tr>
   <td><a href="/applications/{{ r.id|path }}">{{ r.id }}</a></td>
-  <td>{{ sl.applicant(r.applicant_id, user.can_restore) }}{% if r.source == "customer" %} <span class="badge badge-blue">고객 신청</span>{% endif %}</td>
+  <td>{{ sl.applicant(r.applicant_id, user.can_restore) }}{% if r.source == "customer" %} <span class="badge badge-blue">{{ _("고객 신청") }}</span>{% endif %}</td>
   <td><span class="status s-{{ r.status }}">{{ r.status|status_label }}</span></td>
   <td class="num">{{ r.requested_amount_krw|krw }}</td>
   <td>{% if r.recommendation %}<span class="pill rec-{{ r.recommendation }}">{{ r.recommendation }}</span>{% else %}-{% endif %}</td>
   <td>{{ r.updated_at or "" }}</td>
 </tr>
 {% else %}
-<tr><td colspan="6">신청이 없습니다.</td></tr>
+<tr><td colspan="6">{{ _("신청이 없습니다.") }}</td></tr>
 {% endfor %}

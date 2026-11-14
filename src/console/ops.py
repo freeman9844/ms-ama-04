@@ -3,6 +3,7 @@
 from collections.abc import Iterable
 from typing import Any, Protocol
 
+from console.i18n import _
 from opsmetrics.fairness import gap_pp_from_env
 from opsmetrics.labels import AXIS_LABELS, STEP_LABELS
 from opsmetrics.prices import load_prices
@@ -35,7 +36,7 @@ def default_run(runs: Iterable[str]) -> str | None:
 
 def run_options(runs: Iterable[str]) -> list[tuple[str, str]]:
     """선택 목록: 맨 앞이 최근 신청, 그 뒤가 측정 실행(최신순)."""
-    return [(RECENT_RUN, RECENT_LABEL)] + [(r, r) for r in sorted_runs(runs)]
+    return [(RECENT_RUN, _(RECENT_LABEL))] + [(r, r) for r in sorted_runs(runs)]
 
 
 def scope_docs(store: OpsStore, selected: str) -> list[dict[str, Any]]:
@@ -43,4 +44,6 @@ def scope_docs(store: OpsStore, selected: str) -> list[dict[str, Any]]:
 
 
 def ops_view(docs: list[dict[str, Any]]) -> dict[str, Any]:
-    return summarize(docs, load_prices(), gap_pp=gap_pp_from_env())
+    summary = summarize(docs, load_prices(), gap_pp=gap_pp_from_env())
+    summary["basis"] = _(summary["basis"])
+    return summary

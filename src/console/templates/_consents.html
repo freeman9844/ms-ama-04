@@ -1,8 +1,8 @@
 <section>
-<h2>동의</h2>
+<h2>{{ _("동의") }}</h2>
 {% if consents %}
 <table>
-  <thead><tr><th>동의 ID</th><th>목적</th><th>범위</th><th>상태</th><th>만료</th><th>안내</th><th></th></tr></thead>
+  <thead><tr><th>{{ _("동의 ID") }}</th><th>{{ _("목적") }}</th><th>{{ _("범위") }}</th><th>{{ _("상태") }}</th><th>{{ _("만료") }}</th><th>{{ _("안내") }}</th><th></th></tr></thead>
   <tbody>
 {% for c in consents %}
 <tr>
@@ -13,11 +13,11 @@
   <td>{{ c.expires_at }}</td>
   <td>{% for n in c.notices or [] %}<span class="chip">{{ n.kind|notice_label }}</span>{% endfor %}</td>
   <td>
-    {% if c.deletion_proof_id %}<a href="/consents/{{ c.deletion_proof_id|path }}/proof">삭제 증명{% if not c.deletion_complete %}(미완료){% endif %}</a>{% endif %}
+    {% if c.deletion_proof_id %}<a href="/consents/{{ c.deletion_proof_id|path }}/proof">{{ _("삭제 증명") }}{% if not c.deletion_complete %}{{ _("(미완료)") }}{% endif %}</a>{% endif %}
     {% if c.status == "granted" and user.can_decide %}
     {% for action, label in demo_actions.items() %}
     <form method="post" action="/applications/{{ c.application_id|path }}/consents/{{ c.consent_id|path }}/{{ action }}" class="inline">
-      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{{ label }}</button>
+      <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{{ _(label) }}</button>
     </form>
     {% endfor %}
     {% endif %}
@@ -27,6 +27,6 @@
   </tbody>
 </table>
 {% else %}
-<p>이 신청에 연결된 동의가 없습니다.</p>
+<p>{{ _("이 신청에 연결된 동의가 없습니다.") }}</p>
 {% endif %}
 </section>
