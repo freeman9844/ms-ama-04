@@ -16,7 +16,7 @@
 | A6. AI solution design & evaluation | 모델 선택을 비용·지연·품질로 비교하고, 지표·실패 유형을 정의한 평가 하네스로 측정했다 | `eval/reports/job-eval-9imbutm/report.md`, [ADR-002](adr/ADR-002-model-deployment.md), [ADR-005](adr/ADR-005-classification-model.md) |
 | A7. Agentic autonomy & orchestration | 에이전트가 명확한 가드레일 안에서 자율 판단하고, 핸드오프·반성·상태 그래프 패턴을 의도적으로 썼다 | [에이전트](agents.md), [아키텍처](architecture.md), [ADR-001](adr/ADR-001-orchestration.md), `eval/reports/job-eval-9imbutm/report.md` |
 | B3. Demo & executive hook | 2분 데모로 기능이 아니라 결과("so what")를 보이고 장애 시 복구를 보이는 것이 목표다. 2026-11-03에 실제 환경에서 리허설을 1회 했고(탐색 위주 약 6분 20초, 2분 시간 측정은 완료하지 못함) 그 결과로 대본·대비책을 보완했다 | [운영 실행 기록](runbook/deploy-history.md), [데모 대본](demo/demo-script.md), [대비책](demo/fallback.md), [리허설 기록](demo/rehearsal.md) |
-| B6. Written communication — deck & capstone documentation | 캡스톤 문서가 완결적이고 탐색 가능하며, 링크·경로가 테스트로 검증된다 | [아키텍처](architecture.md), [한계](limitations.md), [비용 모델](cost-model.md), `tests/docs/test_docs.py` |
+| B6. Written communication — deck & capstone documentation | 캡스톤 문서가 완결적이고 탐색 가능하며, 링크·경로가 테스트로 검증된다 | [아키텍처](architecture.md), [한계](limitations.md), [비용 모델](cost-model.md), [발표 덱](deck/capstone.pptx), [발표 스크립트](deck/capstone.script.md), `tests/docs/test_docs.py` |
 | B7. Use of evidence & data storytelling | 청중이 행동할 수 있는 숫자로 주장을 뒷받침한다(건당 $0.0423, 고정비 월 $304.73, SLO·공정성 격차) | [비용 모델](cost-model.md), `ops/reports/load-20261102110233/report.md`, `eval/reports/job-eval-9imbutm/report.md` |
 | C1. Discovery & business framing | 후원자(CBO·CRO)·제약·성공 지표를 밝히고, 원문 수치로 기대 가치($6,000 대출 단위 경제, 100bp = 자산 3억~5억 달러에서 연 $3M~5M)와 미추진 비용을 산술했다. 데모 측정값과 목표를 대조하되 목표 달성은 주장하지 않는다 | [비즈니스 케이스](business-case.md), [비용 모델](cost-model.md) |
 

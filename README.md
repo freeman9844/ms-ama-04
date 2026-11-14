@@ -87,7 +87,7 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN>/
 | [한계와 운영 전환](docs/limitations.md) | as-built 한계, 상위 Spec 위험 현황, 운영 전환 체크리스트 |
 | [증거 색인](docs/evidence.md) | 평가 루브릭 기준별 주장과 증거, 실측 보고서 목록 |
 | [사고 리더십 초안](docs/thought-leadership.md) | 구축·측정에서 얻은 7가지 설계 원칙과 체크리스트(발행 전 초안, 영역 D) |
-| [데모 대본](docs/demo/demo-script.md) | 2분 데모 장면 구성 |
+| [발표 덱](docs/deck/capstone.pptx) · [발표 스크립트](docs/deck/capstone.script.md) | 45장 L300 덱(선택 장 8·20·23·32·35·36·40)과 장별 발표 스크립트, 원본 스펙은 `docs/deck/capstone.yaml` || [데모 대본](docs/demo/demo-script.md) | 2분 데모 장면 구성 |
 | [데모 대비책](docs/demo/fallback.md) | 장애 시 대체 경로와 사전 건 |
 | [데모 리허설](docs/demo/rehearsal.md) | 리허설 절차와 기록표(2026-11-03 실시, 기록은 rehearsal.md) |
 | [환경 준비](docs/runbook/setup.md) | 로컬 개발, Azure 준비, 최초 배포, 데모 모드 |
