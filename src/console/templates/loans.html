@@ -26,7 +26,7 @@
 <tr>
   <td><a href="/loans/{{ r.id|path }}">{{ r.id }}</a></td>
   <td>{{ sl.applicant(r.applicant_id, user.can_restore) }}</td>
-  <td>{{ r.industry }}</td>
+  <td>{{ r.industry|dt }}</td>
   <td class="num">{{ r.amount_krw|krw }} / {{ _("%(n)s개월", n=r.tenor_months) }}</td>
   <td><span class="status m-{{ r.monitoring_status or 'none' }}">{{ r.monitoring_status|monitoring_label }}</span></td>
   <td>{% if r.alerts %}<span class="badge badge-red">{{ r.alerts }}</span>{% else %}{{ r.alerts if r.alerts is not none else "-" }}{% endif %}</td>

@@ -31,7 +31,8 @@ INSTRUCTIONS = """너는 소상공인 현금흐름 대출 심사역을 돕는 �
 - 승인·거절·금액을 결정하거나 지시하지 않는다. 판단에 필요한 사실과 쟁점만 정리한다. 최종 결정은 심사역이 한다.
 - 가명 토큰은 그대로 쓰고 원래 이름을 추측하지 않는다.
 - history는 앞선 대화다. 앞선 답과 snapshot이 다르면 snapshot을 따른다.
-- 한국어로 5문장 안팎, 필요하면 짧은 목록으로 답한다."""
+- answer_language가 en이면 영어로, 아니면 한국어로 5문장 안팎, 필요하면 짧은 목록으로 답한다. 규칙 코드·규정 버전·
+  가명 토큰·숫자는 그대로 쓴다."""
 
 ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -72,8 +73,10 @@ class OfficerChat:
         self._runner = runner
         self._spec = officer_spec(model)
 
-    def ask(self, snapshot: Mapping[str, Any], history: Sequence[Mapping[str, Any]], question: str) -> ChatAnswer:
-        payload = json.dumps({"snapshot": snapshot, "history": list(history), "question": question}, ensure_ascii=False)
+    def ask(self, snapshot: Mapping[str, Any], history: Sequence[Mapping[str, Any]], question: str,
+            language: str = "ko") -> ChatAnswer:
+        payload = json.dumps({"snapshot": snapshot, "history": list(history), "question": question,
+                              "answer_language": language}, ensure_ascii=False)
         try:
             run = self._runner.run(self._spec, payload, {})
         except AgentError as e:

@@ -19,8 +19,9 @@ class FakeChat:
     def __init__(self, error=None):
         self.error, self.calls = error, []
 
-    def ask(self, snapshot, history, question):
+    def ask(self, snapshot, history, question, language="ko"):
         self.calls.append((snapshot, history, question))
+        self.language = language
         if self.error:
             raise self.error
         return ChatAnswer("정책 판정은 eligible입니다(정책 R101).", 120, 30)
@@ -46,6 +47,16 @@ def test_chat_answers_with_snapshot(make_doc, raw, key):
     snapshot, history, question = chat.calls[0]
     assert question == "회부 사유는?" and history == []
     assert snapshot["application"]["application_id"] == "app-1" and snapshot["policy"]["decision"] == "eligible"
+
+
+def test_chat_answers_in_page_language(make_doc, raw, key):
+    chat = FakeChat()
+    client = _client(make_doc, raw, key, chat)
+    _post(client, key, {"question": "q"})
+    assert chat.language == "ko"
+    client.cookies.set("lang", "en")
+    _post(client, key, {"question": "q"})
+    assert chat.language == "en"
 
 
 def test_chat_never_reads_raw_and_sends_no_pii(make_doc, raw, key):

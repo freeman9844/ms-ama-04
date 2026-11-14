@@ -72,6 +72,8 @@ from console.ops import (
 )
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
+from console import translate
+from console.translate import MachineTranslation, data_label, mt_filters, validate_texts
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
     CONSENT_PURPOSE,
@@ -107,6 +109,7 @@ MAX_FORM_BYTES = 16 * 1024
 MAX_CHAT_BYTES = 128 * 1024
 CSRF_HEADER = "X-CSRF-Token"
 chat_log = logging.getLogger("console.chat")
+mt_log = logging.getLogger("console.translate")
 LIST_LIMIT = 50
 DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
@@ -167,6 +170,8 @@ class ConsoleDeps:
     ops: OpsStore | None = None
     # 심사역 결정 채팅(agents.officer_chat.OfficerChat). 없으면 결정 탭에 "채팅을 쓸 수 없습니다"만 보인다.
     chat: Any | None = None
+    # 영문 화면의 데이터 기계 번역(agents.translator.Translator). 없으면 카탈로그에 있는 데이터만 영문으로 바뀐다.
+    translator: Any | None = None
 
 
 def state_tag(*docs: Any) -> str:
@@ -205,8 +210,8 @@ def _templates() -> Environment:
     env.filters["action_label"] = lambda s: i18n.label(ACTION_LABELS, s)
     env.filters["trigger_label"] = lambda s: i18n.label(TRIGGER_LABELS, s)
     env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
-    env.filters["seller_label"] = seller_label
-    env.filters["seller_name"] = seller_name
+    env.filters["seller_label"] = lambda s: data_label(seller_label(s))
+    env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
     env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
     for name, labels in (LABEL_FILTERS | MONITORING_FILTERS).items():
         env.filters[name] = lambda s, labels=labels: i18n.label(labels, s)
@@ -285,6 +290,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     app = FastAPI(title="AMA Lending officer console", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.deps = deps
     templates = _templates()
+    machine = MachineTranslation(deps.translator) if deps.translator is not None else None
+    templates.filters.update(mt_filters(machine))
+    templates.globals["mt_enabled"] = machine is not None
     # 레플리카가 여러 개여도 같은 토큰을 쓰도록 가명처리 키에서 파생한다.
     csrf_key = hmac.new(deps.pseudonym_key, b"console-csrf", hashlib.sha256).digest()
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
@@ -478,7 +486,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         started = time.monotonic()
         result, answer = "ok", None
         try:
-            answer = await run_in_threadpool(deps.chat.ask, snapshot, clean_history(body.get("history")), question)
+            answer = await run_in_threadpool(deps.chat.ask, snapshot, clean_history(body.get("history")), question,
+                                             i18n.current())
         except GatewayThrottled:
             result = "throttled"
         except GatewayBlocked:
@@ -495,6 +504,39 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if answer is None:
             return _chat_error(result)
         return JSONResponse({"answer": answer.answer})
+
+    @app.post("/i18n/translate")
+    async def machine_translate(request: Request) -> JSONResponse:
+        """영문 화면에서 카탈로그에 없는 데이터 문구를 기계 번역한다(static/mt.js). 실패하면 원문을 그대로 둔다."""
+        user = viewer(request)
+        if not verify_csrf(csrf_key, user.user_id, request.headers.get(CSRF_HEADER)):
+            raise HTTPException(403, "invalid csrf token")
+        if machine is None:
+            return JSONResponse({"error": "disabled"}, status_code=503)
+        try:
+            texts = validate_texts(await _json_body(request))
+        except _BadBody:
+            texts = None
+        if texts is None:
+            return JSONResponse({"error": "bad_request"}, status_code=400)
+        started = time.monotonic()
+        result, out, tokens = "ok", None, (0, 0)
+        try:
+            with i18n.use("en"):
+                out, *tokens = await run_in_threadpool(machine.translate, texts)
+        except GatewayThrottled:
+            result = "throttled"
+        except GatewayBlocked:
+            result = "blocked"
+        except Exception:  # noqa: BLE001 - AgentError·토큰 발급 실패 등. 본문 없이 결과 코드만 남긴다
+            result = "failed"
+        mt_log.info(
+            "machine_translate result=%s items=%d chars=%d latency_ms=%d input_tokens=%d output_tokens=%d",
+            result, len(texts), sum(len(t) for t in texts), int((time.monotonic() - started) * 1000), *tokens,
+        )
+        if out is None:
+            return JSONResponse({"error": result}, status_code={"throttled": 429, "blocked": 422}.get(result, 502))
+        return JSONResponse({"translations": out})
 
     def monitoring_store() -> MonitoringStore:
         if deps.monitoring is None:

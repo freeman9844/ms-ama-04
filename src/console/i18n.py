@@ -3,10 +3,12 @@
 한국어 원문이 곧 메시지 키다. 영문은 locales/en/*.json(원문 → 영문)에서 찾고, 없으면 원문을 그대로 쓴다.
 언어는 요청마다 ?lang= → lang 쿠키 → Accept-Language 순으로 정하고 ContextVar에 담는다.
 값을 끼워 넣는 문구는 Jinja newstyle gettext와 같은 %(name)s 형식을 쓴다(리터럴 %는 %%).
-LLM 출력·고객 발송 문구·저장된 데이터는 번역하지 않는다.
+LLM 출력·고객 발송 문구·저장된 데이터는 여기서 번역하지 않는다(console.translate: 데이터 카탈로그 + 기계 번역).
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,15 @@ CATALOGS: dict[str, dict[str, str]] = {"en": load_catalog("en")}
 
 def current() -> str:
     return _locale.get()
+
+
+@contextmanager
+def use(lang: str) -> Iterator[None]:
+    token = _locale.set(lang)
+    try:
+        yield
+    finally:
+        _locale.reset(token)
 
 
 def gettext(message: str, **params: Any) -> str:

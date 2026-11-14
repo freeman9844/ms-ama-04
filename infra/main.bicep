@@ -86,7 +86,7 @@ var tags = {
 // 구독의 다른 리소스가 gpt-5.6-sol 쿼터 100을 쓰고 있어 이 배포가 가질 수 있는 최대치가 150입니다.
 // gpt-5.4 200 = 평가 판정(EVAL_JUDGE_MODEL)·이전 분석 용량(쿼터 보유만).
 // gpt-6.1-sol 50 = 보유만. 게이트웨이 연결(chat completions)에서 함수 도구 + 추론을 거부해(400) 분석가로 쓰지 않습니다.
-// gpt-6-luna 250 = 콘솔 심사역 채팅(gw-officer-chat 250K) 전용. 다른 에이전트와 용량을 나누지 않습니다(2026-11-09 쿼터 100/250에서 전량으로 증설).
+// gpt-6-luna 250 = 콘솔 전용: 심사역 채팅(gw-officer-chat 200K) + 영문 화면 기계 번역(gw-translator 50K). 오케스트레이터 에이전트와 나누지 않습니다(2026-11-09 쿼터 100/250에서 전량으로 증설).
 // DataZoneStandard 쿼터는 100이라 100으로 낮추며, 이때는 APIM TPM보다 배포 한도(100K)가 먼저 걸립니다.
 // ARM은 리소스 이름에 예약어 MICROSOFT를 허용하지 않으므로 Decision-1은 배포 이름을 따로 둡니다.
 var modelDeployments = [

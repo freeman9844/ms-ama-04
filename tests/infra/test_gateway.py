@@ -16,7 +16,8 @@ GATEWAYS = {
     "gw-collections": 10000,
     "gw-consent-notice": 5000,
     "gw-grievance": 5000,
-    "gw-officer-chat": 250000,
+    "gw-officer-chat": 200000,
+    "gw-translator": 50000,
     "gw-probe": 1000,
 }
 

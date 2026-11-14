@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/static/console.css">
 <script src="{{ htmx_src }}" integrity="{{ htmx_sri }}" crossorigin="anonymous"></script>
 </head>
-<body>
+{% set mt_on = mt_enabled and csrf and locale() == "en" %}<body{% if mt_on %} data-mt-csrf="{{ csrf }}"{% endif %}>
 <div class="shell">
 <aside class="sidebar">
   <a class="brand" href="/">AMA Lending <small>{{ _("심사 콘솔") }}</small></a>
@@ -31,10 +31,12 @@
 </aside>
 <div class="content">
 {% if demo %}<p class="demo-banner">{{ _("데모 모드: Entra 로그인이 꺼져 있습니다. 운영자 IP만 접속할 수 있습니다.") }}</p>{% endif %}
+{% if mt_on %}<p class="mt-note" data-mt-note hidden>{{ _("점선 밑줄 문구는 기계 번역입니다. 마우스를 올리면 원문이 보입니다. 원문이 기준입니다.") }}</p>{% endif %}
 <main>
 {% block main %}{% endblock %}
 </main>
 </div>
 </div>
+{% if mt_on %}<script src="/static/mt.js" defer></script>{% endif %}
 </body>
 </html>

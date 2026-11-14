@@ -122,7 +122,7 @@
 <details><summary>{{ _("계좌에 들어오지 않은 정산 %(n)s건(최근 10건)", n=ui.settlement.unmatched_count) }}</summary>
 <table class="kv">
 <thead><tr><th>{{ _("정산일 · 플랫폼") }}</th><th>{{ _("실지급액") }}</th><th>{{ _("추정 원인") }}</th></tr></thead>
-<tbody>{% for u in ui.settlement.unmatched %}<tr><th>{{ u.settled_on }} {{ u.platform }}</th><td>{{ u.net_krw|krw }}</td><td>{{ u.cause }}</td></tr>{% endfor %}</tbody>
+<tbody>{% for u in ui.settlement.unmatched %}<tr><th>{{ u.settled_on }} {{ u.platform }}</th><td>{{ u.net_krw|krw }}</td><td>{{ u.cause|mt }}</td></tr>{% endfor %}</tbody>
 </table>
 </details>
 {% endif %}
@@ -134,7 +134,7 @@
 {% for i in op.officer_checks["items"] %}
 <li>
 <span class="claim-mark {{ 'ok' if i.status == 'ok' else 'missing' }}" title="{{ i.status_text }}">{{ "✓" if i.status == "ok" else "⚠" }}</span>
-{{ i.text }} <small>({{ i.status_text }})</small>
+{{ i.text|mt }} <small>({{ i.status_text }})</small>
 {% for e in i.evidence %}<span class="chip{% if e.missing %} warn{% endif %}">{{ e.label }} = {{ e.value }}</span>{% endfor %}
 </li>
 {% endfor %}
@@ -156,7 +156,7 @@
     <span class="swatch bg-{{ g.tone }}"></span>
     <span class="signal-name">{{ g.name }} <small>{{ g.label }}</small></span>
     {% if g.bar %}{{ ch.marker_bar(g.bar, _("%(name)s %(value)s / 기준 %(threshold)s", name=g.name, value=g.value, threshold=g.threshold), g.tone) }}{% endif %}
-    <span class="signal-text">{{ g.text }}</span>
+    <span class="signal-text">{{ g.text|mt }}</span>
   </li>
 {% endfor %}
 </ul>
@@ -185,7 +185,7 @@
 </div>
 {% if v.features %}
 <details><summary>{{ _("전체 현금흐름 지표") }}</summary>
-<table class="kv">{% for k, val in v.features|dictsort %}<tr><th>M:{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
+<table class="kv">{% for k, val in v.features|dictsort %}<tr><th>M:{{ k }}</th><td>{{ val|dt }}</td></tr>{% endfor %}</table>
 </details>
 {% endif %}
 {% else %}<p class="note">{{ _("심사 지표가 아직 없습니다.") }}</p>{% endif %}
@@ -206,7 +206,7 @@
 {% if v.policy.reason_codes %}
 <table>
   <thead><tr><th>{{ _("코드") }}</th><th>{{ _("내용") }}</th><th>{{ _("관측값") }}</th><th>{{ _("기준") }}</th></tr></thead>
-  <tbody>{% for r in v.policy.reason_codes %}<tr><td>{{ r.code }}</td><td>{{ r.message }}</td><td>{{ r.observed }}</td><td>{{ r.threshold }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for r in v.policy.reason_codes %}<tr><td>{{ r.code }}</td><td>{{ r.message|mt }}</td><td>{{ r.observed }}</td><td>{{ r.threshold }}</td></tr>{% endfor %}</tbody>
 </table>
 {% else %}<p class="note">{{ _("걸린 사유 코드가 없습니다.") }}</p>{% endif %}
 </section>
@@ -229,7 +229,7 @@
 {% if r.aligned %}<p class="ok">{{ r.relation }}</p>{% else %}<p class="warn">{{ r.relation }}</p>{% endif %}
 {% if ui.review %}{{ ch.stepper(ui.review, _("에이전트 검토 단계"), compact=true) }}{% endif %}
 <h4>{{ _("에이전트 요약") }}</h4>
-<p class="summary">{{ a.summary }}</p>
+<p class="summary">{{ a.summary|mt }}</p>
 </section>
 
 <section class="card">
@@ -242,7 +242,7 @@
   <tr>
     <td>{{ c.n }}</td>
     <td><span class="claim-mark {{ 'ok' if c.ok else 'missing' }}" title="{{ _('근거 모두 확인') if c.ok else _('근거 값을 찾지 못한 항목이 있습니다') }}">{{ "✓" if c.ok else "⚠" }}</span></td>
-    <td>{{ c.text }}</td>
+    <td>{{ c.text|mt }}</td>
     <td>{% for e in c.evidence %}<span class="chip{% if e.missing %} warn{% endif %}" title="{{ e.id }}">{{ e.label }} = {{ e.value }}</span>{% else %}-{% endfor %}</td>
     <td>{% for t in c.txn_ids %}<a class="chip txn" href="#tab-evidence">{{ t }}</a>{% else %}-{% endfor %}</td>
   </tr>
@@ -265,7 +265,7 @@
 <div class="grid-2">
 <div>
 <table class="kv">{% for k, val in st.rows %}<tr><th>{{ k }}</th><td>{{ val }}</td></tr>{% endfor %}</table>
-{% if st.rationale %}<p><strong>{{ _("근거") }}</strong> — {{ st.rationale }}</p>{% endif %}
+{% if st.rationale %}<p><strong>{{ _("근거") }}</strong> — {{ st.rationale|mt }}</p>{% endif %}
 </div>
 <div>
 {% if st.bars %}<h4>{{ _("신청액·정책 한도·제안 금액") }}</h4>{{ ch.hbars(st.bars, _("신청액 정책 한도 제안 금액 비교"), "krw10k") }}{% endif %}
@@ -284,7 +284,7 @@
 <h3>{{ _("개선 조건(반사실)") }} <small>{{ _("이 지표가 목표에 닿으면 판단이 나아집니다") }}</small></h3>
 <table>
   <thead><tr><th>{{ _("지표") }}</th><th>{{ _("현재") }}</th><th>{{ _("목표") }}</th><th>{{ _("변화") }}</th><th>{{ _("방향") }}</th><th>{{ _("설명") }}</th></tr></thead>
-  <tbody>{% for cf in op.counterfactuals %}<tr><td title="{{ cf.id }}">{{ cf.label }}</td><td>{{ cf.current }}</td><td>{{ cf.target }}</td><td>{{ cf.change }} ({{ cf.pct }})</td><td>{{ cf.direction }}</td><td>{{ cf.explanation }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for cf in op.counterfactuals %}<tr><td title="{{ cf.id }}">{{ cf.label }}</td><td>{{ cf.current }}</td><td>{{ cf.target }}</td><td>{{ cf.change }} ({{ cf.pct }})</td><td>{{ cf.direction }}</td><td>{{ cf.explanation|mt }}</td></tr>{% endfor %}</tbody>
 </table>
 <ul class="counterfactuals">{% for cf in ui.counterfactuals %}{% if cf.bar %}<li>{{ op.counterfactuals[loop.index0].label }}{{ ch.hbars(cf.bar, cf.metric_id ~ " " ~ _("현재와 목표"), "") }}</li>{% endif %}{% endfor %}</ul>
 </section>
@@ -293,7 +293,7 @@
 <section class="card">
 <h3>{{ _("반성 루프") }} <small>{{ _("분석 → 근거 검사 → 검토, 최대 3라운드") }}</small></h3>
 {% if a.review %}<p class="review">{{ _("검토 에이전트:") }} <strong>{{ _("통과") if a.review.passed else _("미통과") }}</strong> ({{ _("%(n)s회", n=a.review.rounds) }}){% if not a.review.passed %} — {{ _("마지막 초안을 그대로 보여 줍니다. 아래 지적 사항을 심사역이 확인하세요.") }}{% endif %}</p>
-{% if a.review.issues %}<ul class="cons">{% for i in a.review.issues %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}{% endif %}
+{% if a.review.issues %}<ul class="cons">{% for i in a.review.issues %}<li>{{ i|mt }}</li>{% endfor %}</ul>{% endif %}{% endif %}
 {% if op.loop %}
 <table>
   <thead><tr><th>{{ _("라운드") }}</th><th>{{ _("도구 호출") }}</th><th>{{ _("토큰") }}</th><th>{{ _("근거 검사") }}</th><th>{{ _("검토 에이전트") }}</th><th>{{ _("결과") }}</th></tr></thead>
@@ -301,7 +301,7 @@
 </table>
 {% set issues = op.loop.rows|map(attribute="issues")|sum(start=[]) %}
 {% if issues %}<details><summary>{{ _("라운드별 지적 사항 %(n)s건", n=issues|length) }}</summary>
-<ul>{% for rd in op.loop.rows %}{% for kind, text in rd.issues %}<li><strong>{{ _("%(n)s라운드", n=rd.n) }} {{ kind }}</strong> — {{ text }}</li>{% endfor %}{% endfor %}</ul>
+<ul>{% for rd in op.loop.rows %}{% for kind, text in rd.issues %}<li><strong>{{ _("%(n)s라운드", n=rd.n) }} {{ kind }}</strong> — {{ text|mt }}</li>{% endfor %}{% endfor %}</ul>
 </details>{% endif %}
 <div class="grid-2">
 {% if op.loop.tools %}<div><h4>{{ _("분석 에이전트 도구 호출") }}</h4>{{ ch.hbars(op.loop.tools, _("도구별 호출 수"), "times") }}</div>{% endif %}
@@ -354,7 +354,7 @@
 {% if d.officer_decision %}
 <p>{% if d.officer_decision.policy_override %}<span class="badge badge-red">{{ _("정책 예외 승인") }}</span> {% endif %}{{ d.officer_decision.decision }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
 {% if d.officer_decision.conditions %}<ul>{% for c in d.officer_decision.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
-{% if d.officer_decision.reason %}<p>{{ d.officer_decision.reason }}</p>{% endif %}
+{% if d.officer_decision.reason %}<p>{{ d.officer_decision.reason|mt }}</p>{% endif %}
 {% endif %}
 {% if d.decision_attempts %}
 <details><summary>{{ _("거부된 결정 시도 %(n)s건", n=d.decision_attempts|length) }}</summary>

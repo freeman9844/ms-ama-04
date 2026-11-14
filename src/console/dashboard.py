@@ -13,6 +13,7 @@ from console import charts, i18n
 from console.i18n import _
 from console.monitoring import CONTACT_STATUS_LABELS, PROPOSAL_LABELS, SEVERITY_LABELS, TRIGGER_LABELS
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
+from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
@@ -289,9 +290,9 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
          "tone": ("red" if advance_n >= 1 else "green") if charts.is_num(advance_n) else "neutral"},
     ]
     platforms_list = list(pg.get("platforms") or ())
-    platforms = charts.hbars([(p["platform"], round(p["share"] * 100, 1), "blue") for p in platforms_list],
+    platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue") for p in platforms_list],
                              width=320, label_w=88)
-    cycles = [{"platform": p["platform"], "cycle": _(PLATFORM_CYCLES.get(p["platform"], "—")),
+    cycles = [{"platform": dt(p["platform"]), "cycle": _(PLATFORM_CYCLES.get(p["platform"], "—")),
                "lag_days": p.get("lag_days")} for p in platforms_list]
     monthly = list(pg.get("monthly_take_rate") or ())
     split = bool(monthly) and all(charts.is_num(m.get("fee_rate")) and charts.is_num(m.get("offset_rate"))
@@ -664,7 +665,8 @@ def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[st
     for axis, a in ((s.get("fairness") or {}).get("axes") or {}).items():
         values = a.get("values") or {}
         groups, sufficient = [], []
-        for value, r in values.items():
+        for raw_value, r in values.items():
+            value = dt(raw_value)
             rate = r.get("approve_rate")
             pct = rate * 100 if charts.is_num(rate) else None
             if pct is None:

@@ -4,7 +4,7 @@
 {% import "_charts.html" as ch %}
 {% macro collections_block(c) -%}
 <h3>{{ _("추심 에이전트") }} <small>{{ c.decision }}</small></h3>
-<p>{{ c.reason }}</p>
+<p>{{ c.reason|mt }}</p>
 {% if c.contacts %}<table>
   <thead><tr><th>{{ _("일자") }}</th><th>{{ _("스크립트") }}</th><th>{{ _("상태") }}</th><th>{{ _("사유") }}</th></tr></thead>
   <tbody>{% for x in c.contacts %}<tr><td>{{ x.at }}</td><td>{{ x.script_id }}</td><td>{{ x.status }}</td><td>{{ x.reason or "" }}</td></tr>{% endfor %}</tbody>
@@ -12,8 +12,8 @@
 {%- endmacro %}
 {% macro restructure_block(doc_id, rs, decidable) -%}
 <h3>{{ _("재조정 상담 요청") }} <small>{{ rs.status }}</small></h3>
-<p>{{ rs.category }} · {{ rs.note }}</p>
-{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason }}</p>{% endif %}
+<p>{{ rs.category }} · {{ rs.note|mt }}</p>
+{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason|mt }}</p>{% endif %}
 {% if decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 끝나면 재조정 결정을 내릴 수 있습니다.") }}</small></p>
 {% elif decidable and user.can_decide %}
@@ -35,12 +35,12 @@
 <div>
 <h4>{{ _("제안 조치와 이유") }}</h4>
 <p><span class="chip">{{ p.script_id|script_label }}</span>{% if p.hardship %} <span class="chip warn">{{ _("재조정 상담 권고") }}</span>{% endif %}</p>
-<p>{{ p.reason }}</p>
-{% if p.hardship %}<p>{{ _("재조정 상담 권고") }}: {{ p.hardship.category }} · {{ p.hardship.note }}</p>{% endif %}
+<p>{{ p.reason|mt }}</p>
+{% if p.hardship %}<p>{{ _("재조정 상담 권고") }}: {{ p.hardship.category }} · {{ p.hardship.note|mt }}</p>{% endif %}
 <h4>{{ _("판단 근거") }}</h4>
 <ul>
   <li>{{ _("%(no)s회차", no=ev.installment_no) }} {{ ev.due_on }} · {{ ev.amount_krw|krw }} · {{ _("누적 미납 %(n)s회", n=ev.missed_count) }}</li>
-  {% if ev.recent_alert %}<li>{{ _("최근 경보") }} {{ ev.recent_alert.severity|severity_label }}: {{ ev.recent_alert.summary }}{% if ev.recent_alert.check_action %}<br>{{ _("확인할 조치") }}: {{ ev.recent_alert.check_action }}{% endif %}</li>{% endif %}
+  {% if ev.recent_alert %}<li>{{ _("최근 경보") }} {{ ev.recent_alert.severity|severity_label }}: {{ ev.recent_alert.summary|mt }}{% if ev.recent_alert.check_action %}<br>{{ _("확인할 조치") }}: {{ ev.recent_alert.check_action|mt }}{% endif %}</li>{% endif %}
   <li>{{ _("최근 7일 차주 연락 %(n)s회", n=ev.contacts_7d) }}</li>
   {% for e in ev.escalation or () %}<li>{{ _("단계 자동 안내") }}: {{ e.script_id|script_label }} · {{ e.on }} · {{ e.status|contact_status_label }}</li>{% endfor %}
 </ul>
@@ -51,14 +51,14 @@
   <li><span class="{{ 'ok' if k.ok else 'error' }}">{{ "✔" if k.ok else "✖" }}</span> {{ k.id|check_label }} · {{ k.detail }}</li>
 {% endfor %}</ul>
 <h4>{{ _("고객에게 보낼 문구") if p.status == "pending_officer" else _("제안한 문구") }}</h4>
-<blockquote>{{ p.text }}</blockquote>
+<blockquote>{{ p.text|mt_ref }}</blockquote>
 </div>
 </div>
 {% if p.status != "pending_officer" %}
 <h4>{{ _("심사역 결정") }}</h4>
 <p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason }}{% endif %}</p>
 {% if p.contact %}<p>{{ _("발송 결과") }}: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
-<blockquote>{{ p.sent_text or p.contact.text }}</blockquote>{% endif %}
+<blockquote>{{ (p.sent_text or p.contact.text)|mt_ref }}</blockquote>{% endif %}
 {% elif decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 멈추면 결정할 수 있습니다.") }}</small></p>
 {% elif decidable and user.can_decide %}
@@ -141,7 +141,7 @@
 </div>
 <section class="card">
 <dl class="facts">
-  <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(l.applicant_id, user.can_restore) }} · {{ l.industry }}</dd>
+  <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(l.applicant_id, user.can_restore) }} · {{ l.industry|dt }}</dd>
   <dt>{{ _("대출") }}</dt><dd>{{ l.amount_krw|krw }} / {{ _("%(n)s개월", n=l.tenor_months) }} · {{ l.decision }} · {{ l.approved_at }}</dd>
   <dt>{{ _("기준선") }}</dt><dd>{{ _("주 평균 매출 %(revenue)s · 현금 버퍼 %(days)s일", revenue=l.baseline.avg_weekly_revenue|krw, days=l.baseline.cash_buffer_days) }}</dd>
   {% if m.replay_id %}<dt>{{ _("재생") }}</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ _("%(done)s/%(total)s주", done=m.processed_week, total=13) }} · {{ _("시작 %(at)s", at=m.started_at) }}{% if m.resumed_at %} · {{ _("재개 %(n)s회", n=m.resumed_at|length) }}{% endif %}{% if m.stopped_at %} · {{ _("종료 %(at)s", at=m.stopped_at) }}{% endif %}</dd>{% endif %}
@@ -248,7 +248,7 @@
     <td>{% for a in pc.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
   </tr></tbody>
 </table>
-{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason }}{% endif %}</p>
+{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason|mt }}{% endif %}</p>
 {% elif v.plan_decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 멈추면 결정할 수 있습니다.") }}</small></p>
 {% elif v.plan_decidable and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}
@@ -312,13 +312,13 @@
 <p class="cause"><span class="chip">{{ _("주원인: %(cause)s", cause=a.cause_label) }}</span>{% if a.secondary_labels %} <span class="chip">{{ _("부원인: %(causes)s", causes=a.secondary_labels|join(", ")) }}</span>{% endif %}</p>
 {% if ui.alert_steps[a.alert_id] %}{{ ch.stepper(ui.alert_steps[a.alert_id], _("경보 처리 단계"), compact=true) }}{% endif %}
 {% if a.check_action %}<div class="decision-layout">
-  <div><h3>{{ _("이유") }}</h3><p class="summary">{{ a.summary }}</p></div>
+  <div><h3>{{ _("이유") }}</h3><p class="summary">{{ a.summary|mt }}</p></div>
   <div><h3>{{ _("확인할 조치") }}</h3><p>{{ a.check_action }}</p></div>
 </div>
-{% else %}<p class="summary">{{ a.summary }}</p>{% endif %}
+{% else %}<p class="summary">{{ a.summary|mt }}</p>{% endif %}
 <ul class="claims">
 {% for s in a.signals %}
-  <li><strong>{{ s.kind }}</strong> {{ s.text }}
+  <li><strong>{{ s.kind }}</strong> {{ s.text|mt }}
     <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else _("없음") }}</span>{% endfor %}
     {% for t in s.txn_ids %}<span class="chip txn">{{ t }}</span>{% endfor %}</div>
   </li>
@@ -350,7 +350,7 @@
 <section id="{{ c.case_id }}" class="card alert-card">
 <h2>{{ _("%(no)s회차 미납", no=inst.no) }} · {{ inst.due_on }} · {{ inst.amount_krw|krw }} <small>{{ _("누적 미납 %(n)s회", n=c.missed_count) }} · {{ c.status }}</small></h2>
 {% if ui.case_steps[c.case_id] %}{{ ch.stepper(ui.case_steps[c.case_id], _("미납 추심 단계"), compact=true) }}{% endif %}
-{% if c.recent_alert %}<p>{{ _("최근 경보") }}: <a href="#{{ c.recent_alert.alert_id }}">{{ _("%(n)s주차", n=c.recent_alert.week) }} {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary }}</p>
+{% if c.recent_alert %}<p>{{ _("최근 경보") }}: <a href="#{{ c.recent_alert.alert_id }}">{{ _("%(n)s주차", n=c.recent_alert.week) }} {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary|mt }}</p>
 {% else %}<p class="note">{{ _("이번 재생에 앞선 경보 없음.") }}</p>{% endif %}
 {% if c.event_error %}<p class="error">{{ _("이벤트 발행 실패") }}: {{ c.event_error }}</p>{% endif %}
 {% if c.proposal %}{{ proposal_block(c.id, c.proposal, c.proposal_decidable) }}

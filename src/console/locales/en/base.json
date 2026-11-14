@@ -14,5 +14,7 @@
   "button|승인": "Approve",
   "button|거절": "Decline",
   "button|반려": "Reject",
-  "button|수정 후 승인": "Approve with edits"
+  "button|수정 후 승인": "Approve with edits",
+  "기계 번역 · 원문: %(t)s": "Machine translation · original: %(t)s",
+  "점선 밑줄 문구는 기계 번역입니다. 마우스를 올리면 원문이 보입니다. 원문이 기준입니다.": "Dotted-underlined text is machine-translated. Hover to see the Korean original, which is authoritative."
 }

@@ -57,7 +57,7 @@
 <table>
   <thead><tr><th>{{ _("날짜") }}</th><th>{{ _("안내") }}</th><th>{{ _("상태") }}</th></tr></thead>
   <tbody>{% for n in notices|sort(attribute="on") %}
-<tr><td>{{ n.on }}</td><td>{{ n.text or (n.script_id|script_label) }}</td>
+<tr><td>{{ n.on }}</td><td>{{ n.text|mt_ref if n.text else n.script_id|script_label }}</td>
 <td>{{ n.status|contact_status_label }}{% if n.reason %} · {{ n.reason|contact_reason_label }}{% endif %}</td></tr>
 {% endfor %}</tbody>
 </table>
@@ -75,7 +75,7 @@
   <p>{% for s in c.scopes %}<span class="chip">{{ s|scope_label }}</span>{% endfor %} · {{ _("만료 %(date)s", date=c.expires_at) }}{% if c.ended_at %} · {{ _("종료 %(date)s", date=c.ended_at) }}{% endif %}</p>
   {% if c.deletion_proof_id %}<p><a href="/consents/{{ c.deletion_proof_id|path }}/proof">{{ _("삭제 증명 보기") }}</a></p>{% endif %}
   {% for n in c.notices or [] %}
-  <details><summary>{{ n.kind|notice_label }}: {{ n.title }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body }}</p></details>
+  <details><summary>{{ n.kind|notice_label }}: {{ n.title|mt }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body|mt_ref }}</p></details>
   {% endfor %}
   {% if c.status == "granted" and user.can_decide %}
   <form method="post" action="/borrower/{{ applicant_id|path }}/consents/{{ c.consent_id|path }}/revoke" class="inline">
@@ -104,8 +104,8 @@
 {% for g in grievances %}
 <article class="grievance">
   <h3>{{ g.application_id }} <span class="status g-{{ g.status }}">{{ g.status|grievance_status }}</span> <small>{{ g.grievance_id }} · {{ g.submitted_at }}</small></h3>
-  <p class="quote">{{ g.text }}</p>
-  {% if g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title }}</summary><p class="notice">{{ g.reply.body }}</p></details>{% endif %}
+  <p class="quote">{{ g.text|mt_ref }}</p>
+  {% if g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title|mt }}</summary><p class="notice">{{ g.reply.body|mt_ref }}</p></details>{% endif %}
 </article>
 {% endfor %}
 </section>

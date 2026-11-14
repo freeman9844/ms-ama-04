@@ -318,3 +318,11 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
 .chat-system { align-self: flex-start; color: var(--bad); font-size: 13px; }
 .chat-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .chat-form textarea { width: 100%; box-sizing: border-box; }
+
+/* 영문 화면 기계 번역(console/translate.py, static/mt.js) */
+.mt-note { margin: 0; padding: .4rem 1.5rem; background: #eff6fc; color: #004578; border-bottom: 1px solid #c7e0f4; font-size: .85rem; }
+.mt-done { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
+.mt-ref { display: block; margin-top: .25rem; color: var(--muted); font-size: .85em; font-style: italic; }
+.mt-ref:empty { display: none; }
+.mt-ref::before { content: "EN · "; font-style: normal; font-weight: 600; }
+.mt-ref.mt-done { text-decoration: none; }

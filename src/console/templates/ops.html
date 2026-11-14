@@ -125,7 +125,7 @@
 <details><summary>{{ _("사유 코드 설명") }}</summary>
 <table>
   <thead><tr><th>{{ _("코드") }}</th><th>{{ _("설명") }}</th><th>{{ _("신청") }}</th></tr></thead>
-  <tbody>{% for r in s.reason_codes %}<tr><td>{{ r.key }}</td><td>{{ r.message or "-" }}</td><td>{{ r.count }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for r in s.reason_codes %}<tr><td>{{ r.key }}</td><td>{{ r.message|mt if r.message else "-" }}</td><td>{{ r.count }}</td></tr>{% endfor %}</tbody>
 </table>
 </details>
 {% endif %}
@@ -180,7 +180,7 @@
   <tbody>
   {% for value, r in a["values"].items() %}
   <tr>
-    <td>{{ value }}</td><td>{{ r.n }}</td><td>{{ r.assessed }}</td><td>{{ r.approve_rate|pct }}</td><td>{{ r.eligible_rate|pct }}</td>
+    <td>{{ value|dt }}</td><td>{{ r.n }}</td><td>{{ r.assessed }}</td><td>{{ r.approve_rate|pct }}</td><td>{{ r.eligible_rate|pct }}</td>
     <td>{{ r.recommendations.approve }} / {{ r.recommendations.conditional }} / {{ r.recommendations.refer }} / {{ r.recommendations.decline }}</td>
     <td>{{ r.officer_approve_rate|pct }}</td><td>{% if r.insufficient %}{{ _("표본 부족") }}{% endif %}</td>
   </tr>

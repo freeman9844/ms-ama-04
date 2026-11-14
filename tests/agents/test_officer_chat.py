@@ -67,7 +67,7 @@ def test_ask_sends_snapshot_history_question_and_deletes_conversation():
     spec, payload, handlers, _ = runner.calls[0]
     assert spec.name == OFFICER_AGENT and handlers == {}
     assert payload == {"snapshot": {"application": {"application_id": "app-1"}}, "history": history,
-                       "question": "왜 회부?"}
+                       "question": "왜 회부?", "answer_language": "ko"}
     assert runner.deleted == ["conv-1"]
 
 

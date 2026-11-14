@@ -12,7 +12,6 @@ import console
 from console import i18n
 from console.app import create_app
 from consolepreview import fixtures
-from shared.sellers import DEMO_SELLERS, LOAD_BUSINESS_NAMES
 
 ROOT = Path(__file__).resolve().parents[2]
 CONSOLE = ROOT / "src" / "console"
@@ -180,8 +179,6 @@ def test_english_page_has_no_korean_ui_text(preview, page):
     data: set[str] = set()
     for source in (deps.store.docs, deps.monitoring.loans, deps.monitoring.alerts, deps.ops.data):
         _data_strings(source, data)
-    _data_strings([vars(s) for s in DEMO_SELLERS], data)
-    _data_strings(LOAD_BUSINESS_NAMES, data)
     data.update({"한국어", deps.demo_principal.name})
     html = client.get(page, headers={"Cookie": "lang=en"}).text
     html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S)

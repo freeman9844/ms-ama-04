@@ -6,7 +6,7 @@
 - Storage Queue: applications-start·officer-decisions·monitoring-replay·restructure-decisions·
   consent-commands·grievances·grievance-decisions에 보내기만 한다
   (Functions host.json messageEncoding=none)
-- Foundry 에이전트(심사역 채팅): Azure AI User, 계정 범위(AI_PROJECT_ENDPOINT·CHAT_MODEL이 있을 때만)
+- Foundry 에이전트(심사역 채팅·영문 화면 기계 번역): Azure AI User, 계정 범위(AI_PROJECT_ENDPOINT·CHAT_MODEL이 있을 때만)
 """
 
 import json
@@ -245,6 +245,22 @@ def build_chat(env: Mapping[str, str], credential: Any) -> Any | None:
     return OfficerChat(runner, env["CHAT_MODEL"])
 
 
+def build_translator(env: Mapping[str, str], credential: Any) -> Any | None:
+    """영문 화면 기계 번역. 모델은 TRANSLATE_MODEL(없으면 CHAT_MODEL)이고 게이트웨이 연결은 gw-translator다."""
+    model = env.get("TRANSLATE_MODEL") or env.get("CHAT_MODEL")
+    if not (env.get("AI_PROJECT_ENDPOINT") and model):
+        return None
+    from agents.gateway import GatewayRunner, gateway_enabled
+    from agents.runtime import FoundryAgents
+    from agents.translator import Translator
+
+    runner: Any = FoundryAgents(env["AI_PROJECT_ENDPOINT"], lambda: credential.get_token(FOUNDRY_SCOPE).token,
+                                timeout=CHAT_TIMEOUT_S)
+    if gateway_enabled(env):
+        runner = GatewayRunner(runner)
+    return Translator(runner, model)
+
+
 REQUIRED_ENV = ("AZURE_CLIENT_ID", "COSMOS_ENDPOINT", "COSMOS_DATABASE", "DATA_BLOB_ENDPOINT", "QUEUE_ENDPOINT")
 CONSOLE_ROLES = (CREDIT_OFFICER, CREDIT_MANAGER, AUDITOR)
 
@@ -277,4 +293,5 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
         demo_principal=demo,
         ops=CosmosOps(db.get_container_client(APPLICATIONS)),
         chat=build_chat(env, credential),
+        translator=build_translator(env, credential),
     )
