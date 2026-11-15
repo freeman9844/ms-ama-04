@@ -227,6 +227,8 @@ def _loan_and_alerts(mask):
     )
     medium["signals"][0]["text"] = mask(f"{REP} 대표 계좌 입금이 줄었다")
     high["summary"] = mask(f"{BIZ} 정산 보류로 현금 버퍼가 줄었다")
+    loan["monitoring"]["escalation"] = {"stage1": {"alert_id": high["alert_id"], "on": "2027-01-10", "status": "sent",
+                                                   "reason": None}}
     high["check_action"] = mask(f"{REP} 대표에게 정산 보류 사유를 확인한다")
     high["restructure"] = {
         "request_id": f"rs-{high['id']}", "category": "debt_overload", "note": mask(f"{BIZ} 고금리 차입 중첩"),
@@ -245,9 +247,11 @@ def _loan_and_alerts(mask):
                              "check_action": high["check_action"]},
             "contacts_7d": 1, "escalation": [],
         },
-        "checks": [{"id": "approved_script", "ok": True, "detail": "승인된 스크립트입니다."}],
+        "checks": [{"id": "approved_script", "ok": True, "detail": "승인된 스크립트입니다."},
+                   {"id": "contact_hours", "ok": False, "detail": "연락 가능 시간(08:00~21:00)이 아닙니다."}],
         "created_at": "2027-01-31T10:00:00+09:00", "officer_id": "oid-officer",
-        "decided_at": "2027-01-31T11:00:00+09:00", "decision_reason": "", "sent_text": sent,
+        "decided_at": "2027-01-31T11:00:00+09:00", "decision_reason": f"{REP} 대표와 통화한 뒤 문구를 고쳤다",
+        "sent_text": sent,
         "contact": {"ref": case["case_id"], "on": "2027-01-31", "at": "2027-01-31T11:00:00+09:00",
                     "script_id": "hardship_offer", "status": "sent", "reason": None, "by": "officer",
                     "officer_id": "oid-officer", "text": sent},
@@ -331,6 +335,17 @@ def test_allowlist_covers_grievance_contact_proposal_and_entity_texts(synthetic_
     deps, _, items = synthetic_world
     left = _left(deps, _render(deps, items, page))
     assert not left, f"{page}: 사전 번역이 덮지 못한 문구(마스킹) {sorted(left)}"
+
+
+def test_loan_page_shows_stored_english_for_checks_decision_reason_check_action_and_auto_contact(synthetic_world):
+    deps, _, items = synthetic_world
+    page = html.unescape(_render(deps, items, f"/loans/{APP}"))
+    for ko in (
+        "승인된 스크립트입니다.", "연락 가능 시간(08:00~21:00)이 아닙니다.", f"{REP} 대표와 통화한 뒤 문구를 고쳤다",
+        f"{REP} 대표에게 정산 보류 사유를 확인한다",
+    ):
+        assert f"EN({ko})" in page, ko
+    assert f"EN({BIZ} 대표님, 다음 상환일 전 잔고가 부족할 수 있습니다.)" in page
 
 
 @pytest.mark.parametrize("page", SYN_PAGES)

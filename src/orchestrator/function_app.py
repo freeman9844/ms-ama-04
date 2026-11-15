@@ -150,6 +150,8 @@ def restructure_decision(msg: func.QueueMessage) -> None:
 
 COSMOS_CONNECTION = "CosmosDBConnection"
 PRETRANSLATE_BACKFILL = timedelta(days=7)
+# 리스 세대를 올리면 새 리스가 만들어져 start_from_time부터 최근 7일을 다시 읽는다. 이미 저장된 문구는 건너뛰어 빠진 문구만 모델에 간다.
+LEASE_GENERATION = 2
 # 429가 잦은 백필에서도 한 호출이 짧게 끝나도록 묶음 크기를 줄인다.
 PRETRANSLATE_MAX_ITEMS = 20
 
@@ -170,7 +172,7 @@ def _register_pretranslate(source: str, start_from: str) -> None:
         database_name="%COSMOS_DATABASE%",
         container_name=source,
         lease_container_name="leases",
-        lease_container_prefix=f"{source}-",
+        lease_container_prefix=f"{source}-g{LEASE_GENERATION}-",
         create_lease_container_if_not_exists=False,
         start_from_time=start_from,
         max_items_per_invocation=PRETRANSLATE_MAX_ITEMS,

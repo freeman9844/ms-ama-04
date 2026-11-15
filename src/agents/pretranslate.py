@@ -52,6 +52,8 @@ ALLOWLIST: dict[str, tuple[str, ...]] = {
         "proposal.evidence.recent_alert.summary",  # loan: ev.recent_alert.summary
         "proposal.evidence.recent_alert.check_action",  # loan: ev.recent_alert.check_action
         "proposal.text",  # loan: 고객에게 보낼 문구(p.text|mt_ref)
+        "proposal.checks[].detail",  # loan: k.detail(정책 확인 결과)
+        "proposal.decision_reason",  # loan: p.decision_reason(심사역 결정 사유)
         "proposal.sent_text",  # loan: 수정해 보낸 문구
         "proposal.contact.text",  # loan: 발송 결과 문구
         # 연락 기록 문서(contacts-*)

@@ -73,6 +73,13 @@ def test_extract_reads_contact_records_in_alerts():
     assert extract("alerts", doc) == ["입금 감소", "상환일이 다가옵니다"]
 
 
+def test_extract_reads_proposal_checks_detail_and_decision_reason_in_alerts():
+    doc = {"loan_id": "L", "proposal": {"checks": [{"id": "approved_script", "ok": True, "detail": "승인된 스크립트입니다."},
+                                                    {"id": "contact_hours", "ok": True, "detail": "OK"}, {"id": "x"}],
+                                        "decision_reason": "연락 시간이 아니라 반려한다"}}
+    assert extract("alerts", doc) == ["승인된 스크립트입니다.", "연락 시간이 아니라 반려한다"]
+
+
 def test_allowlist_covers_every_source():
     assert set(ALLOWLIST) == set(SOURCES)
 
