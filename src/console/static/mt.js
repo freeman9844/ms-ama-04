@@ -54,7 +54,7 @@
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !Array.isArray(body.translations)) continue;
         batch.forEach((text, i) => {
-          if (typeof body.translations[i] === "string") apply(pending.get(text), text, body.translations[i]);
+          if (typeof body.translations[i] === "string" && body.translations[i]) apply(pending.get(text), text, body.translations[i]);
         });
       } catch {
         // 원문 유지

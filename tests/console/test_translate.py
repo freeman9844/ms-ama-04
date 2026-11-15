@@ -8,12 +8,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agents.runtime import AgentError, GatewayThrottled
+from agents.pretranslate import translation_id
 from console import i18n, translate
+from console.translate import PageTexts, page_scope
 from console.app import create_app
 from console.auth import csrf_token
 from consolepreview import fixtures
+from shared.pseudonymize import tokens
+from shared.pseudonymize import tokens
 from shared.segments import AGE_BANDS, SELLER_INDUSTRIES
 from shared.sellers import DEMO_SELLERS, LOAD_BUSINESS_NAMES
+from tests.console.conftest import KEY, PROFILE
 from tests.console.test_i18n import EN_PAGES, HANGUL
 
 EN = i18n.CATALOGS["en"]
@@ -69,25 +74,77 @@ def test_data_label_translates_each_part(english):
 def test_mt_filter_marks_by_source(english):
     machine = translate.MachineTranslation(FakeTranslator())
     machine.cache.put("캐시된 문장", "Cached sentence")
-    f = translate.mt_filters(machine)
+    f = translate.mt_filters(machine, KEY)
     assert f["mt"]("식품") == "Food"
     assert f["mt"]("ABC 123") == "ABC 123"
     cached = str(f["mt"]("캐시된 문장"))
     assert 'class="mt mt-done"' in cached and "Cached sentence" in cached and 'title="Machine translation' in cached
     assert str(f["mt"]("<b>새 문장</b>")) == \
         '<span class="mt" data-mt="&lt;b&gt;새 문장&lt;/b&gt;">&lt;b&gt;새 문장&lt;/b&gt;</span>'
-    assert translate.mt_filters(None)["mt"]("새 문장") == "새 문장"
+    assert translate.mt_filters(None, KEY)["mt"]("새 문장") == "새 문장"
 
 
 def test_mt_ref_keeps_sent_korean():
     machine = translate.MachineTranslation(FakeTranslator())
-    f = translate.mt_filters(machine)
+    f = translate.mt_filters(machine, KEY)
     assert f["mt_ref"]("보낸 문구") == "보낸 문구"  # 한국어 화면
     token = i18n._locale.set("en")
     try:
         assert str(f["mt_ref"]("보낸 문구")) == '보낸 문구<span class="mt-ref" data-mt="보낸 문구"></span>'
     finally:
         i18n._locale.reset(token)
+
+
+def profile(**overrides):
+    return PROFILE.model_copy(update=overrides)
+
+
+def test_stored_translation_restores_only_visible_values(english):
+    page = PageTexts.for_case(KEY, profile(business_name="성수데일리룩"), [])
+    masked = page.masked("성수데일리룩 매출 감소")
+    page = PageTexts.for_case(KEY, profile(business_name="성수데일리룩"), [],
+                              stored={translation_id(masked): masked.replace("매출 감소", "sales fell")})
+    with page_scope(page):
+        officer = str(translate.mt_filters(None, KEY)["mt"]("성수데일리룩 매출 감소"))
+        auditor = str(translate.mt_filters(None, KEY)["mt"](masked))  # 감사자 화면은 원래 토큰
+    assert "Seongsu Daily Look sales fell" in officer and 'class="mt mt-done"' in officer
+    assert "[[BIZNAME_" in auditor and "Seongsu" not in auditor
+
+
+def test_stored_translation_with_missing_token_is_ignored(english):
+    page = PageTexts.for_case(KEY, profile(business_name="성수데일리룩"), [])
+    masked = page.masked("성수데일리룩 매출 감소")
+    page = PageTexts.for_case(KEY, profile(business_name="성수데일리룩"), [], stored={translation_id(masked): "sales fell"})
+    with page_scope(page):
+        out = str(translate.mt_filters(translate.MachineTranslation(FakeTranslator()), KEY)["mt"]("성수데일리룩 매출 감소"))
+    assert 'class="mt"' in out and f'data-mt="{masked}"' in out and "sales fell" not in out
+
+
+def test_pending_carries_masked_text_and_token_map(english):
+    page = PageTexts.for_case(KEY, PROFILE, [])
+    machine = translate.MachineTranslation(FakeTranslator())
+    with page_scope(page):
+        out = str(translate.mt_filters(machine, KEY)["mt"]("연락처 010-1234-5678"))
+    token = next(iter(tokens(out)))
+    assert token.startswith("[[PHONE_") and "010-1234-5678" not in out.split(">")[0]
+    assert page.token_map() == {token: "010-1234-5678"}
+    assert 'class="mt" data-mt="연락처 [[PHONE_' in out
+
+
+def test_pending_without_page_masks_patterns_only(english):
+    out = str(translate.mt_filters(translate.MachineTranslation(FakeTranslator()), KEY)["mt"]("연락처 010-1234-5678"))
+    assert 'data-mt="연락처 [[PHONE_' in out
+
+
+def test_machine_translation_rejects_token_loss():
+    class Lossy(FakeTranslator):
+        def translate(self, texts):
+            return SimpleNamespace(translations=[t.split("]]")[-1] for t in texts], input_tokens=1, output_tokens=1)
+
+    machine = translate.MachineTranslation(Lossy())
+    masked = "연락처 [[PHONE_0123456789]] 입니다"
+    out, _, _ = machine.translate([masked, "일반 문장"])
+    assert out[0] == "" and machine.lookup(masked) is None
 
 
 @pytest.mark.parametrize("page", [*EN_PAGES, "/borrower/seller-dailylook-01"])
