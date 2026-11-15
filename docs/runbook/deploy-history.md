@@ -953,3 +953,11 @@ python -m ops smoke
 - **배포:** `window open --acr`(프로비저닝으로 `gw-translator` APIM·Foundry 연결 생성) → `ops deploy console`(`console:20261115001215`). `agw-amalend`가 다시 `Stopped`라 시작했습니다(약 7분).
 - **WAF 오탐:** `/i18n/translate`가 403이었습니다. `ARGS:texts`에서 942430(SQL 특수문자 12개 이상)이 매칭돼 이상 점수 15(949110)였습니다. bicep에 `texts`(Equals) 인자의 942430만 빼는 제외를 넣고, 라이브 정책에는 `az network application-gateway waf-policy managed-rule exclusion rule-set add`로 바로 적용했습니다.
 - **라이브 확인:** `app-20261114-170e2a` 영문 상세의 기계 번역 대상 14개 → 200(첫 호출 30.4초) → 다시 열면 모두 캐시(`mt-done` 14, 대기 0). `/loans/app-20261113-59e115` 25개 → 200(9.7초), 경보 요약·신호가 영어로 바뀌고 금액은 `₩`로 표시됐습니다. → **`window close`** 뒤 `/loans` 200.
+
+## 2026-11-15 영문 화면 사전 번역 배포
+
+- **배경:** 영문 화면은 페이지가 뜬 뒤 기계 번역이 끝날 때까지(첫 호출 최대 30초) 한국어가 보였습니다. 처음 열 때부터 영어로 보이게 하려는 변경입니다.
+- **변경**(`a04b526`~`3a4f52c`, `76796c7`, 스펙 `docs/superpowers/specs/2026-11-15-en-pretranslation-design.md`): 허용 목록의 데이터 문구를 가명 토큰으로 가린 뒤 Cosmos 변경 피드 트리거(`pretranslate_<source>`, 호출당 20건)가 `console-translator`(`gpt-6-luna`)로 번역해 `translations` 컨테이너에 저장합니다(리스는 `leases`, 접두사 `<source>-g2-`). 콘솔은 저장된 번역을 먼저 쓰고 없을 때만 기존 `mt.js`로 넘어갑니다(`mt.js?v=<해시>`). 대출 화면의 확인 조치·자동 연락 문구·정책 확인 상세·결정 사유도 번역 대상에 넣었습니다([에이전트](../agents.md#영문-화면-번역), [한계](../limitations.md)).
+- **배포:** `window open --acr`(4.0분, `translations`·`leases` 컨테이너와 `CosmosDBConnection__*` 설정 생성) → `ops deploy orchestrator`(6.2분, `pretranslate_*` 4개 등록) → `ops deploy console`(`console:20261115040048`, 5.1분) → `ops smoke` 성공(`job-smoke-arv2a9l`). 대출 화면 후속(`76796c7`) 재배포: orchestrator 6.0분 → console(`console:20261115043247`) 5.1분 → `ops smoke` 성공(`job-smoke-sm3dsie`) → **`window close`**(3.9분) 뒤 `/loans` 200.
+- **백필:** 첫 실행은 applications 번역 844·alerts 254, 거절 0, 실패 18(alerts 16·grievances 2)이었습니다. 실패는 콜드 스타트에서 두 트리거가 `console-translator` 에이전트 버전을 동시에 만들다 생긴 409 Conflict입니다. 리스 세대(g2)를 올린 재백필에서 alerts 번역 40·건너뜀 255·실패 0, applications 건너뜀 855였습니다.
+- **라이브 확인:** `app-20261114-170e2a`·`app-20261113-59e115` 영문 화면의 기계 번역 대기(`data-mt`) 0, 대출 화면 사전 번역 48개(`mt-done`). 새 신청 `app-20261115-fe02fa`(glowlab-03, 5,000,000원·6개월)는 심사 완료 약 30초 뒤 영어로 보였습니다. 남은 한국어는 차주 원문(영문 참고 번역 동반), 거래 원문 설명, 데모 사용자 이름, 언어 전환기뿐입니다.
