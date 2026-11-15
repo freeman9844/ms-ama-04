@@ -132,22 +132,25 @@ class PageTexts:
     복원한다(마스킹으로 새로 생긴 토큰). 이미 토큰으로 보이던 문구(감사자 화면)는 토큰 그대로 둔다.
     """
 
-    def __init__(self, masker: Pseudonymizer, stored: Mapping[str, str] | None = None) -> None:
+    def __init__(self, masker: Pseudonymizer, stored: Mapping[str, str] | None = None, allow_pending: bool = True) -> None:
         self._masker = masker
         self._stored = stored or {}
         self._tokens: dict[str, str] = {}
+        # False면 원천을 못 읽은 화면: 저장 번역·카탈로그만 쓰고 새 번역 대기(data-mt)는 내지 않는다.
+        self.allow_pending = allow_pending
 
     @classmethod
     def for_case(cls, key: bytes, profile: Any, transactions: Sequence[Any], stored: Mapping[str, str] | None = None):
         return cls(Pseudonymizer(key, case_entities(profile, transactions)), stored)
 
     @classmethod
-    def merged(cls, key: bytes, cases: Iterable[tuple[Any, Sequence[Any]]], stored: Mapping[str, str] | None = None):
+    def merged(cls, key: bytes, cases: Iterable[tuple[Any, Sequence[Any]]], stored: Mapping[str, str] | None = None,
+               allow_pending: bool = True):
         """여러 신청이 한 화면에 섞일 때: 엔티티의 합집합."""
         entities: dict[str, str] = {}
         for profile, transactions in cases:
             entities.update(case_entities(profile, transactions))
-        return cls(Pseudonymizer(key, entities), stored)
+        return cls(Pseudonymizer(key, entities), stored, allow_pending)
 
     def masked(self, text: str) -> str:
         return self._masker.mask(text)
@@ -216,7 +219,7 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
         cached = _cached_en(text, page, translator)
         if cached:
             return Markup('{}<span class="mt-ref mt-done">{}</span>').format(text, cached)
-        if translator:
+        if translator and page.allow_pending:
             return Markup('{}<span class="mt-ref" data-mt="{}"></span>').format(text, page.pending(text))
         return text
     if fixed:
@@ -225,7 +228,7 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
     cached = _cached_en(text, page, translator)
     if cached:
         return Markup('<span class="mt mt-done" title="{}">{}</span>').format(i18n.gettext("기계 번역 · 원문: %(t)s", t=text), cached)
-    if translator is None:
+    if translator is None or not page.allow_pending:
         return text
     return Markup('<span class="mt" data-mt="{}">{}</span>').format(page.pending(text), text)
 

@@ -313,23 +313,108 @@ def test_grievance_list_and_detail(env):
     assert client.get("/grievances/app-2/grv-nope00", headers=OFFICER).status_code == 404
 
 
-def test_english_grievance_page_reads_stored_translations_of_its_application(env, fake_raw):
+def _english(client, path):
+    return client.get(path, headers={**OFFICER, "Cookie": "lang=en"})
+
+
+def _pending(page):
+    import html
+
+    return [html.unescape(t) for t in re.findall(r'data-mt="([^"]*)"', page.text)]
+
+
+def _translating(env):
+    """번역 에이전트와 저장 번역 읽기를 단 앱. 원천 오류를 바꿔 끼울 수 있게 deps를 돌려준다."""
+    from console.app import create_app
     from consolepreview.fixtures import InMemoryTranslations
+    from tests.console.test_translate import FakeTranslator
 
     client, _, _ = env
     deps = client.app.state.deps
-    deps.translations = InMemoryTranslations()
-    ko = client.get("/grievances/app-2/grv-abc123", headers=OFFICER)
-    assert ko.status_code == 200 and deps.translations.calls == []
-    en = client.get("/grievances/app-2/grv-abc123", headers={**OFFICER, "Cookie": "lang=en"})
+    deps.translator, deps.translations = FakeTranslator(), InMemoryTranslations()
+    return TestClient(create_app(deps), follow_redirects=False), deps
+
+
+class BrokenRaw:
+    def get_json(self, container, name):
+        raise RuntimeError("blob down")
+
+
+def test_english_grievance_page_reads_stored_translations_of_its_application(env):
+    client, deps = _translating(env)
+    assert client.get("/grievances/app-2/grv-abc123", headers=OFFICER).status_code == 200
+    assert deps.translations.calls == []
+    en = _english(client, "/grievances/app-2/grv-abc123")
     assert en.status_code == 200 and deps.translations.calls == ["app-2"]
+    assert "<b>한도</b>가 너무 낮습니다" in _pending(en)
 
-    class BrokenRaw:
-        def get_json(self, container, name):
-            raise RuntimeError("blob down")
 
+def test_english_grievance_page_with_unreadable_source_sends_nothing(env, caplog):
+    client, deps = _translating(env)
     deps.raw = BrokenRaw()
-    assert client.get("/grievances/app-2/grv-abc123", headers={**OFFICER, "Cookie": "lang=en"}).status_code == 200
+    with caplog.at_level("WARNING", logger="console.translate"):
+        en = _english(client, "/grievances/app-2/grv-abc123")
+    assert en.status_code == 200 and "data-mt=" not in en.text and "한도" in en.text
+    assert "app-2" in caplog.text and "RuntimeError" in caplog.text and "blob down" not in caplog.text
+
+
+def test_english_grievance_page_with_failing_application_read_sends_nothing(env):
+    client, deps = _translating(env)
+
+    class BrokenStore:
+        def get(self, application_id):
+            raise RuntimeError("cosmos down")
+
+    deps.store = BrokenStore()
+    en = _english(client, "/grievances/app-2/grv-abc123")
+    assert en.status_code == 200 and "data-mt=" not in en.text
+
+
+def _borrower_env(env, raw):
+    from tests.console.conftest import PROFILE
+
+    client, deps = _translating(env)
+    other = PROFILE.model_copy(update={"business_name": "다른상점", "representative_name": "박다른",
+                                       "business_reg_no": "987-65-43210"})
+    raw.blobs[("consent-c-2", "profile.json")] = other.model_dump(mode="json")
+    raw.blobs[("consent-c-2", "transactions.json")] = []
+    deps.store.docs["app-2"]["consent"]["consent_id"] = "c-2"
+    grievance = deps.privacy.grievances[("app-2", "grv-abc123")]
+    grievance["text"] = "다른상점 박다른 그리고 김대표 문의"
+    return client, deps
+
+
+def test_english_borrower_page_merges_entities_and_stored_translations_of_each_application(env, raw):
+    from agents.pretranslate import translation_id
+    from console.app import create_app
+
+    client, deps = _borrower_env(env, raw)
+    path = "/borrower/seller-dailylook-01"
+    first = _english(client, path)
+    assert first.status_code == 200 and deps.translations.calls == ["app-1", "app-2"]
+    pending = [p for p in _pending(first) if "[[" in p and "문의" in p]
+    assert len(pending) == 1 and len(re.findall(r"\[\[", pending[0])) == 3
+    assert all(n not in pending[0] for n in ("다른상점", "박다른", "김대표"))
+    deps.translations.items["app-2"] = {translation_id(p): p.replace("문의", "inquiry") for p in pending}
+    again = _english(TestClient(create_app(deps)), path)
+    assert "다른상점" in again.text and "inquiry" in again.text and not [p for p in _pending(again) if "문의" in p]
+
+
+def test_english_borrower_page_with_one_unreadable_source_sends_nothing(env, raw):
+    client, deps = _borrower_env(env, raw)
+    real = deps.raw
+
+    class OneBroken:
+        def get_json(self, container, name):
+            if container == "consent-c-2":
+                raise RuntimeError("blob down")
+            return real.get_json(container, name)
+
+    deps.raw = OneBroken()
+    en = _english(client, "/borrower/seller-dailylook-01")
+    assert en.status_code == 200 and "data-mt=" not in en.text and "문의" in en.text
+    deps.raw = real
+    assert _pending(_english(client, "/borrower/seller-dailylook-01"))
 
 
 def test_uphold_decision_is_sent_with_principal(env):

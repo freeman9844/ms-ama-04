@@ -299,6 +299,35 @@ def test_token_map_script_lists_only_pending_tokens(make_doc, raw, key):
     assert "김대표" in token_map.values() or "빈스카페" in token_map.values()
 
 
+def test_detail_masking_matches_orchestrator(make_doc, raw, key):
+    from agents.data_assembly import case_entities
+    from agents.pretranslate import load_case_raw
+    from console.auth import CREDIT_OFFICER
+    from shared.pseudonymize import Pseudonymizer
+
+    doc = make_doc()
+    profile, txns = load_case_raw("applications", doc, raw, lambda source, owner: None)
+    expected = Pseudonymizer(key, case_entities(profile, txns))
+    client, _, headers = _case_client(make_doc, raw, key, CREDIT_OFFICER)
+    pending = _pending(client.get("/applications/app-1", headers=headers).text)
+    text = "빈스카페(대표 김대표)는 계절성이 있다"
+    assert expected.mask(text) in pending and "빈스카페" not in expected.mask(text)
+    assert all(expected.mask(p) == p for p in pending)  # 화면이 보낸 문구는 이미 같은 마스킹 결과다
+
+
+def test_unreadable_source_disables_pending_translation(make_doc, raw, key):
+    from console.auth import CREDIT_OFFICER
+
+    client, deps, headers = _case_client(make_doc, raw, key, CREDIT_OFFICER)
+    page = PageTexts(translate.Pseudonymizer(key), {}, allow_pending=False)
+    with page_scope(page), i18n.use("en"):
+        machine = translate.MachineTranslation(FakeTranslator())
+        filters = translate.mt_filters(machine, key)
+        assert filters["mt"]("김대표 개인이체") == "김대표 개인이체"
+        assert filters["mt_ref"]("김대표 개인이체") == "김대표 개인이체"
+    assert page.token_map() == {}
+
+
 def test_token_script_escapes_markup_characters():
     from console.app import _token_script
 

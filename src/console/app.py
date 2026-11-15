@@ -351,22 +351,25 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 mt_log.warning("stored translations unavailable owner=%s", owner)
         return stored
 
-    def page_texts(raw: Any, *owners: str) -> PageTexts | None:
-        """영문 화면의 문구 처리기. raw(프로필·거래)가 없으면 패턴 마스킹만 한다. 한국어 화면은 None."""
+    def page_texts(raw: Any, *owners: str, readable: bool = True) -> PageTexts | None:
+        """영문 화면의 문구 처리기. raw(프로필·거래)가 없으면 패턴 마스킹만 한다. 한국어 화면은 None.
+
+        readable=False(원천 읽기 오류)면 새 번역 대기를 내지 않는다. 엔티티 없이 마스킹한 문구를 모델에 보내지 않기 위해서다.
+        """
         if i18n.current() == i18n.DEFAULT:
             return None
         stored = stored_translations(owners)
         if raw is None:
-            return PageTexts(Pseudonymizer(deps.pseudonym_key), stored)
+            return PageTexts(Pseudonymizer(deps.pseudonym_key), stored, readable)
         return PageTexts.for_case(deps.pseudonym_key, raw.profile, raw.transactions, stored)
 
-    def tolerant(load: Callable[[], Any], owner: str) -> Any:
-        """원천을 새로 읽는 화면(이의·차주)에서 읽기 오류를 500으로 만들지 않는다. 패턴 마스킹만 남는다."""
+    def read_raw(load: Callable[[], Any], owner: str) -> tuple[Any, bool]:
+        """원천을 새로 읽는 화면(이의·차주)용. 읽기 오류는 500 대신 (None, False)로 돌려준다. 예외 종류만 남긴다."""
         try:
-            return load()
-        except Exception:  # noqa: BLE001
-            mt_log.warning("raw unavailable for page texts owner=%s", owner)
-            return None
+            return load(), True
+        except Exception as e:  # noqa: BLE001
+            mt_log.warning("raw unavailable for page texts owner=%s error=%s", owner, type(e).__name__)
+            return None, False
 
     def viewer(request: Request) -> Principal:
         user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
@@ -818,16 +821,19 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         """차주 화면은 여러 신청이 섞이므로 신청·대출 원천의 엔티티를 합쳐 가명처리한다."""
         if i18n.current() == i18n.DEFAULT:
             return None
-        cases = []
+        cases, readable = [], True
         for doc in applications:
-            raw = tolerant(lambda: load_raw(deps.raw, doc), doc["application_id"]) if doc.get("consent") else None
+            raw, ok = read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"]) if doc.get("consent") else (None, True)
+            readable &= ok
             if raw is not None:
                 cases.append((raw.profile, raw.transactions))
         for loan in loans:
-            raw = tolerant(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])
+            raw, ok = read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])
+            readable &= ok
             if raw is not None:
                 cases.append((raw.profile, raw.transactions))
-        return PageTexts.merged(deps.pseudonym_key, cases, stored_translations(doc["application_id"] for doc in applications))
+        stored = stored_translations(doc["application_id"] for doc in applications)
+        return PageTexts.merged(deps.pseudonym_key, cases, stored, allow_pending=readable)
 
     @app.get("/borrower", response_class=HTMLResponse)
     def borrower_index(request: Request) -> HTMLResponse:
@@ -968,9 +974,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if i18n.current() == i18n.DEFAULT:
             return None
         owner = doc["application_id"]
-        application = tolerant(lambda: deps.store.get(owner), owner)
-        raw = tolerant(lambda: load_raw(deps.raw, application), owner) if application else None
-        return page_texts(raw, owner)
+        application, readable = read_raw(lambda: deps.store.get(owner), owner)
+        raw = None
+        if application and readable:
+            raw, readable = read_raw(lambda: load_raw(deps.raw, application), owner)
+        return page_texts(raw, owner, readable=readable)
 
     @app.get("/grievances/{application_id}/{grievance_id}", response_class=HTMLResponse)
     def grievance(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
