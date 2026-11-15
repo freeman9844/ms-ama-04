@@ -156,8 +156,8 @@ def _pretranslate(source: str, docs) -> None:
     """변경 피드 한 묶음을 번역한다. 어떤 예외도 올리지 않는다(올리면 같은 묶음이 계속 재시도된다)."""
     try:
         handle_changes(deps(), source, [d.to_dict() for d in docs])
-    except Exception:  # noqa: BLE001
-        log.exception("pretranslate trigger failed source=%s", source)
+    except Exception as e:  # noqa: BLE001 - 예외 본문·트레이스백에 문서 값이 있을 수 있어 종류만 남긴다
+        log.error("pretranslate trigger failed source=%s error=%s", source, type(e).__name__)
 
 
 def _register_pretranslate(source: str, start_from: str) -> None:

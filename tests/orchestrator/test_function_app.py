@@ -180,11 +180,13 @@ def test_pretranslate_trigger_never_raises(monkeypatch, caplog):
 
     class Doc:
         def to_dict(self):
-            raise RuntimeError("bad doc")
+            raise RuntimeError("가나상회 대표 김민수")
 
-    monkeypatch.setattr(function_app, "deps", lambda: (_ for _ in ()).throw(RuntimeError("no deps")))
+    monkeypatch.setattr(function_app, "deps", lambda: "deps")
     function_app._pretranslate("applications", [Doc()])
-    assert "pretranslate" in caplog.text
+    assert "pretranslate trigger failed source=applications error=RuntimeError" in caplog.text
+    assert "가나상회" not in caplog.text and all(r.exc_info is None for r in caplog.records)
+
 
 def test_host_json():
     host = json.loads((ROOT / "host.json").read_text(encoding="utf-8"))

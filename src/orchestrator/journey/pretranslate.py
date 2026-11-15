@@ -39,8 +39,12 @@ def _owner(deps: Deps, source: str, owner: str, docs: Sequence[Mapping[str, Any]
     extracted = list(dict.fromkeys(text for doc in docs for text in extract(source, doc)))
     try:
         masker = _masker(deps, source, docs[0])
-    except Exception:  # noqa: BLE001 - 원천을 못 읽으면 평문 전송 대신 건너뛴다
-        log.exception("pretranslate raw load failed source=%s owner=%s texts=%d", source, owner, len(extracted))
+    except Exception as e:  # noqa: BLE001 - 원천을 못 읽으면 평문 전송 대신 건너뛴다
+        # 검증 오류 메시지에 원천 값(상호·대표자·적요)이 들어가므로 종류만 남긴다.
+        log.error(
+            "pretranslate raw load failed source=%s owner=%s texts=%d error=%s",
+            source, owner, len(extracted), type(e).__name__,
+        )
         report["texts"] += len(extracted)
         report["failed"] += len(extracted)
         return
@@ -101,10 +105,10 @@ def handle_changes(deps: Deps, source: str, docs: Sequence[Mapping[str, Any]]) -
         for owner, owner_docs in grouped.items():
             try:
                 _owner(deps, source, owner, owner_docs, report, chars)
-            except Exception:  # noqa: BLE001
-                log.exception("pretranslate owner failed source=%s owner=%s", source, owner)
-    except Exception:  # noqa: BLE001
-        log.exception("pretranslate failed source=%s", source)
+            except Exception as e:  # noqa: BLE001
+                log.error("pretranslate owner failed source=%s owner=%s error=%s", source, owner, type(e).__name__)
+    except Exception as e:  # noqa: BLE001
+        log.error("pretranslate failed source=%s error=%s", source, type(e).__name__)
     log.info(
         "pretranslate source=%s owners=%d texts=%d chars=%d translated=%d skipped=%d rejected=%d failed=%d tokens=%d/%d",
         source, report["owners"], report["texts"], chars[0], report["translated"], report["skipped"],

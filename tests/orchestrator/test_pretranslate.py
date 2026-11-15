@@ -172,6 +172,28 @@ def test_store_error_never_raises():
     assert report["failed"] == 1 and report["translated"] == 0
 
 
+def test_invalid_raw_blob_logs_no_profile_values(caplog):
+    bad = {**PROFILE, "business_age_months": "삼십개월"}
+    raw = MemoryRaw({("consent-c1", "profile.json"): bad, ("consent-c1", "transactions.json"): [TXN]})
+    deps = make_deps(FakeTranslator(), raw=raw)
+    caplog.set_level(logging.DEBUG)
+    report = handle_changes(deps, "applications", [app_doc(summary="매출 안정")])
+    assert report["failed"] == 1 and deps.translator.calls == []
+    logged = "\n".join(r.getMessage() + (r.exc_text or "") + str(r.exc_info) for r in caplog.records)
+    assert "ValidationError" in logged
+    for text in ("가나상회", "김민수", "123-45-67890", "삼십개월", "급여 이서연", "매출 안정"):
+        assert text not in logged
+
+
+def test_owner_level_failure_logs_type_only(caplog):
+    deps = make_deps(FakeTranslator())
+    deps.store.read = lambda *a: (_ for _ in ()).throw(RuntimeError("가나상회 대표 김민수"))
+    caplog.set_level(logging.DEBUG)
+    handle_changes(deps, "applications", [app_doc(summary="매출 안정")])
+    logged = "\n".join(r.getMessage() + (r.exc_text or "") + str(r.exc_info) for r in caplog.records)
+    assert "가나상회" not in logged and "김민수" not in logged
+
+
 def test_logs_have_counts_not_text(caplog):
     deps = make_deps(FakeTranslator(throttle_first=True))
     caplog.set_level(logging.DEBUG)
