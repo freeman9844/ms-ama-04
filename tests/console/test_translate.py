@@ -191,6 +191,26 @@ def test_translate_endpoint_fills_cache_for_next_render(mt, caplog):
     assert len(deps.translator.calls) == 1
 
 
+def test_translate_endpoint_masks_pii_before_model(mt):
+    client, deps = mt
+    r = _post(client, deps, {"texts": ["연락처 010-1234-5678 확인"]})
+    assert r.status_code == 200 and "010-1234-5678" not in json.dumps(deps.translator.calls, ensure_ascii=False)
+    assert "[[PHONE_" in r.json()["translations"][0]
+
+
+def test_translate_endpoint_blanks_token_loss(mt):
+    client, deps = mt
+
+    class Lossy(FakeTranslator):
+        def translate(self, texts):
+            return SimpleNamespace(translations=[t.split("]]")[-1] for t in texts], input_tokens=1, output_tokens=1)
+
+    deps.translator = Lossy()
+    client2 = TestClient(create_app(deps), follow_redirects=False)
+    r = _post(client2, deps, {"texts": ["연락처 010-1234-5678 확인"]})
+    assert r.status_code == 200 and r.json()["translations"] == [""]
+
+
 def test_translate_endpoint_guards(mt):
     client, deps = mt
     assert _post(client, deps, {"texts": ["가"]}, token="bad").status_code == 403

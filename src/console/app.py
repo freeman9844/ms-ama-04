@@ -578,6 +578,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             texts = None
         if texts is None:
             return JSONResponse({"error": "bad_request"}, status_code=400)
+        # 정상 클라이언트는 이미 마스킹한 문구를 보낸다(재마스킹은 변화 없음). 원문이 오면 모델에 가기 전에 가린다.
+        mask = Pseudonymizer(deps.pseudonym_key).mask
+        texts = [mask(t) for t in texts]
         started = time.monotonic()
         result, out, tokens = "ok", None, (0, 0)
         try:
