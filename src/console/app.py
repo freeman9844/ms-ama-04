@@ -13,7 +13,7 @@ import logging
 import re
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -73,7 +73,7 @@ from console.ops import (
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console import translate
-from console.translate import MachineTranslation, data_label, mt_filters, validate_texts
+from console.translate import MachineTranslation, PageTexts, data_label, mt_filters, page_scope, validate_texts
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
     CONSENT_PURPOSE,
@@ -95,6 +95,7 @@ from journey.models import (
 )
 from journey.validation import validate_officer_decision
 from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
+from shared.pseudonymize import Pseudonymizer
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
 HERE = Path(__file__).parent
@@ -146,6 +147,10 @@ class QueueSender(Protocol):
     def send(self, queue: str, message: dict[str, Any]) -> None: ...
 
 
+class TranslationReader(Protocol):
+    def for_owner(self, owner: str) -> dict[str, str]: ...
+
+
 def _new_application_id() -> str:
     return f"app-{datetime.now(KST):%Y%m%d}-{secrets.token_hex(3)}"
 
@@ -172,7 +177,8 @@ class ConsoleDeps:
     chat: Any | None = None
     # 영문 화면의 데이터 기계 번역(agents.translator.Translator). 없으면 카탈로그에 있는 데이터만 영문으로 바뀐다.
     translator: Any | None = None
-
+    # 오케스트레이터가 미리 번역해 둔 문구(translations 컨테이너). 없으면 렌더 때 저장 번역을 쓰지 않는다.
+    translations: TranslationReader | None = None
 
 def state_tag(*docs: Any) -> str:
     """문서 상태의 짧은 지문. 큐 처리 전후로 값이 바뀌었는지만 본다."""
@@ -286,6 +292,12 @@ def _issue_text(issue: str) -> str:
     return _(issue)
 
 
+def _token_script(token_map: dict[str, str]) -> str:
+    """영문 화면의 토큰 지도. 브라우저가 번역 결과의 토큰을 같은 화면에서 평문으로 보이던 값으로 되돌린다."""
+    body = json.dumps(token_map, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return f'<script type="application/json" class="mt-tokens">{body}</script>'
+
+
 def create_app(deps: ConsoleDeps) -> FastAPI:
     app = FastAPI(title="AMA Lending officer console", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.deps = deps
@@ -308,10 +320,53 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    def render(name: str, user: Principal | None, status_code: int = 200, **ctx: Any) -> HTMLResponse:
+    def render(name: str, user: Principal | None, status_code: int = 200, texts: PageTexts | None = None,
+               **ctx: Any) -> HTMLResponse:
         csrf = csrf_token(csrf_key, user.user_id) if user else ""
-        html = templates.get_template(name).render(user=user, csrf=csrf, demo=deps.demo_principal is not None, **ctx)
+
+        def draw() -> str:
+            return templates.get_template(name).render(user=user, csrf=csrf, demo=deps.demo_principal is not None, **ctx)
+
+        if i18n.current() == i18n.DEFAULT:
+            return HTMLResponse(draw(), status_code=status_code)
+        page = texts or PageTexts(Pseudonymizer(deps.pseudonym_key))
+        with page_scope(page):
+            html = draw()
+        token_map = page.token_map()
+        if token_map:
+            script = _token_script(token_map)
+            at = html.rfind("</body>")
+            html = html + script if at < 0 else html[:at] + script + html[at:]
         return HTMLResponse(html, status_code=status_code)
+
+    def stored_translations(owners: Iterable[str]) -> dict[str, str]:
+        """저장된 영문 번역(id → en). 읽기 실패는 그 owner만 번역 대기로 되돌린다. 예외 본문은 남기지 않는다."""
+        stored: dict[str, str] = {}
+        if deps.translations is None:
+            return stored
+        for owner in dict.fromkeys(owners):
+            try:
+                stored.update(deps.translations.for_owner(owner))
+            except Exception:  # noqa: BLE001
+                mt_log.warning("stored translations unavailable owner=%s", owner)
+        return stored
+
+    def page_texts(raw: Any, *owners: str) -> PageTexts | None:
+        """영문 화면의 문구 처리기. raw(프로필·거래)가 없으면 패턴 마스킹만 한다. 한국어 화면은 None."""
+        if i18n.current() == i18n.DEFAULT:
+            return None
+        stored = stored_translations(owners)
+        if raw is None:
+            return PageTexts(Pseudonymizer(deps.pseudonym_key), stored)
+        return PageTexts.for_case(deps.pseudonym_key, raw.profile, raw.transactions, stored)
+
+    def tolerant(load: Callable[[], Any], owner: str) -> Any:
+        """원천을 새로 읽는 화면(이의·차주)에서 읽기 오류를 500으로 만들지 않는다. 패턴 마스킹만 남는다."""
+        try:
+            return load()
+        except Exception:  # noqa: BLE001
+            mt_log.warning("raw unavailable for page texts owner=%s", owner)
+            return None
 
     def viewer(request: Request) -> Principal:
         user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
@@ -338,7 +393,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        return render("detail.html", user, status_code, v=view, ui=detail_summary(view), panels=assessment_panels(view),
+        return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"]),
+                      v=view, ui=detail_summary(view), panels=assessment_panels(view),
                       op=opinion_panel(view), in_progress=in_progress,
                       consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
                       **ctx)
@@ -567,7 +623,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         contacts = monitoring_store().get_contacts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else None
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore, contacts=contacts)
         blocked = replay_in_progress(mon, deps.clock())
-        return render("loan.html", user, status_code, v=view, ui=loan_summary(view), replay_blocked=blocked,
+        return render("loan.html", user, status_code, texts=page_texts(raw, loan["id"]), v=view, ui=loan_summary(view),
+                      replay_blocked=blocked,
                       replay_held=replay_held(mon), weeks_left=WEEKS - (mon.get("paused_week") or 0), **ctx)
 
     @app.get("/loans", response_class=HTMLResponse)
@@ -733,25 +790,44 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             doc = deps.store.get(application_id)
             if doc is not None and doc.get("applicant_id") == applicant_id:
                 applications.append(doc)
+        loans = borrower_loans(applicant_id, applications)
         return render(
-            "borrower.html", user, status_code, applicant_id=applicant_id, consents=consents,
+            "borrower.html", user, status_code, texts=borrower_texts(applications, loans),
+            applicant_id=applicant_id, consents=consents,
             applications=applications, grievances=store.grievances_for_applicant(applicant_id),
-            plans=borrower_plans(applicant_id, applications), **ctx,
+            plans=borrower_plans(loans), **ctx,
         )
 
-    def borrower_plans(applicant_id: str, applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """신청별 대출(대출 id = 신청 id)의 셀프 플랜 제안과 받은 안내. 모니터링이 없으면 빈 목록."""
+    def borrower_loans(applicant_id: str, applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """신청별 대출(대출 id = 신청 id). 모니터링이 없으면 빈 목록."""
         if deps.monitoring is None:
             return []
+        loans = (deps.monitoring.get_loan(doc["application_id"]) for doc in applications)
+        return [loan for loan in loans if loan is not None and loan.get("applicant_id") == applicant_id]
+
+    def borrower_plans(loans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """대출별 셀프 플랜 제안과 받은 안내."""
         plans = []
-        for doc in applications:
-            loan = deps.monitoring.get_loan(doc["application_id"])
-            if loan is None or loan.get("applicant_id") != applicant_id:
-                continue
+        for loan in loans:
             replay_id = (loan.get("monitoring") or {}).get("replay_id")
             contacts = deps.monitoring.get_contacts(loan["id"], replay_id) if replay_id else None
             plans.append(borrower_plan(loan, contacts))
         return plans
+
+    def borrower_texts(applications: list[dict[str, Any]], loans: list[dict[str, Any]]) -> PageTexts | None:
+        """차주 화면은 여러 신청이 섞이므로 신청·대출 원천의 엔티티를 합쳐 가명처리한다."""
+        if i18n.current() == i18n.DEFAULT:
+            return None
+        cases = []
+        for doc in applications:
+            raw = tolerant(lambda: load_raw(deps.raw, doc), doc["application_id"]) if doc.get("consent") else None
+            if raw is not None:
+                cases.append((raw.profile, raw.transactions))
+        for loan in loans:
+            raw = tolerant(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])
+            if raw is not None:
+                cases.append((raw.profile, raw.transactions))
+        return PageTexts.merged(deps.pseudonym_key, cases, stored_translations(doc["application_id"] for doc in applications))
 
     @app.get("/borrower", response_class=HTMLResponse)
     def borrower_index(request: Request) -> HTMLResponse:
@@ -887,10 +963,20 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "grievance not found")
         return doc
 
+    def grievance_texts(doc: dict[str, Any]) -> PageTexts | None:
+        """이의 화면: 그 신청의 원천으로 가명처리한다."""
+        if i18n.current() == i18n.DEFAULT:
+            return None
+        owner = doc["application_id"]
+        application = tolerant(lambda: deps.store.get(owner), owner)
+        raw = tolerant(lambda: load_raw(deps.raw, application), owner) if application else None
+        return page_texts(raw, owner)
+
     @app.get("/grievances/{application_id}/{grievance_id}", response_class=HTMLResponse)
     def grievance(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
         user = viewer(request)
-        return render("grievance.html", user, g=grievance_or_404(application_id, grievance_id))
+        doc = grievance_or_404(application_id, grievance_id)
+        return render("grievance.html", user, texts=grievance_texts(doc), g=doc)
 
     @app.post("/grievances/{application_id}/{grievance_id}/decision", response_class=HTMLResponse)
     async def grievance_decision(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
@@ -906,7 +992,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         amount = _int(amount_text) if amount_text else None
 
         def invalid(message: str, code: str | None = None) -> HTMLResponse:
-            return render("grievance.html", user, 422, g=doc, error=message, error_code=code, form=form)
+            return render("grievance.html", user, 422, texts=grievance_texts(doc), g=doc, error=message,
+                          error_code=code, form=form)
 
         if amount_text and amount is None:
             return invalid(_(DECISION_ERRORS["invalid_payload"]))

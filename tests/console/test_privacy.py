@@ -313,6 +313,25 @@ def test_grievance_list_and_detail(env):
     assert client.get("/grievances/app-2/grv-nope00", headers=OFFICER).status_code == 404
 
 
+def test_english_grievance_page_reads_stored_translations_of_its_application(env, fake_raw):
+    from consolepreview.fixtures import InMemoryTranslations
+
+    client, _, _ = env
+    deps = client.app.state.deps
+    deps.translations = InMemoryTranslations()
+    ko = client.get("/grievances/app-2/grv-abc123", headers=OFFICER)
+    assert ko.status_code == 200 and deps.translations.calls == []
+    en = client.get("/grievances/app-2/grv-abc123", headers={**OFFICER, "Cookie": "lang=en"})
+    assert en.status_code == 200 and deps.translations.calls == ["app-2"]
+
+    class BrokenRaw:
+        def get_json(self, container, name):
+            raise RuntimeError("blob down")
+
+    deps.raw = BrokenRaw()
+    assert client.get("/grievances/app-2/grv-abc123", headers={**OFFICER, "Cookie": "lang=en"}).status_code == 200
+
+
 def test_uphold_decision_is_sent_with_principal(env):
     client, queue, _ = env
     path = "/grievances/app-2/grv-abc123"

@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import html
+import json
 import logging
 import re
 from types import SimpleNamespace
@@ -211,3 +213,95 @@ def test_translate_endpoint_disabled_without_translator():
     client = TestClient(create_app(deps))
     assert _post(client, deps, {"texts": ["새 문장"]}).status_code == 503
     assert "mt.js" not in client.get("/", headers={"Cookie": "lang=en"}).text
+
+
+EN_HEADERS = {"Cookie": "lang=en"}
+DETAIL = "/applications/app-20261103-p01"
+
+
+def _pending(text):
+    return [html.unescape(t) for t in re.findall(r'data-mt="([^"]*)"', text)]
+
+
+def test_english_detail_uses_stored_translation_without_browser_call(mt):
+    client, deps = mt
+    pending = _pending(client.get(DETAIL, headers=EN_HEADERS).text)
+    assert pending
+    deps.translations = fixtures.InMemoryTranslations(
+        {"app-20261103-p01": {translation_id(t): f"EN({t})" for t in pending}})
+    again = TestClient(create_app(deps)).get(DETAIL, headers=EN_HEADERS).text
+    assert "data-mt=" not in again and deps.translator.calls == []
+    assert deps.translations.calls == ["app-20261103-p01"]
+
+
+@pytest.mark.parametrize("page", [DETAIL, "/loans/app-20261103-p03", "/borrower/seller-dailylook-01"])
+def test_korean_page_does_not_read_translations(mt, page):
+    client, deps = mt
+    deps.translations = fixtures.InMemoryTranslations()
+    r = client.get(page)
+    assert r.status_code == 200 and deps.translations.calls == [] and "mt-tokens" not in r.text
+
+
+def test_loan_page_reads_its_own_owner(mt):
+    client, deps = mt
+    deps.translations = fixtures.InMemoryTranslations()
+    assert client.get("/loans/app-20261103-p03", headers=EN_HEADERS).status_code == 200
+    assert deps.translations.calls == ["app-20261103-p03"]
+
+
+def test_translation_read_failure_falls_back_to_pending(mt, caplog):
+    client, deps = mt
+
+    class Broken:
+        def for_owner(self, owner):
+            raise RuntimeError("cosmos-secret-detail")
+
+    deps.translations = Broken()
+    with caplog.at_level(logging.WARNING, logger="console.translate"):
+        r = client.get(DETAIL, headers=EN_HEADERS)
+    assert r.status_code == 200 and "data-mt=" in r.text
+    assert "app-20261103-p01" in caplog.text and "cosmos-secret-detail" not in caplog.text
+
+
+def _case_client(make_doc, raw, key, role, stored=None):
+    from console.app import ConsoleDeps
+    from tests.console.test_app import FakeQueue, FakeStore, principal
+
+    deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key,
+                       translator=FakeTranslator(), translations=fixtures.InMemoryTranslations(stored))
+    return TestClient(create_app(deps)), deps, {**EN_HEADERS, **principal(role)}
+
+
+def test_auditor_sees_tokens_in_stored_translation(make_doc, raw, key, mask):
+    from console.auth import AUDITOR, CREDIT_OFFICER
+
+    summary = mask("빈스카페(대표 김대표)는 계절성이 있다")
+    stored = {"app-1": {translation_id(summary): summary.replace("는 계절성이 있다", " is seasonal")}}
+    client, _, headers = _case_client(make_doc, raw, key, AUDITOR, stored)
+    page = client.get("/applications/app-1", headers=headers).text
+    assert "is seasonal" in page and "[[BIZNAME_" in page and "빈스카페" not in page and "김대표" not in page
+    client, _, headers = _case_client(make_doc, raw, key, CREDIT_OFFICER, stored)
+    officer = client.get("/applications/app-1", headers=headers).text
+    assert "빈스카페(대표 김대표) is seasonal" in officer
+    assert "[[BIZNAME_" not in officer
+
+
+def test_token_map_script_lists_only_pending_tokens(make_doc, raw, key):
+    from console.auth import CREDIT_OFFICER
+
+    client, _, headers = _case_client(make_doc, raw, key, CREDIT_OFFICER)
+    page = client.get("/applications/app-1", headers=headers).text
+    found = re.findall(r'<script type="application/json" class="mt-tokens">(.*?)</script>', page, flags=re.S)
+    assert len(found) == 1 and page.index("mt-tokens") < page.rindex("</body>")
+    token_map = json.loads(found[0])
+    pending = "".join(_pending(page))
+    assert token_map and set(token_map) <= tokens(pending)
+    assert "김대표" in token_map.values() or "빈스카페" in token_map.values()
+
+
+def test_token_script_escapes_markup_characters():
+    from console.app import _token_script
+
+    out = _token_script({"[[PERSON_x]]": "</script><b>&"})
+    assert "</script><b>" not in out.removeprefix('<script type="application/json" class="mt-tokens">')
+    assert json.loads(out.split(">", 1)[1].rsplit("</script>", 1)[0]) == {"[[PERSON_x]]": "</script><b>&"}

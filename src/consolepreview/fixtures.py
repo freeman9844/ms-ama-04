@@ -489,6 +489,18 @@ class MemoryOps:
         return sorted(docs, key=lambda d: d.get("received_at") or "", reverse=True)[:limit]
 
 
+class InMemoryTranslations:
+    """저장된 사전 번역(owner → {id: en}). 읽기 전용."""
+
+    def __init__(self, items: dict[str, dict[str, str]] | None = None) -> None:
+        self.items = items or {}
+        self.calls: list[str] = []
+
+    def for_owner(self, owner: str) -> dict[str, str]:
+        self.calls.append(owner)
+        return dict(self.items.get(owner, {}))
+
+
 def build_deps() -> ConsoleDeps:
     loan_docs, alerts = loans()
     return ConsoleDeps(

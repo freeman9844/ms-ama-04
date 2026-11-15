@@ -1,6 +1,6 @@
 """콘솔의 Azure 어댑터(관리 ID). Azure SDK는 지연 import한다.
 
-- Cosmos `applications`·`loans`·`alerts`·`consents`·`deletion_proofs`·`grievances`:
+- Cosmos `applications`·`loans`·`alerts`·`consents`·`deletion_proofs`·`grievances`·`translations`:
   읽기 전용(Built-in Data Reader, 데이터베이스 범위)
 - Blob 원천 데이터: 읽기 전용(실명 복원용)
 - Storage Queue: applications-start·officer-decisions·monitoring-replay·restructure-decisions·
@@ -24,6 +24,7 @@ ALERTS = "alerts"
 CONSENTS = "consents"
 PROOFS = "deletion_proofs"
 GRIEVANCES = "grievances"
+TRANSLATIONS = "translations"
 PSEUDONYM_SECRET = "pseudonym-key"
 LIST_QUERY = (
     "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, c.source, "
@@ -145,6 +146,20 @@ class CosmosPrivacy:
 
     def get_grievance(self, application_id: str, grievance_id: str) -> dict[str, Any] | None:
         return _read_or_none(self._grievances, grievance_id, application_id)
+
+
+TRANSLATIONS_QUERY = "SELECT c.id, c.en FROM c"
+
+
+class CosmosTranslations:
+    """사전 번역(translations, 파티션 /owner_id) 읽기 전용. 한 owner의 id → 영문."""
+
+    def __init__(self, container: Any) -> None:
+        self._container = container
+
+    def for_owner(self, owner: str) -> dict[str, str]:
+        items = self._container.query_items(query=TRANSLATIONS_QUERY, partition_key=owner)
+        return {i["id"]: i["en"] for i in items if i.get("en")}
 
 
 RUNS_QUERY = "SELECT DISTINCT VALUE c.run_id FROM c WHERE IS_STRING(c.run_id)"
@@ -292,6 +307,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
         pseudonym_key=load_pseudonym_key(env, credential),
         demo_principal=demo,
         ops=CosmosOps(db.get_container_client(APPLICATIONS)),
+        translations=CosmosTranslations(db.get_container_client(TRANSLATIONS)),
         chat=build_chat(env, credential),
         translator=build_translator(env, credential),
     )

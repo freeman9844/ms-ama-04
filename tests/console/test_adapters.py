@@ -24,7 +24,7 @@ class FakeContainer:
         self.missing = missing
         self.calls = []
 
-    def query_items(self, query, parameters, enable_cross_partition_query=None, partition_key=None):
+    def query_items(self, query, parameters=None, enable_cross_partition_query=None, partition_key=None):
         self.calls.append(("query", query, parameters, enable_cross_partition_query or partition_key))
         return iter(self.items)
 
@@ -133,7 +133,7 @@ def test_build_deps_wires_env(monkeypatch):
             return (name, *self.where)
 
     for name in ("ManagedIdentityCredential", "CosmosApplications", "CosmosMonitoring", "CosmosPrivacy",
-                 "BlobRawStore", "StorageQueueSender", "CosmosOps"):
+                 "BlobRawStore", "StorageQueueSender", "CosmosOps", "CosmosTranslations"):
         monkeypatch.setattr(f"console.adapters.{name}", type(name, (Recorder,), {}), raising=True)
     monkeypatch.setattr("console.adapters._cosmos_database", lambda endpoint, db, cred: FakeDb(endpoint, db))
     monkeypatch.setattr("console.adapters._queue_factory", lambda endpoint, cred: ("queues", endpoint))
@@ -152,7 +152,17 @@ def test_build_deps_wires_env(monkeypatch):
     assert made["StorageQueueSender"][0] == (("queues", "https://queue"),)
     assert deps.pseudonym_key == b"k" * 32
     assert made["CosmosOps"][0] == (("applications", "https://cos", "lending"),)
+    assert made["CosmosTranslations"][0] == (("translations", "https://cos", "lending"),)
     assert deps.chat is None
+
+
+def test_cosmos_translations_queries_single_partition():
+    from console.adapters import TRANSLATIONS_QUERY, CosmosTranslations
+
+    container = FakeContainer([{"id": "h1", "en": "Sales fell"}, {"id": "h2", "en": ""}])
+    assert CosmosTranslations(container).for_owner("app-1") == {"h1": "Sales fell"}
+    assert container.calls == [("query", TRANSLATIONS_QUERY, None, "app-1")]
+    assert TRANSLATIONS_QUERY == "SELECT c.id, c.en FROM c"
 
 
 def test_cosmos_ops_lists_runs_and_projects_docs():
