@@ -57,6 +57,8 @@ def test_cosmos_app_containers(closed):
         "alerts": ["/loan_id"],
         "deletion_proofs": ["/consent_id"],
         "grievances": ["/application_id"],
+        "translations": ["/owner_id"],
+        "leases": ["/id"],
     }
 
 

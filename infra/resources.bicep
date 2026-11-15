@@ -281,6 +281,9 @@ module cosmos 'modules/cosmos.bicep' = {
       { name: 'alerts', partitionKey: '/loan_id' }
       { name: 'deletion_proofs', partitionKey: '/consent_id' }
       { name: 'grievances', partitionKey: '/application_id' }
+      // 영문 화면 사전 번역 저장소와 변경 피드 트리거 리스(리스는 소스 컨테이너마다 접두사로 구분).
+      { name: 'translations', partitionKey: '/owner_id' }
+      { name: 'leases', partitionKey: '/id' }
     ]
     sqlRoleAssignments: concat([
       { principalId: identities.outputs.orchestratorPrincipalId, roleDefinitionGuid: '00000000-0000-0000-0000-000000000002', scope: 'database' }
@@ -553,7 +556,11 @@ module functions 'modules/functions.bicep' = {
       COLLECTIONS_MODEL: 'gpt-5.6-luna'
       NOTICE_MODEL: 'gpt-5.6-luna'
       GRIEVANCE_MODEL: 'gpt-5.6-luna'
-      // 동의 수명주기 예약(consent-lifecycle 큐). 오케스트레이터 ID가 함수 스토리지 큐 기여자입니다.
+      TRANSLATE_MODEL: 'gpt-6-luna'
+      // Cosmos 변경 피드 트리거(관리 ID). 이 엔드포인트가 있어야 pretranslate_* 트리거를 등록합니다.
+      CosmosDBConnection__accountEndpoint: cosmos.outputs.endpoint
+      CosmosDBConnection__credential: 'managedidentity'
+      CosmosDBConnection__clientId: identities.outputs.orchestratorClientId      // 동의 수명주기 예약(consent-lifecycle 큐). 오케스트레이터 ID가 함수 스토리지 큐 기여자입니다.
       QUEUE_ENDPOINT: 'https://${names.stFunc}.queue.${storageSuffix}/'
       POLICY_URL: policyUrl
       MOCKAPI_URL: mockapiUrl

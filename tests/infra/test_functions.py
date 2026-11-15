@@ -41,5 +41,12 @@ def test_function_app_uses_identity_based_host_storage(closed):
     assert settings["APPLICATIONINSIGHTS_AUTHENTICATION_STRING"].endswith(";Authorization=AAD")
 
 
+def test_function_app_has_cosmos_trigger_identity_connection(closed):
+    s = _settings(closed.one(SITE, "func-"))
+    assert s["CosmosDBConnection__credential"] == "managedidentity" and s["TRANSLATE_MODEL"] == "gpt-6-luna"
+    assert s["CosmosDBConnection__accountEndpoint"].startswith("https://") and s["CosmosDBConnection__clientId"]
+    assert s["COSMOS_DATABASE"] == "lending"  # 트리거 바인딩의 %COSMOS_DATABASE%
+
+
 def test_function_app_private_endpoint(closed):
     assert closed.private_endpoints("func-") == {"sites": {"privatelink.azurewebsites.net"}}

@@ -59,6 +59,12 @@ def test_cosmos_is_serverless_keyless_with_app_database(closed):
     assert dbs == {"lending"}
 
 
+def test_cosmos_has_translation_and_lease_containers(closed):
+    pks = {c["name"].split("/")[-1]: c["properties"]["resource"]["partitionKey"]["paths"]
+           for c in closed.of_type(f"{COSMOS}/sqlDatabases/containers")}
+    assert pks["translations"] == ["/owner_id"] and pks["leases"] == ["/id"]
+
+
 def cosmos_sql_roles(exp) -> set[tuple[str, str]]:
     """(역할 GUID, 범위) 집합. 범위는 'account' 또는 데이터베이스 이름."""
     result = set()
