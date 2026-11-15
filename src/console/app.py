@@ -180,6 +180,7 @@ class ConsoleDeps:
     # 오케스트레이터가 미리 번역해 둔 문구(translations 컨테이너). 없으면 렌더 때 저장 번역을 쓰지 않는다.
     translations: TranslationReader | None = None
 
+
 def state_tag(*docs: Any) -> str:
     """문서 상태의 짧은 지문. 큐 처리 전후로 값이 바뀌었는지만 본다."""
     body = json.dumps(docs, sort_keys=True, default=str, ensure_ascii=False)
@@ -305,6 +306,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     machine = MachineTranslation(deps.translator) if deps.translator is not None else None
     templates.filters.update(mt_filters(machine, deps.pseudonym_key))
     templates.globals["mt_enabled"] = machine is not None
+    # 배포 뒤 브라우저가 옛 mt.js를 쓰지 않도록 내용 해시를 쿼리로 붙인다.
+    templates.globals["mt_js_version"] = hashlib.sha256((HERE / "static" / "mt.js").read_bytes()).hexdigest()[:10]
     # 레플리카가 여러 개여도 같은 토큰을 쓰도록 가명처리 키에서 파생한다.
     csrf_key = hmac.new(deps.pseudonym_key, b"console-csrf", hashlib.sha256).digest()
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")

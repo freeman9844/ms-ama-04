@@ -167,7 +167,7 @@ def test_pretranslate_triggers_only_with_cosmos_connection(monkeypatch):
             assert binding["type"] == "cosmosDBTrigger" and binding["connection"] == "CosmosDBConnection"
             assert binding["databaseName"] == "%COSMOS_DATABASE%" and binding["containerName"] == source
             assert binding["leaseContainerName"] == "leases" and binding["leaseContainerPrefix"] == f"{source}-"
-            assert binding["createLeaseContainerIfNotExists"] is False
+            assert binding["createLeaseContainerIfNotExists"] is False and binding["maxItemsPerInvocation"] == 20
             start = datetime.strptime(binding["startFromTime"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
             assert abs(datetime.now(UTC) - timedelta(days=7) - start) < timedelta(days=1)
     finally:

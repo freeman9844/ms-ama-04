@@ -159,6 +159,24 @@ def test_owners_are_grouped_and_documents_without_owner_ignored():
     assert report["owners"] == 2 and report["texts"] == 3 and report["translated"] == 3
 
 
+def test_nothing_to_translate_skips_raw_load(caplog):
+    class CountingRaw(MemoryRaw):
+        reads = 0
+
+        def get_json(self, container, name):
+            type(self).reads += 1
+            return super().get_json(container, name)
+
+    store = MemoryStore()
+    store.upsert("loans", {"id": "L1", "loan_id": "L1", "underwriting_consent_id": "u1", "monitoring": {"consent_id": "m1"}})
+    deps = make_deps(FakeTranslator(), raw=CountingRaw(error=OSError("blob down")), store=store)
+    caplog.set_level(logging.DEBUG)
+    report = handle_changes(deps, "loans", [{"id": "L1", "loan_id": "L1", "underwriting_consent_id": "u1", "monitoring": {"consent_id": "m1"}, "status": "active"}])
+    assert report["owners"] == 1 and report["texts"] == 0 and report["failed"] == 0
+    assert CountingRaw.reads == 0 and deps.translator.calls == []
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
 def test_without_translator_reports_zero():
     deps = make_deps(None)
     report = handle_changes(deps, "applications", [app_doc(summary="매출 안정")])

@@ -114,7 +114,7 @@ flowchart TB
 | 신청 판단 기록 | 파생·내부 | Cosmos `applications` | 장기 보존(설명 가능성) | `docs/runbook/deploy-history.md:92` |
 | 거래 분류 캐시(토큰 든 적요 제외) | 파생·내부 | Cosmos `classifications` | 장기 보존 | `docs/runbook/deploy-history.md:145` |
 | 대출·모니터링·경보 | 파생·내부 | Cosmos `loans`·`alerts` | 장기 보존 | `docs/runbook/deploy-history.md:303-304` |
-| 영문 화면 사전 번역 | 파생·내부(가명 토큰 포함, 원문 없음) | Cosmos `translations`(`/owner_id`), 변경 피드 리스 `leases` | 신청 판단 기록과 같은 기준으로 장기 보존 | `infra/resources.bicep`, `src/agents/pretranslate.py` |
+| 영문 화면 사전 번역 | 파생·내부(가명 토큰 포함, 원문 없음. 원천이 없을 때의 패턴 마스킹뿐인 경우 영문에 로마자 이름이 남을 수 있다) | Cosmos `translations`(`/owner_id`), 변경 피드 리스 `leases` | 신청 판단 기록과 같은 기준으로 장기 보존 | `infra/resources.bicep`, `src/agents/pretranslate.py` |
 | 동의·삭제 증명·이의제기 | 증적 | Cosmos `consents`·`deletion_proofs`·`grievances` | 장기 보존 | `docs/runbook/deploy-history.md:388-390` |
 | 신청 진행 상태 | 휘발·내부 | Durable Task 저장소 | 삭제하지 않음(동의 ID·상태, 활동 입력의 동의 토큰 포함) | `docs/runbook/deploy-history.md:452`, `docs/limitations.md:49` |
 
@@ -144,7 +144,7 @@ flowchart TB
 - **데모 인증:** 콘솔은 WAF의 운영자 IP 규칙에만 기대고(데모는 Easy Auth 꺼짐, `infra/resources.bicep:609`; 운영은 Entra 로그인 복원), 데모 모드는 `CreditOfficer`를 고정 주체 `demo-operator`로 둬 감사 추적에 실제 신원이 없다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
 - **자체 서명 인증서:** 브라우저 경고가 뜨고, 운영 전환 시 공인 CA 인증서로 바꿔야 한다. 인증서 개인 키는 Key Vault 비밀로만 있다([ADR-011](../adr/ADR-011-appgw-waf-entry.md)).
 - **WAF 오탐 조정 최소:** DRS 2.1 제외는 심사역 채팅 본문 인자(`question`, `history.*`)와 영문 화면 번역 본문(`texts`)의 942430 하나다. 이 값들은 SQL에 쓰이지 않는 자연어로 모델에만 간다. 다른 오탐이 생기면 방화벽 로그로 규칙을 찾아 해당 규칙만 제외한다.
-- **번역 모델 입력·토큰 지도 범위(2026-11-15):** 영문 화면 번역은 사전 번역(오케스트레이터)과 즉시 번역(콘솔) 모두 가명처리한 문구만 모델로 보낸다. 사전 번역은 원천을 읽다 예외가 나면 그 owner를 번역하지 않고(패턴 마스킹으로 대신하지 않음), 원천이 없을 때(동의 삭제)만 패턴 마스킹(사업자번호·전화번호·계좌번호)으로 대신해 그때는 평문 상호·이름이 가려지지 않을 수 있다. 즉시 번역 `/i18n/translate`는 받은 문구를 패턴 마스킹으로 다시 가린다. 번역문에서 토큰이 빠지거나 바뀌면 버린다. 콘솔이 페이지에 싣는 토큰 지도(`script.mt-tokens`)는 그 사용자가 같은 페이지에서 한국어 화면으로 이미 평문으로 본 값만 담고(마스킹으로 새로 생긴 토큰), 번역 대기 문구에 해당하는 것만 넣는다. 감사자 화면은 토큰이 원래 토큰이라 지도에 없고 영어 화면에서도 토큰으로 남는다. `translations`는 원문 없이 마스킹 문구의 해시·영문(가명 토큰 포함)만 저장한다. 번역 로그에는 개수·글자 수·토큰 수·예외 종류만 남는다.
+- **번역 모델 입력·토큰 지도 범위(2026-11-15):** 영문 화면 번역은 사전 번역(오케스트레이터)과 즉시 번역(콘솔) 모두 가명처리한 문구만 모델로 보낸다. 사전 번역은 원천을 읽다 예외가 나면 그 owner를 번역하지 않고(패턴 마스킹으로 대신하지 않음), 원천이 없을 때(동의 삭제)만 패턴 마스킹(사업자번호·전화번호·계좌번호)으로 대신해 그때는 평문 상호·이름이 가려지지 않을 수 있고, 그런 프롬프트는 Foundry `genAIContent` 트레이스에도 평문 이름을 남긴다(아래 "Foundry 트레이스 잔존" 참고). 즉시 번역 `/i18n/translate`는 받은 문구를 패턴 마스킹으로 다시 가린다. 번역문에서 토큰이 빠지거나 바뀌면 버린다. 콘솔이 페이지에 싣는 토큰 지도(`script.mt-tokens`)는 그 사용자가 같은 페이지에서 한국어 화면으로 이미 평문으로 본 값만 담고(마스킹으로 새로 생긴 토큰), 번역 대기 문구에 해당하는 것만 넣는다. 감사자 화면은 토큰이 원래 토큰이라 지도에 없고 영어 화면에서도 토큰으로 남는다. `translations`는 원문 없이 마스킹 문구의 해시·영문(가명 토큰 포함)만 저장한다. 번역 로그에는 개수·글자 수·토큰 수·예외 종류만 남는다.
 - **Foundry 트레이스 잔존:** 대화는 삭제하지만 트레이스(`genAIContent`)에는 프롬프트·응답이 남아, 입력이 가명화 값뿐이라는 원칙에 기댄다(`docs/runbook/deploy-history.md:606`).
 - **Durable 실행 기록:** 신청 진행 상태는 Durable Task 저장소에 남고 삭제하지 않는다. 활동 입력의 동의 토큰도 함께 남는다([한계](../limitations.md#동의삭제이의제기)).
 - **서킷 인스턴스별:** 서킷 브레이커는 프로세스·인스턴스별이라 전역 상태를 공유하지 않는다(`src/orchestrator/journey/adapters.py:96`).

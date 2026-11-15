@@ -560,7 +560,8 @@ module functions 'modules/functions.bicep' = {
       // Cosmos 변경 피드 트리거(관리 ID). 이 엔드포인트가 있어야 pretranslate_* 트리거를 등록합니다.
       CosmosDBConnection__accountEndpoint: cosmos.outputs.endpoint
       CosmosDBConnection__credential: 'managedidentity'
-      CosmosDBConnection__clientId: identities.outputs.orchestratorClientId      // 동의 수명주기 예약(consent-lifecycle 큐). 오케스트레이터 ID가 함수 스토리지 큐 기여자입니다.
+      CosmosDBConnection__clientId: identities.outputs.orchestratorClientId
+      // 동의 수명주기 예약(consent-lifecycle 큐). 오케스트레이터 ID가 함수 스토리지 큐 기여자입니다.
       QUEUE_ENDPOINT: 'https://${names.stFunc}.queue.${storageSuffix}/'
       POLICY_URL: policyUrl
       MOCKAPI_URL: mockapiUrl

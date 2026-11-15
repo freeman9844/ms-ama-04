@@ -167,7 +167,7 @@ def test_english_pages_leave_only_pending_machine_translation(mt, page):
 def test_english_page_loads_mt_script_with_csrf(mt):
     client, deps = mt
     en = client.get("/applications/app-20261103-p01", headers={"Cookie": "lang=en"}).text
-    assert '<script src="/static/mt.js" defer></script>' in en and f'data-mt-csrf="{_token(deps)}"' in en
+    assert re.search(r'<script src="/static/mt\.js\?v=[0-9a-f]{8,}" defer></script>', en) and f'data-mt-csrf="{_token(deps)}"' in en
     ko = client.get("/applications/app-20261103-p01").text
     assert "mt.js" not in ko and "data-mt=" not in ko
 

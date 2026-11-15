@@ -150,6 +150,8 @@ def restructure_decision(msg: func.QueueMessage) -> None:
 
 COSMOS_CONNECTION = "CosmosDBConnection"
 PRETRANSLATE_BACKFILL = timedelta(days=7)
+# 429가 잦은 백필에서도 한 호출이 짧게 끝나도록 묶음 크기를 줄인다.
+PRETRANSLATE_MAX_ITEMS = 20
 
 
 def _pretranslate(source: str, docs) -> None:
@@ -171,6 +173,7 @@ def _register_pretranslate(source: str, start_from: str) -> None:
         lease_container_prefix=f"{source}-",
         create_lease_container_if_not_exists=False,
         start_from_time=start_from,
+        max_items_per_invocation=PRETRANSLATE_MAX_ITEMS,
     )
     def run(docs: func.DocumentList) -> None:
         _pretranslate(source, docs)
