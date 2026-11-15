@@ -75,6 +75,13 @@ resource policy 'Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolic
           selector: 'history.'
           exclusionManagedRuleSets: [ { ruleSetType: 'Microsoft_DefaultRuleSet', ruleSetVersion: '2.1', ruleGroups: [ { ruleGroupName: 'SQLI', rules: [ { ruleId: '942430' } ] } ] } ]
         }
+        // 영문 화면 기계 번역 본문(texts)도 화면에 이미 보이는 자연어 문구라 같은 규칙만 뺍니다.
+        {
+          matchVariable: 'RequestArgNames'
+          selectorMatchOperator: 'Equals'
+          selector: 'texts'
+          exclusionManagedRuleSets: [ { ruleSetType: 'Microsoft_DefaultRuleSet', ruleSetVersion: '2.1', ruleGroups: [ { ruleGroupName: 'SQLI', rules: [ { ruleId: '942430' } ] } ] } ]
+        }
       ]
     }
   }

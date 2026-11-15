@@ -945,3 +945,11 @@ python -m ops smoke
 - **배경:** `app-20261113-59e115` 3회차 미납 추심 제안을 그대로 승인했더니, 에이전트가 넣은 재조정 상담(`hardship_offer` + `revenue_shock`, 근거: 최근 경보 원인 sales_slump)까지 함께 반영되어 재조정 상담 요청(`rs-<건>`, `pending_officer`)이 생기고 재생이 멈췄습니다. 사용자 요청은 "상담 요청 없이 문구만 보내는 방식"입니다.
 - **변경**(`4ebed49`): `settle_proposal`이 승인·수정 모두 `include_hardship=True`일 때만 재조정 상담 요청을 만듭니다(기본은 문구만 발송 → 재개 대기). 제안에 재조정이 없는데 `True`면 기존처럼 오류입니다. 콘솔은 제안 칩을 `재조정 상담 권고`로 바꾸고, 체크박스 `재조정 상담 요청도 만들기(체크할 때만 생성, 기본은 문구만 발송)`를 기본 해제로 승인·수정 모두에 적용합니다.
 - **배포:** `window open --acr`(창 IP 167.220.232.104) → `ops deploy orchestrator`가 SCM 403이었습니다. 지난번 출구 IP(167.220.255.123) 임시 규칙으로도 403이었고, 이번엔 `AppServiceIPSecAuditLogs`가 10분 넘게 비어 있어 `ifconfig.me`가 돌려준 두 번째 출구 IP 167.220.233.232를 임시 규칙 `operator-alt3`(priority 112)로 넣자 SCM 200 → 배포 성공 → `ops deploy console`(`console:20261113063958`) → `ops smoke` 1차는 consent 실패(300초 안에 Foundry 대화 삭제 미확인, 이번 변경과 무관) → 재실행 성공(`job-smoke-ab0k0ek`) → 진단 설정 삭제 → **`window close`**(임시 규칙도 함께 정리됨). WAF `allowOperatorOnly`에 운영자 IP를 다시 더하고 167.220.233.232도 추가했습니다(`/loans` 200). 라이브 `app-20261113-59e115`에 `재조정 상담 권고` 표시를 확인했습니다.
+
+## 2026-11-15 영문 화면 데이터 번역 배포
+
+- **배경:** 영문 화면에서도 셀러 상호·정책 사유 같은 저장 데이터, 에이전트 의견·요약, 차주에게 보낸 문구가 한국어로 남았습니다. 사용자는 카탈로그와 기계 번역을 함께 쓰는 방식을 골랐습니다.
+- **변경**(`223962d`): 데이터 카탈로그(`locales/en/data.json`, 125개), 콘솔 번역 에이전트 `console-translator`(APIM `gw-translator` 50K TPM, `gw-officer-chat` 250K → 200K), `POST /i18n/translate`와 `mt.js`(페이지가 뜬 뒤 비동기 번역, 레플리카 메모리 캐시, 점선 밑줄과 원문 툴팁), 차주 발송·이의 원문 + `EN ·` 참고 번역, 화면 언어로 답하는 심사역 채팅([에이전트](../agents.md#영문-화면-번역)).
+- **배포:** `window open --acr`(프로비저닝으로 `gw-translator` APIM·Foundry 연결 생성) → `ops deploy console`(`console:20261115001215`). `agw-amalend`가 다시 `Stopped`라 시작했습니다(약 7분).
+- **WAF 오탐:** `/i18n/translate`가 403이었습니다. `ARGS:texts`에서 942430(SQL 특수문자 12개 이상)이 매칭돼 이상 점수 15(949110)였습니다. bicep에 `texts`(Equals) 인자의 942430만 빼는 제외를 넣고, 라이브 정책에는 `az network application-gateway waf-policy managed-rule exclusion rule-set add`로 바로 적용했습니다.
+- **라이브 확인:** `app-20261114-170e2a` 영문 상세의 기계 번역 대상 14개 → 200(첫 호출 30.4초) → 다시 열면 모두 캐시(`mt-done` 14, 대기 0). `/loans/app-20261113-59e115` 25개 → 200(9.7초), 경보 요약·신호가 영어로 바뀌고 금액은 `₩`로 표시됐습니다. → **`window close`** 뒤 `/loans` 200.

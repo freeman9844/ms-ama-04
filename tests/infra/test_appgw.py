@@ -118,11 +118,12 @@ def test_waf_policy_prevention_and_operator_rule(opened):
         {"ruleSetType": "Microsoft_DefaultRuleSet", "ruleSetVersion": "2.1"}]
 
 
-def test_waf_excludes_only_rule_942430_for_chat_text_args(opened):
+def test_waf_excludes_only_rule_942430_for_natural_text_args(opened):
     exclusions = opened.one(WAF, "waf-amatest")["properties"]["managedRules"]["exclusions"]
     assert {(e["matchVariable"], e["selectorMatchOperator"], e["selector"]) for e in exclusions} == {
         ("RequestArgNames", "Equals", "question"),
-        ("RequestArgNames", "StartsWith", "history.")}
+        ("RequestArgNames", "StartsWith", "history."),
+        ("RequestArgNames", "Equals", "texts")}
     for e in exclusions:
         assert e["exclusionManagedRuleSets"] == [{
             "ruleSetType": "Microsoft_DefaultRuleSet", "ruleSetVersion": "2.1",
