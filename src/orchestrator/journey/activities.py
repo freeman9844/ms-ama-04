@@ -15,6 +15,7 @@ from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
 from agents.features import compute_underwriting, monthly_installment
 from agents.monitoring import Baseline, settlement_for
 from agents.pg_ledger import FLAG_PG_LEDGER_UNAVAILABLE
+from agents.translator import TRANSLATE_MODEL
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
@@ -101,6 +102,8 @@ class Deps:
     queue: QueueSender | None = None
     notice_model: str = NOTICE_MODEL
     grievance_model: str = GRIEVANCE_MODEL
+    translator: Any | None = None
+    translate_model: str = TRANSLATE_MODEL
 
 
 class Conflict(RuntimeError):

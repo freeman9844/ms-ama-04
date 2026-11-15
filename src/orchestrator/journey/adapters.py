@@ -12,6 +12,7 @@ import httpx
 from agents.data_assembly import DEFAULT_MODEL, SourceError
 from agents.gateway import GatewayRunner, decision_base, gateway_enabled
 from agents.runtime import FoundryAgents
+from agents.translator import TRANSLATE_MODEL, Translator
 from agents.txn_classify import DecisionClient
 from journey import telemetry
 from journey.activities import (
@@ -257,6 +258,8 @@ def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[
         settings["collections_model"] = env.get("COLLECTIONS_MODEL", COLLECTIONS_MODEL)
         settings["notice_model"] = env.get("NOTICE_MODEL", NOTICE_MODEL)
         settings["grievance_model"] = env.get("GRIEVANCE_MODEL", GRIEVANCE_MODEL)
+        settings["translate_model"] = env.get("TRANSLATE_MODEL", TRANSLATE_MODEL)
+        settings["translator"] = Translator(settings["agents"], settings["translate_model"])
     if env.get("AI_ACCOUNT_ENDPOINT") and (deployment := env.get("DECISION_DEPLOYMENT")):
         settings["decider"] = DecisionClient(decision_base(env), deployment, lambda: token(COGNITIVE_SCOPE))
     return settings

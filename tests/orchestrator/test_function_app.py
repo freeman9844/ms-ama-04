@@ -150,6 +150,42 @@ def test_servicebus_triggers_only_when_enabled(monkeypatch):
     load_app(monkeypatch, "")
 
 
+def test_pretranslate_triggers_only_with_cosmos_connection(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from agents.pretranslate import SOURCES
+
+    monkeypatch.delenv("CosmosDBConnection__accountEndpoint", raising=False)
+    assert not {f.get_function_name() for f in load_app(monkeypatch, "").get_functions()} & {
+        f"pretranslate_{s}" for s in SOURCES
+    }
+    monkeypatch.setenv("CosmosDBConnection__accountEndpoint", "https://cosmos-x.documents.azure.com:443/")
+    try:
+        functions = {f.get_function_name(): f for f in load_app(monkeypatch, "").get_functions()}
+        for source in SOURCES:
+            binding = json.loads(functions[f"pretranslate_{source}"].get_function_json())["bindings"][0]
+            assert binding["type"] == "cosmosDBTrigger" and binding["connection"] == "CosmosDBConnection"
+            assert binding["databaseName"] == "%COSMOS_DATABASE%" and binding["containerName"] == source
+            assert binding["leaseContainerName"] == "leases" and binding["leaseContainerPrefix"] == f"{source}-"
+            assert binding["createLeaseContainerIfNotExists"] is False
+            start = datetime.strptime(binding["startFromTime"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+            assert abs(datetime.now(UTC) - timedelta(days=7) - start) < timedelta(days=1)
+    finally:
+        monkeypatch.delenv("CosmosDBConnection__accountEndpoint", raising=False)
+        load_app(monkeypatch, "")
+
+
+def test_pretranslate_trigger_never_raises(monkeypatch, caplog):
+    import function_app
+
+    class Doc:
+        def to_dict(self):
+            raise RuntimeError("bad doc")
+
+    monkeypatch.setattr(function_app, "deps", lambda: (_ for _ in ()).throw(RuntimeError("no deps")))
+    function_app._pretranslate("applications", [Doc()])
+    assert "pretranslate" in caplog.text
+
 def test_host_json():
     host = json.loads((ROOT / "host.json").read_text(encoding="utf-8"))
     assert host["extensionBundle"]["version"] == "[4.*, 5.0.0)"

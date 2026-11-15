@@ -485,6 +485,8 @@ def test_agent_settings_builds_agents_decider_and_models():
     assert (settings["analyst_model"], settings["reviewer_model"]) == ("gpt-x", "gpt-5.6-luna")
     assert settings["classifier_model"] == "gpt-5.6-luna"
     assert (settings["notice_model"], settings["grievance_model"]) == ("gpt-5.6-luna", "gpt-5.6-luna")
+    assert settings["translate_model"] == "gpt-6-luna" and settings["translator"] is not None
+    assert agent_settings({**env, "TRANSLATE_MODEL": "gpt-y"}, lambda scope: "t")["translate_model"] == "gpt-y"
 
 
 def test_agent_settings_routes_via_gateway():

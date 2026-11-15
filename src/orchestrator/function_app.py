@@ -1,10 +1,13 @@
 """Azure Functions 진입점(Python v2 모델). 업무 로직은 journey 패키지에 있다."""
 
+import logging
 import os
+from datetime import UTC, datetime, timedelta
 
 import azure.durable_functions as df
 import azure.functions as func
 
+from agents.pretranslate import SOURCES
 from journey import telemetry
 from journey.activities import ACTIVITIES, Deps
 from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start
@@ -21,9 +24,11 @@ from journey.monitoring import (
     handle_restructure_decision,
 )
 from journey.orchestration import journey
+from journey.pretranslate import handle_changes
 
 telemetry.setup()
 
+log = logging.getLogger("journey.pretranslate")
 app = df.DFApp(http_auth_level=func.AuthLevel.FUNCTION)
 RETRY = df.RetryOptions(first_retry_interval_in_milliseconds=5000, max_number_of_attempts=3)
 SB_CONNECTION = "ServiceBusConnection"
@@ -142,6 +147,40 @@ def monitoring_replay(msg: func.QueueMessage) -> None:
 def restructure_decision(msg: func.QueueMessage) -> None:
     handle_restructure_decision(deps(), msg.get_body().decode("utf-8"))
 
+
+COSMOS_CONNECTION = "CosmosDBConnection"
+PRETRANSLATE_BACKFILL = timedelta(days=7)
+
+
+def _pretranslate(source: str, docs) -> None:
+    """변경 피드 한 묶음을 번역한다. 어떤 예외도 올리지 않는다(올리면 같은 묶음이 계속 재시도된다)."""
+    try:
+        handle_changes(deps(), source, [d.to_dict() for d in docs])
+    except Exception:  # noqa: BLE001
+        log.exception("pretranslate trigger failed source=%s", source)
+
+
+def _register_pretranslate(source: str, start_from: str) -> None:
+    @app.function_name(name=f"pretranslate_{source}")
+    @app.cosmos_db_trigger(
+        arg_name="docs",
+        connection=COSMOS_CONNECTION,
+        database_name="%COSMOS_DATABASE%",
+        container_name=source,
+        lease_container_name="leases",
+        lease_container_prefix=f"{source}-",
+        create_lease_container_if_not_exists=False,
+        start_from_time=start_from,
+    )
+    def run(docs: func.DocumentList) -> None:
+        _pretranslate(source, docs)
+
+
+# 변경 피드 연결(ID 기반 CosmosDBConnection__accountEndpoint)이 있을 때만 등록한다. 시작 시점은 리스가 처음 만들어질 때만 쓰인다.
+if os.environ.get("CosmosDBConnection__accountEndpoint"):
+    _start_from = (datetime.now(UTC) - PRETRANSLATE_BACKFILL).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for _source in SOURCES:
+        _register_pretranslate(_source, _start_from)
 
 # Service Bus는 비용 때문에 평소 꺼 둔다(pause = 네임스페이스 삭제). 꺼져 있으면 트리거를 등록하지 않고
 # handle_replay가 같은 처리를 직접 한다. 설정이 바뀌면 호스트가 재시작되며 다시 색인된다.
