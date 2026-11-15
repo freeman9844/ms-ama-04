@@ -10,18 +10,17 @@
 import hashlib
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from markupsafe import Markup
 
+from agents.pretranslate import BATCH_CHARS, BATCH_ITEMS, batches  # noqa: F401 - 배치 상수 재수출
 from console import i18n
 
 MAX_ITEMS = 80
 MAX_CHARS = 2000
 MAX_TOTAL_CHARS = 30000  # 한글 3바이트 기준으로 본문 상한(app.MAX_CHAT_BYTES 128KB) 안에 들어간다
-BATCH_ITEMS = 25
-BATCH_CHARS = 8000
 CACHE_SIZE = 5000
 
 
@@ -75,19 +74,6 @@ class TranslationCache:
                 self._items.popitem(last=False)
 
 
-def _batches(texts: Sequence[str]) -> Iterable[list[str]]:
-    batch: list[str] = []
-    chars = 0
-    for t in texts:
-        if batch and (len(batch) >= BATCH_ITEMS or chars + len(t) > BATCH_CHARS):
-            yield batch
-            batch, chars = [], 0
-        batch.append(t)
-        chars += len(t)
-    if batch:
-        yield batch
-
-
 class MachineTranslation:
     """agent.translate(texts) -> 결과(.translations, .input_tokens, .output_tokens)를 감싼 캐시."""
 
@@ -102,7 +88,7 @@ class MachineTranslation:
         """원문 순서대로 영문. 카탈로그·캐시에 없는 한국어만 에이전트로 보낸다. (번역, 입력 토큰, 출력 토큰)."""
         missing = list(dict.fromkeys(t for t in texts if has_korean(t) and not catalog(t) and self.cache.get(t) is None))
         tokens_in = tokens_out = 0
-        for batch in _batches(missing):
+        for batch in batches(missing):
             result = self._agent.translate(batch)
             tokens_in += result.input_tokens
             tokens_out += result.output_tokens

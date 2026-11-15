@@ -4,7 +4,7 @@ import pytest
 
 from agents.gateway import GatewayRunner
 from agents.runtime import AgentError, AgentRun
-from agents.translator import TRANSLATOR_AGENT, Translations, Translator, translator_spec
+from agents.translator import INSTRUCTIONS, TRANSLATOR_AGENT, Translations, Translator, translator_spec
 from tests.agents.test_officer_chat import FakeRunner
 
 
@@ -22,6 +22,10 @@ def test_translate_sends_texts_in_order_and_deletes_conversation():
     assert spec.name == TRANSLATOR_AGENT and spec.tools == () and handlers == {}
     assert payload == {"texts": ["식품", "매출 급감"]}
     assert runner.deleted == ["conv-1"]
+
+
+def test_instructions_name_real_token_format():
+    assert "[[BIZNAME_" in INSTRUCTIONS and "[ORG_" not in INSTRUCTIONS
 
 
 def test_translate_rejects_count_mismatch():

@@ -21,7 +21,7 @@ INSTRUCTIONS = """너는 소상공인 현금흐름 대출 심사 콘솔의 한�
 - texts의 각 항목을 같은 순서, 같은 개수로 영어로 옮겨 translations에 넣는다. 합치거나 나누거나 빼지 않는다.
 - 뜻만 옮기고 요약·설명·의견을 더하지 않는다. 숫자·날짜·금액·비율·규칙 코드(R104 등)·지표 ID(M:dscr 등)·영문 약어(DSCR 등)는 그대로 둔다.
 - 금액 'N만 원'은 원 단위로 풀어 '₩N0,000'처럼, 'N원'은 '₩N'으로 쓴다.
-- 가명 토큰(예: [ORG_1a2b], [PERSON_…])과 대괄호·꺾쇠 안 식별자는 그대로 둔다. 고유명사(상호)는 로마자로 옮긴다.
+- 가명 토큰(`[[BIZNAME_0a1b2c3d4e]]`, `[[PERSON_…]]`, `[[PHONE_…]]` 등)은 글자 하나 바꾸지 말고 그대로 둔다. 대괄호·꺾쇠 안 식별자도 그대로 둔다. 토큰이 아닌 고유명사만 로마자로 옮긴다.
 - 용어: 심사역 credit officer, 차주 borrower, 셀러 seller, 정산 settlement, 현금 버퍼 cash buffer, 대표자 인출 owner draw,
   조기경보 early warning, 추심 collections, 재조정 restructuring, 미납 missed payment, 회차 installment, 업력 business age.
 - 항목이 이미 영어거나 번역할 것이 없으면 그대로 돌려준다."""

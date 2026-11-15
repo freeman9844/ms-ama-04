@@ -1,6 +1,6 @@
 import pytest
 
-from shared.pseudonymize import Pseudonymizer, find_pii
+from shared.pseudonymize import Pseudonymizer, find_pii, tokens
 
 KEY = b"k" * 32
 ENTITIES = {"김민수": "PERSON", "성수커피랩": "BIZNAME", "이서연": "PERSON"}
@@ -120,3 +120,9 @@ def test_phone_and_bizno_keep_priority_and_dates_stay():
     assert "[[PHONE_" in masked and "[[BIZNO_" in masked
     assert "2026-11-02" in masked and "20000000" in masked
     assert p.restore(masked) == text
+
+
+def test_tokens_returns_only_complete_tokens():
+    text = "[[BIZNAME_0123456789]] 와 [[PERSON_abcdef0123]] 그리고 [[PHONE_12]] [[bad_0123456789]] [[BIZNAME_0123456789]]"
+    assert tokens(text) == {"[[BIZNAME_0123456789]]", "[[PERSON_abcdef0123]]"}
+    assert tokens("평문") == set()

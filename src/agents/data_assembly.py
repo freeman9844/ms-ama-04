@@ -209,10 +209,8 @@ def _mask(value: Any, p: Pseudonymizer) -> Any:
     return value
 
 
-def build_pseudonymizer(
-    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction]
-) -> Pseudonymizer:
-    """상호·대표자·사업자번호와 적요 속 직원·대표자 이름을 가명 대상으로 등록한다."""
+def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Transaction]) -> dict[str, str]:
+    """상호·대표자·사업자번호와 적요 속 직원·대표자 이름을 가명 대상(값 → 종류)으로 모은다."""
     entities: dict[str, str] = {}
     if profile is not None:
         entities[profile.business_name] = "BIZNAME"
@@ -222,7 +220,13 @@ def build_pseudonymizer(
         match = _PAYROLL.match(t.description) or _OWNER.match(t.description)
         if match:
             entities.setdefault(match.group(1), "PERSON")
-    return Pseudonymizer(key, entities)
+    return entities
+
+
+def build_pseudonymizer(
+    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction]
+) -> Pseudonymizer:
+    return Pseudonymizer(key, case_entities(profile, transactions))
 
 
 class AssemblySession:

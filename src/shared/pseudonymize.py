@@ -55,6 +55,11 @@ def has_token(text: str) -> bool:
     return _TOKEN_PREFIX_RE.search(text) is not None
 
 
+def tokens(text: str) -> set[str]:
+    """완전한 가명 토큰의 집합. 잘리거나 바뀐 토큰은 들어가지 않는다."""
+    return set(_TOKEN_RE.findall(text))
+
+
 class Pseudonymizer:
     def __init__(self, key: bytes, known_entities: Mapping[str, str] | None = None) -> None:
         if len(key) < 32:

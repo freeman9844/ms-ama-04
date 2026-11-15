@@ -11,11 +11,13 @@ from agents.data_assembly import (
     AssemblyOutput,
     SourceError,
     assemble,
+    build_pseudonymizer,
+    case_entities,
     data_assembly_spec,
 )
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
-from shared.pseudonymize import find_pii
+from shared.pseudonymize import Pseudonymizer, find_pii
 
 KEY = b"p" * 32
 ALL_SCOPES = ("account", "tax", "pg")
@@ -280,3 +282,13 @@ def test_descriptions_are_withheld_when_profile_is_unavailable(cases):
     s = agent.tool_outputs[0]
     assert s["unusual_descriptions"] == [] and s["unusual_descriptions_withheld"] == "profile_unavailable"
     assert case.profile.business_name not in json.dumps(s, ensure_ascii=False)
+
+def test_case_entities_registers_profile_and_names_and_matches_build_pseudonymizer():
+    case = build_demo_cases(date(2026, 11, 2))["seller-dailylook-01"]
+    entities = case_entities(case.profile, case.transactions)
+    assert entities[case.profile.business_name] == "BIZNAME"
+    assert entities[case.profile.representative_name] == "PERSON"
+    assert entities[case.profile.business_reg_no] == "BIZNO"
+    text = f"{case.profile.business_name} {case.profile.representative_name}"
+    assert build_pseudonymizer(KEY, case.profile, case.transactions).mask(text) == Pseudonymizer(KEY, entities).mask(text)
+    assert case_entities(None, []) == {}
