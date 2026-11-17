@@ -968,3 +968,15 @@ python -m ops smoke
 - **주요 변경:** APIM `openai` API는 제품 없는 구독을 403으로 막고 `llm-token-limit` 카운터를 제품 단위로 바꿨습니다. Key Vault는 `id-apps` 접근을 없애고 `id-smoke`를 Key Vault Reader로 줄였습니다. 이의 회신·심사역 채팅은 심사역이 쓴 문장을 그 건의 가명처리기로 가립니다. 이의 재심사의 정책 밖 승인은 `rereview_outside_policy`로 거부합니다. 콘솔 폼 POST는 스레드 풀에서 실행하고, 두 번째 심사역 결정에는 409를 돌려줍니다. 에이전트 호출은 버전을 고정합니다(`agent_reference.version`). `window close`는 `WINDOW_STATE`로 완료 여부를 기록합니다.
 - **배포:** `window open --acr`(4.4분, APIM 정책·Key Vault 역할 반영) → `ops deploy all` 1차는 콘솔 이미지 빌드 중 az 토큰 연결 끊김으로 실패, 재실행으로 이미지 4개(`*:20261117025938`)와 프로비저닝 성공. Functions zip은 SCM 403이었습니다. `ifconfig.me`가 돌려준 두 번째 출구 IP 167.220.233.25를 임시 규칙 `operator-alt2`(priority 111)로 넣고 `ops deploy orchestrator` 성공(`func-gaz7yh2zic7zc`).
 - **확인:** `ops smoke` 1차는 Job 성공(`job-smoke-lfhkqk8`), 콘솔 관문은 `agw-amalend`가 다시 `Stopped`라 시간 초과였습니다. 게이트웨이를 시작한 뒤 이전 Key Vault Secrets User 할당(`id-apps-amalend`·`id-smoke-amalend`)을 지우고 다시 돌려 성공(`job-smoke-vs4mazv`, 콘솔 관문 정상)했습니다. smoke가 Key Vault Reader만으로 통과함을 확인했습니다. 임시 규칙 삭제 → **`window close`**(`window status`: 닫힘).
+
+## 2026-11-17 세무 불일치 참고 지표 배포
+
+- **변경**(`3b91aaa`): 정책 판정에 쓰지 않는 참고 지표(watch, 세무 불일치 등)를 분석가 평가서가 위험 요인으로 언급하게 했습니다.
+- **배포:** orchestrator(`func-gaz7yh2zic7zc`)·console(`console:20261117134209`)·eval(`eval:20261117134722`).
+- **평가:** `ops eval --suite underwriting`(`job-eval-whctsbr`, $1.83)에서 세무 불일치 탐지율이 gpt-5.6-luna·gpt-5.6-sol 모두 100%였습니다(이전 `job-eval-7nxe8gw`는 `tax_mismatch_missed` 4건). 실패 5건은 `review_not_passed` 3·`grounding_failed` 1·`agent_error` 1입니다.
+
+## 2026-11-17 고객 콘솔 분리 배포
+
+- **변경**(`cd8c28b`·`e3bef2b`): 심사 콘솔의 차주 시뮬레이터를 고객 콘솔로 옮겼습니다. `/apply`(대출 신청)와 `/borrower/<신청인>`(신청 현황)·`/plans`·`/notices`·`/consents`·`/grievances`가 왼쪽 메뉴를 함께 쓰고, 로그인만 요구합니다(콘솔 역할 불필요). 심사역 사이드바에는 `고객 콘솔 열기` 링크만 남겼습니다. 셀프 상환 플랜 링크와 철회 안내 경로가 오케스트레이터 코드에 있어 둘 다 배포했습니다.
+- **배포:** `window open --acr`(4.6분) → `ops deploy orchestrator`(6.1분, `func-gaz7yh2zic7zc`) → `ops deploy console`(`console:20261117143826`, 5.0분) → **`window close`**(4.0분, `window status`: 닫힘) 뒤 `/loans` 200.
+- **라이브 확인:** `/loans`에 `고객 콘솔 열기`가 보이고 `차주 시뮬레이터`는 없습니다. `/apply`, `/borrower`, `seller-dailylook-01`의 신청 현황과 메뉴 4개는 200을 돌려주고, 없는 메뉴는 404입니다.
