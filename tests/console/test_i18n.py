@@ -169,7 +169,7 @@ def _data_strings(value, out: set[str]) -> set[str]:
 EN_PAGES = [
     "/", "/applications/new", "/applications/app-20261103-p01", "/applications/app-20261103-p06",
     "/loans", "/loans/app-20261103-p03", "/loans/app-20261103-p04", "/loans/app-20261103-p11",
-    "/ops", "/grievances", "/borrower", "/apply",
+    "/ops", "/grievances", "/borrower", "/apply?applicant_id=seller-dailylook-01",
 ]
 # 고객 콘솔 '내 대출 관리' 메뉴(신청 현황·상환 플랜·받은 안내·동의 관리·이의제기). 동의·이의 원문은 기계 번역 대기다.
 CUSTOMER_PAGES = [f"/borrower/seller-dailylook-01{sub}" for sub in ("", "/plans", "/notices", "/consents", "/grievances")]

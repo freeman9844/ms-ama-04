@@ -9,11 +9,8 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <section class="card">
     <h2>{{ _("신청 사업자") }}</h2>
-    <label>{{ _("사업자(데모)") }}
-      <select name="applicant_id">
-      {% for a in demo_applicants %}<option value="{{ a }}"{% if (form and form.applicant_id == a) or (not form and applicant_id == a) %} selected{% endif %}>{{ a|seller_label }}</option>{% endfor %}
-      </select>
-    </label>
+    <p class="seller-fixed"><strong>{{ applicant_id|seller_label }}</strong> <a href="/borrower">{{ _("고객 변경") }}</a></p>
+    <input type="hidden" name="applicant_id" value="{{ applicant_id }}">
   </section>
   <section class="card">
     <h2>{{ _("데이터 이용 동의") }}</h2>

@@ -542,17 +542,22 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                       ttl_days=CONSENT_TTL_DAYS, **ctx)
 
     @app.get("/apply", response_class=HTMLResponse)
-    def apply_page(request: Request, applicant_id: str | None = None) -> HTMLResponse:
-        return apply_form(customer(request), applicant_id=applicant_id if applicant_id in DEMO_APPLICANTS else None)
+    def apply_page(request: Request, applicant_id: str | None = None):
+        user = customer(request)
+        if applicant_id not in DEMO_APPLICANTS:
+            return RedirectResponse("/borrower", status_code=303)
+        return apply_form(user, applicant_id=applicant_id)
 
     @app.post("/apply")
     def apply_submit(posted: Posted = Depends(customer_form)):
         user, form = posted.user, posted.form
+        chosen = form.get("applicant_id", "").strip()
+        if chosen not in DEMO_APPLICANTS:
+            return RedirectResponse("/borrower", status_code=303)
         code = validate_apply(form, DEMO_APPLICANTS)
         if code:
-            chosen = form.get("applicant_id", "").strip()
             return apply_form(user, 422, error=_(APPLY_ERRORS[code]), error_code=code, form=form,
-                              applicant_id=chosen if chosen in DEMO_APPLICANTS else None)
+                              applicant_id=chosen)
         req = StartRequest(
             application_id=deps.new_application_id(),
             applicant_id=form["applicant_id"].strip(),

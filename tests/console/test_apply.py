@@ -34,7 +34,7 @@ def env(make_doc, raw, key):
 
 
 def token(client, headers=CUSTOMER):
-    page = client.get("/apply", headers=headers).text
+    page = client.get("/apply?applicant_id=seller-dailylook-01", headers=headers).text
     return re.search(r'name="csrf" value="([0-9a-f]{64})"', page).group(1)
 
 
@@ -46,9 +46,11 @@ def apply(client, headers=CUSTOMER, **fields):
 def test_apply_page_needs_login_but_no_console_role(env):
     client, _, _ = env
     assert client.get("/apply").status_code == 401
-    page = client.get("/apply", headers=CUSTOMER)
+    page = client.get("/apply?applicant_id=seller-dailylook-01", headers=CUSTOMER)
     assert page.status_code == 200
     html = page.text
+    assert '<input type="hidden" name="applicant_id" value="seller-dailylook-01">' in html
+    assert '<select name="applicant_id"' not in html
     for name in ("consent_account", "consent_tax", "consent_pg"):
         assert f'name="{name}"' in html
     assert "운전자금 대출 심사" in html and "90일" in html
@@ -57,13 +59,25 @@ def test_apply_page_needs_login_but_no_console_role(env):
     assert "사후 모니터링" not in html
 
 
-def test_apply_page_preselects_known_applicant_and_opens_its_menu(env):
+def test_apply_page_is_fixed_to_chosen_applicant(env):
     client, _, _ = env
     html = client.get("/apply?applicant_id=seller-candle-05", headers=CUSTOMER).text
-    assert '<option value="seller-candle-05" selected>' in html
+    assert '<input type="hidden" name="applicant_id" value="seller-candle-05">' in html
     assert '<li class="n-apply active">' in html and 'href="/borrower/seller-candle-05/grievances"' in html
-    unknown = client.get("/apply?applicant_id=nope", headers=CUSTOMER).text
-    assert " selected>" not in unknown and "/borrower/nope" not in unknown and 'href="/borrower"' in unknown
+
+
+@pytest.mark.parametrize("path", ["/apply", "/apply?applicant_id=nope"])
+def test_apply_without_known_applicant_goes_to_customer_select(env, path):
+    client, _, _ = env
+    response = client.get(path, headers=CUSTOMER)
+    assert response.status_code == 303 and response.headers["location"] == "/borrower"
+
+
+def test_unknown_applicant_post_goes_to_customer_select(env):
+    client, _, queue = env
+    response = apply(client, applicant_id="seller-unknown-99")
+    assert response.status_code == 303 and response.headers["location"] == "/borrower"
+    assert queue.sent == []
 
 
 def test_status_page_opens_menu_of_its_applicant_and_points_declined_to_grievances(env):
@@ -112,7 +126,6 @@ def test_consent_value_other_than_on_is_not_consent(env):
     ({"requested_tenor_months": "2"}, "tenor_invalid"),
     ({"requested_tenor_months": "7"}, "tenor_invalid"),
     ({"requested_tenor_months": "12"}, "tenor_invalid"),
-    ({"applicant_id": "seller-unknown-99"}, "applicant_invalid"),
 ])
 def test_out_of_range_input_is_rejected_and_form_kept(env, fields, code):
     client, _, queue = env
@@ -120,6 +133,8 @@ def test_out_of_range_input_is_rejected_and_form_kept(env, fields, code):
     assert response.status_code == 422
     assert f'data-code="{code}"' in response.text
     assert 'name="consent_tax" class="consent" checked' in response.text
+    assert 'name="applicant_id" value="seller-dailylook-01"' in response.text
+    assert 'href="/borrower/seller-dailylook-01"' in response.text
     assert queue.sent == []
 
 

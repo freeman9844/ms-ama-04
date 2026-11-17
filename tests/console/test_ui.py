@@ -52,7 +52,7 @@ def test_csp_is_unchanged(client):
     ("/loans", '<li class="n-loans active">'),
     ("/grievances", '<li class="n-grievances active">'),
     ("/ops", '<li class="n-ops active">'),
-    ("/apply", '<li class="n-apply active">'),
+    ("/apply?applicant_id=seller-dailylook-01", '<li class="n-apply active">'),
     ("/borrower", '<li class="n-status active">'),
 ])
 def test_sidebar_marks_current_screen(client, path, item):

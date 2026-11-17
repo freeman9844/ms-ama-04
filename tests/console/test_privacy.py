@@ -170,15 +170,16 @@ HOME = "/borrower/seller-dailylook-01"
 def test_officer_sidebar_links_customer_console_and_grievances(env):
     client, _, _ = env
     page = client.get("/", headers=OFFICER).text
-    assert 'class="customer-link" href="/apply"' in page and 'href="/grievances"' in page
-    assert 'href="/borrower"' not in page
+    assert 'class="customer-link" href="/borrower"' in page and 'href="/grievances"' in page
+    assert '<li class="n-borrower' not in page
 
 
 def test_borrower_index_lists_demo_applicants(env):
     client, _, _ = env
     page = client.get("/borrower", headers=CUSTOMER).text
     assert 'href="/borrower/seller-dailylook-01"' in page and 'href="/borrower/seller-candle-05"' in page
-    assert '<li class="n-status active"><a href="/borrower">' in page
+    assert '<li class="n-status active"><a href="/borrower">고객 선택</a>' in page
+    assert 'class="n-apply' not in page
 
 
 def test_customer_menu_links_every_page_of_the_chosen_seller(env):

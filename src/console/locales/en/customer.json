@@ -2,7 +2,6 @@
   "운전자금 대출 신청": "Working-capital loan application",
   "마켓플레이스 정산 데이터로 심사합니다. 서류 제출 없이 데이터 이용에 동의하면 바로 신청됩니다.": "We review your application using your marketplace settlement data. No documents are needed: once you consent to data use, your application is submitted.",
   "신청 사업자": "Applying business",
-  "사업자(데모)": "Business (demo)",
   "데이터 이용 동의": "Consent to data use",
   "목적: %(purpose)s · 보유기간: %(days)s일. 3종 모두 동의해야 신청할 수 있습니다.": "Purpose: %(purpose)s · Retention period: %(days)s days. You must consent to all three to apply.",
   "운전자금 대출 심사": "Working-capital loan underwriting",
@@ -154,9 +153,7 @@
   "고객 변경": "Switch customer",
   "고객 콘솔": "Customer console",
   "고객 콘솔 열기": "Open customer console",
-  "고객(셀러)을 고르면 신청 현황·상환 플랜·받은 안내·동의 관리·이의제기 메뉴가 열립니다. 데모라 로그인한 사용자가 고객을 직접 고릅니다.": "Pick a customer (seller) to open the application status, repayment plan, notices, consents and grievance menus. In this demo, the signed-in user picks the customer.",
   "고객을 선택하면 메뉴가 열립니다.": "Select a customer to open the menus.",
-  "내 대출 관리": "My loans",
   "대출 신청": "Apply for a loan",
   "동의 관리로": "Back to consents",
   "상환 플랜": "Repayment plan",
@@ -168,5 +165,6 @@
   "이번 신청은 승인되지 않았습니다. 결정에 이의가 있으면 내 대출 관리의 이의제기 메뉴에서 제기해 주세요.": "This application was not approved. If you disagree with the decision, you can file a grievance from the Grievances menu under My loans.",
   "이의제기가 없습니다. 고객 콘솔에서 제출할 수 있습니다.": "No grievances. Customers can submit one from the customer console.",
   "접수일": "Received on",
-  "플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 상환 플랜 메뉴에 표시됩니다.": "Plan (%(label)s) selected. The result appears in the Repayment plan menu once an officer confirms."
+  "플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 상환 플랜 메뉴에 표시됩니다.": "Plan (%(label)s) selected. The result appears in the Repayment plan menu once an officer confirms.",
+  "신청 사업자(셀러)를 고르면 그 사업자 기준으로 대출 신청·신청 현황·상환 플랜·받은 안내·동의 관리·이의제기 메뉴가 열립니다. 데모라 로그인한 사용자가 사업자를 직접 고릅니다.": "Choose the applicant business (seller). Apply, Application status, Repayment plans, Notices, Consents and Appeals then open for that business. In this demo the signed-in user picks the business."
 }

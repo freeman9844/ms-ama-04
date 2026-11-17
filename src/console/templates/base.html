@@ -25,7 +25,7 @@
     <span class="who-name">{{ user.name }}</span>
     <span class="who-roles">{{ user.roles|sort|join(", ") }}</span>
     {% if not demo %}<a href="/.auth/logout">{{ _("로그아웃") }}</a>{% endif %}
-    <a class="customer-link" href="/apply">{{ _("고객 콘솔 열기") }}</a>
+    <a class="customer-link" href="/borrower">{{ _("고객 콘솔 열기") }}</a>
     {% include "_lang.html" %}
   </div>
 </aside>
