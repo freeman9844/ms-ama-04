@@ -14,8 +14,14 @@ from shared.krcalendar import month_add
 from mockapis.sellerdata.categories import TxnCategory
 from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.engine import simulate
+from mockapis.sellerdata.marketplace import (
+    MARKETPLACE_SEED_OFFSET,
+    StoreOverride,
+    marketplace_hooks,
+    synthesize_store,
+)
 from mockapis.sellerdata.personas import DEMO_PERSONAS, Persona, business_reg_no, load_persona
-from shared.contracts import ApplicantProfile, PgSettlement, TaxFiling, Transaction
+from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 
 __all__ = ["INJECTION_TEXT", "Archetype", "Persona", "SyntheticCase", "TxnCategory", "generate_case", "load_persona"]
 
@@ -66,7 +72,7 @@ class SyntheticCase:
     known_entities: dict[str, str]
     persona: Persona
     opening_balance_krw: int
-
+    marketplace: MarketplaceStore | None = None
 
 def stress_lending(persona: Persona, onset: date, end: date) -> list[Event]:
     """기준일 60일 전부터 2주마다 대부·P2P에서 빌리고, 빌린 건마다 매주 금요일 상환한다."""
@@ -104,6 +110,7 @@ def generate_case(
     inject_prompt: bool = False,
     persona: Persona | None = None,
     business_age_months: int | None = None,
+    store_override: StoreOverride | None = None,
 ) -> SyntheticCase:
     rng = random.Random(seed)
     persona = persona or ARCHETYPE_PERSONAS[archetype]
@@ -115,6 +122,7 @@ def generate_case(
     def stressed(d: date) -> bool:
         return onset is not None and d >= onset
 
+    assigned_from = as_of - timedelta(days=ASSIGNED_DAYS) if archetype is Archetype.ASSIGNED else None
     ledger = simulate(
         persona, start, as_of, rng,
         sales_factor=lambda d: STRESS_FACTOR if stressed(d) else 1.0,
@@ -123,7 +131,8 @@ def generate_case(
         owner_draw_factor=lambda d: STRESS_OWNER_DRAW if stressed(d) else 1.0,
         extra=stress_lending(persona, onset, as_of) if onset else (),
         receipt_rng=random.Random(seed + RECEIPT_SEED_OFFSET),
-        assigned_from=as_of - timedelta(days=ASSIGNED_DAYS) if archetype is Archetype.ASSIGNED else None,
+        assigned_from=assigned_from,
+        **marketplace_hooks(store_override, persona, as_of),
     )
     events = list(ledger.events)
     if inject_prompt:
@@ -182,4 +191,8 @@ def generate_case(
         known_entities=known_entities,
         persona=persona,
         opening_balance_krw=opening,
+        marketplace=synthesize_store(
+            persona, archetype, as_of, business_age_months, ledger, assigned_from,
+            random.Random(seed + MARKETPLACE_SEED_OFFSET), store_override,
+        ),
     )

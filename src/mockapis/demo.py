@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
 from mockapis.postloan import FlowScenario, LoanTerms, PostLoanFlow, generate_postloan
+from mockapis.sellerdata.marketplace import StoreOverride
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, SyntheticCase, generate_case, load_persona
 from shared.krcalendar import next_business_day
@@ -38,11 +39,19 @@ DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
     ("seller-mugshop-21", Archetype.ASSIGNED, 121, False),
 )
 
+# 데모 셀러 덮어쓰기(스펙 8.1). 사후 시나리오 셀러(dailylook-01 등)는 건드리지 않는다.
+DEMO_STORE_OVERRIDES: dict[str, StoreOverride] = {
+    "seller-streetfit-19": StoreOverride(rating=3.8),
+    "seller-petfood-07": StoreOverride(suspended_days_ago=40),
+    "seller-ceramic-08": StoreOverride(return_rate_90d=0.18),
+}
+
 
 def build_demo_cases(as_of: date) -> dict[str, SyntheticCase]:
     return {
         applicant_id: generate_case(
-            applicant_id, archetype, as_of, seed, inject_prompt=inject, persona=DEMO_PERSONAS[applicant_id]
+            applicant_id, archetype, as_of, seed, inject_prompt=inject, persona=DEMO_PERSONAS[applicant_id],
+            store_override=DEMO_STORE_OVERRIDES.get(applicant_id),
         )
         for applicant_id, archetype, seed, inject in DEMO_APPLICANTS
     }

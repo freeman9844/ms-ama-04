@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from mockapis.sellerdata.categories import TxnCategory
-from mockapis.sellerdata.channels import CHANNELS, OrderDay, _same_rate, payouts
+from mockapis.sellerdata.channels import CHANNELS, OrderDay, Payout, _same_rate, payouts
 from mockapis.sellerdata.costs import CostSchedule, Event
 from mockapis.sellerdata.personas import Persona
 from mockapis.sellerdata.receipts import ReceiptHooks, bank_receipts
@@ -30,24 +30,30 @@ def _ten(year: int, month: int) -> int:
     return 10
 
 
+def _one_channel(channel: str, d: date) -> float:
+    return 1.0
+
+
 @dataclass(frozen=True)
 class Ledger:
     events: tuple[Event, ...]
     pg_settlements: tuple[PgSettlement, ...]
     daily_sales: dict[date, int]
     orders: tuple[OrderDay, ...] = ()  # 워밍업 포함 전체(2026-11-11)
+    pending: tuple[Payout, ...] = ()  # 기준일(end) 이후 지급 예정. 계좌 반영 전 순액(수수료만 차감, 2026-11-17)
 
 
 def daily_sales(persona: Persona, start: date, end: date, rng: random.Random,
-                sales_factor: Callable[[date], float] = _one) -> dict[str, dict[date, int]]:
-    """채널별 일 주문액(반품 전)."""
+                sales_factor: Callable[[date], float] = _one,
+                channel_factor: Callable[[str, date], float] = _one_channel) -> dict[str, dict[date, int]]:
+    """채널별 일 주문액(반품 전). channel_factor는 채널·날짜별 금액에 곱만 한다(난수 호출 순서는 그대로)."""
     base = persona.monthly_sales_krw / DAYS_PER_MONTH
     out: dict[str, dict[date, int]] = {c: {} for c, _ in persona.channels}
     d = start
     while d < end:
         total = base * day_factor(persona.industry, d) * sales_factor(d) * rng.uniform(1 - DAILY_NOISE, 1 + DAILY_NOISE)
         for channel, weight in persona.channels:
-            out[channel][d] = int(total * weight * rng.uniform(0.9, 1.1))
+            out[channel][d] = int(total * weight * rng.uniform(0.9, 1.1) * channel_factor(channel, d))
         d += timedelta(days=1)
     return out
 
@@ -68,6 +74,7 @@ def simulate(
     receipt_hooks: ReceiptHooks | None = None,
     warmup_days: int = WARMUP_DAYS,
     ledger_from: date | None = None,
+    channel_factor: Callable[[str, date], float] = _one_channel,
 ) -> Ledger:
     """[start, end) 기간의 거래 사건. 같은 날은 입금 먼저, 출금 나중.
 
@@ -76,12 +83,15 @@ def simulate(
     return_rate·receipt_hooks는 사후 시나리오 훅(반품률·보류·추가 상계·선정산 플랫폼, 2026-11-11)이고
     기본값에서는 난수 호출 순서·값이 바뀌지 않는다. warmup_days·ledger_from은 원장 워밍업 길이를 늘려
     대출 전 기준선을 만들 때 쓴다(심사 원장과 난수가 섞이지 않게 pg_settlements만 더 이른 날짜까지 남긴다).
+    channel_factor는 마켓 판매정지 같은 채널별 주문 중단에 쓰는 곱셈 훅이다(2026-11-17).
     """
-    by_channel = daily_sales(persona, start - timedelta(days=warmup_days), end, rng, sales_factor)
+    by_channel = daily_sales(persona, start - timedelta(days=warmup_days), end, rng, sales_factor, channel_factor)
     orders: list[OrderDay] = []
-    paid = [p for channel, sales in by_channel.items()
-            for p in payouts(CHANNELS[channel], persona.industry, sales, rng, return_rate=return_rate, orders=orders)
-            if p.paid_on < end]
+    scheduled = [p for channel, sales in by_channel.items()
+                 for p in payouts(CHANNELS[channel], persona.industry, sales, rng, return_rate=return_rate,
+                                  orders=orders)]
+    paid = [p for p in scheduled if p.paid_on < end]
+    pending = tuple(p for p in scheduled if p.paid_on >= end)
     settlement_floor = ledger_from or start
     if receipt_rng is None:
         full_ledger = paid
@@ -112,4 +122,5 @@ def simulate(
     events += CostSchedule(persona, start, end, total, rng, payroll_day, owner_draw_factor, ad_deductions).build()
     events += [e for e in extra if start <= e.booked_on < end]
     events.sort(key=lambda e: (e.booked_on, e.amount_krw < 0))
-    return Ledger(tuple(events), tuple(sorted(settlements, key=lambda s: s.settled_on)), total, tuple(orders))
+    return Ledger(tuple(events), tuple(sorted(settlements, key=lambda s: s.settled_on)), total, tuple(orders),
+                  pending)

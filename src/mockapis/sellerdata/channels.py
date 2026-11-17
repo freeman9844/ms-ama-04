@@ -127,5 +127,7 @@ def payouts(
     out = []
     for (paid_on, key), gross in sorted(acc.items()):
         gross_krw = int(gross)
+        if gross_krw == 0:
+            continue  # 판매정지로 주문이 0인 날만 묶인 지급은 만들지 않는다(0원 거래는 계약 위반)
         out.append(Payout(paid_on, channel.name, DESCRIPTIONS[key], channel.code, gross_krw, round(gross_krw * rate)))
     return out
