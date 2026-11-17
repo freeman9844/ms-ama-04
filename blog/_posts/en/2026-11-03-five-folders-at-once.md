@@ -10,19 +10,19 @@ summary: "Five folders had sessions on the same day. The live rehearsal found a 
 ---
 In the last entry I cut back things the agent had added; on the 3rd, what grew instead was the number of folders I had open. Five places had sessions that day: Attempt 3, Attempt 5, Attempt 6, Attempt 7 (which started that afternoon) and the main attempt. The log counts 61 commits and 58 tool failures across them. The records don't say why I kept all five going at once, so I won't guess. What they do show is how the day looked from my side of the keyboard.
 
-## What I set out to do
+## What I was trying to do
 
 Each folder had its own goal.
 
 - **The main attempt** had finished its documentation tasks and was ready for a live rehearsal on Azure: deploy, run a smoke test, then click through the two-minute demo script together.
-- **Attempt 6** had run a 17-task plan overnight through subagents and was moving on to a private-network deployment. Its final review at 1:42 a.m. had found five issues (three Critical) that every test missed, because the tests only used fakes.
+- **Attempt 6** had run its next plan, 17 tasks, overnight through subagents and was moving on to a private-network deployment. Its final review at 1:42 a.m. had found five issues (three Critical) that every test missed, because the tests only used fakes.
 - **Attempt 3** was deep in a single task about deleting cloud resources safely.
 - **Attempt 5** was a local demo, and I was asking it how it would look on Azure.
 - **Attempt 7** began at 1:41 p.m. by syncing a repository that held an earlier two-agent MVP. It used the same gpt-6-sol and Fabric F2 setup as Attempt 1, so I think it was that code.
 
 ## How I handed it to the agent
 
-Mostly with one word. Between 7:05 and 7:06 a.m. I answered four folders: "subagent" as the execution method in the main attempt, "go" in Attempt 3, "go" in Attempt 5, and "merge" for Attempt 6's finished branch. At 9:43 it happened again: "go" in Attempt 6, "current status?" in Attempt 5, "start now" for the main rehearsal, and "go" in Attempt 3 a minute later.
+Mostly with one word. Between 7:05 and 7:06 a.m. I answered four folders: "subagent" as the execution method in the main attempt, "go" in Attempt 3, "go" in Attempt 5, and "merge" for Attempt 6's finished branch. At 9:43 a.m. it happened again: "go" in Attempt 6, "current status?" in Attempt 5, "start now" for the main rehearsal, and "go" in Attempt 3 a minute later.
 
 Attempt 3 shows this rhythm most clearly. I typed "go" there six times that day, and each reply ended with nearly the same line: Task 4 is still in progress, and nothing was deployed to Azure.
 
@@ -32,11 +32,11 @@ The more interesting hand-offs were in the main attempt. When the agent proposed
 
 ## Where it went sideways
 
-**The console kept refusing me.** Partway through the deployment the agent stopped to tell me my PC's public IP had changed to what looked like a corporate VPN range, and that Azure still returned 403 even after it allowed the new address. I picked "reopen," and by 10:44 a.m. two IPs were on the console's allow list. At 1:12 p.m. I was back:
+**The console kept refusing me.** Partway through the deployment the agent stopped to tell me my PC's public IP had changed, and that Azure still returned 403 even after it allowed the new address. I picked "reopen," and by 10:44 a.m. two IPs were on the console's allow list. At 1:12 p.m. I was back:
 
 > "I'm getting a 403... check my IP and add it to the allow list."
 
-The cause, it said, was the office network's NAT: the outgoing IP kept changing. It allowed the two new addresses as temporary rules, opened the page five times in a row to check, and wrote the rules into its progress ledger so they'd be removed at cleanup.
+The cause, it said, was my network's NAT: the outgoing IP kept changing. It allowed the two new addresses as temporary rules, opened the page five times in a row to check, and wrote the rules into its progress ledger so they'd be removed at cleanup.
 
 **The rehearsal found a real bug, and I found it by clicking.** At 1:23 p.m. I wrote: "I tested it. Look at the most recent data." Nine minutes later the agent came back with a cause I don't think I'd have found on my own:
 

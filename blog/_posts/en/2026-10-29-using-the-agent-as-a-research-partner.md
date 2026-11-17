@@ -18,7 +18,7 @@ So for most of these two days I didn't ask for code. The five commits on the 29t
 
 ## How I handed it to the agent
 
-The first request, at 12:17, was short and had a typo in it:
+The first request, at 12:17 p.m., was short and had a typo in it:
 
 > "Please do some more analysis from a business point of view."
 
@@ -44,7 +44,7 @@ Every so often I typed "update the file" and the agent folded the recent discuss
 
 ## Where it went sideways
 
-**The research tools stumbled first.** Within six minutes of the first question on the 30th, three tool calls failed: a 504 from the GitHub tool, a web fetch that couldn't connect, and a timeout. The day before, a GitHub documentation page had returned 404. I don't think I noticed any of this at the time. The answer arrived at 11:36 anyway, and the saved file has source links. I can't tell from the records exactly which sources it finally reached.
+**The research tools stumbled first.** Within six minutes of the first question on the 30th, three tool calls failed: a 504 from the GitHub tool, a web fetch that couldn't connect, and a timeout. The day before, a GitHub documentation page had returned 404. I don't think I noticed any of this at the time. The answer arrived at 11:36 a.m. anyway, and the saved file has source links. I can't tell from the records exactly which sources it finally reached.
 
 **The agent kept narrowing my claims.** I think part of me hoped for "yes, this exists, go build it." Instead each answer came with a fence around it:
 
@@ -56,7 +56,7 @@ Every so often I typed "update the file" and the agent folded the recent discuss
 
 None of this was a failure. But it was not cheerleading.
 
-**One save may not have happened.** At 12:34 I asked it to update the file. A minute later, before any reply shows up in the records, I asked the next question about business value. The next save, at 13:18, reports adding the business-value analysis; the one after that, at 14:19, lists the gap analysis, differentiation, platform data access and peer comparison. Neither summary mentions the architecture comparison from 12:27. From the records alone I can't tell whether it ever made it into the file.
+**One save may not have happened.** At 12:34 p.m. I asked it to update the file. A minute later, before any reply shows up in the records, I asked the next question about business value. The next save, at 1:18 p.m., reports adding the business-value analysis; the one after that, at 2:19 p.m., lists the gap analysis, differentiation, platform data access and peer comparison. Neither summary mentions the architecture comparison from 12:27 p.m. From the records alone I can't tell whether it ever made it into the file.
 
 ## How I got past it
 

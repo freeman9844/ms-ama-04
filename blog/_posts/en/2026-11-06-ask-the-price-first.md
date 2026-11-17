@@ -32,7 +32,7 @@ I think that second appearance of the price is the useful part. The number wasn'
 
 The spec was committed at 1:13 a.m. While writing the plan, the agent flagged a conflict with its own spec: a tenant policy forces Key Vault public access off, so the certificate step as designed wouldn't work. It offered an alternative that keeps the private key off disk, and I picked it.
 
-The plan was finished at 7:53 a.m. with seven tasks, and I chose to run it with subagents: each task went to a fresh implementer agent, then to a fresh reviewer. Between 7:54 and 9:02, tasks 1–6 went through that loop. The reviewers found one Important issue in total: the docs' quick-start ran the smoke check before the gateway existed. It was fixed in one round, and 1,949 tests were passing.
+The plan was finished at 7:53 a.m. with seven tasks, and I chose to run it with subagents: each task went to a fresh implementer agent, then to a fresh reviewer. Between 7:54 and 9:02 a.m., tasks 1–6 went through that loop. The reviewers found one Important issue in total: the docs' quick-start ran the smoke check before the gateway existed. It was fixed in one round, and 1,949 tests were passing.
 
 ## Where it went sideways
 
@@ -42,11 +42,11 @@ Task 7 was the live rollout, which started by deleting the old console and its e
 
 **Then the internet couldn't get in.** The second run took 1,468 seconds. The gateway was running and its backend was healthy, yet ports 80 and 443 timed out from outside. A tenant policy had attached its own NSG to the subnet, because that subnet had none, and the NSG let in only the gateway management traffic. A temporary allow rule confirmed the cause, and the agent didn't leave it there: "without IaC the policy NSG would revert the fix." A second fix subagent made the subnet's NSG part of the Bicep. The third run took 479 seconds.
 
-My own IP then changed, so the WAF blocked me too until the allowed IP was updated. At 12:47 the next day, it happened again:
+My own IP then changed, so the WAF blocked me too until the allowed IP was updated. At 12:47 p.m. the next day, it happened again:
 
 > "I went into the console to test, and it doesn't work. Please check the IP and make the console accessible."
 
-There were two causes: my IP had changed again, and the gateway had been stopped at 00:52 by an identity outside our resource group. The agent guessed it was the tenant's cost-saving automation; I can't confirm that from my records. The gateway I had chosen to keep on all the time had been switched off overnight anyway.
+There were two causes: my IP had changed again, and the gateway had been stopped at 12:52 a.m. by an identity outside our resource group. The agent guessed it was the tenant's cost-saving automation; I can't confirm that from my records. The gateway I had chosen to keep on all the time had been switched off overnight anyway.
 
 **The cheaper model didn't work.** The same day I asked: "Please change the analysis agent to gpt-6.1 sol." The agent found that the GlobalStandard quota was already used up by other resources in the subscription, and listed the unit prices per million tokens: $2 in and $10 out for gpt-6.1-sol, $4 and $20 for gpt-5.6-sol. Then I noticed something odd in the console:
 

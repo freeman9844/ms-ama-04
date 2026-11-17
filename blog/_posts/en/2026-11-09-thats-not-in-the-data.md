@@ -18,7 +18,7 @@ Until the evening of the 10th, several of my messages show me clicking through s
 
 ## How I handed it to the agent
 
-At 10:06 I pasted the assistant's answer back to the agent:
+At 10:06 a.m. I pasted the assistant's answer back to the agent:
 
 > "I asked the review assistant about 'rate band A' and got: 'The rate band is shown as A (policy decision). However, the specific rate or criteria for band A are not in the data.' What more information would it need to answer properly?"
 
@@ -33,15 +33,15 @@ So the assistant had been honest. The gap was in what we had handed it.
 
 A minute later I followed up: "How do we make the review assistant able to answer questions about these policy decisions?" The agent sorted such questions into two kinds: what the rule says, and how it was applied to this case. It proposed passing both: the rule text for the version used, and a deterministic trace of the calculation. I typed "yes."
 
-Then came a choice before code. The policy engine was a separate service the console didn't import, so there were three routes: (A) copy the rule files and pure engine code into the console image, (B) store an explanation at decision time, or (C) call a new policy API. The agent recommended A and named its cost: it weakens the separation between console and policy package. B would mean redeploying three components and couldn't explain past decisions. I picked A. The spec came at 10:12, I typed "approve" at 10:13, and a four-task plan followed, run directly this time because the tasks were few and in order.
+Then came a choice before code. The policy engine was a separate service the console didn't import, so there were three routes: (A) copy the rule files and pure engine code into the console image, (B) store an explanation at decision time, or (C) call a new policy API. The agent recommended A and named its cost: it weakens the separation between console and policy package. B would mean redeploying three components and couldn't explain past decisions. I picked A. The spec came at 10:12 a.m., I typed "approve" a minute later, and a four-task plan followed, run directly this time because the tasks were few and in order.
 
 One rule in the spec stood out. If recomputing a decision disagrees with the stored one, the chat drops the trace and says why, because that beats showing wrong reasoning. Per-band rates stayed out of scope, so for those the chat would keep saying "not in the data."
 
 ## Where it went sideways
 
-**A rule file had changed under the same name.** Before the deploy, the log shows an English brief I never typed, sent to a "final whole-branch reviewer." It found one issue: on 11/04 a ruleset had been edited in place, changing the product's amount limits but keeping its version label. An old decision would have been "explained" with limits never applied to it. The 10:32 fix stops explaining those old decisions. Live, all four questions got answers. Band B was explained from a DSCR of 1.76 and the v3 table. The real rate per band was still "not in the data", and now that answer was the whole truth.
+**A rule file had changed under the same name.** Before the deploy, the log shows an English brief I never typed, sent to a "final whole-branch reviewer." It found one issue: on 11/04 a ruleset had been edited in place, changing the product's amount limits but keeping its version label. An old decision would have been "explained" with limits never applied to it. The 10:32 a.m. fix stops explaining those old decisions. Live, all four questions got answers. Band B was explained from a DSCR of 1.76 and the v3 table. The real rate per band was still "not in the data", and now that answer was the whole truth.
 
-**The alert said "high"; the card said "no contact."** In the afternoon I pointed at one loan: the alert was high, "but neither a hardship offer nor a regular missed-payment notice went out?" The agent checked. A hardship offer *had* gone out at 16:13, after the third instalment was missed, but it was recorded on the collections card further down. The early-warning card, by design, always said "for officer review · no contact with borrower."
+**The alert said "high"; the card said "no contact."** In the afternoon I pointed at one loan: the alert was high, "but neither a hardship offer nor a regular missed-payment notice went out?" The agent checked. A hardship offer *had* gone out at 4:13 p.m., after the third instalment was missed, but it was recorded on the collections card further down. The early-warning card, by design, always said "for officer review · no contact with borrower."
 
 Each card was correct on its own, and together they told the reader something false. I wrote back:
 
@@ -51,7 +51,7 @@ Each card was correct on its own, and together they told the reader something fa
 
 ## How I got past it
 
-**For the alert card, a real choice.** The agent took my "L4" at face value and turned it into options. A, display only: keep the behaviour, link the contact to the alert behind it, and fix the "no contact" wording. B, L4 autonomous action: the early-warning agent contacts borrowers itself, even with no missed payment, with more write permissions and revised specs. I picked A. The records don't say why; I can only note that I had just claimed L4 autonomy and then chose not to build it. At 16:51 the high alert card showed the chain: missed instalment → collections agent → hardship offer sent → rescheduling request waiting for the officer.
+**For the alert card, a real choice.** The agent took my "L4" at face value and turned it into options. A, display only: keep the behaviour, link the contact to the alert behind it, and fix the "no contact" wording. B, L4 autonomous action: the early-warning agent contacts borrowers itself, even with no missed payment, with more write permissions and revised specs. I picked A. The records don't say why; I can only note that I had just claimed L4 autonomy and then chose not to build it. At 4:51 p.m. the high alert card showed the chain: missed instalment → collections agent → hardship offer sent → rescheduling request waiting for the officer.
 
 **For settlement, I narrowed and let the agent decide the small things.** I wrote "Do 1–3 first." The agent listed decisions it had already made, for me to override: three new metrics in the deterministic ledger code, and policy kept at v3, since changing it would shift every existing evaluation's expected values. It asked only where the agent's recommendations should live. I answered "B". From the spec that followed, I think that meant a field of up to three officer checks, each with evidence.
 
@@ -59,9 +59,9 @@ Before showing me the spec, the agent had a separate reviewer read it. The brief
 
 > "You will not be able to talk to the person who wrote it. … Report only the questions you'd still need answered before you could plan this well."
 
-The reviewer came back with three questions. The agent answered them in the spec and listed its answers for me to check. I said "yes."
+The agent answered the reviewer's three questions in the spec and listed its answers for me to check. I said "yes."
 
-The plan had nine tasks, and this time the agent recommended subagents, because the tasks leaned on each other's interfaces. Each task went to an implementer, then a task reviewer. Three tasks needed one fix round. The Task 3 review found a Critical: a new required field broke two orchestrator tests outside the diff. The Task 4 brief then carried it forward as an "Important regression lesson from Task 3." The final whole-branch review said "with fixes": one metric counted settlements where the spec said amounts, the docs pointed to the wrong tab, and one analyst instruction was missing. After a fix wave and a re-review, 2,896 tests passed, plus one known, unrelated docs failure. At 23:47 the agent asked before deploying and pushing, and I approved.
+The plan had nine tasks, and this time the agent recommended subagents, because the tasks leaned on each other's interfaces. Each task went to an implementer, then a task reviewer. Three tasks needed one fix round. The Task 3 review found a Critical: a new required field broke two orchestrator tests outside the diff. The Task 4 brief then carried it forward as an "Important regression lesson from Task 3." The final whole-branch review said "with fixes": one metric counted settlements where the spec said amounts, the docs pointed to the wrong tab, and one analyst instruction was missing. After a fix wave and a re-review, a run over seven test folders (not the whole suite) passed 2,896 tests, plus one known, unrelated docs failure. At 11:47 p.m. the agent asked before deploying and pushing, and I approved.
 
 **Two smaller moments on the 10th also put understanding before building.** For a "no NSG" security warning, the agent found the cause before adding anything: four subnets had no NSG in our Bicep, so a tenant policy kept attaching empty ones. It added our own NSGs with default rules only and deleted the orphans. And when I asked about moving JSON processing to a Fabric medallion pipeline, it advised against putting Fabric on the real-time path and suggested a read-only analytics layer instead. Nothing was built.
 

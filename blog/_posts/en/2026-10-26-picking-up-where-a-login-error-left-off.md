@@ -55,7 +55,7 @@ For the rest of the evening, my side of the conversation was mostly that word. S
 
 1. A resource list: a dedicated resource group, a Foundry account and project, a gpt-6-sol deployment at 50,000 TPM, a Fabric F2 capacity, and the items to bootstrap inside it. It gave rough prices (about $0.42 an hour for the F2, plus per-million-token model prices) and said this approval was *not* approval to deploy.
 2. A detailed plan, with the F2 cost for a four-hour demo (about $1.68) and for leaving it on all month (about $306.60). I approved generating Bicep and validating it locally, nothing more.
-3. Bicep compiled, `what-if` showed six new resources and no changes to anything existing, and a Checkov scan passed with one warning: the public development endpoint I had already accepted. It noted that it hadn't hidden the warning.
+3. Bicep compiled, `what-if` showed six new resources and no changes to anything existing, and a Checkov scan showed two passes and one warning: the public development endpoint I had already accepted. It noted that it hadn't hidden the warning.
 4. Installing ODBC Driver 18 on my Windows machine got its own question, because it changes a shared system.
 5. Only then, the paid deployment. I approved it with one word: "approve."
 

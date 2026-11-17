@@ -16,7 +16,7 @@ In Attempt 7, the plan was to grow the existing lending MVP into a consent-first
 
 Just after midnight I asked a checking question: "Is the current work an improvement that includes the existing MVP, or a new build that ignores it?" The answer was clear: "a phased improvement built on the existing MVP." The screens, chat, data and deployment would be kept. The new parts were consent, withdrawal and deletion, plus a durable base for running agents. I replied, "Yes, go."
 
-Then came the morning. Between 08:01 and 12:53 I sent "go" five times. Each time a short report came back: a commit and what had been added, most of them with a line saying no real Azure changes had been made. There were two approval prompts along the way. First, whether to install x86 emulation in WSL, which changes my system (I approved). Then, when the image build ran into an emulator conflict and Podman limits, whether to allow more system changes. I chose to continue with code only.
+Then came the morning. Between 8:01 a.m. and 12:53 p.m. I sent "go" five times. Each time a short report came back: a commit and what had been added, most of them with a line saying no real Azure changes had been made. There were two approval prompts along the way. First, whether to install x86 emulation in WSL, which changes my system (I approved). Then, when the image build ran into an emulator conflict and Podman limits, whether to allow more system changes. I chose to continue with code only.
 
 The reports covered Fabric provisioning, deployment and publishing CLIs, SQL bootstrap, model budgets, and an image check. Each sounded reasonable on its own. I think that is exactly why I didn't see the total.
 
