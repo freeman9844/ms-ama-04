@@ -21,6 +21,7 @@ class ConsentScope(StrEnum):
     ACCOUNT = "account"
     TAX = "tax"
     PG = "pg"
+    MARKETPLACE = "marketplace"
 
 
 class ConsentGrant(Contract):
@@ -128,6 +129,45 @@ class PgFlow(Contract):
     orders: tuple[PgOrderDay, ...] = ()
 
 
+class StorePlatform(Contract):
+    """마켓 플랫폼 1곳의 셀러 성과 요약(최근 90일)."""
+
+    platform: str = Field(min_length=1)
+    opened_on: date
+    rating: float = Field(ge=1.0, le=5.0, allow_inf_nan=False)
+    review_count: int = Field(ge=0)
+    orders_90d: int = Field(ge=0)
+    gross_90d_krw: int = Field(ge=0)
+    cancel_90d_krw: int = Field(ge=0)
+    return_90d_krw: int = Field(ge=0)
+    seller_grade: str
+    pending_settlement_krw: int = Field(ge=0)
+    assigned_pending_krw: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _amounts(self) -> "StorePlatform":
+        if self.cancel_90d_krw + self.return_90d_krw > self.gross_90d_krw:
+            raise ValueError("cancel_90d_krw + return_90d_krw는 gross_90d_krw 이하여야 한다")
+        if self.assigned_pending_krw > self.pending_settlement_krw:
+            raise ValueError("assigned_pending_krw는 pending_settlement_krw 이하여야 한다")
+        return self
+
+
+class StorePenalty(Contract):
+    """플랫폼 제재 이력. 자유 서술 사유는 받지 않는다."""
+
+    platform: str
+    occurred_on: date
+    kind: Literal["suspension", "warning"]
+
+
+class MarketplaceStore(Contract):
+    schema_version: SchemaV1 = "1"
+    as_of: date
+    platforms: tuple[StorePlatform, ...] = ()
+    penalties: tuple[StorePenalty, ...] = ()
+
+
 class CashFlowFeatures(Contract):
     """Underwriting이 산출해 Policy Engine에 넘기는 특성 벡터.
 
@@ -154,6 +194,25 @@ class CashFlowFeatures(Contract):
     high_cost_lender_count: int | None = Field(default=None, ge=0)
     pg_reconciliation_ratio: Annotated[float, Field(ge=0, le=1)] | None = None
     pg_top_platform_share: Annotated[float, Field(ge=0, le=1)] | None = None
+    # 정책 v4 마켓 셀러 성과 지표. 마켓 동의·자료가 없으면 None이다.
+    mkt_tenure_months: int | None = Field(default=None, ge=0)
+    mkt_rating: float | None = Field(default=None, ge=1, le=5, allow_inf_nan=False)
+    mkt_review_count: int | None = Field(default=None, ge=0)
+    mkt_return_rate_90d: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    mkt_cancel_rate_90d: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    mkt_days_since_suspension: int | None = Field(default=None, ge=0)
+    mkt_pending_settlement_krw: int | None = Field(default=None, ge=0)
+
+
+MKT_FEATURES: tuple[str, ...] = (
+    "mkt_tenure_months",
+    "mkt_rating",
+    "mkt_review_count",
+    "mkt_return_rate_90d",
+    "mkt_cancel_rate_90d",
+    "mkt_days_since_suspension",
+    "mkt_pending_settlement_krw",
+)
 
 
 class Decision(StrEnum):
@@ -163,11 +222,19 @@ class Decision(StrEnum):
 
 
 class ReasonCode(Contract):
-    code: str = Field(pattern=r"^R\d{3}$")
+    code: str = Field(pattern=r"^[RS]\d{3}$")
     message: str
     field: str | None = None
     observed: float | None = None
     threshold: float | None = None
+
+
+class CashOnlyDecision(Contract):
+    """마켓 자료를 빼고 현금흐름만으로 낸 비교 판정."""
+
+    decision: Decision
+    max_amount_krw: int = Field(ge=0)
+    reason_codes: tuple[ReasonCode, ...]
 
 
 class PolicyDecision(Contract):
@@ -178,6 +245,7 @@ class PolicyDecision(Contract):
     rate_band: str | None
     reason_codes: tuple[ReasonCode, ...]
     rules_version: str = Field(min_length=1)
+    cash_only: CashOnlyDecision | None = None
 
     @model_validator(mode="after")
     def _invariants(self) -> "PolicyDecision":

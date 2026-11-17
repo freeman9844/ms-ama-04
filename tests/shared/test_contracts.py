@@ -14,6 +14,8 @@ from shared.contracts import (
     ConsentScope,
     CreditAssessment,
     Decision,
+    MKT_FEATURES,
+    MarketplaceStore,
     OfficerCheck,
     PgFlow,
     PgOrderDay,
@@ -23,6 +25,8 @@ from shared.contracts import (
     ReasonCode,
     Recommendation,
     ReviewOutcome,
+    StorePenalty,
+    StorePlatform,
     TaxFiling,
     Transaction,
 )
@@ -382,3 +386,83 @@ def test_cash_flow_features_v3_fields_optional_and_bounded():
         f.model_validate(f.model_dump() | {"pg_top_platform_share": 1.2})
     with pytest.raises(ValidationError):
         f.model_validate(f.model_dump() | {"high_cost_lender_count": -1})
+
+
+PLATFORM = dict(
+    platform="쿠팡",
+    opened_on=date(2023, 3, 1),
+    rating=4.6,
+    review_count=320,
+    orders_90d=900,
+    gross_90d_krw=45_000_000,
+    cancel_90d_krw=1_000_000,
+    return_90d_krw=2_000_000,
+    seller_grade="골드",
+    pending_settlement_krw=5_000_000,
+    assigned_pending_krw=0,
+)
+
+ELIGIBLE = dict(
+    application_id="app-1",
+    decision=Decision.ELIGIBLE,
+    max_amount_krw=10_000_000,
+    rate_band="B",
+    reason_codes=(),
+    rules_version="v",
+)
+
+
+def test_marketplace_scope_and_store_round_trip():
+    assert ConsentScope.MARKETPLACE == "marketplace"
+    store = MarketplaceStore(
+        as_of=date(2026, 11, 1),
+        platforms=(StorePlatform(**PLATFORM),),
+        penalties=(StorePenalty(platform="쿠팡", occurred_on=date(2026, 10, 1), kind="warning"),),
+    )
+    assert MarketplaceStore.model_validate_json(store.model_dump_json()) == store
+    assert MarketplaceStore(as_of=date(2026, 11, 1)).platforms == ()
+
+
+def test_marketplace_store_rejects_free_text_penalty_reason():
+    with pytest.raises(ValidationError):
+        StorePenalty(platform="쿠팡", occurred_on=date(2026, 10, 1), kind="suspension", reason="x")
+    with pytest.raises(ValidationError):
+        StorePenalty(platform="쿠팡", occurred_on=date(2026, 10, 1), kind="fine")
+
+
+def test_store_platform_assigned_le_pending():
+    with pytest.raises(ValidationError):
+        StorePlatform(**PLATFORM | {"pending_settlement_krw": 100, "assigned_pending_krw": 101})
+
+
+def test_store_platform_cancel_plus_return_le_gross():
+    StorePlatform(**PLATFORM | {"gross_90d_krw": 3_000_000})
+    with pytest.raises(ValidationError):
+        StorePlatform(**PLATFORM | {"gross_90d_krw": 2_999_999})
+    with pytest.raises(ValidationError):
+        StorePlatform(**PLATFORM | {"rating": 5.1})
+
+
+def test_features_mkt_fields_default_none_and_strict():
+    f = _features()
+    assert all(getattr(f, k) is None for k in MKT_FEATURES) and len(MKT_FEATURES) == 7
+    with pytest.raises(ValidationError):
+        _features(mkt_rating="4.5")
+    with pytest.raises(ValidationError):
+        _features(mkt_cancel_rate_90d=1.1)
+
+
+def test_reason_code_accepts_substitution_code():
+    assert ReasonCode(code="S001", message="m").code == "S001"
+    with pytest.raises(ValidationError):
+        ReasonCode(code="X001", message="m")
+
+
+def test_policy_decision_cash_only_optional():
+    d = PolicyDecision(**ELIGIBLE)
+    assert d.cash_only is None
+    d2 = PolicyDecision(
+        **ELIGIBLE,
+        cash_only={"decision": "ineligible", "max_amount_krw": 0, "reason_codes": [{"code": "R001", "message": "m"}]},
+    )
+    assert d2.cash_only.decision is Decision.INELIGIBLE
