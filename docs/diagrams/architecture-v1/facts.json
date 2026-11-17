@@ -1,0 +1,258 @@
+{
+  "nodes": [
+    {
+      "id": "EXT-USER",
+      "label": "사용자 — 심사역 · 고객(셀러) · 운영자"
+    },
+    {
+      "id": "EXT-INET",
+      "label": "Internet / Public DNS"
+    },
+    {
+      "id": "EXT-ENTRA",
+      "label": "Microsoft Entra ID"
+    },
+    {
+      "id": "EXT-OPS",
+      "label": "운영자 배포 창 (ops window)"
+    },
+    {
+      "id": "EXT-PROV",
+      "label": "외부 데이터 제공기관 (운영 전환 대상)"
+    },
+    {
+      "id": "ING-PIP",
+      "label": "Public IP ×1"
+    },
+    {
+      "id": "ING-APPGW",
+      "label": "Application Gateway WAF v2 ×1"
+    },
+    {
+      "id": "M-DNS",
+      "label": "Private DNS Zone ×15"
+    },
+    {
+      "id": "M-MI",
+      "label": "Managed Identity ×7"
+    },
+    {
+      "id": "M-NSG",
+      "label": "NSG ×6 (서브넷별)"
+    },
+    {
+      "id": "ACA-ENV",
+      "label": "Container Apps 환경 (internal) ×1"
+    },
+    {
+      "id": "ACA-CONSOLE",
+      "label": "Officer Console ×1"
+    },
+    {
+      "id": "ACA-POLICY",
+      "label": "Policy Engine ×1"
+    },
+    {
+      "id": "ACA-MOCK",
+      "label": "Mock API ×1 (외부 기관 대역)"
+    },
+    {
+      "id": "ACA-JOBS",
+      "label": "Container Apps Job ×3"
+    },
+    {
+      "id": "FN-ORCH",
+      "label": "Azure Functions Flex Consumption ×1"
+    },
+    {
+      "id": "AI-APIM",
+      "label": "API Management (AI 게이트웨이) ×1"
+    },
+    {
+      "id": "AI-FOUNDRY",
+      "label": "Microsoft Foundry Agent Service ×1"
+    },
+    {
+      "id": "AI-MODELS",
+      "label": "모델 배포 (Global Standard) ×7"
+    },
+    {
+      "id": "AI-SEARCH",
+      "label": "Azure AI Search Basic ×1"
+    },
+    {
+      "id": "OPS-ACR",
+      "label": "Container Registry ×1"
+    },
+    {
+      "id": "OPS-OBS",
+      "label": "Log Analytics + Application Insights ×1"
+    },
+    {
+      "id": "PE-ALL",
+      "label": "Private Endpoint ×11"
+    },
+    {
+      "id": "D-COSMOS",
+      "label": "Azure Cosmos DB for NoSQL ×1"
+    },
+    {
+      "id": "D-ST",
+      "label": "Storage Account ×3"
+    },
+    {
+      "id": "D-SB",
+      "label": "Service Bus Premium ×1 (평상시 pause)"
+    },
+    {
+      "id": "D-KV",
+      "label": "Key Vault ×1"
+    }
+  ],
+  "edges": [
+    {
+      "no": 1,
+      "from": "EXT-USER",
+      "to": "EXT-INET",
+      "label": "HTTPS"
+    },
+    {
+      "no": 2,
+      "from": "EXT-INET",
+      "to": "ING-APPGW",
+      "label": "HTTPS 443 · WAF(운영자 IP만)"
+    },
+    {
+      "no": 3,
+      "from": "ING-APPGW",
+      "to": "ACA-CONSOLE",
+      "label": "백엔드 HTTPS · /healthz"
+    },
+    {
+      "no": 4,
+      "from": "ACA-CONSOLE",
+      "to": "D-ST",
+      "label": "명령 큐(applications-start 등) · PE"
+    },
+    {
+      "no": 5,
+      "from": "D-ST",
+      "to": "FN-ORCH",
+      "label": "큐 트리거 · Durable 상태"
+    },
+    {
+      "no": 6,
+      "from": "ACA-CONSOLE",
+      "to": "D-COSMOS",
+      "label": "읽기 · 저장 번역 조회 · PE"
+    },
+    {
+      "no": 7,
+      "from": "FN-ORCH",
+      "to": "D-COSMOS",
+      "label": "단계 스냅샷 저장 · 변경 피드"
+    },
+    {
+      "no": 8,
+      "from": "FN-ORCH",
+      "to": "AI-FOUNDRY",
+      "label": "에이전트 실행 · 도구는 오케스트레이터가 실행"
+    },
+    {
+      "no": 9,
+      "from": "AI-FOUNDRY",
+      "to": "AI-APIM",
+      "label": "모델 호출(BYOM gw-*)"
+    },
+    {
+      "no": 10,
+      "from": "AI-APIM",
+      "to": "AI-MODELS",
+      "label": "MI 인증 · 토큰 한도"
+    },
+    {
+      "no": 11,
+      "from": "FN-ORCH",
+      "to": "AI-APIM",
+      "label": "거래 분류 Decision-1"
+    },
+    {
+      "no": 12,
+      "from": "FN-ORCH",
+      "to": "ACA-POLICY",
+      "label": "정책 판정(fail-closed)"
+    },
+    {
+      "no": 13,
+      "from": "FN-ORCH",
+      "to": "ACA-MOCK",
+      "label": "동의 발급 · Bearer 토큰 원천 조회"
+    },
+    {
+      "no": 14,
+      "from": "ACA-CONSOLE",
+      "to": "AI-FOUNDRY",
+      "label": "심사역 채팅 · 번역(가명 문구만)"
+    },
+    {
+      "no": 15,
+      "from": "FN-ORCH",
+      "to": "D-ST",
+      "label": "원천 데이터 Blob · PE"
+    },
+    {
+      "no": 16,
+      "from": "FN-ORCH",
+      "to": "D-SB",
+      "label": "사후 이벤트(활성 시)"
+    },
+    {
+      "no": 17,
+      "from": "FN-ORCH",
+      "to": "D-KV",
+      "label": "비밀 조회 · PE"
+    },
+    {
+      "no": 18,
+      "from": "AI-FOUNDRY",
+      "to": "AI-SEARCH",
+      "label": "벡터 저장소"
+    },
+    {
+      "no": 19,
+      "from": "OPS-ACR",
+      "to": "ACA-ENV",
+      "label": "이미지 pull(AcrPull)"
+    },
+    {
+      "no": 20,
+      "from": "ACA-ENV",
+      "to": "OPS-OBS",
+      "label": "진단 로그 · OpenTelemetry"
+    },
+    {
+      "no": 21,
+      "from": "ING-APPGW",
+      "to": "D-KV",
+      "label": "TLS 인증서(id-appgw)"
+    },
+    {
+      "no": 22,
+      "from": "EXT-OPS",
+      "to": "FN-ORCH",
+      "label": "배포 창: 운영자 IP만 일시 허용"
+    },
+    {
+      "no": 23,
+      "from": "M-MI",
+      "to": "EXT-ENTRA",
+      "label": "관리 ID 토큰"
+    },
+    {
+      "no": 24,
+      "from": "AI-FOUNDRY",
+      "to": "D-ST",
+      "label": "에이전트 파일(stagt)"
+    }
+  ]
+}

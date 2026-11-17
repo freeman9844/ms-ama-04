@@ -1,0 +1,40 @@
+{
+  "status": "IMAGE_RECEIVED_VERIFIED",
+  "at": "2026-11-16T10:29:19.053969+00:00",
+  "endpoint": "https://jwlee-foundry-eastus2-001.openai.azure.com/openai/v1/images/generations",
+  "parameters": {
+    "model": "gpt-image-2.5-sunburst",
+    "n": 1,
+    "size": "2560x1440",
+    "quality": "high",
+    "output_format": "png"
+  },
+  "prompt_sha256": "b814a34dd842d2540cf622d57f2742575361f0688b808b1eef2400eaf0474c4f",
+  "spec_sha256": "9e304ec505c1ad63ae850ca1a486fe4bda1874aeeb6f658ddce365e240571045",
+  "spec_author": "MainAgent code (write_spec_en.py / write_spec_v3_en.py per output dir), not a model",
+  "references": [],
+  "reference_note": "No reference image: the v8 sample image is not available on this PC; plain generations call",
+  "http_status": 200,
+  "client_request_id": "708e06bf-19e7-472d-9fb9-a34c3f2f17de",
+  "server_request_id": "821fe62b-d0ca-4d57-b00b-cd9cae30fa66",
+  "dimensions": [
+    2560,
+    1440
+  ],
+  "bytes": 3678725,
+  "sha256": "a99b2cc40dd2d0f423a9b36104a2d57477cf4552851bd3e6284580bc3b11f4fa",
+  "usage": {
+    "input_tokens": 4882,
+    "input_tokens_details": {
+      "image_tokens": 0,
+      "text_tokens": 4882
+    },
+    "output_tokens": 1843,
+    "output_tokens_details": {
+      "image_tokens": 1843,
+      "text_tokens": 0
+    },
+    "total_tokens": 6725
+  },
+  "postprocessed": false
+}

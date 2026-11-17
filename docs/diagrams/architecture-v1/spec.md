@@ -1,0 +1,88 @@
+# 상세 작도 명세 — AMALend 에이전트 현금흐름 대출 as-built 아키텍처 (한 장, 세로 3티어)
+
+- 작성: MainAgent 코드(모델이 작성하지 않음). 근거: 라이브 리소스 목록(rg-amalend), docs/architecture.md, docs/agents.md, infra/resources.bicep.
+- 도면 종류: 단일 리전 상세도 · 상태: 배포 완료(as-built, 데모 운영) · 범위: Korea Central 한 리전, 리소스 그룹 rg-amalend.
+- 고정 개수: 객체 27개 · 연결 24개. 목록 밖 객체·연결을 추가하거나 빼지 않는다.
+- 금지: Virtual WAN, Azure Firewall, VPN Gateway, ExpressRoute, AKS, SQL Database, Event Hub, Databricks, 다른 리전(이 시스템에는 없음). AS-IS/TO-BE/DEV/PRD 라벨, 내부 파일 경로, 말줄임표(…).
+
+## 1. 객체 (고정)
+- **EXT-USER** | “사용자 — 심사역 · 고객(셀러) · 운영자” | 구역 Z2 | 브라우저 · 운영자 공인 IP에서만 접속 / /apply 고객 신청 · 심사역 콘솔 · 차주 시뮬레이터
+- **EXT-INET** | “Internet / Public DNS” | 구역 Z2 | amalend-*.koreacentral.cloudapp.azure.com / HTTPS 443 · 유일한 공개 진입점
+- **EXT-ENTRA** | “Microsoft Entra ID” | 구역 Z2 | 관리 ID 토큰 · RBAC(무키 인증) / 데모: Easy Auth 꺼짐 / 운영: 로그인 복원
+- **EXT-OPS** | “운영자 배포 창 (ops window)” | 구역 Z2 | azd · ops deploy/smoke/eval / 작업 중에만 운영자 IP 허용 후 다시 닫음
+- **EXT-PROV** | “외부 데이터 제공기관 (운영 전환 대상)” | 구역 Z2 | 마이데이터 사업자 · 홈택스 · PG사 / 데모에서는 Mock API가 대역
+- **ING-PIP** | “Public IP ×1” | 구역 T1 | pip-agw-amalend · DNS 레이블
+- **ING-APPGW** | “Application Gateway WAF v2 ×1” | 구역 T1 | agw-amalend · snet-appgw 192.168.7.0/24 / WAF 정책 waf-amalend: Prevention · OWASP DRS 2.1 / allowOperatorOnly(운영자 IP만) · 자동 확장 0–2 / HTTP→HTTPS 리디렉션 · 백엔드 HTTPS /healthz
+- **M-DNS** | “Private DNS Zone ×15” | 구역 T1 | privatelink.* (cosmos·blob·queue·table·vault / ·search·cognitiveservices·openai·services.ai / ·azurecr·servicebus·azurewebsites) + APIM · ACA
+- **M-MI** | “Managed Identity ×7” | 구역 T1 | id-orch · id-console · id-apps · id-appgw / id-smoke · id-eval · id-ops
+- **M-NSG** | “NSG ×6 (서브넷별)” | 구역 T1 | nsg-appgw · nsg-apim · nsg-agents / nsg-pe · nsg-functions · nsg-apps-int
+- **ACA-ENV** | “Container Apps 환경 (internal) ×1” | 구역 T2 | cae-int-amalend · snet-apps-int 192.168.4.0/24
+- **ACA-CONSOLE** | “Officer Console ×1” | 구역 T2 | ca-console · FastAPI + HTMX · 국문/영문 / 심사 상세·승인/거절·사후 재생·추심 승인 / 심사역 채팅 · 영문 화면 번역
+- **ACA-POLICY** | “Policy Engine ×1” | 구역 T2 | ca-policy · 결정론적 YAML 규칙 v3 / 자격·한도·금리 구간 · fail-closed
+- **ACA-MOCK** | “Mock API ×1 (외부 기관 대역)” | 구역 T2 | ca-mockapi · 동의 발급·철회(HMAC 토큰) / /mydata · /tax · /pg 합성 원천 · 장애 주입
+- **ACA-JOBS** | “Container Apps Job ×3” | 구역 T2 | job-smoke · job-eval · job-ops / 배포 후 스모크 · 평가 · 운영 리포트
+- **FN-ORCH** | “Azure Functions Flex Consumption ×1” | 구역 T2 | func-gaz7yh2zic7zc · plan-amalend(FC1) · snet-functions 192.168.2.0/26 / Journey Orchestrator — Durable Functions 상태 그래프 / 동의→수집→분류→심사 지표→정책→신용 평가→심사역 대기(HITL) / 사후: 조기경보 · 상환 원장 · 추심 · 동의 수명주기 · 이의 / 변경 피드 트리거 pretranslate ×4 (영문 사전 번역)
+- **AI-APIM** | “API Management (AI 게이트웨이) ×1” | 구역 T2 | apim-gaz7yh2zic7zc · Developer · 내부 VNet 모드 / snet-apim 192.168.6.0/27 · 공인 IP 없음 / Prompt Shields → 에이전트별 TPM → MI 인증 → 토큰 지표 / Foundry BYOM 연결 gw-* · Decision-1 API
+- **AI-FOUNDRY** | “Microsoft Foundry Agent Service ×1” | 구역 T2 | ais-gaz7yh2zic7zc / 프로젝트 proj-lending / standard setup · capability host · snet-agents 192.168.0.0/24 / 에이전트 10종: data-assembly · txn-classifier / underwriting-analyst ↔ reviewer · early-warning / collections · consent-notice · grievance-reply / officer-assistant · console-translator
+- **AI-MODELS** | “모델 배포 (Global Standard) ×7” | 구역 T2 | gpt-5.6-sol(분석가·평가) · gpt-5.6-luna(소형) / gpt-6-luna(채팅·번역) · decision-1(거래 분류) / gpt-5.4 · gpt-5.4-mini · gpt-6.1-sol
+- **AI-SEARCH** | “Azure AI Search Basic ×1” | 구역 T2 | srch-gaz7yh2zic7zc · 지식 인덱스 / Foundry 벡터 저장소
+- **OPS-ACR** | “Container Registry ×1” | 구역 T2 | acrgaz7yh2zic7zc · 콘솔·Policy·Mock·Job 이미지
+- **OPS-OBS** | “Log Analytics + Application Insights ×1” | 구역 T2 | log-amalend · appi-amalend / AGWAccessLogs · AGWFirewallLogs · 워크북 / 경보 규칙 2개(정책 서킷·에이전트 단계 실패)
+- **PE-ALL** | “Private Endpoint ×11” | 구역 PE | snet-pe 192.168.1.0/24 / Cosmos · Blob×3 · Queue · Table · Key Vault / AI Search · Foundry · ACR · Functions
+- **D-COSMOS** | “Azure Cosmos DB for NoSQL ×1” | 구역 T3 | cosmos-gaz7yh2zic7zc · DB lending · 컨테이너 10개 / applications · consents · classifications · loans / alerts · deletion_proofs · grievances / translations · leases (변경 피드)
+- **D-ST** | “Storage Account ×3” | 구역 T3 | stdat: 원천 데이터·평가 리포트(Blob) / stfn: 큐 8개·Durable 상태(Queue·Table·Blob) / stagt: Foundry 에이전트 파일(Blob)
+- **D-SB** | “Service Bus Premium ×1 (평상시 pause)” | 구역 T3 | 토픽: consent · flow.updated · alert.raised / repayment.updated · grievance · 세션·중복 감지 / 평상시 삭제 → monitoring-replay 큐로 대체
+- **D-KV** | “Key Vault ×1” | 구역 KV | kvgaz7yh2zic7zc / AppGW 인증서 · Mock 동의 서명 비밀
+
+## 2. 연결 (고정, 각 한 번, 직각선, 선마다 번호 배지 하나 = 연결 번호)
+- 1번 | EXT-USER(사용자 — 심사역 · 고객(셀러) · 운영자) → EXT-INET(Internet / Public DNS) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “HTTPS”
+- 2번 | EXT-INET(Internet / Public DNS) → ING-APPGW(Application Gateway WAF v2 ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “HTTPS 443 · WAF(운영자 IP만)”
+- 3번 | ING-APPGW(Application Gateway WAF v2 ×1) → ACA-CONSOLE(Officer Console ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “백엔드 HTTPS · /healthz”
+- 4번 | ACA-CONSOLE(Officer Console ×1) → D-ST(Storage Account ×3) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “명령 큐(applications-start 등) · PE”
+- 5번 | D-ST(Storage Account ×3) → FN-ORCH(Azure Functions Flex Consumption ×1) | 보라 #7030A0 실선(양방향) · 양방향 | 캡슐 “큐 트리거 · Durable 상태”
+- 6번 | ACA-CONSOLE(Officer Console ×1) → D-COSMOS(Azure Cosmos DB for NoSQL ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “읽기 · 저장 번역 조회 · PE”
+- 7번 | FN-ORCH(Azure Functions Flex Consumption ×1) → D-COSMOS(Azure Cosmos DB for NoSQL ×1) | 보라 #7030A0 실선(양방향) · 양방향 | 캡슐 “단계 스냅샷 저장 · 변경 피드”
+- 8번 | FN-ORCH(Azure Functions Flex Consumption ×1) → AI-FOUNDRY(Microsoft Foundry Agent Service ×1) | 보라 #7030A0 실선(양방향) · 양방향 | 캡슐 “에이전트 실행 · 도구는 오케스트레이터가 실행”
+- 9번 | AI-FOUNDRY(Microsoft Foundry Agent Service ×1) → AI-APIM(API Management (AI 게이트웨이) ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “모델 호출(BYOM gw-*)”
+- 10번 | AI-APIM(API Management (AI 게이트웨이) ×1) → AI-MODELS(모델 배포 (Global Standard) ×7) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “MI 인증 · 토큰 한도”
+- 11번 | FN-ORCH(Azure Functions Flex Consumption ×1) → AI-APIM(API Management (AI 게이트웨이) ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “거래 분류 Decision-1”
+- 12번 | FN-ORCH(Azure Functions Flex Consumption ×1) → ACA-POLICY(Policy Engine ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “정책 판정(fail-closed)”
+- 13번 | FN-ORCH(Azure Functions Flex Consumption ×1) → ACA-MOCK(Mock API ×1 (외부 기관 대역)) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “동의 발급 · Bearer 토큰 원천 조회”
+- 14번 | ACA-CONSOLE(Officer Console ×1) → AI-FOUNDRY(Microsoft Foundry Agent Service ×1) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “심사역 채팅 · 번역(가명 문구만)”
+- 15번 | FN-ORCH(Azure Functions Flex Consumption ×1) → D-ST(Storage Account ×3) | 청록 파랑 #0070C0 실선 · 단방향 | 캡슐 “원천 데이터 Blob · PE”
+- 16번 | FN-ORCH(Azure Functions Flex Consumption ×1) → D-SB(Service Bus Premium ×1 (평상시 pause)) | 주황/적색 #D9534F 파선 · 양방향 | 캡슐 “사후 이벤트(활성 시)”
+- 17번 | FN-ORCH(Azure Functions Flex Consumption ×1) → D-KV(Key Vault ×1) | 보라 #7030A0 실선(양방향) · 양방향 | 캡슐 “비밀 조회 · PE”
+- 18번 | AI-FOUNDRY(Microsoft Foundry Agent Service ×1) → AI-SEARCH(Azure AI Search Basic ×1) | 주황/적색 #D9534F 파선 · 단방향 | 캡슐 “벡터 저장소”
+- 19번 | OPS-ACR(Container Registry ×1) → ACA-ENV(Container Apps 환경 (internal) ×1) | 보라 #7030A0 실선(양방향) · 단방향 | 캡슐 “이미지 pull(AcrPull)”
+- 20번 | ACA-ENV(Container Apps 환경 (internal) ×1) → OPS-OBS(Log Analytics + Application Insights ×1) | 주황/적색 #D9534F 파선 · 단방향 | 캡슐 “진단 로그 · OpenTelemetry”
+- 21번 | ING-APPGW(Application Gateway WAF v2 ×1) → D-KV(Key Vault ×1) | 주황/적색 #D9534F 파선 · 단방향 | 캡슐 “TLS 인증서(id-appgw)”
+- 22번 | EXT-OPS(운영자 배포 창 (ops window)) → FN-ORCH(Azure Functions Flex Consumption ×1) | 주황/적색 #D9534F 파선 · 단방향 | 캡슐 “배포 창: 운영자 IP만 일시 허용”
+- 23번 | M-MI(Managed Identity ×7) → EXT-ENTRA(Microsoft Entra ID) | 보라 #7030A0 실선(양방향) · 양방향 | 캡슐 “관리 ID 토큰”
+- 24번 | AI-FOUNDRY(Microsoft Foundry Agent Service ×1) → D-ST(Storage Account ×3) | 주황/적색 #D9534F 파선 · 단방향 | 캡슐 “에이전트 파일(stagt)”
+
+## 3. 배치 (핵심 원칙: 세로 흐름 위→아래)
+16:9 흰 배경, 옅은 설계 그리드. 카드는 가로형(좌상단 공식 Azure 아이콘, 굵은 제목, 아래 2~5줄 작은 칩 텍스트). 글자는 모두 한국어/영문 리소스명 그대로, 또렷하고 읽을 수 있게. 위에서 아래로: 외부 접점·네트워크 관리 → 웹/WAS·AI 처리 → 데이터. 외부 트래픽을 받는 리소스는 진입 카드의 **바로 아래 같은 세로 축(같은 x)**. 선은 위→아래로 흐르고 카드 본문 위를 지나지 않는다.
+
+**Z1 헤더(맨 위 한 줄)**: 제목 “AMALend — 에이전트 현금흐름 대출 Azure 아키텍처 (as-built)”, 부제 “Korea Central · rg-amalend · VNet 격리 + Private Endpoint · 무키(관리 ID) 인증 · 객체 27개 / 연결 24개”. 우측 배지 [LIVE DEMO] + 캡슐 “Azure Master Architect Capstone · Case 18”.
+
+**Z2 외부 바(헤더 바로 아래 가로 한 줄, 리전 프레임 밖)**: 왼쪽부터 EXT-USER → EXT-INET(아래 Application Gateway와 같은 x), 그 오른쪽 EXT-ENTRA, EXT-OPS(주황 파선 테두리), 맨 오른쪽 EXT-PROV(회색 파선, [OUT OF SCOPE · 데모는 Mock API]). EXT-PROV에는 선을 긋지 않는다.
+
+**Z3 리전 프레임**: 주황 파선, 제목 “Azure Region — Korea Central (koreacentral) · Subscription: ME-MngEnvMCAP974883”, 안쪽에 진한 파랑 실선 VNet 프레임 “vnet-amalend · 192.168.0.0/16 (Spoke VNet, 서브넷 6개)”. 리전 프레임 안을 위→아래 3개 가로 구역(1티어, 2티어, 3티어)과 그 사이 PE 띠로 나눈다. 각 구역 왼쪽 끝에 세로 라벨 ① 외부 접점·네트워크 관리, ② 웹/WAS · AI 처리, ③ 데이터.
+
+**1티어(외부 접점·네트워크 관리)**: 왼쪽에 서브넷 박스 “snet-appgw 192.168.7.0/24” 안에 ING-APPGW(EXT-INET 바로 아래, 같은 x), 그 왼쪽 위 모서리에 작은 ING-PIP 카드. 오른쪽 절반에 회색 패널 “Management · 네트워크/신원”에 M-DNS, M-MI, M-NSG 세 카드를 가로로 나란히.
+
+**2티어(웹/WAS · AI 처리, 가장 넓은 구역)** — 왼쪽부터 세 열:
+- 왼쪽 열: 서브넷 박스 “snet-apps-int 192.168.4.0/24” 안에 녹색 점선 그룹 ACA-ENV(제목 그대로). 그룹 안을 2×2로: 위 줄 ACA-CONSOLE(ING-APPGW 바로 아래, 같은 x) · ACA-POLICY, 아래 줄 ACA-MOCK · ACA-JOBS. ACA-MOCK 카드 아래에 회색 작은 주석 “운영 전환 시 실제 제공기관 API로 대체”.
+- 가운데 열: 서브넷 박스 “snet-functions 192.168.2.0/26” 안에 FN-ORCH 카드(크게, 칩 5줄). 그 아래 서브넷 박스 “snet-apim 192.168.6.0/27” 안에 AI-APIM.
+- 오른쪽 열: 서브넷 박스 “snet-agents 192.168.0.0/24” 안에 파란 점선 그룹 “Microsoft Foundry”: AI-FOUNDRY(위, 칩 6줄로 에이전트 10종 표시)와 AI-MODELS(아래). 그 오른쪽 맨 끝 세로 열(보라 파선 “PaaS · Operations”)에 AI-SEARCH, OPS-ACR, OPS-OBS를 위→아래로 쌓는다.
+
+**PE 띠(2티어와 3티어 사이 가로 띠)**: 서브넷 박스 “snet-pe 192.168.1.0/24” 안에 PE-ALL 카드 1개와 작은 박스 “Private DNS 연결”. 데이터로 내려가는 선(4·6·7·15·17)은 이 띠를 지나 내려간다. 띠 오른쪽 끝에 작은 회색 글씨 “평상시 모든 PaaS public access 꺼짐”.
+
+**3티어(데이터, 맨 아래)**: 보라 파선 프레임 “데이터 · 메시징 (Private Endpoint 전용)” 안에 왼쪽부터 D-COSMOS, D-ST, D-SB(파선 테두리, ‘평상시 pause’ 회색 태그). 그 오른쪽 바깥에 별도 보라 파선 프레임 “비밀·인증서”에 D-KV. 데이터 카드끼리는 선을 긋지 않는다.
+
+**Z6 하단 띠(3칸)**: ① 범례: 청록 파랑 실선 = 요청/수신(단방향), 보라 실선 양방향 화살촉 = 양방향 연동, 주황/적색 파선 = 보조·조건부 경로(로그·배포 창·평상시 꺼짐), 녹색 점선 = Container Apps 환경, 파란 점선 = Foundry, 서브넷 박스 = 회색 실선. ② “신청 1건 흐름”: 동의 → 데이터 수집(L3) → 거래 분류(Decision-1) → 심사 지표 → 정책 판정 v3 → 신용 평가(분석가↔검토자 최대 3회) → 심사역 승인/거절(HITL). ③ “보안 요점”: 공개 진입은 AppGW WAF 하나 · PaaS 11개 PE · 관리 ID 7개 · 모든 LLM 호출은 APIM 게이트웨이 경유 · 신용 규칙은 LLM 밖 Policy Engine.
+
+## 4. 그리기 규칙
+- 연결선은 지정한 두 카드의 테두리에 정확히 닿고 선마다 번호 배지(원 안 숫자) 하나와 캡슐 라벨 하나.
+- 카드 제목·칩 문구는 위 목록 그대로(철자·숫자·×N 수량 그대로). 같은 카드 반복 금지.
+- 아이콘은 공식 Azure 아키텍처 아이콘 스타일(Application Gateway, Container Apps, Function App, API Management, Foundry/AI, AI Search, Container Registry, Log Analytics, Cosmos DB, Storage, Service Bus, Key Vault, Private Endpoint, DNS, Managed Identity, NSG, Entra ID, Public IP).

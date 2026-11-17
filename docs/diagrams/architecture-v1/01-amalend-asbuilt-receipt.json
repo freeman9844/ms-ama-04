@@ -1,0 +1,40 @@
+{
+  "status": "IMAGE_RECEIVED_VERIFIED",
+  "at": "2026-11-16T08:31:44.220029+00:00",
+  "endpoint": "https://jwlee-foundry-eastus2-001.openai.azure.com/openai/v1/images/generations",
+  "parameters": {
+    "model": "gpt-image-2.5-sunburst",
+    "n": 1,
+    "size": "2560x1440",
+    "quality": "high",
+    "output_format": "png"
+  },
+  "prompt_sha256": "84600a6f2370827436f0bef8ce6a49e503e09152d59a4e681e36de76d7b773df",
+  "spec_sha256": "c4969f2dc8072d7d5b6b735f3ad2e18116b1b511430d5c644333a0f15eadf39c",
+  "spec_author": "MainAgent code (write_spec.py), not a model",
+  "references": [],
+  "reference_note": "v8 샘플 이미지가 이 PC에 없어 참조 이미지 없이 generations 호출",
+  "http_status": 200,
+  "client_request_id": "940b1455-a424-4855-b89f-37e86b09e620",
+  "server_request_id": "9f6e2b9b-d8f5-4c47-a70c-1a79bcc474ae",
+  "dimensions": [
+    2560,
+    1440
+  ],
+  "bytes": 3439197,
+  "sha256": "c2b3c4e7050937b334e3f54ee1c9db2fcf7bf7cf92269f9598c4fa4f9fd6ca71",
+  "usage": {
+    "input_tokens": 5370,
+    "input_tokens_details": {
+      "image_tokens": 0,
+      "text_tokens": 5370
+    },
+    "output_tokens": 1843,
+    "output_tokens_details": {
+      "image_tokens": 1843,
+      "text_tokens": 0
+    },
+    "total_tokens": 7213
+  },
+  "postprocessed": false
+}

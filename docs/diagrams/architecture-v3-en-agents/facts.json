@@ -1,0 +1,304 @@
+{
+  "nodes": [
+    {
+      "id": "EXT-USER",
+      "label": "Users — Loan Officers · Sellers · Operators"
+    },
+    {
+      "id": "EXT-INET",
+      "label": "Internet / Public DNS"
+    },
+    {
+      "id": "EXT-ENTRA",
+      "label": "Microsoft Entra ID"
+    },
+    {
+      "id": "EXT-OPS",
+      "label": "Operator Deploy Window"
+    },
+    {
+      "id": "EXT-PROV",
+      "label": "External Data Providers (production target)"
+    },
+    {
+      "id": "ING-PIP",
+      "label": "Public IP ×1"
+    },
+    {
+      "id": "ING-APPGW",
+      "label": "Application Gateway WAF v2 ×1"
+    },
+    {
+      "id": "M-DNS",
+      "label": "Private DNS Zones ×15"
+    },
+    {
+      "id": "M-MI",
+      "label": "Managed Identities ×7"
+    },
+    {
+      "id": "M-NSG",
+      "label": "NSGs ×6"
+    },
+    {
+      "id": "OPS-ACR",
+      "label": "Container Registry ×1"
+    },
+    {
+      "id": "OPS-OBS",
+      "label": "Log Analytics + App Insights ×1"
+    },
+    {
+      "id": "ACA-ENV",
+      "label": "Container Apps Environment (internal) ×1"
+    },
+    {
+      "id": "ACA-CONSOLE",
+      "label": "Officer Console ×1"
+    },
+    {
+      "id": "ACA-POLICY",
+      "label": "Policy Engine ×1"
+    },
+    {
+      "id": "ACA-MOCK",
+      "label": "Mock API ×1"
+    },
+    {
+      "id": "ACA-JOBS",
+      "label": "Container Apps Jobs ×3"
+    },
+    {
+      "id": "FN-ORCH",
+      "label": "Journey Orchestrator — Functions Flex ×1"
+    },
+    {
+      "id": "AI-APIM",
+      "label": "API Management — AI Gateway ×1"
+    },
+    {
+      "id": "AI-FOUNDRY",
+      "label": "Microsoft Foundry Agent Service ×1"
+    },
+    {
+      "id": "AG-DATA",
+      "label": "data-assembly"
+    },
+    {
+      "id": "AG-TXN",
+      "label": "txn-classifier"
+    },
+    {
+      "id": "AG-ANALYST",
+      "label": "underwriting-analyst"
+    },
+    {
+      "id": "AG-REVIEWER",
+      "label": "underwriting-reviewer"
+    },
+    {
+      "id": "AG-EW",
+      "label": "early-warning-investigator"
+    },
+    {
+      "id": "AG-COLL",
+      "label": "collections-agent"
+    },
+    {
+      "id": "AG-CONSENT",
+      "label": "consent-notice-agent"
+    },
+    {
+      "id": "AG-GRIEV",
+      "label": "grievance-reply-agent"
+    },
+    {
+      "id": "AG-CHAT",
+      "label": "officer-assistant"
+    },
+    {
+      "id": "AG-TRANS",
+      "label": "console-translator"
+    },
+    {
+      "id": "AI-MODELS",
+      "label": "Model Deployments (Global Standard) ×7"
+    },
+    {
+      "id": "AI-SEARCH",
+      "label": "Azure AI Search ×1"
+    },
+    {
+      "id": "PE-ALL",
+      "label": "Private Endpoints ×11"
+    },
+    {
+      "id": "D-COSMOS",
+      "label": "Azure Cosmos DB for NoSQL ×1"
+    },
+    {
+      "id": "D-ST",
+      "label": "Storage Accounts ×3"
+    },
+    {
+      "id": "D-SB",
+      "label": "Service Bus Premium ×1 (paused by default)"
+    },
+    {
+      "id": "D-KV",
+      "label": "Key Vault ×1"
+    }
+  ],
+  "edges": [
+    {
+      "no": 1,
+      "from": "EXT-USER",
+      "to": "EXT-INET",
+      "label": "HTTPS"
+    },
+    {
+      "no": 2,
+      "from": "EXT-INET",
+      "to": "ING-APPGW",
+      "label": "HTTPS 443 · WAF"
+    },
+    {
+      "no": 3,
+      "from": "ING-APPGW",
+      "to": "ACA-CONSOLE",
+      "label": "Backend HTTPS"
+    },
+    {
+      "no": 4,
+      "from": "ACA-CONSOLE",
+      "to": "D-ST",
+      "label": "Command queues · PE"
+    },
+    {
+      "no": 5,
+      "from": "D-ST",
+      "to": "FN-ORCH",
+      "label": "Queue triggers · Durable state"
+    },
+    {
+      "no": 6,
+      "from": "ACA-CONSOLE",
+      "to": "D-COSMOS",
+      "label": "Read case · translations"
+    },
+    {
+      "no": 7,
+      "from": "FN-ORCH",
+      "to": "D-COSMOS",
+      "label": "Step snapshots · change feed"
+    },
+    {
+      "no": 8,
+      "from": "FN-ORCH",
+      "to": "AI-FOUNDRY",
+      "label": "Run agents · function_call loop (tools run in VNet)"
+    },
+    {
+      "no": 9,
+      "from": "AI-FOUNDRY",
+      "to": "AI-APIM",
+      "label": "Every model call via gw-<agent>"
+    },
+    {
+      "no": 10,
+      "from": "AI-APIM",
+      "to": "AI-MODELS",
+      "label": "MI auth · token limits"
+    },
+    {
+      "no": 11,
+      "from": "FN-ORCH",
+      "to": "AI-APIM",
+      "label": "Decision-1 classification"
+    },
+    {
+      "no": 12,
+      "from": "FN-ORCH",
+      "to": "ACA-POLICY",
+      "label": "Policy decision (fail-closed)"
+    },
+    {
+      "no": 13,
+      "from": "FN-ORCH",
+      "to": "ACA-MOCK",
+      "label": "Consent · data fetch"
+    },
+    {
+      "no": 14,
+      "from": "ACA-CONSOLE",
+      "to": "AI-FOUNDRY",
+      "label": "Officer chat · translation (pseudonymized)"
+    },
+    {
+      "no": 15,
+      "from": "FN-ORCH",
+      "to": "D-ST",
+      "label": "Source data Blob"
+    },
+    {
+      "no": 16,
+      "from": "FN-ORCH",
+      "to": "D-SB",
+      "label": "Post-loan events (when active)"
+    },
+    {
+      "no": 17,
+      "from": "FN-ORCH",
+      "to": "D-KV",
+      "label": "Secret lookup · PE"
+    },
+    {
+      "no": 18,
+      "from": "AI-FOUNDRY",
+      "to": "AI-SEARCH",
+      "label": "Vector store"
+    },
+    {
+      "no": 19,
+      "from": "OPS-ACR",
+      "to": "ACA-ENV",
+      "label": "Image pull (AcrPull)"
+    },
+    {
+      "no": 20,
+      "from": "ACA-ENV",
+      "to": "OPS-OBS",
+      "label": "Diagnostics · OpenTelemetry"
+    },
+    {
+      "no": 21,
+      "from": "ING-APPGW",
+      "to": "D-KV",
+      "label": "TLS certificate"
+    },
+    {
+      "no": 22,
+      "from": "EXT-OPS",
+      "to": "FN-ORCH",
+      "label": "Deploy window (temporary)"
+    },
+    {
+      "no": 23,
+      "from": "M-MI",
+      "to": "EXT-ENTRA",
+      "label": "Managed identity tokens"
+    },
+    {
+      "no": 24,
+      "from": "AI-FOUNDRY",
+      "to": "D-ST",
+      "label": "Agent files (stagt)"
+    },
+    {
+      "no": 25,
+      "from": "AG-ANALYST",
+      "to": "AG-REVIEWER",
+      "label": "Critique loop ≤3 rounds"
+    }
+  ]
+}

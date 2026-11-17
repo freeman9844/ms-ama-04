@@ -1,0 +1,247 @@
+{
+  "response_id": "resp_0231328f157590ce006afadc5612988197a50a96c035a332c6",
+  "model": "gpt-6.1-sol",
+  "usage": {
+    "input_tokens": 2198,
+    "input_tokens_details": {
+      "cache_write_tokens": 2195,
+      "cached_tokens": 0
+    },
+    "output_tokens": 5320,
+    "output_tokens_details": {
+      "reasoning_tokens": 4142
+    },
+    "total_tokens": 7518
+  },
+  "prompt_sha256": "c1331b6fd2ba85a726db42bb66f252081b3282556d026646d03169eeabd1b625",
+  "image_sha256": "71e48d01d0c06834e15a899cf30bae166dd14c3e6a8bae54407447d29e9ee5f9",
+  "independent_review": false,
+  "result": {
+    "edges": [
+      {
+        "no": 1,
+        "badge_seen": true,
+        "seen_from": "Users — Loan Officers · Sellers · Operators",
+        "seen_to": "Internet / Public DNS",
+        "endpoints_match": true,
+        "label_seen": "HTTPS"
+      },
+      {
+        "no": 2,
+        "badge_seen": true,
+        "seen_from": "Internet / Public DNS",
+        "seen_to": "Application Gateway WAF v2 ×1",
+        "endpoints_match": true,
+        "label_seen": "HTTPS 443 · WAF"
+      },
+      {
+        "no": 3,
+        "badge_seen": true,
+        "seen_from": "Application Gateway WAF v2 ×1",
+        "seen_to": "Container Apps Environment (internal) ×1",
+        "endpoints_match": false,
+        "label_seen": "Backend HTTPS"
+      },
+      {
+        "no": 4,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 5,
+        "badge_seen": true,
+        "seen_from": "Storage Accounts ×3",
+        "seen_to": "API Management — AI Gateway ×1",
+        "endpoints_match": false,
+        "label_seen": "Queue triggers · Durable state"
+      },
+      {
+        "no": 6,
+        "badge_seen": true,
+        "seen_from": "Officer Console ×1",
+        "seen_to": "Azure Cosmos DB for NoSQL ×1",
+        "endpoints_match": true,
+        "label_seen": "Command queues · PE"
+      },
+      {
+        "no": 6,
+        "badge_seen": true,
+        "seen_from": "Mock API ×1",
+        "seen_to": "Azure Cosmos DB for NoSQL ×1",
+        "endpoints_match": false,
+        "label_seen": "Read case · translations"
+      },
+      {
+        "no": 6,
+        "badge_seen": true,
+        "seen_from": "Container Apps Jobs ×3",
+        "seen_to": "Storage Accounts ×3",
+        "endpoints_match": false,
+        "label_seen": "Read case · translations"
+      },
+      {
+        "no": 7,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 8,
+        "badge_seen": true,
+        "seen_from": "Journey Orchestrator — Durable Functions Flex ×1",
+        "seen_to": "Microsoft Foundry Agent Service ×1",
+        "endpoints_match": true,
+        "label_seen": "Run agents · function_call loop (tools run in VNet)"
+      },
+      {
+        "no": 9,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry · AI Agents",
+        "seen_to": "API Management — AI Gateway ×1",
+        "endpoints_match": false,
+        "label_seen": "Every model call via gw-<agent>"
+      },
+      {
+        "no": 10,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry · AI Agents",
+        "seen_to": "Microsoft Foundry · AI Agents",
+        "endpoints_match": false,
+        "label_seen": "MI auth · token limits"
+      },
+      {
+        "no": 11,
+        "badge_seen": true,
+        "seen_from": "API Management — AI Gateway ×1",
+        "seen_to": "Journey Orchestrator — Durable Functions Flex ×1",
+        "endpoints_match": true,
+        "label_seen": "Decision-1 classification"
+      },
+      {
+        "no": 12,
+        "badge_seen": true,
+        "seen_from": "Policy Engine ×1",
+        "seen_to": "Journey Orchestrator — Durable Functions Flex ×1",
+        "endpoints_match": true,
+        "label_seen": "Policy decision (fail-closed)"
+      },
+      {
+        "no": 13,
+        "badge_seen": true,
+        "seen_from": "Container Apps Jobs ×3",
+        "seen_to": "Journey Orchestrator — Durable Functions Flex ×1",
+        "endpoints_match": false,
+        "label_seen": "Consent · data fetch"
+      },
+      {
+        "no": 14,
+        "badge_seen": true,
+        "seen_from": "Container Apps Environment (internal) ×1",
+        "seen_to": "Microsoft Foundry Agent Service ×1",
+        "endpoints_match": false,
+        "label_seen": "Officer chat · translation (pseudonymized)"
+      },
+      {
+        "no": 15,
+        "badge_seen": true,
+        "seen_from": "API Management — AI Gateway ×1",
+        "seen_to": "Storage Accounts ×3",
+        "endpoints_match": false,
+        "label_seen": "Source data Blob"
+      },
+      {
+        "no": 15,
+        "badge_seen": true,
+        "seen_from": "Service Bus Premium ×1 (paused by default)",
+        "seen_to": "Microsoft Foundry · AI Agents",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 16,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry · AI Agents",
+        "seen_to": "Service Bus Premium ×1 (paused by default)",
+        "endpoints_match": false,
+        "label_seen": "Post-loan events (when active)"
+      },
+      {
+        "no": 17,
+        "badge_seen": true,
+        "seen_from": "Azure AI Search ×1",
+        "seen_to": "Key Vault ×1",
+        "endpoints_match": false,
+        "label_seen": "Secret lookup · PE"
+      },
+      {
+        "no": 18,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 19,
+        "badge_seen": true,
+        "seen_from": "Container Registry ×1",
+        "seen_to": "Microsoft Foundry · AI Agents",
+        "endpoints_match": false,
+        "label_seen": "Image pull (AcrPull)"
+      },
+      {
+        "no": 20,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 21,
+        "badge_seen": true,
+        "seen_from": "Log Analytics + App Insights ×1",
+        "seen_to": "Microsoft Foundry Agent Service ×1",
+        "endpoints_match": false,
+        "label_seen": "TLS certificate"
+      },
+      {
+        "no": 22,
+        "badge_seen": true,
+        "seen_from": "Operator Deploy Window",
+        "seen_to": "Management · Operations",
+        "endpoints_match": false,
+        "label_seen": "Deploy window (temporary)"
+      },
+      {
+        "no": 23,
+        "badge_seen": true,
+        "seen_from": "Microsoft Entra ID",
+        "seen_to": "Management · Operations",
+        "endpoints_match": false,
+        "label_seen": "Managed identity tokens"
+      },
+      {
+        "no": 24,
+        "badge_seen": true,
+        "seen_from": "Application Gateway WAF v2 ×1",
+        "seen_to": "Storage Accounts ×3",
+        "endpoints_match": false,
+        "label_seen": "Agent files (stagt)"
+      },
+      {
+        "no": 25,
+        "badge_seen": true,
+        "seen_from": "underwriting-analyst",
+        "seen_to": "underwriting-reviewer",
+        "endpoints_match": true,
+        "label_seen": ""
+      }
+    ]
+  }
+}

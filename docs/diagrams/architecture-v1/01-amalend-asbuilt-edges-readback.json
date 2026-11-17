@@ -1,0 +1,215 @@
+{
+  "response_id": "resp_0cea181e23c5f7e1006afac0027e748193a0ac2078e8733e26",
+  "model": "gpt-6.1-sol",
+  "usage": {
+    "input_tokens": 2242,
+    "input_tokens_details": {
+      "cache_write_tokens": 2239,
+      "cached_tokens": 0
+    },
+    "output_tokens": 5523,
+    "output_tokens_details": {
+      "reasoning_tokens": 4430
+    },
+    "total_tokens": 7765
+  },
+  "prompt_sha256": "522ae793b0d7da220ae596d638654c251fed9a044f3ce7f63bc151dc1054266d",
+  "image_sha256": "c2b3c4e7050937b334e3f54ee1c9db2fcf7bf7cf92269f9598c4fa4f9fd6ca71",
+  "independent_review": false,
+  "result": {
+    "edges": [
+      {
+        "no": 1,
+        "badge_seen": true,
+        "seen_from": "사용자 — 심사역 · 고객(셀러) · 운영자",
+        "seen_to": "Internet / Public DNS",
+        "endpoints_match": true,
+        "label_seen": "HTTPS"
+      },
+      {
+        "no": 2,
+        "badge_seen": true,
+        "seen_from": "Internet / Public DNS",
+        "seen_to": "Application Gateway WAF v2 ×1",
+        "endpoints_match": true,
+        "label_seen": "HTTPS 443 · WAF(운영자 IP만)"
+      },
+      {
+        "no": 3,
+        "badge_seen": true,
+        "seen_from": "Application Gateway WAF v2 ×1",
+        "seen_to": "Container Apps 환경 (internal) ×1",
+        "endpoints_match": false,
+        "label_seen": "백엔드 HTTPS · /healthz"
+      },
+      {
+        "no": 4,
+        "badge_seen": true,
+        "seen_from": "Container Apps 환경 (internal) ×1",
+        "seen_to": "Azure Cosmos DB for NoSQL ×1",
+        "endpoints_match": false,
+        "label_seen": "명령 큐(applications-start 등) · PE"
+      },
+      {
+        "no": 5,
+        "badge_seen": true,
+        "seen_from": "Storage Account ×3",
+        "seen_to": "Azure Functions Flex Consumption ×1",
+        "endpoints_match": true,
+        "label_seen": "큐 트리거 · Durable 상태"
+      },
+      {
+        "no": 6,
+        "badge_seen": true,
+        "seen_from": "Container Apps 환경 (internal) ×1",
+        "seen_to": "Azure Cosmos DB for NoSQL ×1",
+        "endpoints_match": false,
+        "label_seen": "읽기 · 저장 번역 조회 · PE"
+      },
+      {
+        "no": 7,
+        "badge_seen": true,
+        "seen_from": "API Management (AI 게이트웨이) ×1",
+        "seen_to": "Storage Account ×3",
+        "endpoints_match": false,
+        "label_seen": "단계 스냅샷 저장 · 변경 피드"
+      },
+      {
+        "no": 8,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption ×1",
+        "seen_to": "Microsoft Foundry",
+        "endpoints_match": false,
+        "label_seen": "에이전트 실행 · 도구는 오케스트레이터가 실행"
+      },
+      {
+        "no": 9,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry Agent Service ×1",
+        "seen_to": "API Management (AI 게이트웨이) ×1",
+        "endpoints_match": true,
+        "label_seen": "모델 호출(BYOM gw-*)"
+      },
+      {
+        "no": 10,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry Agent Service ×1",
+        "seen_to": "모델 배포 (Global Standard) ×7",
+        "endpoints_match": false,
+        "label_seen": "MI 인증 · 토큰 한도"
+      },
+      {
+        "no": 11,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption ×1",
+        "seen_to": "API Management (AI 게이트웨이) ×1",
+        "endpoints_match": true,
+        "label_seen": "거래 분류 Decision-1"
+      },
+      {
+        "no": 12,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption ×1",
+        "seen_to": "Office Console ×1",
+        "endpoints_match": false,
+        "label_seen": "정책 판정(fail-closed)"
+      },
+      {
+        "no": 13,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption ×1",
+        "seen_to": "Container Apps 환경 (internal) ×1",
+        "endpoints_match": false,
+        "label_seen": "동의 발급 · Bearer 토큰 원천 조회"
+      },
+      {
+        "no": 14,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 15,
+        "badge_seen": true,
+        "seen_from": "API Management (AI 게이트웨이) ×1",
+        "seen_to": "Storage Account ×3",
+        "endpoints_match": false,
+        "label_seen": "원천 데이터 Blob · PE"
+      },
+      {
+        "no": 16,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 17,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry",
+        "seen_to": "Service Bus Premium ×1",
+        "endpoints_match": false,
+        "label_seen": "비밀 조회 · PE"
+      },
+      {
+        "no": 18,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry",
+        "seen_to": "Azure AI Search Basic ×1",
+        "endpoints_match": false,
+        "label_seen": "벡터 저장소"
+      },
+      {
+        "no": 19,
+        "badge_seen": true,
+        "seen_from": "Container Registry ×1",
+        "seen_to": "Microsoft Foundry",
+        "endpoints_match": false,
+        "label_seen": "이미지 pull(AcrPull)"
+      },
+      {
+        "no": 20,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry",
+        "seen_to": "Log Analytics + Application Insights ×1",
+        "endpoints_match": false,
+        "label_seen": "진단 로그 · OpenTelemetry"
+      },
+      {
+        "no": 21,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry",
+        "seen_to": "Key Vault ×1",
+        "endpoints_match": false,
+        "label_seen": "TLS 인증서(id-appgw)"
+      },
+      {
+        "no": 22,
+        "badge_seen": true,
+        "seen_from": "",
+        "seen_to": "Azure Functions Flex Consumption ×1",
+        "endpoints_match": false,
+        "label_seen": "배포 창: 운영자 IP만 일시 허용"
+      },
+      {
+        "no": 23,
+        "badge_seen": true,
+        "seen_from": "운영자 배포 창 (ops window)",
+        "seen_to": "Microsoft Entra ID",
+        "endpoints_match": false,
+        "label_seen": "관리 ID 토큰"
+      },
+      {
+        "no": 24,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      }
+    ]
+  }
+}

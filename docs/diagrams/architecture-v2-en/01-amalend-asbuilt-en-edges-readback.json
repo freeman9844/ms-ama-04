@@ -1,0 +1,215 @@
+{
+  "response_id": "resp_0d03c3a9accec368006afad902617c81959b75268fbc7061b8",
+  "model": "gpt-6.1-sol",
+  "usage": {
+    "input_tokens": 2187,
+    "input_tokens_details": {
+      "cache_write_tokens": 2184,
+      "cached_tokens": 0
+    },
+    "output_tokens": 3094,
+    "output_tokens_details": {
+      "reasoning_tokens": 2070
+    },
+    "total_tokens": 5281
+  },
+  "prompt_sha256": "b988abb4cbbc40452dccda1de80ac8fbc8caa996e8536067cb3059ff7c263983",
+  "image_sha256": "35f32d9641e97597928334ed71b57b410616e7d61bee237265f054eff7f881f8",
+  "independent_review": false,
+  "result": {
+    "edges": [
+      {
+        "no": 1,
+        "badge_seen": true,
+        "seen_from": "Users — Loan Officers · Sellers · Operators",
+        "seen_to": "Internet / Public DNS",
+        "endpoints_match": true,
+        "label_seen": "HTTPS"
+      },
+      {
+        "no": 2,
+        "badge_seen": true,
+        "seen_from": "Internet / Public DNS",
+        "seen_to": "Application Gateway WAF v2 x1",
+        "endpoints_match": true,
+        "label_seen": "HTTPS 443 · WAF (operator IP only)"
+      },
+      {
+        "no": 3,
+        "badge_seen": true,
+        "seen_from": "Application Gateway WAF v2 x1",
+        "seen_to": "Container Apps Environment (internal) x1",
+        "endpoints_match": false,
+        "label_seen": "Backend HTTPS · /healthz"
+      },
+      {
+        "no": 4,
+        "badge_seen": true,
+        "seen_from": "Mock API x1",
+        "seen_to": "Azure Cosmos DB for NoSQL x1",
+        "endpoints_match": false,
+        "label_seen": "Command queues"
+      },
+      {
+        "no": 5,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 6,
+        "badge_seen": true,
+        "seen_from": "Container Apps Jobs x3",
+        "seen_to": "Azure Cosmos DB for NoSQL x1",
+        "endpoints_match": false,
+        "label_seen": "Read translations"
+      },
+      {
+        "no": 7,
+        "badge_seen": true,
+        "seen_from": "No card (snet-apps-int · 192.168.4.0/24 boundary)",
+        "seen_to": "Storage Accounts x3",
+        "endpoints_match": false,
+        "label_seen": "Step snapshots"
+      },
+      {
+        "no": 8,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption x1",
+        "seen_to": "Microsoft Foundry Agent Service x1",
+        "endpoints_match": true,
+        "label_seen": "Run agents"
+      },
+      {
+        "no": 9,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry Agent Service x1",
+        "seen_to": "API Management (AI Gateway) x1",
+        "endpoints_match": true,
+        "label_seen": "BYOM gw-*"
+      },
+      {
+        "no": 10,
+        "badge_seen": true,
+        "seen_from": "API Management (AI Gateway) x1",
+        "seen_to": "Model Deployments (Global Standard) x7",
+        "endpoints_match": true,
+        "label_seen": "MI auth"
+      },
+      {
+        "no": 11,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption x1",
+        "seen_to": "API Management (AI Gateway) x1",
+        "endpoints_match": true,
+        "label_seen": "Decision-1"
+      },
+      {
+        "no": 12,
+        "badge_seen": true,
+        "seen_from": "Azure Functions Flex Consumption x1",
+        "seen_to": "Policy Engine x1",
+        "endpoints_match": true,
+        "label_seen": "Policy decision"
+      },
+      {
+        "no": 13,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 14,
+        "badge_seen": true,
+        "seen_from": "No card (inside Container Apps Environment (internal) x1, above the application cards)",
+        "seen_to": "Microsoft Foundry Agent Service x1",
+        "endpoints_match": false,
+        "label_seen": "Officer chat · translation (pseudonymized text)"
+      },
+      {
+        "no": 15,
+        "badge_seen": true,
+        "seen_from": "API Management (AI Gateway) x1",
+        "seen_to": "Storage Accounts x3",
+        "endpoints_match": false,
+        "label_seen": "Source data Blob"
+      },
+      {
+        "no": 16,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 17,
+        "badge_seen": true,
+        "seen_from": "Model Deployments (Global Standard) x7",
+        "seen_to": "No card (line ends left of Key Vault x1)",
+        "endpoints_match": false,
+        "label_seen": "Secret lookup"
+      },
+      {
+        "no": 18,
+        "badge_seen": true,
+        "seen_from": "Microsoft Foundry Agent Service x1",
+        "seen_to": "Azure AI Search Basic x1",
+        "endpoints_match": true,
+        "label_seen": "Vector store"
+      },
+      {
+        "no": 19,
+        "badge_seen": true,
+        "seen_from": "Container Registry x1",
+        "seen_to": "Azure AI Search Basic x1",
+        "endpoints_match": false,
+        "label_seen": "Image pull (AcrPull)"
+      },
+      {
+        "no": 20,
+        "badge_seen": true,
+        "seen_from": "Container Registry x1",
+        "seen_to": "Log Analytics + Application Insights x1",
+        "endpoints_match": false,
+        "label_seen": "Diagnostics · OpenTelemetry"
+      },
+      {
+        "no": 21,
+        "badge_seen": true,
+        "seen_from": "Application Gateway WAF v2 x1",
+        "seen_to": "PaaS · Operations",
+        "endpoints_match": false,
+        "label_seen": "TLS certificate (id-appgw)"
+      },
+      {
+        "no": 22,
+        "badge_seen": false,
+        "seen_from": "",
+        "seen_to": "",
+        "endpoints_match": false,
+        "label_seen": ""
+      },
+      {
+        "no": 23,
+        "badge_seen": true,
+        "seen_from": "Managed Identities x7",
+        "seen_to": "Microsoft Entra ID",
+        "endpoints_match": true,
+        "label_seen": "Managed identity tokens"
+      },
+      {
+        "no": 24,
+        "badge_seen": true,
+        "seen_from": "Model Deployments (Global Standard) x7",
+        "seen_to": "Service Bus Premium x1",
+        "endpoints_match": false,
+        "label_seen": "Agent files (stagt)"
+      }
+    ]
+  }
+}

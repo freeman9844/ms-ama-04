@@ -1,0 +1,431 @@
+{
+  "response_id": "resp_06c367c81be82b1a006afadb4742ec8194acbe211a74940bd1",
+  "model": "gpt-6.1-sol",
+  "usage": {
+    "input_tokens": 2072,
+    "input_tokens_details": {
+      "cache_write_tokens": 2069,
+      "cached_tokens": 0
+    },
+    "output_tokens": 1984,
+    "output_tokens_details": {
+      "reasoning_tokens": 492
+    },
+    "total_tokens": 4056
+  },
+  "prompt_sha256": "d493c058db8fca2f0befc71a1d31cb6a5f9193ffdfc099134be08afd505e2064",
+  "image_sha256": "a99b2cc40dd2d0f423a9b36104a2d57477cf4552851bd3e6284580bc3b11f4fa",
+  "independent_review": false,
+  "result": {
+    "nodes": [
+      {
+        "id": "EXT-USER",
+        "found": true,
+        "bbox": [
+          0.01,
+          0.068,
+          0.191,
+          0.059
+        ],
+        "seen_label": "Users — Loan Officers · Sellers · Operators"
+      },
+      {
+        "id": "EXT-INET",
+        "found": true,
+        "bbox": [
+          0.261,
+          0.068,
+          0.165,
+          0.059
+        ],
+        "seen_label": "Internet / Public DNS"
+      },
+      {
+        "id": "EXT-ENTRA",
+        "found": true,
+        "bbox": [
+          0.437,
+          0.068,
+          0.153,
+          0.059
+        ],
+        "seen_label": "Microsoft Entra ID"
+      },
+      {
+        "id": "EXT-OPS",
+        "found": true,
+        "bbox": [
+          0.601,
+          0.064,
+          0.183,
+          0.066
+        ],
+        "seen_label": "Operator Deploy Window"
+      },
+      {
+        "id": "EXT-PROV",
+        "found": true,
+        "bbox": [
+          0.798,
+          0.064,
+          0.192,
+          0.066
+        ],
+        "seen_label": "External Data Providers (production target)"
+      },
+      {
+        "id": "ING-PIP",
+        "found": true,
+        "bbox": [
+          0.069,
+          0.241,
+          0.102,
+          0.059
+        ],
+        "seen_label": "Public IP ×1"
+      },
+      {
+        "id": "ING-APPGW",
+        "found": true,
+        "bbox": [
+          0.196,
+          0.237,
+          0.15,
+          0.065
+        ],
+        "seen_label": "Application Gateway WAF v2 ×1"
+      },
+      {
+        "id": "M-DNS",
+        "found": true,
+        "bbox": [
+          0.381,
+          0.237,
+          0.111,
+          0.061
+        ],
+        "seen_label": "Private DNS Zones ×15"
+      },
+      {
+        "id": "M-MI",
+        "found": true,
+        "bbox": [
+          0.497,
+          0.237,
+          0.133,
+          0.061
+        ],
+        "seen_label": "Managed Identities ×7"
+      },
+      {
+        "id": "M-NSG",
+        "found": true,
+        "bbox": [
+          0.635,
+          0.237,
+          0.094,
+          0.061
+        ],
+        "seen_label": "NSGs ×6"
+      },
+      {
+        "id": "OPS-ACR",
+        "found": true,
+        "bbox": [
+          0.736,
+          0.237,
+          0.111,
+          0.061
+        ],
+        "seen_label": "Container Registry ×1"
+      },
+      {
+        "id": "OPS-OBS",
+        "found": true,
+        "bbox": [
+          0.851,
+          0.237,
+          0.129,
+          0.061
+        ],
+        "seen_label": "Log Analytics + App Insights ×1"
+      },
+      {
+        "id": "ACA-ENV",
+        "found": true,
+        "bbox": [
+          0.068,
+          0.367,
+          0.201,
+          0.293
+        ],
+        "seen_label": "Container Apps Environment (internal) ×1"
+      },
+      {
+        "id": "ACA-CONSOLE",
+        "found": true,
+        "bbox": [
+          0.074,
+          0.443,
+          0.094,
+          0.105
+        ],
+        "seen_label": "Officer Console ×1"
+      },
+      {
+        "id": "ACA-POLICY",
+        "found": true,
+        "bbox": [
+          0.171,
+          0.443,
+          0.093,
+          0.105
+        ],
+        "seen_label": "Policy Engine ×1"
+      },
+      {
+        "id": "ACA-MOCK",
+        "found": true,
+        "bbox": [
+          0.074,
+          0.557,
+          0.094,
+          0.09
+        ],
+        "seen_label": "Mock API ×1"
+      },
+      {
+        "id": "ACA-JOBS",
+        "found": true,
+        "bbox": [
+          0.171,
+          0.557,
+          0.093,
+          0.09
+        ],
+        "seen_label": "Container Apps Jobs ×3"
+      },
+      {
+        "id": "FN-ORCH",
+        "found": true,
+        "bbox": [
+          0.313,
+          0.398,
+          0.121,
+          0.152
+        ],
+        "seen_label": "Journey Orchestrator — Functions Flex ×1"
+      },
+      {
+        "id": "AI-APIM",
+        "found": true,
+        "bbox": [
+          0.285,
+          0.615,
+          0.149,
+          0.116
+        ],
+        "seen_label": "API Management — AI Gateway ×1"
+      },
+      {
+        "id": "AI-FOUNDRY",
+        "found": true,
+        "bbox": [
+          0.586,
+          0.379,
+          0.333,
+          0.056
+        ],
+        "seen_label": "Microsoft Foundry Agent Service ×1"
+      },
+      {
+        "id": "AG-DATA",
+        "found": true,
+        "bbox": [
+          0.458,
+          0.483,
+          0.1,
+          0.073
+        ],
+        "seen_label": "data-assembly"
+      },
+      {
+        "id": "AG-TXN",
+        "found": true,
+        "bbox": [
+          0.567,
+          0.483,
+          0.1,
+          0.073
+        ],
+        "seen_label": "txn-classifier"
+      },
+      {
+        "id": "AG-ANALYST",
+        "found": true,
+        "bbox": [
+          0.458,
+          0.565,
+          0.1,
+          0.094
+        ],
+        "seen_label": "underwriting-analyst"
+      },
+      {
+        "id": "AG-REVIEWER",
+        "found": true,
+        "bbox": [
+          0.575,
+          0.565,
+          0.092,
+          0.083
+        ],
+        "seen_label": "underwriting-reviewer"
+      },
+      {
+        "id": "AG-EW",
+        "found": true,
+        "bbox": [
+          0.68,
+          0.483,
+          0.094,
+          0.081
+        ],
+        "seen_label": "early-warning-investigator"
+      },
+      {
+        "id": "AG-COLL",
+        "found": true,
+        "bbox": [
+          0.778,
+          0.483,
+          0.091,
+          0.081
+        ],
+        "seen_label": "collections-agent"
+      },
+      {
+        "id": "AG-CONSENT",
+        "found": true,
+        "bbox": [
+          0.68,
+          0.57,
+          0.094,
+          0.078
+        ],
+        "seen_label": "consent-notice-agent"
+      },
+      {
+        "id": "AG-GRIEV",
+        "found": true,
+        "bbox": [
+          0.778,
+          0.57,
+          0.091,
+          0.078
+        ],
+        "seen_label": "grievance-reply-agent"
+      },
+      {
+        "id": "AG-CHAT",
+        "found": true,
+        "bbox": [
+          0.879,
+          0.483,
+          0.096,
+          0.085
+        ],
+        "seen_label": "officer-assistant"
+      },
+      {
+        "id": "AG-TRANS",
+        "found": true,
+        "bbox": [
+          0.879,
+          0.578,
+          0.096,
+          0.07
+        ],
+        "seen_label": "console-translator"
+      },
+      {
+        "id": "AI-MODELS",
+        "found": true,
+        "bbox": [
+          0.522,
+          0.668,
+          0.301,
+          0.056
+        ],
+        "seen_label": "Model Deployments (Global Standard) ×7"
+      },
+      {
+        "id": "AI-SEARCH",
+        "found": true,
+        "bbox": [
+          0.832,
+          0.668,
+          0.143,
+          0.056
+        ],
+        "seen_label": "Azure AI Search ×1"
+      },
+      {
+        "id": "PE-ALL",
+        "found": true,
+        "bbox": [
+          0.121,
+          0.75,
+          0.183,
+          0.043
+        ],
+        "seen_label": "Private Endpoints ×11"
+      },
+      {
+        "id": "D-COSMOS",
+        "found": true,
+        "bbox": [
+          0.069,
+          0.828,
+          0.207,
+          0.062
+        ],
+        "seen_label": "Azure Cosmos DB for NoSQL ×1"
+      },
+      {
+        "id": "D-ST",
+        "found": true,
+        "bbox": [
+          0.288,
+          0.828,
+          0.24,
+          0.062
+        ],
+        "seen_label": "Storage Accounts ×3"
+      },
+      {
+        "id": "D-SB",
+        "found": true,
+        "bbox": [
+          0.54,
+          0.828,
+          0.23,
+          0.062
+        ],
+        "seen_label": "Service Bus Premium ×1 (paused by default)"
+      },
+      {
+        "id": "D-KV",
+        "found": true,
+        "bbox": [
+          0.799,
+          0.828,
+          0.168,
+          0.06
+        ],
+        "seen_label": "Key Vault ×1"
+      }
+    ],
+    "extras": []
+  }
+}
