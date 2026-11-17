@@ -8,7 +8,7 @@ customers, internal IDs, hosts or local paths.
 
 ## Checks
 
-Run from the repository root (needs Python 3.12 and `pyyaml`):
+Run from the repository root (needs Python 3.12, `pyyaml`, `tzdata`):
 
 ```
 python -m blog.tools.scan_sensitive --denylist <private-denylist> blog   # sensitive-data scan, exit 0 = clean
@@ -18,6 +18,10 @@ python -m pytest -q -p no:cacheprovider blog/tools/tests                 # tool 
 
 `scan_sensitive` also reads an optional private denylist (`--denylist <file>` or the
 `BLOG_DENYLIST` environment variable). Keep that file outside the repository and never commit it.
+
+`scan_sensitive` reads every UTF-8 text file under `blog/` except `tools/` (not published).
+Files that are not UTF-8 text, such as images and other binaries, are skipped, so check them
+by hand before committing (EXIF/GPS metadata, visible names, IDs, hosts or paths in screenshots).
 
 The workflow runs both checks (without the private denylist) before the Jekyll build;
 either failing stops the deploy.

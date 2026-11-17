@@ -4,7 +4,7 @@ from blog.tools.scan_sensitive import load_denylist, main, scan_text, scan_tree
 
 
 def test_flags_inside_code_fence_and_inline_code():
-    text = "```\nC:\\Users\\someone\\x\n```\nip `20.196.1.2` id 9f4014cf-b673-466c-9f7e-9ae4c3db7387"
+    text = "```\nC:\\Users\\someone\\x\n```\nip `20.196.1.2` id 00000000-0000-4000-8000-000000000000"
     assert {f.rule for f in scan_text(text)} == {"user_path", "ipv4", "guid"}
 
 
@@ -60,18 +60,18 @@ def test_fine_grained_github_pat():
 
 
 def test_guid_joined_to_word_character():
-    assert [f.rule for f in scan_text("rg_9f4014cf-b673-466c-9f7e-9ae4c3db7387")] == ["guid"]
+    assert [f.rule for f in scan_text("rg_00000000-0000-4000-8000-000000000000")] == ["guid"]
 
 
 def test_excerpt_does_not_leak_value(tmp_path):
-    [f] = scan_text("x\nid 9f4014cf-b673-466c-9f7e-9ae4c3db7387", path="p.md")
-    assert (f.path, f.line, f.excerpt) == ("p.md", 2, "9f40…")
+    [f] = scan_text("x\nid 00000000-0000-4000-8000-000000000000", path="p.md")
+    assert (f.path, f.line, f.excerpt) == ("p.md", 2, "0000…")
     p = tmp_path / "d.txt"; p.write_text("Kim\n", encoding="utf-8")
     [d] = scan_text("by Kim", deny=load_denylist(p))
     assert "Kim" not in d.excerpt and d.excerpt.endswith("…")
 
 
-def test_scan_tree_filters_extensions_and_skips_tools(tmp_path):
+def test_scan_tree_scans_all_text_files_and_skips_tools(tmp_path):
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / "rules.md").write_text("10.1.2.3", encoding="utf-8")
     (tmp_path / "posts").mkdir()
@@ -80,7 +80,60 @@ def test_scan_tree_filters_extensions_and_skips_tools(tmp_path):
     (tmp_path / "c.yml").write_text("10.1.2.5", encoding="utf-8")
     (tmp_path / "d.txt").write_text("10.1.2.6", encoding="utf-8")
     found = sorted((Path(f.path).name, f.line) for f in scan_tree(tmp_path, []))
-    assert found == [("a.md", 2), ("b.html", 1), ("c.yml", 1)]
+    assert found == [("a.md", 2), ("b.html", 1), ("c.yml", 1), ("d.txt", 1)]
+
+
+def test_scan_tree_skips_non_utf8_files(tmp_path):
+    (tmp_path / "img.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe 10.1.2.7")
+    (tmp_path / "a.md").write_text("10.1.2.8", encoding="utf-8")
+    assert [Path(f.path).name for f in scan_tree(tmp_path, [])] == ["a.md"]
+
+
+def test_azure_openai_hex_key():
+    assert [f.rule for f in scan_text("key " + "0123456789abcdef" * 2)] == ["hex_key"]
+
+
+def test_dashed_guid_is_not_also_a_hex_key():
+    assert [f.rule for f in scan_text("00000000-0000-4000-8000-000000000000")] == ["guid"]
+
+
+def test_longer_hex_is_not_a_hex_key():
+    assert scan_text("sha " + "0123456789abcdef" * 4) == []
+
+
+def test_storage_account_key():
+    assert [f.rule for f in scan_text("k " + "Ab1+/" * 17 + "x" + "==")] == ["storage_key"]
+
+
+def test_entra_client_secret():
+    assert [f.rule for f in scan_text("abc" + "8Q~" + "Fake_Value.0~" * 3)] == ["client_secret"]
+
+
+def test_openai_style_secret_key():
+    assert [f.rule for f in scan_text("sk-" + "proj_" + "fake" * 5)] == ["sk_key"]
+    assert scan_text("task-" + "runner-config-name-long") == []
+
+
+def test_aws_access_key_id():
+    assert [f.rule for f in scan_text("AKIA" + "ABCDEFGHIJKLMNOP")] == ["aws_key"]
+
+
+def test_private_key_block():
+    assert [f.rule for f in scan_text("-----BEGIN " + "RSA PRIVATE KEY-----")] == ["private_key"]
+
+
+def test_password_assignment():
+    text = "\n".join(["Password = x", "pwd: y", "CLIENT_SECRET=z", "the password is not here"])
+    assert [(f.line, f.rule) for f in scan_text(text)] == [(1, "password"), (2, "password"), (3, "password")]
+
+
+def test_bearer_any_case_with_base64_token():
+    assert [f.rule for f in scan_text("authorization: bearer " + "abc+def/ghi=" * 2)] == ["secret"]
+
+
+def test_forward_slash_user_path_any_case():
+    assert [f.rule for f in scan_text("c:/users/someone/x")] == ["user_path"]
+    assert [f.rule for f in scan_text("/users/someone")] == ["user_path"]
 
 
 def test_cli_denylist_env_and_missing_file(tmp_path, monkeypatch, capsys):

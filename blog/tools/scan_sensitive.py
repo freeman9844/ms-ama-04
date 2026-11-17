@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-SCAN_SUFFIXES = {".md", ".html", ".yml"}
 DENYLIST_ENV = "BLOG_DENYLIST"
 
 _GUID = re.compile(
@@ -22,7 +21,7 @@ _GUID = re.compile(
 # 앞뒤로 숫자나 `.숫자`가 이어지면(버전 문자열 등) IP로 보지 않는다.
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_USER_PATH = re.compile(r"(?i:[A-Z]:\\{1,2}Users\\{1,2})|/Users/|/home/")
+_USER_PATH = re.compile(r"(?i:[A-Z]:\\{1,2}Users\\{1,2}|/Users/)|/home/")
 _SECRET = re.compile(
     r"AccountKey="
     r"|SharedAccessSignature"
@@ -30,8 +29,18 @@ _SECRET = re.compile(
     r"|gh[pousr]_[A-Za-z0-9]{20,}"
     r"|github_pat_[A-Za-z0-9_]{22,}"
     r"|eyJ[A-Za-z0-9_-]{20,}\."
-    r"|Bearer [A-Za-z0-9._-]{20,}"
+    r"|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{20,}"
 )
+# Azure AI / OpenAI 키(32자리 hex). 대시가 있는 GUID나 더 긴 hex(해시)는 걸리지 않는다.
+_HEX_KEY = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{32}(?![0-9A-Fa-f])")
+# 스토리지 계정 키(88자 base64). 긴 식별자 오탐을 피하려고 이 길이·형태만 본다.
+_STORAGE_KEY = re.compile(r"[A-Za-z0-9+/]{86}==")
+_CLIENT_SECRET = re.compile(r"[A-Za-z0-9_.\-]{3}\dQ~[A-Za-z0-9_.~\-]{30,}")
+# 앞에 단어 문자가 붙으면(`task-...` 등) 키로 보지 않는다.
+_SK_KEY = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")
+_AWS_KEY = re.compile(r"AKIA[0-9A-Z]{16}")
+_PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_PASSWORD = re.compile(r"(?i)(?:password|pwd|client_secret)\s*[=:]")
 
 _DOC_IP_PREFIXES = ("192.0.2.", "198.51.100.", "203.0.113.")
 _ALLOWED_IPS = {"0.0.0.0", "127.0.0.1"}
@@ -59,6 +68,13 @@ _RULES: list[tuple[str, re.Pattern, object]] = [
     ("email", _EMAIL, _email_ok),
     ("user_path", _USER_PATH, None),
     ("secret", _SECRET, None),
+    ("hex_key", _HEX_KEY, None),
+    ("storage_key", _STORAGE_KEY, None),
+    ("client_secret", _CLIENT_SECRET, None),
+    ("sk_key", _SK_KEY, None),
+    ("aws_key", _AWS_KEY, None),
+    ("private_key", _PRIVATE_KEY, None),
+    ("password", _PASSWORD, None),
 ]
 
 
@@ -116,12 +132,15 @@ def scan_tree(root: Path, deny: Iterable[re.Pattern]) -> list[Finding]:
     deny = list(deny)
     findings: list[Finding] = []
     for file in sorted(root.rglob("*")):
-        if not file.is_file() or file.suffix.lower() not in SCAN_SUFFIXES:
+        if not file.is_file():
             continue
         rel = file.relative_to(root)
         if rel.parts and rel.parts[0] == "tools":
             continue
-        text = file.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = file.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            continue  # 이미지 등 바이너리는 사람이 직접 확인한다(README 참고).
         findings.extend(scan_text(text, path=file.as_posix(), deny=deny))
     return findings
 
