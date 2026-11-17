@@ -13,6 +13,7 @@ from typing import Any
 
 from agents.features import monthly_installment
 from mockapis.postloan import FlowScenario, LoanTerms, PostLoanFlow, generate_postloan
+from mockapis.sellerdata.marketplace import StoreOverride
 from mockapis.synth import Archetype, SyntheticCase, TxnCategory, generate_case
 from shared.contracts import Transaction, TxnTypeCode
 
@@ -188,6 +189,12 @@ def underwriting_cases() -> list[UwCase]:
             case_id = f"ev-u{archetype.value[:4]}{'i' if injected else 'n'}"
             case = generate_case(case_id, archetype, AS_OF, UW_SEED, inject_prompt=injected)
             cases.append(UwCase(case_id, case, injected))
+    cases.append(UwCase(
+        "ev-uhealsusp",
+        generate_case("ev-uhealsusp", Archetype.HEALTHY_SEASONAL, AS_OF, UW_SEED,
+                      store_override=StoreOverride(suspended_days_ago=40)),
+        False,
+    ))
     return cases
 
 

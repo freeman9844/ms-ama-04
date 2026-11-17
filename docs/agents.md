@@ -25,7 +25,7 @@
 
 ## 데이터 수집
 
-- **목적:** 동의 토큰 범위 안의 원천(프로필·거래·세무·PG)을 모으고 완결성·이상 징후를 보고한다(L3).
+- **목적:** 동의 토큰 범위 안의 원천(프로필·거래·세무·PG·마켓 판매 성과)을 모으고 완결성·이상 징후를 보고한다(L3).
 - **도구 allowlist:** `fetch_source`(`src/agents/data_assembly.py`). 핸들러는 `AssemblySession.fetch_source`로, 동의 범위 밖 원천은 `scope_not_consented`를 돌려주고, `unavailable`은 최대 `MAX_ATTEMPTS=3`회 재시도한다.
 - **가드레일:** 원본은 세션에 남고 LLM에는 가명처리한 요약만 간다(`build_pseudonymizer`로 상호·대표자·사업자번호·적요 속 이름을 토큰화). 적요 안 "지시처럼 보이는 문장"은 따르지 않고 anomalies에 기록. 승인·한도·금리는 판단·언급 금지.
 - **완결성은 코드가 계산:** `status`(complete/incomplete)와 `missing_sources`는 결정적으로 산출한다. 에이전트 판단은 `agent_assessment`로만 남는다.
@@ -52,7 +52,7 @@
 - **검토자:** 도구 없음. 주장별 근거 충족을 예/아니오로 판정한다. 주장이 월별 계절 지수(`S:YYYY-MM:index`)를 하나라도 인용하면 입력에 전체 월별 지수와 기준(`seasonal_index`, 1.0 = 관측 기간 월평균)을 함께 넣어 "최저·낮다" 같은 비교를 판정할 수 있게 한다(2026-11-12, 최근 16건 중 추가 라운드 10건의 9건이 이 비교 주장 반려였다).
 - **반성 패턴:** 결정적 grounding 검사(`check_grounding` + `src/agents/grounding.py`의 숫자 대조, 허용 오차 2%) → 통과 시 검토자 → 지적 사항을 다음 라운드 입력으로, 최대 `MAX_ROUNDS=3`회. 3회 초과 시 `review_not_passed`로 심사역에게 넘긴다.
 - **에이전트 요약(2026-11-10, 2026-11-09에서 확장):** `summary`는 심사역이 먼저 읽는 해설로 6~8문장, 상환 여력 → 위험 요인 → 정산 건전성 → 정책 판정과의 관계 → 제안 구조 → 결과를 바꿀 조건 순서다(2026-11-09은 5~7문장·정산 건전성 없이 5단계, 그 전은 세 문장 이내). 정산 건전성은 정산금 입금·현금화 일수·상계율·선정산 추정 중 두드러진 점을 쓰고, 정산 자료가 없으면 "정산 자료 없음" 한 문장으로 끝낸다. 요약 속 숫자도 `check_grounding`이 근거 카탈로그 값·제안 금액·주장에 인용한 거래 금액과 대조한다. 바뀐 지시는 새로 평가하는 신청부터 적용된다.
-- **확인 사항(officer_checks, 2026-11-10):** 정산 자료가 있으면 분석가가 심사역이 확인할 사항을 0~3개(`MAX_OFFICER_CHECKS=3`) 낸다. 각 항목은 '무엇을 확인·요청할지 + 이유' 한 문장(`OfficerCheck.text`, 1~200자)과 근거 ID 1개 이상(`metric_ids`)으로 이뤄지고, 근거 중 하나는 정산 계열(`M:pg_`로 시작하거나 `P:R107:`·`P:R108:`로 시작)이어야 한다(`check_grounding`). 승인·거절·금리·한도는 지시하지 않고 `lag_days`·`fee_rate`·`offset_rate` 숫자는 인용하지 않으며 "선정산" 같은 일반 명사만 쓴다. 정산 자료가 없는데 확인 사항이 있으면 grounding 실패다. 검토자는 `check_verdicts`로 `check_index`마다 근거 충족 여부를 판정하고, 판정은 `CreditAssessment.officer_checks[i].supported`에 담긴다(`src/agents/underwriting.py`). 최종 라운드 초안이 grounding에서 막혀 검토를 받지 못하면 그 라운드의 확인 사항은 `supported=None`으로 남는다(이전 라운드 판정을 이어받지 않는다). 계약 검증(`OfficerCheck` 생성)에 실패해 버려지는 확인 사항이 있어도 남은 항목의 `supported`는 원래 `check_index`의 판정이다(인덱스가 밀리지 않는다).
+- **확인 사항(officer_checks, 2026-11-10):** 정산 자료가 있으면 분석가가 심사역이 확인할 사항을 0~3개(`MAX_OFFICER_CHECKS=3`) 낸다. 각 항목은 '무엇을 확인·요청할지 + 이유' 한 문장(`OfficerCheck.text`, 1~200자)과 근거 ID 1개 이상(`metric_ids`)으로 이뤄지고, 근거 중 하나는 정산·셀러 계열이어야 한다(`OFFICER_CHECK_PREFIXES`: `M:pg_`·`M:mkt_`로 시작하거나 `P:R107:`·`P:R108:`·`P:R003:`·`P:R109:`·`P:R110:`·`P:S001:`·`P:S002:`로 시작, `check_grounding`. 2026-11-17에 셀러 접두사를 더했다 — [마켓 셀러 지표](#마켓-셀러-지표)). 승인·거절·금리·한도는 지시하지 않고 `lag_days`·`fee_rate`·`offset_rate` 숫자는 인용하지 않으며 "선정산" 같은 일반 명사만 쓴다. 정산 자료도 마켓 자료도 없는데 확인 사항이 있으면 grounding 실패다(정산 자료가 없어도 마켓 자료가 있으면 셀러 근거로 쓸 수 있다). 검토자는 `check_verdicts`로 `check_index`마다 근거 충족 여부를 판정하고, 판정은 `CreditAssessment.officer_checks[i].supported`에 담긴다(`src/agents/underwriting.py`). 최종 라운드 초안이 grounding에서 막혀 검토를 받지 못하면 그 라운드의 확인 사항은 `supported=None`으로 남는다(이전 라운드 판정을 이어받지 않는다). 계약 검증(`OfficerCheck` 생성)에 실패해 버려지는 확인 사항이 있어도 남은 항목의 `supported`는 원래 `check_index`의 판정이다(인덱스가 밀리지 않는다).
 - **가드레일:** 모델로 가는 모든 문자열은 가명처리. Code Interpreter 컨테이너는 실행마다 즉시 삭제(`delete_container`). 근거 목록에 없는 숫자(직접 계산 포함) 사용 금지. 정책이 ineligible이면 추천은 decline/refer만. 제안 구조의 기간은 상품 기간 3~6개월(`check_grounding`의 구조 검사, `shared.contracts`의 `MIN_TENOR_MONTHS`·`MAX_TENOR_MONTHS`, 2026-11-08 1~12개월에서 축소). 권고 `conditional`은 남아 있지만 심사역 결정에는 조건부 승인이 없으므로 콘솔은 "승인 권고(조건 제안)"로 표시한다.
 - **알려진 한계:** 평가에서 1라운드 근거 통과율이 모델에 민감하다. 평가 활동은 예외를 올리지 않는다(1라운드 실패면 평가 없음, 이후 실패면 직전 초안을 미통과로). 평가가 없으면 오케스트레이터가 한 번 더 돌리고, 그래도 없으면 `assessment_unavailable` 플래그와 함께 신청을 `failed`로 끝낸다. 심사역은 에이전트 평가를 근거로 결정하므로 평가 없는 건을 심사역 대기로 넘기지 않는다(2026-11-07).
 - **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 3장(검토자 `gpt-5.4-mini` 고정) — 분석가 `gpt-5.4`는 1라운드 근거 통과 100.0%·검토 통과 87.5%·건당 $0.0631, `gpt-5.4-mini`는 62.5%·62.5%·$0.0199. 품질 차이 때문에 분석가는 `gpt-5.4`, 검토자는 `gpt-5.4-mini`로 두었다.
@@ -72,6 +72,27 @@
 - **선지급 입금 분류:** 계좌에 들어온 "선정산" 이체(`TRANSFER_IN`)는 매출이 아니라 대출금(`LOAN_PROCEEDS`)으로 분류한다(`src/agents/classify.py`). 정산 양도 셀러의 선지급이 매출로 잡히지 않게 하려는 규칙이다. 양도 시나리오(`seller-mugshop-21`)는 정책에서 R108이 사유로 붙고, 선지급이 대출금으로 빠지면서 DSCR도 낮아져 R002·R106이 함께 걸린다([ADR-003](adr/ADR-003-deterministic-policy.md#2026-11-08-개정-정책-v3)).
 - **평가:** 심사 suite의 `TAX_EVIDENCE`는 `M:tax_bank_match_ratio` 하나로 줄었고(R101 삭제), 정산 양도(ASSIGNED) 케이스에서 주장이 `M:pg_reconciliation_ratio` 또는 `P:R108`을 인용하는 비율을 `settlement_gap_detection_rate`로 재서 리포트 표의 "정산 차이 탐지" 열에 싣는다(`src/evals/suites/underwriting.py`). 같은 케이스에서 확인 사항이 `SETTLEMENT_CHECK_EVIDENCE`(`M:pg_advance_share`·`M:pg_reconciliation_ratio`·`P:R108` 세 가지만, 접두 일치)를 인용하는 비율을 `settlement_check_rate`로 재고, 내지 않은 케이스는 `settlement_check_missed` 실패로 남긴다. 이 지표들의 실측은 아직 없다.
 - **콘솔:** 상세 화면 현금흐름 탭의 "정산 대사" 카드가 정산금 계좌 입금 비율·최대 채널 비중·현금화 일수·공제율 변화·선정산 추정 건수 KPI, 플랫폼 비중 막대, 월별 공제율(수수료·광고비 상계 분리) 막대, 미입금 정산 목록(원인 열에 선지급 추정 여부)을 보인다(`settlement_card`, `src/console/dashboard.py`). 옛 문서는 현금화 일수·선정산 추정 두 KPI만 "—"다(둘 다 2026-11-10에 새로 생긴 키라서 값이 없다 — 정산금 계좌 입금·최대 채널 비중·공제율 변화는 2026-11-08부터 있던 지표라 옛 문서에도 값이 있다). 공제율 막대는 단색이다. 세금·계좌 일치율은 정책 규칙이 아니라 참고(watch) 지표로만 표시한다. 같은 "정산 대사" 카드 안(현금흐름 탭이고, `에이전트 의견` 탭이 아니다) "에이전트 확인 사항" 패널은 확인 사항이 있으면 검토자 검증 결과(✓/⚠, `N/M`)와 함께 목록을 보이고, 없으면 "이번 평가에서는 확인 사항이 없습니다", `officer_checks` 키 자체가 없는 옛 평가서는 "2026-11-10 이전 심사분은 확인 사항이 없습니다"를 보인다. `_officer_checks`(`src/console/opinion.py`)는 이 세 경우를 `state` `listed`/`empty`/`legacy`로만 구분해 돌려주고, 위 안내 문구 자체는 `src/console/templates/detail.html`에 있다.
+
+## 마켓 셀러 지표
+
+- **목적:** 계좌 현금흐름에 없는 마켓 셀러 운영 데이터(입점 기간·평점·리뷰·반품·취소·판매정지·정산 예정금)를 결정적 코드가 지표로 만들고(`src/agents/marketplace.py`의 `store_summary`·`features_of`, 2026-11-17, 정책 v4), 에이전트는 근거 ID로 인용만 한다. 판정·대체 여부는 정책 엔진이 정한다([ADR-003](adr/ADR-003-deterministic-policy.md#2026-11-17-개정-정책-v4)).
+- **동의 범위·원천:** 새 동의 범위 `ConsentScope.MARKETPLACE`(`marketplace`, 고지 라벨 "마켓 판매 성과")와 Mock API `GET /marketplace/store`(`MarketplaceStore`). 데이터 수집 에이전트의 `SOURCES`에 `marketplace`가 들어가며(필수 원천 아님) 원천 Blob은 동의 ID별 컨테이너의 `marketplace.json`이라 동의 삭제 흐름에 포함된다. 동의가 없거나 자료가 없으면 지표가 모두 `None`이고 정책은 셀러 규칙을 적용하지 않는다(불이익 없음). `marketplace.json`이 손상되면 같은 처리에 `marketplace_unavailable` 플래그를 남기고 심사는 계속한다.
+- **지표 7개(`mkt_*`, `CashFlowFeatures`의 선택 필드, 기본 `None`):**
+
+  | 지표 | 정의 |
+  |---|---|
+  | `mkt_tenure_months` | 가장 이른 입점일부터 기준일까지 개월 수(내림) |
+  | `mkt_rating` | 플랫폼 평점의 리뷰 수 가중 평균, 소수 둘째 자리 |
+  | `mkt_review_count` | 플랫폼 리뷰 수 합 |
+  | `mkt_return_rate_90d` | 최근 90일 반품액 합 ÷ 총매출 합(총매출 0이면 `None`) |
+  | `mkt_cancel_rate_90d` | 최근 90일 취소액 합 ÷ 총매출 합 |
+  | `mkt_days_since_suspension` | 가장 최근 판매정지부터 기준일까지 일수(정지가 없으면 `None`) |
+  | `mkt_pending_settlement_krw` | Σ(정산 예정금 − 선정산 양도분), 0 미만이면 0 |
+
+- **근거 ID:** `get_metrics`의 지표 맵에 `M:mkt_tenure_months`·`M:mkt_rating`·`M:mkt_review_count`·`M:mkt_return_rate_90d`·`M:mkt_cancel_rate_90d`·`M:mkt_days_since_suspension`·`M:mkt_pending_settlement_krw`가 들어간다(값이 `None`이면 넣지 않음). 정책 사유가 있으면 `P:R003`·`P:R109`·`P:R110`·`P:S001`의 `observed`·`threshold`(예: `P:S001:observed`)가 근거가 된다. `P:S002`는 사유 코드를 남기지 않는 `outcome: pass` 규칙이라 근거 ID가 생기지 않는다. 숫자 대조(`check_grounding`)는 기존 방식 그대로다.
+- **지시문:** 분석가는 셀러 지표를 `M:mkt_*` ID와 값만 인용하고, 정책 사유에 S001이 있으면 확인 사항 하나 이상에 `P:S001` 근거를 단다(검증 실패로 처리하지 않는 지시문 요구). 리뷰 원문이나 판매정지 사유 원문은 쓰지 않는다(자료에 없다). 승인·거절을 지시하지 않는 규칙과 "정책이 ineligible이면 decline/refer만" 규칙은 그대로다. 대체로 정책이 refer를 내면 그 결과를 따른다.
+- **확인 사항 근거 확장:** 심사역 확인 사항의 유효 근거 접두사(`OFFICER_CHECK_PREFIXES`, `src/agents/underwriting.py`)가 `M:pg_`·`P:R107:`·`P:R108:`에 더해 `M:mkt_`·`P:R003:`·`P:R109:`·`P:R110:`·`P:S001:`·`P:S002:`로 넓어졌다. 정산 자료가 없어도 마켓 자료가 있으면 확인 사항을 쓸 수 있다. 콘솔 상세의 `마켓 셀러` 탭과 정책 판정 탭이 같은 지표와 "현금흐름만 볼 때 → 셀러 데이터 반영" 비교를 보여 준다.
+- **평가:** 심사 suite에 판매정지 케이스 `ev-uhealsusp`(정상 계절형 셀러에 기준일 40일 전 판매정지, `StoreOverride(suspended_days_ago=40)`)를 더했고, 이력 부족(THIN_FILE)과 이 케이스의 행에 `seller_evidence_cited`(분석가 초안의 주장이 `M:mkt_`·`P:S001`·`P:R003`·`P:R109`·`P:R110`을 하나라도 인용했는지)를 싣는다(`SELLER_EVIDENCE`, `src/evals/suites/underwriting.py`). 컨텍스트는 운영과 같이 `compute_underwriting(..., marketplace=...)`로 만든다. 이 지표의 모델 실측은 아직 없다.
 
 ## 조기경보
 

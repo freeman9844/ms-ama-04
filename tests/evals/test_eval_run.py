@@ -290,3 +290,34 @@ def test_report_shows_settlement_check_column_and_dash_for_old_results(tmp_path)
     del config["settlement_check_rate"]
     section = report.render_markdown(summary).split("## 3.")[1].split("## 4.")[0]
     assert "| — |" in section
+
+
+def _offline_decision(case_id):
+    case = next(c for c in datasets.underwriting_cases() if c.case_id == case_id)
+    return build_context(case, b"k" * 32).policy
+
+
+def _codes(policy):
+    return [r["code"] for r in policy["reason_codes"]]
+
+
+def test_underwriting_cases_include_suspension_case():
+    policy = _offline_decision("ev-uhealsusp")
+    assert policy["decision"] == "ineligible" and "R003" in _codes(policy)
+
+
+def test_thin_file_eval_case_substituted():
+    policy = _offline_decision("ev-uthinn")
+    assert policy["cash_only"]["decision"] == "ineligible"
+    assert "S001" in _codes(policy)
+
+
+def test_seller_evidence_row():
+    meter = Meter(load_prices(), 5.0)
+    models = Models.from_env({})
+    backend = fake_backend(meter, models)
+    case = next(c for c in datasets.underwriting_cases() if c.case_id == "ev-uthinn")
+    row = underwriting.run_case(case, models.mini, reviewer_model=models.reviewer, meter=meter,
+                                runner=EvalRunner(backend.agents, meter), pseudonym_key=b"k" * 32)
+    backend.close()
+    assert isinstance(row["seller_evidence_cited"], bool)

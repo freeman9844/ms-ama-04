@@ -7,7 +7,7 @@
 자격·한도·금리 구간 같은 신용 규칙은 감사·재현이 가능해야 하고 규제 대상이다. LLM에 판정을 맡기면 근거 추적·버전 관리·재현이 어렵다. 과제 요구는 "결정론적 정책 엔진 + 심사역 승인"이다(상위 Spec §2.3·§4.1, `docs/superpowers/specs/2026-10-31-agentic-cashflow-lending-design.md`). 판정 서비스가 일시적으로 불능일 때 자동 승인이 새는 것을 막아야 한다.
 
 ## 결정
-신용 규칙은 LLM 밖의 **결정적 Policy Engine**이 판정한다: 버전드 YAML 규칙(`src/policy/rulesets/v3.yaml`, `2026.11-v3`, 기본 규칙은 `DEFAULT_RULES_PATH`; 2026-11-08 정책 v3로 개정([아래 절](#2026-11-08-개정-정책-v3)). P9에서 상품 한도 50만~1,000만 원·기간 1~12개월로 개정(v2), 2026-11-08 기간을 3~6개월로 축소(규칙 YAML은 기간을 보지 않고 신청 입구에서 강제), `v1.yaml`·`v2.yaml`은 이력으로 보존)을 `src/policy/rules.py`가 로드하고(`load_rules`, `RuleSet.version`), `src/policy/engine.py`가 순수 함수로 자격·한도·금리·reason code를 판정하며 응답에 `rules_version`을 담는다(`:66`, `:74`). 서비스 진입점은 `src/policy/app.py`다. LLM(분석가·검토자)은 **추천만** 만들고 판정 권한이 없다. Policy 호출이 실패하면 **fail-closed**로 진행하지 않는다: 오케스트레이터가 `policy_unavailable`+`assessment_unavailable` 플래그를 남기고 `awaiting_officer`로 심사역에게 넘기며(`src/orchestrator/journey/orchestration.py:198-201`, `:245`), 심사역 결정 검증은 정책 결과가 없거나 ineligible이면 기본적으로 승인을 거부한다(`override_required`). 2026-11-04 개정으로 심사역(CreditOfficer·CreditManager)이 **정책 예외 승인**을 할 수 있다. 콘솔이 "정책 결과상 거절이지만 승인하겠습니까?" 확인을 받고, 결정에 `policy_override=true`와 사유를 붙여야 한다. 금액은 상품 최대 한도(1,000만 원, `OVERRIDE_MAX_AMOUNT_KRW`) 이하이며, 콘솔과 오케스트레이터가 같은 검증을 다시 한다(`src/orchestrator/journey/validation.py`, `src/console/static/decision.js`). 자동 경로에서는 여전히 승인이 새지 않는다. 정책 판정이 eligible·refer인 건은 지금처럼 정책 한도를 넘는 승인을 막는다(`amount_exceeds_policy`). P9부터 심사역 결정은 승인/거절 두 가지이며 조건부 승인은 폐지했다(이전 `conditionally_approved` 문서는 읽기 전용 이력으로 표시). 반복 실패를 막는 서킷 브레이커는 `src/orchestrator/journey/circuit.py`(프로세스 단위)이고, `src/orchestrator/journey/adapters.py`의 `HttpPolicyApi`가 open 상태에서 `PolicyUnavailable("circuit_open")`을 던진다.
+신용 규칙은 LLM 밖의 **결정적 Policy Engine**이 판정한다: 버전드 YAML 규칙(`src/policy/rulesets/v4.yaml`, `2026.11-v4`, 기본 규칙은 `DEFAULT_RULES_PATH`; 2026-11-17 정책 v4로 개정([아래 절](#2026-11-17-개정-정책-v4)), 그 전 2026-11-08 정책 v3([절](#2026-11-08-개정-정책-v3)). P9에서 상품 한도 50만~1,000만 원·기간 1~12개월로 개정(v2), 2026-11-08 기간을 3~6개월로 축소(규칙 YAML은 기간을 보지 않고 신청 입구에서 강제), `v1.yaml`·`v2.yaml`은 이력으로 보존)을 `src/policy/rules.py`가 로드하고(`load_rules`, `RuleSet.version`), `src/policy/engine.py`가 순수 함수로 자격·한도·금리·reason code를 판정하며 응답에 `rules_version`을 담는다(`:66`, `:74`). 서비스 진입점은 `src/policy/app.py`다. LLM(분석가·검토자)은 **추천만** 만들고 판정 권한이 없다. Policy 호출이 실패하면 **fail-closed**로 진행하지 않는다: 오케스트레이터가 `policy_unavailable`+`assessment_unavailable` 플래그를 남기고 `awaiting_officer`로 심사역에게 넘기며(`src/orchestrator/journey/orchestration.py:198-201`, `:245`), 심사역 결정 검증은 정책 결과가 없거나 ineligible이면 기본적으로 승인을 거부한다(`override_required`). 2026-11-04 개정으로 심사역(CreditOfficer·CreditManager)이 **정책 예외 승인**을 할 수 있다. 콘솔이 "정책 결과상 거절이지만 승인하겠습니까?" 확인을 받고, 결정에 `policy_override=true`와 사유를 붙여야 한다. 금액은 상품 최대 한도(1,000만 원, `OVERRIDE_MAX_AMOUNT_KRW`) 이하이며, 콘솔과 오케스트레이터가 같은 검증을 다시 한다(`src/orchestrator/journey/validation.py`, `src/console/static/decision.js`). 자동 경로에서는 여전히 승인이 새지 않는다. 정책 판정이 eligible·refer인 건은 지금처럼 정책 한도를 넘는 승인을 막는다(`amount_exceeds_policy`). P9부터 심사역 결정은 승인/거절 두 가지이며 조건부 승인은 폐지했다(이전 `conditionally_approved` 문서는 읽기 전용 이력으로 표시). 반복 실패를 막는 서킷 브레이커는 `src/orchestrator/journey/circuit.py`(프로세스 단위)이고, `src/orchestrator/journey/adapters.py`의 `HttpPolicyApi`가 open 상태에서 `PolicyUnavailable("circuit_open")`을 던진다.
 
 ## 2026-11-08 개정: 정책 v3
 
@@ -17,6 +17,44 @@
 - **임계값 근거(데모 케이스·평가 케이스 분포, 기준일 2026-10-01·11-02·11-09, 기간 6개월):** 정상 셀러의 대사율 최솟값은 1.0, ASSIGNED(정산 양도) 셀러의 최댓값은 0.776이라 R108 기준 0.90이 둘 사이에 들어간다. STRESSED 셀러의 매출 추세 최댓값은 0.799로 R106 기준 0.80 바로 아래다. **R106은 마진이 0.001뿐이라** 합성 데이터의 작은 변화나 다른 기준일에도 판정이 뒤집힐 수 있다. 합성 분포에 맞춘 값이지 실데이터로 보정한 값이 아니다.
 - **데모 판정 변화:** 세금 불일치 셀러 4명(mangwon-02·kimchi-09·kitchen-12·petcare-16)은 다른 사유가 없어 적격이 된다. 스트레스 셀러 4명(glowlab-03·skinlab-11·cable-13·sofa-18)은 `refer`(R105·R106). 단일 플랫폼 셀러(candle-05·ceramic-08)는 R107로 `refer`이고, 이력 부족 셀러도 단일 플랫폼이면 R107이 더해진다. 정산 양도 셀러 mugshop-21은 `ineligible`(R002·R106·R108·R901)이다. 양도로 지급이 다른 곳에 들어가 매출이 줄고 "선정산 선지급" 입금(`LOAN_PROCEEDS`로 분류)이 매출에서 빠져 DSCR이 1.0 아래로 크게 내려가므로(신청 금액·기간에 따라 달라지며, 결정 불변성 테스트 입력인 330만 원·12개월·기준일 2026-11-01에서 0.393이고 기본 신청 조건 500만 원·6개월에서는 더 낮다), R108만의 검토가 아니라 R002 탈락에 R108·R106이 *왜 매출이 줄었는지*를 설명하는 사유로 붙는다.
 - **배포 순서:** 새 특성 필드는 기본값 `None`이라 정책 서비스를 먼저 올려도 옛 특성을 받는다. 정책 → mockapi → 오케스트레이터 → 콘솔 순서로 배포한다.
+
+## 2026-11-17 개정: 정책 v4
+
+현금흐름만 보던 심사에 마켓 셀러만 가진 운영 데이터(입점 기간·평점·리뷰·반품·취소·판매정지·정산 예정금)를 더한다. 기본 규칙셋은 `src/policy/rulesets/v4.yaml`(`2026.11-v4`)이고 v3 이하는 이력으로 남는다(`rules_for_version`이 읽는다). 판정은 여전히 결정적 엔진이 하고 LLM은 인용만 한다. 설계는 `docs/superpowers/specs/2026-11-17-marketplace-seller-underwriting-design.md`다.
+
+- **대체(substitution) 원칙:**
+  - 셀러 근거로 기존 규칙 하나를 대체한다. 대상 규칙이 `hit`이고 `when` 조건이 모두 관측값이 있고 참일 때만 적용한다. 조건 값이 하나라도 `None`이면 적용하지 않는다.
+  - **탈락 대체는 검토(refer)까지만** 간다(S001: R001 거래 이력 6개월 미만 → 검토 사유 S001). 사람 확인 없이 자동 적격이 되지 않게 하려는 것이다. 탈락이 아닌 규칙을 면제하는 S002(R104 업력 부족, `outcome: pass`)만 사유를 남기지 않고 지나간다.
+  - **막는 규칙:** 대체할 수 없는 탈락(R002·R003·R900·R901) 중 하나라도 걸리면 어떤 대체도 판정에 반영하지 않는다. 사유 코드는 원래대로(R001·R104 포함) 남고, 추적에 대체 항목이 `not_applied`와 막은 규칙(`blocked_by`)으로 남는다. 콘솔은 "조건 충족, R002로 미적용"으로 보인다.
+  - **한도 순서:** 대체 → 한도 → R900. `before = min(신청액, max(유입 한도, 정산 예정금 한도), 상품 최대)`이고, 탈락 규칙이 대체됐으면 대체 상한 500만 원으로 한 번 더 자른 뒤 10만 원 단위로 절사한다. 정산 예정금 한도는 `mkt_pending_settlement_krw × 0.8`이며 선정산 양도분은 뺀다(값이 없으면 0). 대체 상한은 탈락을 대체한 경우에만 걸린다. 금리 구간 규칙은 바꾸지 않았다.
+  - **현금흐름만 판정(`cash_only`):** 같은 규칙셋에서 `mkt_*` 7개를 모두 `None`으로 바꾸고 대체·한도 보강 없이 다시 평가한 결과(판정·한도·사유 코드)를 함께 돌려준다. 콘솔은 "현금흐름만 볼 때 → 셀러 데이터 반영"으로 비교한다.
+- **대체 불가 규칙과 이유:**
+
+  | 규칙 | 이유 |
+  |---|---|
+  | R002 (DSCR 1.0 미만) | 상환 능력은 평판으로 덮지 않는다 |
+  | R003 (최근 90일 판매정지) | 플랫폼 제재는 평점·리뷰로 덮지 않는다 |
+  | R900·R901 | 한도·금리 구간이 없어 대출 자체가 성립하지 않는다(엔진 예약 코드) |
+
+  규칙 로더가 `replaces`에 R002·R003이나 엔진 예약 코드를 쓰면 거부한다.
+- **임계값 근거(합성 분포 기반 데모 값):** 아키타입별 합성 기본값(입점 24개월 이상, 평점 정상 4.5~4.9·STRESSED 4.2~4.5·THIN_FILE 4.6~4.9, 취소율 1~6%, 정지 없음)에서 정상 셀러가 셀러 규칙에 걸리지 않게 잡았다. R110 평점 4.0 미만은 기본값 최저(4.2) 아래이고 데모 덮어쓰기(streetfit-19 평점 3.8) 위다. R109 반품률 15% 초과는 덮어쓴 ceramic-08(약 18%)을 잡도록 정했다. S001은 입점 18개월·평점 4.5·리뷰 100건·반품률 8% 이하, S002는 입점 18개월·평점 4.5다. R003의 90일은 합성 셀러 성과 창(`WINDOW_DAYS=90`)과 같다. 합성 분포에 맞춘 값이지 실데이터로 보정한 값이 아니다([한계](../limitations.md)).
+- **데모 판정(기준일 2026-11-17, 신청 500만 원·6개월):** `V4_EXPECTED`(`tests/mockapis/test_policy_v4_sellers.py`)와 같다.
+
+  | 셀러 | cash_only(현금흐름만) | v4 판정 | v4 사유 |
+  |---|---|---|---|
+  | knitroom-04 | ineligible (R001·R104·R107) | refer | S001·R107 (한도 500만 원) |
+  | leather-14 | ineligible (R001·R104·R107) | refer | S001·R107 (한도 500만 원) |
+  | petfood-07 | eligible | ineligible | R003 |
+  | ceramic-08 | refer (R107) | refer | R107·R109 |
+  | tint-17 | ineligible (R001·R002·R901·R104·R107) | ineligible | R001·R002·R901·R104·R107 (S001 조건은 충족했으나 R002·R901이 막아 미적용) |
+  | streetfit-19 | ineligible (R001·R002·R901·R104) | ineligible | R001·R002·R901·R104·R110 (S001·S002 조건 미충족, 평점 3.8) |
+
+  나머지 15개 데모 셀러는 v4 판정·사유가 cash_only와 같다(`test_policy_v4_sellers.py`).
+- **petfood·ceramic의 v3 판정 변화:** 없다. 두 셀러만 계좌 합성에 셀러 훅을 걸어(petfood-07 판매정지 7일 동안 주력 플랫폼 주문 0, ceramic-08 최근 90일 반품률 약 18%) 합성 지문이 바뀌었다(petfood-07 `09c9d812b4991db7` → `b4c9cc0f667ef53b`, ceramic-08 `a5e85591324b25f3` → `ff34510fc5cd7e7c`). 기준일 2026-11-17·신청 500만 원·6개월로 잰 v3 판정은 petfood-07 `eligible`(사유 없음, DSCR 1.74)·ceramic-08 `refer`(R107, DSCR 1.21)로 훅 전과 같다. 다른 셀러와 평가 케이스 지문은 그대로다.
+- **`P:S002` 근거가 없는 이유:** S002는 `outcome: pass` 규칙이라 적용돼도 사유 코드를 남기지 않는다. 근거 ID `P:<코드>:observed`·`P:<코드>:threshold`는 사유 코드에서 만들어지므로(S001은 첫 조건의 field·관측값·기준값을 사유에 싣는다) `P:S002`는 근거 카탈로그에 생기지 않는다. 확인 사항 근거 접두사에는 `P:S002:`가 들어 있지만 인용할 ID가 없다. S002가 적용됐다는 사실은 정책 추적(`substitutions`)에서 본다.
+- **심사역 확인 사항:** S002로 적격이 돼도 모든 신청은 `awaiting_officer`에서 심사역이 결정하므로 자동 승인은 없다.
+- **배포 순서·호환:** 정책 → mockapi → 오케스트레이터 → 콘솔 순서로 올린다. `mkt_*` 값이 하나도 없으면 정책 응답에서 `cash_only` 키를 뺀다(v3와 같은 모양, 버전 문자열만 v4). 옛 저장 문서에는 `cash_only`가 없거나 `null`인데, 콘솔은 둘 다 없는 것으로 다룬다. `ReasonCode.code` 패턴은 `^[RS]\d{3}$`로 넓어졌으므로 콘솔·오케스트레이터는 S 코드를 받아들인다.
+- **동의·삭제:** 새 동의 범위 `marketplace`(`ConsentScope.MARKETPLACE`)와 원천 `marketplace.json`은 ADR-009 삭제 흐름에 포함된다. 신청 문서에는 파생 지표와 제재의 날짜·종류·플랫폼만 남고 자유 텍스트 사유는 없다.
 
 ## 검토한 대안
 | 대안 | 장점 | 기각 이유 |
@@ -36,7 +74,7 @@
 - 실데이터 규제 검토에서 금리·한도 규칙 거버넌스 요건이 강화될 때.
 
 ## 근거
-- 구현: `src/policy/rulesets/v3.yaml`(이력 `v2.yaml`·`v1.yaml`), 정산 지표 `src/agents/pg_ledger.py`, `src/policy/rules.py`, `src/policy/engine.py:66`, `src/policy/app.py`.
+- 구현: `src/policy/rulesets/v4.yaml`(기본, 이력 `v3.yaml`·`v2.yaml`·`v1.yaml`), 정산 지표 `src/agents/pg_ledger.py`, 셀러 지표 `src/agents/marketplace.py`, `src/policy/rules.py`, `src/policy/engine.py:66`, `src/policy/app.py`.
 - fail-closed: `src/orchestrator/journey/orchestration.py:198-201`, `src/orchestrator/journey/validation.py`(예외 승인 `_validate_override`).
 - 서킷: `src/orchestrator/journey/circuit.py`, `src/orchestrator/journey/adapters.py`.
 - 실측: `ops/reports/load-20261102110233/report.md` 4장(정책 호출 수·`circuit_open`), 서킷 half-open·경보는 `docs/runbook/deploy-history.md:581`.
