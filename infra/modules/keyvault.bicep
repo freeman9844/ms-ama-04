@@ -21,6 +21,7 @@ resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
+    // 제거 보호는 끈다(수용한 예외, docs/limitations.md): teardown이 같은 이름을 다시 쓰려고 purge한다.
     publicNetworkAccess: 'Disabled'
     networkAcls: {
       defaultAction: 'Deny'

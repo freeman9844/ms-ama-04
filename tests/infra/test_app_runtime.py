@@ -1,6 +1,8 @@
 """P3 앱 런타임 인프라: 큐, Cosmos 컨테이너, 비밀, 정책·Mock Container Apps, Functions 설정."""
 import json
 
+from tests.infra.test_console import INFRA, _compile, _resources
+
 APP = "Microsoft.App/containerApps"
 SITE = "Microsoft.Web/sites"
 PLACEHOLDER = "mcr.microsoft.com/azurelinux/base/python:3.12"
@@ -97,12 +99,26 @@ def test_acr_image_pulled_with_app_identity(variant):
     assert registry["identity"].endswith("/id-apps-amatest")
 
 
-def test_mock_consent_secret_is_app_secret(closed, variant):
+def test_mock_consent_secret_is_app_secret(closed, opened):
     props = closed.one(APP, "ca-mockapi")["properties"]
     assert [s["name"] for s in props["configuration"]["secrets"]] == ["mock-consent-secret"]
     assert _env(_container(closed, "ca-mockapi"))["MOCK_CONSENT_SECRET"]["secretRef"] == "mock-consent-secret"
     assert "MOCK_CONSENT_SECRET" not in _env(_container(closed, "ca-policy"))
-    assert variant.one(APP, "ca-mockapi")["properties"]["configuration"]["secrets"] == []
+    # 자리표시 이미지(최초 azd provision)는 비밀 없이도 만들어집니다.
+    assert opened.one(APP, "ca-mockapi")["properties"]["configuration"]["secrets"] == []
+
+
+def test_mock_consent_secret_required_for_real_image():
+    # 실제 이미지인데 비밀이 비면 Container App PUT이 비밀·환경 변수를 지우므로, 그 전에 배포를 멈춥니다.
+    modules = {m["name"]: m for m in _resources(_compile(INFRA / "resources.bicep"))
+               if m.get("type") == "Microsoft.Resources/deployments"}
+    guard = modules["require-mock-consent-secret"]
+    assert guard["condition"] == "[not(empty(parameters('mockapiImage')))]"
+    assert guard["properties"]["parameters"]["value"]["value"] == "[parameters('mockConsentSecret')]"
+    [param] = guard["properties"]["template"]["parameters"].values()
+    assert param["type"] == "securestring" and param["minLength"] == 32
+    assert "[resourceId('Microsoft.Resources/deployments', 'require-mock-consent-secret')]" in \
+        modules["ca-mockapi"]["dependsOn"]
 
 
 def test_function_app_settings_point_to_runtime(closed, variant):

@@ -56,10 +56,10 @@ flowchart TB
 | 원천 거래·세무·PG 데이터 | Blob(동의 ID별 컨테이너) | 높음(개인신용정보) | 가명화 후에만 모델 전송, 동의 종료 시 삭제 |
 | 판단 기록(파생 지표·reason code·모델/규칙 버전·심사역 결정) | Cosmos `lending` | 중간 | 장기 보존(설명 가능성), PE 격리 |
 | 동의·삭제 증명 | Cosmos `consents`·`deletion_proofs` | 중간 | manifest·sha256·항목별 검증, 장기 보존 |
-| 비밀 | 없음(관리 ID)·Key Vault 소수 | 높음 | 무키 인증, Key Vault·Cosmos·Storage 로컬 인증 끔, 단 AI Search는 키 인증 유지(`infra/modules/search.bicep:20`) |
+| 비밀 | 없음(관리 ID)·Key Vault 소수 | 높음 | 무키 인증, Key Vault·Cosmos·Storage 로컬 인증 끔, 단 AI Search는 키 인증 유지(`infra/modules/search.bicep:20`). Key Vault 제거 보호(purge protection)는 끈 채 둔다(teardown이 결정적 이름 재사용을 위해 purge, 수용한 예외는 [한계](../limitations.md)) |
 | 모델 프롬프트·트레이스 | Foundry(`genAIContent`) | 높음 | 입력은 가명화 값, 대화는 삭제, 트레이스 잔존은 잔여 위험 |
 | 실명(복원값) | 콘솔 런타임(Blob에서 복원) | 높음 | WAF 운영자 IP 규칙 안의 데모 역할이 상세 화면에서 조회(`src/console/adapters.py:5`) — 잔여 위험 |
-| 게이트웨이 TLS 인증서 | Key Vault 비밀 `appgw-console`(PFX) | 높음(개인 키 포함) | 제어면 PUT으로만 쓰고 게이트웨이 ID는 Secrets User만, 만료 30일 전 갱신 |
+| 게이트웨이 TLS 인증서 | Key Vault 비밀 `appgw-console`(PFX) | 높음(개인 키 포함) | 제어면 PUT으로만 쓰고 게이트웨이 ID는 Secrets User만(볼트 범위라 가명 키도 읽을 수 있음, 인증서 비밀이 첫 provision 뒤에 생겨 비밀 범위로 줄이지 않음), 만료 30일 전 갱신 |
 
 ## STRIDE
 
@@ -83,7 +83,7 @@ flowchart TB
 | D2 | Denial of Service | 공개 진입점 폭주·L7 공격 | Functions·콘솔 | Functions 공개 접근은 배포 창에만, 그 외 Deny 기본값. 콘솔은 WAF(Prevention, OWASP DRS 2.1)와 운영자 IP 규칙이 앞단에서 막고, 진입·WAF 로그(`AGWAccessLogs`, `AGWFirewallLogs`)를 Log Analytics에 남긴다 | `infra/modules/functions.bicep:43`, `infra/modules/functions.bicep:47-49`, `infra/modules/appgw.bicep`, `tests/infra/test_appgw.py` | 구현 |
 | D3 | Denial of Service | WAF 오탐이 정당한 콘솔 요청을 막음 | 게이트웨이 WAF | 방화벽 로그로 차단 규칙을 확인한 뒤 해당 규칙만 정책에서 제외한다. 현재는 오탐 조정을 하지 않았다([ADR-011](../adr/ADR-011-appgw-waf-entry.md) 재검토 조건) | `infra/modules/appgw.bicep` | 부분 완화 |
 | E1 | Elevation of Privilege | 고정 역할로 권한 획득 | 콘솔 역할 | 운영은 Entra 앱 역할(`CreditOfficer`·`CreditManager`·`Auditor`), 데모는 WAF 운영자 IP 규칙만으로 `CreditOfficer` 고정 | `src/console/adapters.py:226-229`, [ADR-007](../adr/ADR-007-demo-auth-mode.md) | 데모 완화 |
-| E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 역할별로 범위를 나눔: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). 전 경로 스모크용 `id-smoke`는 가장 넓어 엄밀한 최소 권한은 아니다 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
+| E2 | Elevation of Privilege | 과도한 Job 권한으로 측면 이동 | 관리 ID | 운영 Job은 역할별로 범위를 나눔: `id-eval`은 모델 호출·`eval-reports` 쓰기만, `id-ops`는 신청 큐 보내기·Cosmos 읽기만(모델·Key Vault·쓰기 없음). Key Vault 비밀 값은 오케스트레이터·콘솔·게이트웨이 ID만 읽고, `id-smoke`는 비밀 목록만(Key Vault Reader), `id-apps`(Policy·Mock API)는 Key Vault 권한이 없다. 전 경로 스모크용 `id-smoke`는 가장 넓어 엄밀한 최소 권한은 아니다 | `infra/modules/identities.bicep:31`, `infra/modules/identities.bicep:38`, `infra/resources.bicep`, `tests/infra/test_platform.py`, [ADR-008](../adr/ADR-008-vnet-jobs-for-eval-ops.md) | 구현 |
 | E3 | Elevation of Privilege | 에이전트가 허용 밖 도구 호출 | 에이전트 런타임 | 도구 allowlist(`unknown_tool` 반환), 추심은 스크립트 ID enum만 발송 | `src/agents/runtime.py:163`, `src/agents/collections.py:68`, `tests/agents/test_runtime.py:133` | 검증 |
 
 ## AI 위험

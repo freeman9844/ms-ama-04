@@ -110,6 +110,10 @@ def test_openai_api_policy(closed):
     assert ops["chat-completions"]["properties"]["urlTemplate"] == "/deployments/{deployment-id}/chat/completions"
     policy = _by_leaf(closed, "Microsoft.ApiManagement/service/apis/policies", 2)["openai"]["properties"]["value"]
     assert '<set-variable name="promptChars"' in policy
+    # 제품 없이 들어오는 구독(master·전체 API 구독)은 제품 TPM을 우회하므로 맨 앞에서 403으로 막습니다.
+    assert '<when condition="@(context.Product == null)">' in policy
+    assert '<set-status code="403"' in policy
+    assert policy.index("context.Product == null") < policy.index('name="promptChars"')
     assert "context.Request.Body.As<JObject>(preserveContent: true)" in policy
     assert policy.index('name="promptChars"') < policy.index("<llm-content-safety")
     assert (
@@ -136,6 +140,8 @@ def test_decision_api_validates_entra_token(closed):
     assert policy.count("<value>") == 2 and "__APPIDS__" not in policy
     assert 'rate-limit-by-key calls="120" renewal-period="60"' in policy
     assert 'set-backend-service backend-id="foundry-decision"' in policy
+    # Decision API는 구독 없이(Entra 토큰) 호출하므로 제품 검사를 두지 않습니다.
+    assert "context.Product" not in policy
 
 
 def test_products_policies_and_subscriptions(closed):
@@ -150,6 +156,9 @@ def test_products_policies_and_subscriptions(closed):
         value = policies[name]["properties"]["value"]
         assert f'tokens-per-minute="{tpm}"' in value
         assert 'estimate-prompt-tokens="false"' in value
+        # 제품마다 생기는 관리자 구독과 나눠 쓰지 않도록 카운터는 제품 단위입니다.
+        assert 'counter-key="@(context.Product.Id)"' in value
+        assert "context.Subscription.Id" not in value
     subs = _by_leaf(closed, "Microsoft.ApiManagement/service/subscriptions")
     assert set(subs) == set(GATEWAYS)
     for name, sub in subs.items():

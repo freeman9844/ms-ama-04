@@ -122,5 +122,3 @@ resource workbook 'Microsoft.Insights/workbooks@2023-06-01' = {
     serializedData: loadTextContent('ops-workbook.json')
   }
 }
-
-output connectionName string = traces.name

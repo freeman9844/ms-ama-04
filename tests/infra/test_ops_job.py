@@ -26,7 +26,7 @@ def test_ops_job_runs_opsjob_with_ops_identity(variant):
     assert container["command"] == ["/opt/venv/bin/python", "-m", "opsjob"]
     env = {e["name"]: e["value"] for e in container["env"]}
     assert env["COSMOS_DATABASE"] and env["COSMOS_ENDPOINT"].startswith("https://")
-    assert re.match(r"^https://st[a-z0-9]+\.queue\.core\.windows\.net$", env["QUEUE_ENDPOINT"])
+    assert re.match(r"^https://st[a-z0-9]+\.queue\.core\.windows\.net/$", env["QUEUE_ENDPOINT"])
 
 
 def test_eval_job_unchanged_by_shared_module(variant):

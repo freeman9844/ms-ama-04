@@ -34,7 +34,7 @@ param chatModelSku string = 'GlobalStandard'
 param decisionModelSku string = 'GlobalStandard'
 
 @secure()
-@description('Mock API 동의 토큰 서명 비밀(32자 이상). ops가 azd 환경에 생성합니다.')
+@description('Mock API 동의 토큰 서명 비밀(32자 이상). ops가 azd 환경에 생성합니다. mockapiImage가 있으면 필수입니다.')
 param mockConsentSecret string = ''
 
 @secure()

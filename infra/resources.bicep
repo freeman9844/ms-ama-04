@@ -74,6 +74,7 @@ var names = {
 }
 
 var storageSuffix = environment().suffixes.storage
+var aiProjectEndpoint = 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
 var blobZone = 'privatelink.blob.${storageSuffix}'
 var queueZone = 'privatelink.queue.${storageSuffix}'
 var tableZone = 'privatelink.table.${storageSuffix}'
@@ -94,7 +95,8 @@ var dnsZoneNames = [
 ]
 
 // 기본 제공 역할 정의 GUID (az role definition list로 확인, 2026-10-31)
-// kvValueReader = Key Vault Secrets User, kvValueAdmin = Key Vault Secrets Officer
+// kvValueReader = Key Vault Secrets User, kvValueAdmin = Key Vault Secrets Officer,
+// kvReader = Key Vault Reader(비밀 목록·메타데이터만, 값 읽기 없음)
 var role = {
   blobOwner: 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
   blobContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
@@ -103,6 +105,7 @@ var role = {
   tableContributor: '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
   kvValueReader: '4633458b-17de-408a-b874-0445c86b69e6'
   kvValueAdmin: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+  kvReader: '21090545-7ca7-4776-b22c-e363652d74d2'
   foundryUser: '53ca6127-db72-4b80-b1b0-d745d6d5456d'
   openAiUser: '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
   sbSender: '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'
@@ -182,9 +185,10 @@ module keyVault 'modules/keyvault.bicep' = {
     zoneId: zoneId['privatelink.vaultcore.azure.net']
     secrets: { 'pseudonym-key': pseudonymKey }
     roleAssignments: concat([
+      // 비밀 값: 가명 키(오케스트레이터·콘솔), TLS 인증서(App Gateway). smoke는 목록 확인만 합니다.
+      // App Gateway 인증서 비밀(appgw-console)은 첫 provision 뒤 ops가 만들어 비밀 범위로 줄 수 없으므로 볼트 범위입니다.
       { principalId: identities.outputs.orchestratorPrincipalId, roleId: role.kvValueReader, principalType: sp }
-      { principalId: identities.outputs.appsPrincipalId, roleId: role.kvValueReader, principalType: sp }
-      { principalId: identities.outputs.smokePrincipalId, roleId: role.kvValueReader, principalType: sp }
+      { principalId: identities.outputs.smokePrincipalId, roleId: role.kvReader, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.kvValueReader, principalType: sp }
       { principalId: identities.outputs.appgwPrincipalId, roleId: role.kvValueReader, principalType: sp }
     ], hasOperator ? [
@@ -396,7 +400,7 @@ module aiRolesPost 'modules/foundry/roles-post.bicep' = if (deployCapabilityHost
 
 output AI_ACCOUNT_NAME string = aiAccount.outputs.name
 output AI_PROJECT_NAME string = aiProject.outputs.name
-output AI_PROJECT_ENDPOINT string = 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
+output AI_PROJECT_ENDPOINT string = aiProjectEndpoint
 output AI_OPENAI_ENDPOINT string = 'https://${names.ais}.openai.azure.com/'
 output FOUNDRY_PROJECT_CAPHOST string = names.projectCapHost
 
@@ -502,6 +506,14 @@ module caPolicy 'modules/container-app.bicep' = {
   }
 }
 
+// 실제 이미지(ops deploy 이후)인데 동의 서명 비밀이 비면 배포를 멈춥니다. 그대로 PUT하면
+// Container App의 비밀 배열이 통째로 바뀌어 MOCK_CONSENT_SECRET이 사라지고 mockapi가 시작하지 못합니다.
+// 자리표시 이미지(최초 azd provision)는 비밀 없이 만듭니다. ops provision은 비밀을 자동 생성합니다.
+module mockSecretGuard 'modules/require-secret.bicep' = if (!empty(mockapiImage)) {
+  name: 'require-mock-consent-secret'
+  params: { value: mockConsentSecret }
+}
+
 module caMockapi 'modules/container-app.bicep' = {
   name: 'ca-mockapi'
   params: {
@@ -516,6 +528,7 @@ module caMockapi 'modules/container-app.bicep' = {
     image: mockapiImage
     secretEnv: { MOCK_CONSENT_SECRET: mockConsentSecret }
   }
+  dependsOn: [ mockSecretGuard ]
 }
 
 output POLICY_APP_NAME string = caPolicy.outputs.name
@@ -545,7 +558,7 @@ module functions 'modules/functions.bicep' = {
       COSMOS_ENDPOINT: cosmos.outputs.endpoint
       COSMOS_DATABASE: cosmos.outputs.databaseName
       DATA_BLOB_ENDPOINT: stData.outputs.blobEndpoint
-      AI_PROJECT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
+      AI_PROJECT_ENDPOINT: aiProjectEndpoint
       DATA_ASSEMBLY_MODEL: 'gpt-5.6-luna'
       AI_ACCOUNT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com'
       DECISION_DEPLOYMENT: 'decision-1'
@@ -616,7 +629,7 @@ module caConsole 'modules/container-app.bicep' = {
       { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${storageSuffix}/' }
       { name: 'KEYVAULT_URI', value: keyVault.outputs.uri }
       // 심사역 결정 채팅(src/console/adapters.py build_chat). 게이트웨이 설정은 오케스트레이터와 같습니다.
-      { name: 'AI_PROJECT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}' }
+      { name: 'AI_PROJECT_ENDPOINT', value: aiProjectEndpoint }
       { name: 'AI_GATEWAY', value: gatewaySettings.AI_GATEWAY }
       { name: 'AI_GATEWAY_URL', value: gatewaySettings.AI_GATEWAY_URL }
       { name: 'CHAT_MODEL', value: 'gpt-6-luna' }
@@ -689,7 +702,7 @@ module smokeJob 'modules/smoke-job.bicep' = {
     identityClientId: identities.outputs.smokeClientId
     config: {
       openai_host: '${names.ais}.openai.azure.com'
-      project_endpoint: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}'
+      project_endpoint: aiProjectEndpoint
       blob_host: '${names.stData}.blob.${storageSuffix}'
       cosmos_host: '${names.cosmos}.documents.azure.com'
       keyvault_host: '${names.kv}${environment().suffixes.keyvaultDns}'
@@ -739,7 +752,7 @@ module evalJob 'modules/eval-job.bicep' = {
     registryServer: acr.outputs.loginServer
     image: evalImage
     envVars: [
-      { name: 'AI_PROJECT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com/api/projects/${names.project}' }
+      { name: 'AI_PROJECT_ENDPOINT', value: aiProjectEndpoint }
       { name: 'AI_ACCOUNT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com' }
       { name: 'DECISION_DEPLOYMENT', value: 'decision-1' }
       { name: 'EVAL_FULL_MODEL', value: 'gpt-5.6-sol' }
@@ -778,7 +791,7 @@ module opsJob 'modules/eval-job.bicep' = {
     envVars: [
       { name: 'COSMOS_ENDPOINT', value: cosmos.outputs.endpoint }
       { name: 'COSMOS_DATABASE', value: cosmos.outputs.databaseName }
-      { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${environment().suffixes.storage}' }
+      { name: 'QUEUE_ENDPOINT', value: 'https://${names.stFunc}.queue.${storageSuffix}/' }
     ]
   }
 }
@@ -820,7 +833,7 @@ module apim 'modules/apim.bicep' = {
     allowedAppIds: [ identities.outputs.orchestratorClientId, identities.outputs.evalClientId ]
     gateways: gateways
   }
-  dependsOn: [ dns ]
+  // azure-api.net 영역(dns 모듈)은 aiAccount 출력 참조를 거쳐 먼저 만들어집니다.
 }
 
 module gatewayConnections 'modules/foundry/gateway-connections.bicep' = {

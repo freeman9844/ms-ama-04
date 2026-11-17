@@ -183,13 +183,25 @@ resource safetyBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = {
 }
 
 // ── 정책 ────────────────────────────────────────────────────────────────
-// 순서: 프롬프트 길이 계산 → 콘텐츠 안전(프롬프트 차단) → 제품 정책(<base/>: 에이전트별 TPM) → MI 인증 → 토큰 지표.
+// 순서: 제품 확인 → 프롬프트 길이 계산 → 콘텐츠 안전(프롬프트 차단) → 제품 정책(<base/>: 에이전트별 TPM) → MI 인증 → 토큰 지표.
+// 제품 없는 구독(기본 master·전체 API 범위 구독)은 제품 TPM 정책을 거치지 않으므로 403으로 막습니다.
 // Prompt Shields 10,000자 한도 — 넘는 프롬프트는 범주 검사만(모델 배포 기본 콘텐츠 필터 DefaultV2가 탈옥 검사를 이어서 함).
 // 길이는 모든 역할(system 포함)의 messages[*].content 합계로, Prompt Shields가 받는 길이의 상한입니다.
 // 연결이 보내는 구독 키(api-key)는 백엔드로 넘기지 않습니다.
 var openaiPolicy = '''
 <policies>
   <inbound>
+    <choose>
+      <when condition="@(context.Product == null)">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-body>{"error":{"code":"ProductSubscriptionRequired","message":"Use a gw-* product subscription key."}}</set-body>
+        </return-response>
+      </when>
+    </choose>
     <set-variable name="promptChars" value='@{
       try {
         var messages = context.Request.Body.As<JObject>(preserveContent: true)["messages"] as JArray;
@@ -277,12 +289,12 @@ var decisionPolicy = '''
 </policies>
 '''
 
-// 에이전트(구독)별 분당 토큰 한도. 카운터는 구독 단위입니다.
+// 에이전트(제품)별 분당 토큰 한도. 카운터는 제품 단위라 제품마다 자동으로 생기는 관리자 구독도 같은 한도를 나눠 씁니다.
 var productPolicy = '''
 <policies>
   <inbound>
     <base />
-    <llm-token-limit counter-key="@(context.Subscription.Id)" tokens-per-minute="__TPM__" estimate-prompt-tokens="false" remaining-tokens-header-name="x-ratelimit-remaining-tokens" />
+    <llm-token-limit counter-key="@(context.Product.Id)" tokens-per-minute="__TPM__" estimate-prompt-tokens="false" remaining-tokens-header-name="x-ratelimit-remaining-tokens" />
   </inbound>
   <backend>
     <base />
@@ -395,5 +407,3 @@ resource subscriptions 'Microsoft.ApiManagement/service/subscriptions@2024-05-01
 }]
 
 output name string = apim.name
-output gatewayUrl string = 'https://${apim.name}.azure-api.net'
-output principalId string = apim.identity.principalId
