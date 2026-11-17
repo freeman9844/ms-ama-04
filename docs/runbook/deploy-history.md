@@ -961,3 +961,10 @@ python -m ops smoke
 - **배포:** `window open --acr`(4.0분, `translations`·`leases` 컨테이너와 `CosmosDBConnection__*` 설정 생성) → `ops deploy orchestrator`(6.2분, `pretranslate_*` 4개 등록) → `ops deploy console`(`console:20261115040048`, 5.1분) → `ops smoke` 성공(`job-smoke-arv2a9l`). 대출 화면 후속(`76796c7`) 재배포: orchestrator 6.0분 → console(`console:20261115043247`) 5.1분 → `ops smoke` 성공(`job-smoke-sm3dsie`) → **`window close`**(3.9분) 뒤 `/loans` 200.
 - **백필:** 첫 실행은 applications 번역 844·alerts 254, 거절 0, 실패 18(alerts 16·grievances 2)이었습니다. 실패는 콜드 스타트에서 두 트리거가 `console-translator` 에이전트 버전을 동시에 만들다 생긴 409 Conflict입니다. 리스 세대(g2)를 올린 재백필에서 alerts 번역 40·건너뜀 255·실패 0, applications 건너뜀 855였습니다.
 - **라이브 확인:** `app-20261114-170e2a`·`app-20261113-59e115` 영문 화면의 기계 번역 대기(`data-mt`) 0, 대출 화면 사전 번역 48개(`mt-done`). 새 신청 `app-20261115-fe02fa`(glowlab-03, 5,000,000원·6개월)는 심사 완료 약 30초 뒤 영어로 보였습니다. 남은 한국어는 차주 원문(영문 참고 번역 동반), 거래 원문 설명, 데모 사용자 이름, 언어 전환기뿐입니다.
+
+## 2026-11-17 전체 소스 리뷰 반영 배포
+
+- **배경:** 전체 소스(src·infra)를 영역별로 리뷰해 버그·보안·성능·정리 항목을 고쳤습니다(`9ba5a0b`·`5b1e2f7`·`124e0b8`·`4dcb380`, 전체 테스트 5253 통과).
+- **주요 변경:** APIM `openai` API는 제품 없는 구독을 403으로 막고 `llm-token-limit` 카운터를 제품 단위로 바꿨습니다. Key Vault는 `id-apps` 접근을 없애고 `id-smoke`를 Key Vault Reader로 줄였습니다. 이의 회신·심사역 채팅은 심사역이 쓴 문장을 그 건의 가명처리기로 가립니다. 이의 재심사의 정책 밖 승인은 `rereview_outside_policy`로 거부합니다. 콘솔 폼 POST는 스레드 풀에서 실행하고, 두 번째 심사역 결정에는 409를 돌려줍니다. 에이전트 호출은 버전을 고정합니다(`agent_reference.version`). `window close`는 `WINDOW_STATE`로 완료 여부를 기록합니다.
+- **배포:** `window open --acr`(4.4분, APIM 정책·Key Vault 역할 반영) → `ops deploy all` 1차는 콘솔 이미지 빌드 중 az 토큰 연결 끊김으로 실패, 재실행으로 이미지 4개(`*:20261117025938`)와 프로비저닝 성공. Functions zip은 SCM 403이었습니다. `ifconfig.me`가 돌려준 두 번째 출구 IP 167.220.233.25를 임시 규칙 `operator-alt2`(priority 111)로 넣고 `ops deploy orchestrator` 성공(`func-gaz7yh2zic7zc`).
+- **확인:** `ops smoke` 1차는 Job 성공(`job-smoke-lfhkqk8`), 콘솔 관문은 `agw-amalend`가 다시 `Stopped`라 시간 초과였습니다. 게이트웨이를 시작한 뒤 이전 Key Vault Secrets User 할당(`id-apps-amalend`·`id-smoke-amalend`)을 지우고 다시 돌려 성공(`job-smoke-vs4mazv`, 콘솔 관문 정상)했습니다. smoke가 Key Vault Reader만으로 통과함을 확인했습니다. 임시 규칙 삭제 → **`window close`**(`window status`: 닫힘).
