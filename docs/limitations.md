@@ -31,7 +31,7 @@
 - 데모 인증(Easy Auth 꺼짐 + WAF 운영자 IP 규칙만)은 모든 결정을 고정 주체 `demo-operator`로 기록해 감사 추적에 실제 신원이 없다. 복원은 환경 변수로 끝나지 않고 `window open` → `deploy console` → `window close` 재배포(실측 약 12분, `docs/runbook/deploy-history.md:250`)와 테넌트 관리자 동의가 선행돼야 한다([ADR-007](adr/ADR-007-demo-auth-mode.md), `src/console/adapters.py:229`).
 - AI Search는 키 인증을 유지하고(`disableLocalAuth: false`, `infra/modules/search.bicep:20`), Foundry·Functions는 배포 창 동안만 공용 접근을 연다(`docs/security/threat-model.md:75`).
 - 운영 Job의 광범위 읽기는 `id-smoke`에 한정돼 있어 엄격한 최소 권한은 아니다(`docs/security/threat-model.md:80`, [ADR-008](adr/ADR-008-vnet-jobs-for-eval-ops.md)).
-- 고객 신청 페이지(`/apply`)는 콘솔 역할 없이 같은 진입 통제(WAF 운영자 IP 규칙)만 받는다. 고객 본인 인증·사업자 실명 확인은 범위 밖이라 데모 셀러 21곳만 고를 수 있고, 진행 현황(`/apply/{id}`)은 신청번호만 알면 누구나 본다(고객 신청 건만, 내부 근거 없이). 운영 설계는 고객용 Entra External ID와 신청-사용자 바인딩이다. (P9)
+- 고객 신청 페이지(`/apply`)는 콘솔 역할 없이 같은 진입 통제(WAF 운영자 IP 규칙)만 받는다. 고객 본인 인증·사업자 실명 확인은 범위 밖이라 고객 콘솔 첫 화면(`/borrower`)에서 데모 셀러 21곳 중 하나를 고르고 그 사업자로만 신청하며(사업자 없는 `/apply`는 선택 화면으로 돌아감), 진행 현황(`/apply/{id}`)은 신청번호만 알면 누구나 본다(고객 신청 건만, 내부 근거 없이). 운영 설계는 고객용 Entra External ID와 신청-사용자 바인딩이다. (P9)
 
 ## 데이터·외부 연동
 

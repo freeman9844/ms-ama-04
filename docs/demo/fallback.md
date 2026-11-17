@@ -6,7 +6,7 @@
 
 ## 사전 준비 목록
 
-데모 전날까지 만들어 둡니다. 동의 유효 기간은 90일이라(`src/orchestrator/journey/models.py`의 `CONSENT_TTL_DAYS`) 그보다 오래된 사전 건은 다시 만듭니다. A·B는 반드시 `seller-dailylook-01`(성수데일리룩)로 만듭니다. 사후 흐름에 조기경보 원인 시나리오가 있는 셀러는 `seller-dailylook-01`(매출 부진)·`seller-gearstore-06`(용산기어스토어, 정산 보류)·`seller-linen-10`(을지로린넨, 반품 급증)·`seller-tangerine-15`(제주귤하루, 비용 증가) 네 곳이고(`src/mockapis/demo.py`의 `POSTLOAN_SCENARIOS`, 2026-11-11), 대본은 `seller-dailylook-01`을 기준으로 씁니다. 그 밖의 셀러로 B를 만들면 재생은 끝나도 경보·미납·추심 제안이 없을 수 있습니다. 네 셀러의 미납 여부·시점은 원인마다 다릅니다: `seller-dailylook-01`(매출 부진)만 13주차 마지막 회차가 시나리오상 미납이라 재생이 끝난 뒤 그 추심 건의 추심 제안(과 재조정)을 결정할 수 있고, `seller-gearstore-06`(정산 보류)은 5주차 첫 회차만 일시 미납된 뒤 보류 해제로 회복하며, `seller-linen-10`·`seller-tangerine-15`는 미납이 없습니다(`docs/limitations.md`). B는 이 때문에 반드시 `seller-dailylook-01`로 만듭니다. C는 삭제 증명만 보므로 셀러가 달라도 됩니다. 신청은 고객 페이지 `/apply`(동의 3개 모두 체크 → `신청하기`)나 콘솔 `새 신청` 어느 쪽으로 넣어도 같은 흐름을 탑니다.
+데모 전날까지 만들어 둡니다. 동의 유효 기간은 90일이라(`src/orchestrator/journey/models.py`의 `CONSENT_TTL_DAYS`) 그보다 오래된 사전 건은 다시 만듭니다. A·B는 반드시 `seller-dailylook-01`(성수데일리룩)로 만듭니다. 사후 흐름에 조기경보 원인 시나리오가 있는 셀러는 `seller-dailylook-01`(매출 부진)·`seller-gearstore-06`(용산기어스토어, 정산 보류)·`seller-linen-10`(을지로린넨, 반품 급증)·`seller-tangerine-15`(제주귤하루, 비용 증가) 네 곳이고(`src/mockapis/demo.py`의 `POSTLOAN_SCENARIOS`, 2026-11-11), 대본은 `seller-dailylook-01`을 기준으로 씁니다. 그 밖의 셀러로 B를 만들면 재생은 끝나도 경보·미납·추심 제안이 없을 수 있습니다. 네 셀러의 미납 여부·시점은 원인마다 다릅니다: `seller-dailylook-01`(매출 부진)만 13주차 마지막 회차가 시나리오상 미납이라 재생이 끝난 뒤 그 추심 건의 추심 제안(과 재조정)을 결정할 수 있고, `seller-gearstore-06`(정산 보류)은 5주차 첫 회차만 일시 미납된 뒤 보류 해제로 회복하며, `seller-linen-10`·`seller-tangerine-15`는 미납이 없습니다(`docs/limitations.md`). B는 이 때문에 반드시 `seller-dailylook-01`로 만듭니다. C는 삭제 증명만 보므로 셀러가 달라도 됩니다. 신청은 고객 콘솔(`고객 선택`에서 사업자 → `대출 신청`, 동의 3개 모두 체크 → `신청하기`)이나 콘솔 `새 신청` 어느 쪽으로 넣어도 같은 흐름을 탑니다.
 
 | 이름 | 만드는 방법 | ID(P9 배포 뒤 준비) | 확인 방법 |
 |---|---|---|---|
@@ -26,7 +26,7 @@
 - [ ] 라이브 신청 ID를 메모할 곳(종이·메모장)을 준비합니다.
 - [ ] `python -m ops fault status`가 `source: off`, `policy: off`로 둘 다 꺼져 있음. 켜져 있으면 `python -m ops fault source off` / `python -m ops fault policy off`로 끕니다(`source`가 `flaky`이면 사후 재생이 실패합니다).
 - [ ] 사전 건 A·B·C의 확인 방법(위 표)을 한 번씩 통과.
-- [ ] 브라우저 탭 순서 맞추기: 1 고객 신청 페이지(`/apply`), 2 콘솔 목록(`/`), 3 사전 건 A, 4 사전 대출 B, 5 사전 동의 C 증명.
+- [ ] 브라우저 탭 순서 맞추기: 1 고객 콘솔 대출 신청(`/apply?applicant_id=seller-dailylook-01`), 2 콘솔 목록(`/`), 3 사전 건 A, 4 사전 대출 B, 5 사전 동의 C 증명.
 - [ ] 사전 대출 B의 마지막 추심 건 `추심 제안`이 아직 `심사역 승인 대기`인지 확인(리허설에서 결정했다면 다시 만듦). 선택 장면을 할 거면 대출 D가 아직 `고객 응답 대기`인지도 확인.
 - [ ] 발표 시각이 21시~08시(KST)면 1:20 장면의 추심 발송이 `보류`(연락 시간 밖)로 끝난다는 것을 알고 대사를 준비(아래 표).
 - [ ] 녹화본 파일을 발표 PC에서 바로 재생할 수 있는지 확인.
