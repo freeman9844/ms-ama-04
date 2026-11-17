@@ -10,3 +10,21 @@ lang: en
   <li><a href="{{ "/en/" | relative_url }}">Read in English</a></li>
   <li><a href="{{ "/ko/" | relative_url }}" lang="ko">한국어로 읽기</a></li>
 </ul>
+
+<h2>Episodes / 편 목록</h2>
+<table>
+<thead><tr><th>Days</th><th>English</th><th lang="ko">한국어</th></tr></thead>
+<tbody>
+{%- for ep in site.data.episodes -%}
+  {%- assign en = nil -%}
+  {%- assign ko = nil -%}
+  {%- for p in site.posts -%}
+    {%- if p.ref == ep.ref and p.lang == "en" -%}{%- assign en = p -%}{%- endif -%}
+    {%- if p.ref == ep.ref and p.lang == "ko" -%}{%- assign ko = p -%}{%- endif -%}
+  {%- endfor -%}
+  {%- if en or ko %}
+<tr><td>{{ ep.days | escape }}</td><td>{% if en %}<a href="{{ en.url | relative_url }}">{{ en.title | escape }}</a>{% endif %}</td><td lang="ko">{% if ko %}<a href="{{ ko.url | relative_url }}">{{ ko.title | escape }}</a>{% endif %}</td></tr>
+  {%- endif -%}
+{%- endfor %}
+</tbody>
+</table>
