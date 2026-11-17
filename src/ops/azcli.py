@@ -10,12 +10,21 @@ from typing import Callable
 
 Runner = Callable[..., str]  # runner(args: list[str], *, stream: bool = False) -> str
 
-_NOT_FOUND_MARKERS = ("ResourceNotFound", "ResourceGroupNotFound", "NotFound", "(404)",
-                      "was not found", "could not be found")
+_NOT_FOUND_MARKERS = ("ResourceNotFound", "ResourceGroupNotFound", "(NotFound)", '"code":"NotFound"',
+                      "Not Found(", "(404)", "was not found", "could not be found")
+# 구독·권한을 잘못 본 오류는 메시지에 "could not be found"가 들어 있어도 "이미 삭제됨"이 아닙니다.
+_WRONG_SCOPE_MARKERS = ("SubscriptionNotFound", "AuthorizationNotFound", "TenantNotFound")
 
 
 class OpsError(RuntimeError):
     """운영 명령 실패."""
+
+
+def _display(args: list[str]) -> str:
+    """오류 메시지용 명령 문자열. `azd env set <KEY> <값>`의 값(비밀일 수 있음)은 가립니다."""
+    if args[1:3] == ["env", "set"] and len(args) > 4:
+        args = [*args[:4], *["***"] * (len(args) - 4)]
+    return " ".join(args)
 
 
 def subprocess_runner(args: list[str], *, stream: bool = False) -> str:
@@ -27,16 +36,18 @@ def subprocess_runner(args: list[str], *, stream: bool = False) -> str:
     if stream:
         completed = subprocess.run(command)
         if completed.returncode != 0:
-            raise OpsError(f"명령 실패({completed.returncode}): {' '.join(args)}")
+            raise OpsError(f"명령 실패({completed.returncode}): {_display(args)}")
         return ""
     completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
     if completed.returncode != 0:
-        raise OpsError(f"명령 실패({completed.returncode}): {' '.join(args)}\n{completed.stderr.strip()}")
+        raise OpsError(f"명령 실패({completed.returncode}): {_display(args)}\n{completed.stderr.strip()}")
     return completed.stdout
 
 
 def is_not_found(err: OpsError) -> bool:
     text = str(err)
+    if any(marker in text for marker in _WRONG_SCOPE_MARKERS):
+        return False
     return any(marker in text for marker in _NOT_FOUND_MARKERS)
 
 

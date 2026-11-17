@@ -7,7 +7,7 @@
 | 명령 | 용도 |
 |------|------|
 | `python -m ops window open [--ip <IP>] [--acr]` | 배포 창 열기: 운영자 공인 IP만 허용(`--acr`은 ACR 빌드 창). 실측 11.0분(P2, Cosmos 갱신이 약 8분; 최근 실측은 [deploy](deploy.md#배포-창)) |
-| `python -m ops window status` | 창 상태 확인. 공인 IP가 바뀌었으면 경고(종료 코드 2) |
+| `python -m ops window status` | 창 상태 확인. 공인 IP가 바뀌었거나 이전 `window close`가 실패해 `닫는 중`이면 경고(종료 코드 2) |
 | `python -m ops window close` | 배포 창 닫기(작업 후 반드시 실행). 실측 10.8분(P2) |
 | `python -m ops deploy [policy\|mockapi\|console\|eval\|orchestrator\|all]` | 앱 배포(P3·P4b): 정책·Mock·콘솔·평가(`eval`) 이미지 ACR Build → 프로비저닝, Function zip. `window open --acr` 필요 |
 | `python -m ops smoke` | VNet 안 smoke Job 실행 + 운영자 PC에서 콘솔 로그인 관문 확인(P4b) |
@@ -80,7 +80,7 @@ python -m ops fault status                                      # 장애 토글 
 python -m ops metrics --run load-<시각> --fault-runs fault-<…> fault-<…>   # report.md·metrics.json
 ```
 
-- `ops load`의 `--count`는 1~48(기본값은 균형 격자 크기 `len(LOAD_GRID)`), `--interval`은 제출 간격(초, 기본 15)입니다. 결과는 `ops/reports/load-<시각>/`에 저장되며, 측정 실행 하나는 `ops/reports/load-20261102110233/report.md`입니다.
+- `ops load`의 `--count`는 1~48(기본값은 균형 격자 크기 `len(LOAD_GRID)`), `--interval`은 제출 간격(초, 기본 15)입니다. 결과는 `ops/reports/load-<시각>/`에 저장되며, 측정 실행 하나는 `ops/reports/load-20261102110233/report.md`입니다. 처음 3건(표본)으로 비용 가드가 예상 비용을 계산하고, 한도를 넘거나 대기 시간 안에 끝난 표본이 없어 추정할 수 없으면 나머지 제출을 멈춥니다.
 - `ops fault run <시나리오>`는 장애를 켜고 신청을 제출한 뒤 `finally`에서 원복합니다. 시나리오는 `source-flaky`, `policy-down`입니다.
 - 장애를 수동으로 켜고 끄는 명령(`src/ops/cli.py`): `python -m ops fault source flaky|off`, `python -m ops fault policy on|off`.
 - **장애 토글 확인**: `python -m ops fault status`는 `source: off|flaky`, `policy: off|unavailable`을 한 줄씩 출력합니다. 시연이나 측정 전에 둘 다 `off`인지 확인합니다. 켜진 채 남았으면 `python -m ops fault source off` / `policy off`(또는 `azd provision`)로 원복합니다.

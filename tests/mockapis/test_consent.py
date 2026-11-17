@@ -85,6 +85,13 @@ def test_registry_revoke_unknown_returns_false():
     assert ConsentRegistry().revoke("nope") is False
 
 
+def test_registry_revokes_well_formed_id_it_never_granted():
+    reg = ConsentRegistry()
+    consent_id = "0123456789abcdef0123456789abcdef"
+    assert reg.revoke(consent_id) is True
+    assert consent_id in reg.revoked_ids
+
+
 @pytest.mark.parametrize("ttl", [timedelta(hours=23), timedelta(days=366)])
 def test_registry_ttl_bounds(ttl):
     with pytest.raises(ValueError):

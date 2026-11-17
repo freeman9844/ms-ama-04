@@ -11,8 +11,7 @@ from evals.gateway_probe import OUTPUT as PROBE_OUTPUT, TASK as PROBE_TASK
 from evals.transport import TransportError
 from ops.azcli import OpsError, Runner, subscription_runner
 from ops.azdenv import get_env
-from ops.jobs import collect_with_retry, start_job, wait_job
-from ops.smoke_runner import log_hint
+from ops.jobs import collect_with_retry, log_hint, start_job, wait_job
 
 REPORTS = Path(__file__).resolve().parents[2] / "eval" / "reports"
 REQUIRED = ("summary.json", "report.md", "calls.jsonl")

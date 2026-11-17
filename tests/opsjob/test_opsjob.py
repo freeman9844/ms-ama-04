@@ -175,6 +175,22 @@ def test_guard_records_unpriced_calls_without_aborting(tmp_path):
     assert summary["guard"]["unpriced_calls"] == 3
 
 
+def test_guard_aborts_when_sample_has_no_finished_docs(tmp_path):
+    # 표본이 하나도 끝나지 않으면 비용을 추정할 수 없다(0달러로 보고 계속 보내지 않는다).
+    stuck = {a.applicant_id for a in LOAD_GRID[:3]}
+    summary, q, _ = run_with(tmp_path, store_kw={"stuck": stuck}, count=24, wait_s=60)
+    assert len(q.sent) == 3 and summary["aborted"] is True
+    guard = summary["guard"]
+    assert guard["reason"] == "inconclusive"
+    assert guard["per_application_usd"] is None and guard["projected_usd"] is None
+    assert guard["sample"] == 0
+
+
+def test_guard_reason_when_over_budget(tmp_path):
+    summary, _, _ = run_with(tmp_path, store_kw={"tokens": 1_000_000}, count=24)
+    assert summary["guard"]["reason"] == "over_budget"
+
+
 def test_docs_keep_only_projected_fields(tmp_path):
     run_with(tmp_path)
     text = (tmp_path / "docs.json").read_text(encoding="utf-8")

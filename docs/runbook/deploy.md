@@ -9,9 +9,9 @@ Azure 서비스는 기본적으로 사설 엔드포인트 전용입니다. 이�
 
 | 명령 | 하는 일 |
 |------|---------|
-| `python -m ops window open [--ip <IP>] [--acr]` | `OPERATOR_IP`·`CONSOLE_IP`를 현재 공인 IP(또는 `--ip`)로 정하고 `azd provision`을 실행해 Foundry 계정·Functions 등에 운영자 IP 규칙을 넣습니다. `--acr`이면 `ACR_PUBLIC=true`로 ACR도 열어 `az acr build`가 가능해집니다. |
-| `python -m ops window status` | 창 상태와 현재 공인 IP를 보여 줍니다. IP가 허용값과 다르면 경고하고 종료 코드 2로 끝납니다. |
-| `python -m ops window close` | `OPERATOR_IP=closed`, `ACR_PUBLIC=false`로 다시 프로비저닝합니다. `CONSOLE_IP`는 그대로 둡니다. |
+| `python -m ops window open [--ip <IP>] [--acr]` | `OPERATOR_IP`·`CONSOLE_IP`를 현재 공인 IP(또는 `--ip`)로 정하고 `azd provision`을 실행해 Foundry 계정·Functions 등에 운영자 IP 규칙을 넣습니다. `--acr`이면 `ACR_PUBLIC=true`로 ACR도 열어 `az acr build`가 가능해집니다. 운영자 IP를 넣은 뒤 단계(프로비저닝·콘솔 인증서)가 실패하면 창이 일부 열린 채일 수 있어, 오류 메시지 끝에 `python -m ops window close` 안내가 붙습니다(자동으로 닫지 않음). |
+| `python -m ops window status` | 창 상태와 현재 공인 IP를 보여 줍니다. IP가 허용값과 다르거나 이전 `window close`가 끝나지 않았으면(`닫는 중(close 미완료)`) 경고하고 종료 코드 2로 끝납니다. |
+| `python -m ops window close` | `OPERATOR_IP=closed`, `ACR_PUBLIC=false`로 다시 프로비저닝합니다. `CONSOLE_IP`는 그대로 둡니다. azd 환경의 `WINDOW_STATE`를 프로비저닝 전 `closing`, 성공 뒤 `closed`로 기록하므로 프로비저닝이 실패하면 `window status`가 닫힘으로 보이지 않습니다. 그때는 `window close`를 다시 실행합니다. |
 
 - 창은 프로비저닝을 동반하므로 몇 분이 걸립니다. 실측: 열기 3.7분·닫기 3.7분(P5b), 열기 6.6분·닫기 5.4분(P6b, job-ops·경보·Workbook 첫 생성 포함) — `docs/runbook/deploy-history.md`의 "실제 배포 기록(P5b…)"과 "실제 실행 기록(P6b…)" 표.
 - 일부 서비스(Key Vault, Cosmos DB, Storage)는 테넌트 정책 때문에 창을 열어도 운영자 PC에서 접근할 수 없습니다. 그 서비스의 데이터 작업은 VNet 안 Job으로 합니다([deploy-history](deploy-history.md)의 "알려진 제약" 절).

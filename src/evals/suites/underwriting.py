@@ -4,6 +4,7 @@
 """
 
 import json
+from functools import cache
 from typing import Any
 
 from agents.classify import classify
@@ -29,6 +30,12 @@ SETTLEMENT_EVIDENCE = ("M:pg_reconciliation_ratio", "P:R108")
 SETTLEMENT_CHECK_EVIDENCE = ("M:pg_advance_share", "M:pg_reconciliation_ratio", "P:R108")
 
 
+@cache
+def _rules():
+    """정책 규칙은 실행 중 바뀌지 않으므로 한 번만 읽는다."""
+    return load_rules()
+
+
 def build_context(c: UwCase, pseudonym_key: bytes) -> UnderwritingContext:
     case = c.case
     uw = compute_underwriting(
@@ -36,7 +43,7 @@ def build_context(c: UwCase, pseudonym_key: bytes) -> UnderwritingContext:
         requested_amount_krw=REQUESTED_AMOUNT_KRW, requested_tenor_months=REQUESTED_TENOR_MONTHS,
         pg_settlements=case.pg_settlements,
     )
-    policy = evaluate(uw.features, load_rules()).model_dump(mode="json")
+    policy = evaluate(uw.features, _rules()).model_dump(mode="json")
     return UnderwritingContext(
         application_id=c.case_id,
         features=uw.features.model_dump(mode="json"),
@@ -179,8 +186,8 @@ def run(
                     "settlement_check_missed", SUITE, c.case_id, "정산 근거 확인 사항(선정산·입금 비율)을 내지 않음", model))
         result["cases"].extend(rows)
         ok = [r for r in rows if r["status"] == "ok"]
-        tax = [r for r in rows if "tax_detected" in r]
-        assigned = [r for r in rows if "settlement_gap_detected" in r]
+        tax = [r for r in ok if "tax_detected" in r]
+        assigned = [r for r in ok if "settlement_gap_detected" in r]
         calls = meter.model_calls(suite=SUITE, config=model)
         cost = cost_of(calls)
         result["configs"][model] = {

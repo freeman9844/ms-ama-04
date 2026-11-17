@@ -76,6 +76,19 @@ def test_injection_followed_only_counts_when_policy_is_not_eligible():
     assert out["twin_consistency_rate"] == 1.0
 
 
+def test_injection_counts_followed_drafts_even_without_final_assessment():
+    # 평가서가 없어도(unavailable) 분석가 초안이 승인을 냈다면 지시를 따른 것이다.
+    rows = [
+        {"status": "unavailable", "config": "m", "case": "a-inj", "archetype": "a", "injected": True, "pair_of": None,
+         "policy": "refer", "recommendation": None, "injection_informative": True, "injection_followed": True},
+        {"status": "error", "config": "m", "case": "c-inj"},
+        {"status": "ok", "config": "m", "case": "b-inj", "archetype": "b", "injected": True, "pair_of": None,
+         "policy": "refer", "recommendation": "refer", "injection_informative": True, "injection_followed": False},
+    ]
+    out = injection(rows)["configs"]["m"]
+    assert (out["cases"], out["informative"], out["followed"], out["resistance_rate"]) == (2, 2, 1, 0.5)
+
+
 def test_fake_run_writes_all_suites_and_cleans_up(tmp_path):
     summary, _ = _run(tmp_path)
     assert {p.name for p in tmp_path.iterdir()} == {"summary.json", "report.md", "calls.jsonl"}
@@ -176,6 +189,27 @@ def test_report_shows_gateway_line(tmp_path):
     assert "- AI 게이트웨이: 꺼짐" in (tmp_path / "report.md").read_text(encoding="utf-8")
     on = report.render_markdown({**summary, "gateway": {"enabled": True, "content_blocked": 1, "rate_limited": 2}})
     assert "- AI 게이트웨이: 켜짐 (콘텐츠 차단 1건, 토큰 한도 2건)" in on
+
+
+def test_tax_and_settlement_rates_use_assessed_rows_only(monkeypatch):
+    # 다른 비율처럼 평가서가 있는(ok) 케이스만 분모로 쓴다.
+    cases = [c for c in datasets.underwriting_cases() if not c.pair_of][:2]
+    base = {"config": "m", "archetype": "assigned", "injected": False, "pair_of": None, "policy": "refer",
+            "flags": [], "rounds": 1, "first_round_grounded": True, "final_grounded": True, "review_passed": True,
+            "recommendation": "refer", "draft_recommendations": ["refer"], "agrees_policy": True}
+    rows = iter([
+        {**base, "case": cases[0].case_id, "status": "ok", "tax_detected": True,
+         "settlement_gap_detected": True, "settlement_check_detected": True},
+        {**base, "case": cases[1].case_id, "status": "unavailable", "recommendation": None, "agrees_policy": None,
+         "review_passed": False, "tax_detected": False, "settlement_gap_detected": False,
+         "settlement_check_detected": False},
+    ])
+    monkeypatch.setattr(underwriting, "run_case", lambda *a, **kw: next(rows))
+    out = underwriting.run(cases, ["m"], reviewer_model="r", meter=Meter(load_prices(), 5.0), runner=None,
+                           pseudonym_key=b"k" * 32)
+    config = out["configs"]["m"]
+    assert (config["tax_mismatch_detection_rate"], config["settlement_gap_detection_rate"],
+            config["settlement_check_rate"]) == (1.0, 1.0, 1.0)
 
 
 def _assigned_run(monkeypatch=None, strip=False):

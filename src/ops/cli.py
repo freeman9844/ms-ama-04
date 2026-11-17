@@ -84,7 +84,10 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             except (OpsError, OSError):
                 current = None
             status = window_status(runner, current)
-            state = f"열림({status.allowed_ip})" if status.open else "닫힘"
+            if status.closing:
+                state = "닫는 중(close 미완료)"
+            else:
+                state = f"열림({status.allowed_ip})" if status.open else "닫힘"
             print(f"배포 창: {state}, ACR 공개: {status.acr_public}, 현재 공인 IP: {current or '확인 불가'}", file=out)
             if status.warning:
                 print(f"경고: {status.warning}", file=out)
@@ -124,7 +127,11 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             print(f"제출 {s['submitted']}건, 도달 {s['reached']}건, 미도달 {len(s['unreached'])}건 "
                   f"(run {result.run_id})", file=out)
             if s.get("aborted"):
-                print(f"예산 가드로 제출 중단: 예상 ${s['guard']['projected_usd']:.2f}", file=out)
+                projected = s["guard"].get("projected_usd")
+                if projected is None:
+                    print("예산 가드로 제출 중단: 표본 신청이 끝나지 않아 비용을 추정할 수 없습니다", file=out)
+                else:
+                    print(f"예산 가드로 제출 중단: 예상 ${projected:.2f}", file=out)
             print(f"다음: python -m ops metrics --run {result.run_id}", file=out)
         elif args.command == "metrics":
             path = opsrun.metrics(runner, args.run, fault_runs=args.fault_runs,

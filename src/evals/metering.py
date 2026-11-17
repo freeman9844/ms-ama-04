@@ -22,6 +22,10 @@ RETRY_STATUS = frozenset({429, 502, 503, 504})
 MAX_RETRIES = 3
 BACKOFF_S = 2.0
 SYSTEMONE_SUFFIX = "/providers/microsoft/v1/systemone"
+MODEL_KINDS = ("agent", "decision")
+# 모델 호출(POST /responses)은 게이트웨이 오류(502·504)가 나도 이미 처리됐을 수 있어 재시도하지 않는다.
+# 재시도하면 호출이 중복되고 첫 시도는 계량되지 않는다.
+MODEL_CALL_RETRY_STATUS = frozenset({429, 503})
 # 식별자·메타데이터 키는 PII 검사에서 뺀다(유닉스 시각·해시 키의 숫자열이 계좌번호 패턴에 걸린다).
 _SKIP_KEYS = frozenset({"id", "call_id", "conversation", "container_id", "previous_response_id", "created_at",
                         "agent_reference", "type", "status", "model", "role", "name", "usage",
@@ -30,17 +34,13 @@ _SKIP_KEYS = frozenset({"id", "call_id", "conversation", "container_id", "previo
 _SERVICE_ID = re.compile(r"[a-z]{2,8}_[0-9a-f]{16,}")
 
 
-class BudgetExceeded(RuntimeError):
-    pass
-
-
 @dataclass
 class CallRecord:
     seq: int
     suite: str
     config: str
     case: str
-    kind: str  # agent | decision | judge | setup | aux
+    kind: str  # agent | decision | setup | aux
     model: str
     method: str
     path: str
@@ -62,8 +62,6 @@ def kind_of(method: str, path: str) -> str:
         return "decision"
     if path.endswith("/openai/v1/responses") and method == "POST":
         return "agent"
-    if path.endswith("/chat/completions"):
-        return "judge"
     if "/agents/" in path and path.endswith("/versions"):
         return "setup"
     return "aux"
@@ -140,10 +138,6 @@ class Meter:
     def over_budget(self) -> bool:
         return self.spent_usd >= self.budget_usd
 
-    def check(self) -> None:
-        if self.over_budget():
-            raise BudgetExceeded(f"예산 {self.budget_usd} USD 도달(사용 {self.spent_usd})")
-
     def observe(
         self, request: httpx.Request, response: httpx.Response | None, latency_ms: int, retries: int, error: str | None = None
     ) -> CallRecord:
@@ -154,7 +148,7 @@ class Meter:
             model = str(req.get("model") or model)
         inp, out = usage_tokens(resp)
         pii: list[str] = []
-        if kind in ("agent", "decision", "judge"):
+        if kind in MODEL_KINDS:
             text = "\n".join([*_strings(req), *_strings(resp)])
             pii = sorted({k for k, _ in find_pii(text, self._scope.get("entities") or {})})
         with self._lock:
@@ -172,7 +166,7 @@ class Meter:
                 retries=retries,
                 input_tokens=inp,
                 output_tokens=out,
-                cost_usd=self.cost(model, inp, out) if kind in ("agent", "decision", "judge") else None,
+                cost_usd=self.cost(model, inp, out) if kind in MODEL_KINDS else None,
                 pii=pii,
                 error=error,
             )
@@ -185,7 +179,7 @@ class Meter:
     def model_calls(self, **where: str) -> list[CallRecord]:
         return [
             r for r in self.records
-            if r.kind in ("agent", "decision", "judge") and all(getattr(r, k) == v for k, v in where.items())
+            if r.kind in MODEL_KINDS and all(getattr(r, k) == v for k, v in where.items())
         ]
 
     def by_model(self) -> dict[str, dict[str, Any]]:
@@ -208,7 +202,8 @@ class Meter:
 
 
 class MeteredTransport(httpx.BaseTransport):
-    """retry_status(기본 429·502·503·504)는 지수 백오프로 최대 3회 재시도하고, 최종 응답 하나를 Meter에 기록한다."""
+    """retry_status(기본 429·502·503·504)는 지수 백오프로 최대 3회 재시도하고, 최종 응답 하나를 Meter에 기록한다.
+    POST /responses(모델 호출)는 그중 429·503만 재시도한다."""
 
     def __init__(
         self,
@@ -225,6 +220,9 @@ class MeteredTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         request.read()
+        retry_status = self._retry_status
+        if request.method == "POST" and request.url.path.endswith("/responses"):
+            retry_status = retry_status & MODEL_CALL_RETRY_STATUS
         retries = 0
         while True:
             started = self._clock()  # 지연은 마지막 시도만 잰다(백오프 대기 제외)
@@ -233,7 +231,7 @@ class MeteredTransport(httpx.BaseTransport):
             except httpx.HTTPError as e:
                 self._meter.observe(request, None, int((self._clock() - started) * 1000), retries, type(e).__name__)
                 raise
-            if response.status_code in self._retry_status and retries < MAX_RETRIES:
+            if response.status_code in retry_status and retries < MAX_RETRIES:
                 response.close()
                 self._sleep(BACKOFF_S * 2**retries)
                 retries += 1

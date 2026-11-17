@@ -14,9 +14,8 @@ from evals.transport import TransportError
 from ops import costs, kql
 from ops.azcli import OpsError, Runner, subscription_runner
 from ops.azdenv import get_env
-from ops.jobs import collect_with_retry, start_job, wait_job
+from ops.jobs import collect_with_retry, log_hint, start_job, wait_job
 from ops.opsreport import render
-from ops.smoke_runner import log_hint
 from opsmetrics.fairness import gap_pp_from_env
 from opsmetrics.prices import load_prices
 from opsmetrics.summary import summarize

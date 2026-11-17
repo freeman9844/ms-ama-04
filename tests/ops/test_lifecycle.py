@@ -86,6 +86,25 @@ def test_teardown_tolerates_already_deleted_resources(fake_runner):
     assert runner.env["DEPLOY_CAPHOST"] == "true"
 
 
+def test_teardown_does_not_treat_wrong_subscription_as_deleted(fake_runner):
+    # SubscriptionNotFound는 "이미 삭제됨"이 아니라 구독을 잘못 본 것입니다. 성공으로 끝내지 않습니다.
+    wrong = OpsError("(SubscriptionNotFound) The subscription 'sub-azd' could not be found.")
+    runner = fake_runner(ENV).on("az", "rest", "--method", "delete", results=[wrong])
+    with pytest.raises(OpsError, match="SubscriptionNotFound"):
+        teardown(runner, "rg-amalend", sleep=lambda s: None)
+    assert runner.commands("az", "group", "delete") == []
+    assert runner.env["DEPLOY_CAPHOST"] == "false"
+
+
+def test_is_not_found_markers():
+    from ops.azcli import is_not_found
+
+    assert is_not_found(OpsError('Not Found({"error":{"code":"NotFound","message":"missing"}})'))
+    assert is_not_found(OpsError("(ResourceGroupNotFound) Resource group 'rg' could not be found."))
+    assert not is_not_found(OpsError("(AuthorizationNotFound) No authorization for scope"))
+    assert not is_not_found(OpsError("(SubscriptionNotFound) The subscription 'x' could not be found."))
+
+
 def test_teardown_gives_up_after_retries(fake_runner):
     in_use = OpsError("InUseSubnetCannotBeDeleted")
     runner = (fake_runner(ENV)

@@ -118,11 +118,18 @@ def _wait(store: Store, run_id: str, ids: set[str], deadline: datetime, clock, s
 
 
 def _guard(docs: list[dict[str, Any]], count: int, prices: dict) -> dict[str, Any]:
-    cost = ai_cost([project(d) for d in docs], prices)
-    per_app = cost["per_application_usd"] or 0.0
+    finished = [d for d in docs if done(d)]
+    cost = ai_cost([project(d) for d in finished], prices)
+    per_app = cost["per_application_usd"] if finished else None
+    projected = None if per_app is None else per_app * count
+    # 끝난 표본이 없으면 비용을 0으로 볼 수 없다. 추정 불가로 보고 제출을 멈춘다.
+    if projected is None:
+        reason = "inconclusive"
+    else:
+        reason = "over_budget" if projected > BUDGET_GUARD_USD else None
     # 단가 없는 호출은 비용 0으로 잡혀 과소 추정이 된다. 중단 사유는 아니고 기록만 한다.
-    return {"sample": len(docs), "per_application_usd": per_app, "projected_usd": per_app * count,
-            "limit_usd": BUDGET_GUARD_USD, "unpriced_calls": cost["unpriced_calls"]}
+    return {"sample": len(finished), "per_application_usd": per_app, "projected_usd": projected,
+            "limit_usd": BUDGET_GUARD_USD, "unpriced_calls": cost["unpriced_calls"], "reason": reason}
 
 
 def _write(cfg: Config, runs: dict[str, list[dict[str, Any]]], summary: dict[str, Any]) -> list[Path]:
@@ -163,7 +170,7 @@ def run(
             ids = {s["application_id"] for s in sent}
             sample = _wait(store, cfg.run_id, ids, clock() + timedelta(seconds=cfg.wait_s), clock, sleep)
             guard = _guard(sample, len(applicants), prices)
-            if guard["projected_usd"] > BUDGET_GUARD_USD:
+            if guard["reason"]:
                 aborted = True
                 break
     ids = {s["application_id"] for s in sent}

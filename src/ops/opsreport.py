@@ -111,6 +111,10 @@ def render(data: dict[str, Any]) -> str:
         ids = ", ".join(f"{u['application_id']}({u['status']})" for u in load["unreached"])
         lines += [f"미도달 {len(load['unreached'])}건: {ids}", ""]
     if load.get("aborted"):
-        lines += [f"예산 가드로 제출 중단: 예상 {_usd((load.get('guard') or {}).get('projected_usd'))}", ""]
+        guard = load.get("guard") or {}
+        if guard.get("reason") == "inconclusive":
+            lines += ["예산 가드로 제출 중단: 표본 신청이 끝나지 않아 비용을 추정할 수 없음", ""]
+        else:
+            lines += [f"예산 가드로 제출 중단: 예상 {_usd(guard.get('projected_usd'))}", ""]
     lines += _slo(s) + _cost(s) + _fairness(s) + _faults(data.get("faults") or [])
     return "\n".join(lines) + "\n"

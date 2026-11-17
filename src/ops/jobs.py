@@ -6,9 +6,16 @@ from collections.abc import Callable, Iterable
 
 from evals.transport import TAG, TransportError, reassemble
 from ops.azcli import OpsError, Runner, rest_post
-from ops.smoke_runner import TERMINAL, log_hint
 
 START_API = "2024-03-01"
+TERMINAL = {"Succeeded", "Failed", "Stopped", "Degraded"}
+
+
+def log_hint(env: dict[str, str], execution: str) -> str:
+    query = (f"ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith '{execution}' "
+             "| project TimeGenerated, Log_s | order by TimeGenerated asc")
+    workspace = env.get("LOG_ANALYTICS_CUSTOMER_ID", "<workspace-id>")
+    return f'로그 조회: az monitor log-analytics query -w {workspace} --analytics-query "{query}" -o table'
 
 
 def start_job(az: Runner, env: dict[str, str], group: str, job: str,

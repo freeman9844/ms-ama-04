@@ -107,6 +107,17 @@ def test_revoke_then_401(client):
     assert client.post("/consents/unknown/revoke").status_code == 404
 
 
+def test_revoke_after_restart_rejects_old_token(clock):
+    # 레지스트리는 인메모리라 재시작하면 원장이 비지만, 철회는 그대로 받아 그 토큰을 막아야 한다.
+    cases = {"a1": generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)}
+    c = _consent(TestClient(create_app(cases, SECRET, clock)))
+    restarted = TestClient(create_app(cases, SECRET, clock))
+    assert restarted.post(f"/consents/{c['consent_id']}/revoke").status_code == 204
+    assert restarted.post(f"/consents/{c['consent_id']}/revoke").status_code == 204
+    r = restarted.get("/mydata/transactions", headers=_auth(c["token"]))
+    assert r.status_code == 401 and r.json()["detail"]["code"] == "revoked"
+
+
 def test_unknown_applicant_404(client):
     r = client.post("/consents", json={"applicant_id": "zz", "scopes": ["account"], "purpose": "p"})
     assert r.status_code == 404

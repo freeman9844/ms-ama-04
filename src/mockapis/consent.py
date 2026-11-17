@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import hmac
+import re
 import uuid
 from collections.abc import Collection, Iterable
 from datetime import datetime, timedelta
@@ -16,6 +17,7 @@ ConsentErrorCode = Literal["invalid", "expired", "scope", "revoked"]
 
 _MIN_TTL = timedelta(days=1)
 _MAX_TTL = timedelta(days=365)
+_CONSENT_ID = re.compile(r"[0-9a-f]{32}")  # uuid4().hex
 
 
 class ConsentError(Exception):
@@ -100,7 +102,9 @@ class ConsentRegistry:
         return self._grants.get(consent_id)
 
     def revoke(self, consent_id: str) -> bool:
-        if consent_id not in self._grants:
+        # 원장은 메모리에만 있어 재시작 뒤에는 이전 동의를 모른다. 형식이 맞는 ID면 철회로 기록해
+        # 그 ID가 든 토큰을 거절한다(같은 ID를 다시 철회해도 성공).
+        if consent_id not in self._grants and not _CONSENT_ID.fullmatch(consent_id):
             return False
         self._revoked.add(consent_id)
         return True

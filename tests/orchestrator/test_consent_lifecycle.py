@@ -251,14 +251,14 @@ def test_deletion_without_agents_is_incomplete_only_when_foundry_items_exist(moc
     assert delete_consent_data(deps, end(clean, "expired", "timer", "system"))["complete"] is True
 
 
-def test_registry_absent_after_mock_restart_still_counts_as_deleted(mock_client):
+def test_revoke_after_mock_restart_is_recorded_and_verified(mock_client):
     deps = make_deps(mock_client, FoundryRunner())
     cid = granted(deps)["consent_id"]
     restarted = TestClient(create_mock_app(build_demo_cases(AS_OF), SECRET, lambda: NOW))
     fresh = replace(deps, mock=HttpMockApi(client=restarted))
     delete_consent_data(fresh, end(cid))
     item = next(i for i in deps.store.read(PROOFS_CONTAINER, cid, cid)["items"] if i["kind"] == "consent_registry")
-    assert (item["outcome"], item["verified"]) == ("absent", True)
+    assert (item["outcome"], item["verified"]) == ("revoked", True)
 
 
 def test_delete_unknown_consent_raises(mock_client):

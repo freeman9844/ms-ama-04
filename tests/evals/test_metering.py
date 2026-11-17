@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from evals.metering import BudgetExceeded, Meter, MeteredTransport
+from evals.metering import Meter, MeteredTransport
 
 PRICES = {"_source": "test", "m": {"input_per_1m": 1.0, "output_per_1m": 10.0}, "d": {"input_per_1m": None, "output_per_1m": None}}
 USAGE = {"usage": {"input_tokens": 1000, "output_tokens": 100}}
@@ -48,22 +48,30 @@ def test_excluded_429_is_returned_at_once_but_503_still_retries():
     assert waits == [2.0]
 
 
+def test_gateway_errors_on_responses_post_are_not_retried():
+    # 502·504는 모델이 이미 처리했을 수 있어 재시도하면 호출이 중복되고 첫 시도는 계량되지 않는다.
+    meter = Meter(PRICES, 10)
+    client, waits = _client(meter, [504, 200])
+    with meter.scope(model="m"):
+        assert client.post("https://x/openai/v1/responses", json={}).status_code == 504
+    assert [(r.status, r.retries) for r in meter.records] == [(504, 0)]
+    assert waits == []
+
+
+def test_gateway_errors_on_other_calls_still_retry():
+    meter = Meter(PRICES, 10)
+    client, waits = _client(meter, [502, 200])
+    assert client.get("https://x/agents/a/versions").status_code == 200
+    assert [(r.status, r.retries) for r in meter.records] == [(200, 1)]
+    assert waits == [2.0]
+
+
 def test_unpriced_model_has_no_cost_and_does_not_spend_budget():
     meter = Meter(PRICES, 10)
     client, _ = _client(meter, [200])
     client.post("https://x/providers/microsoft/v1/systemone", json={"model": "d", "input": []})
     assert (meter.records[0].kind, meter.records[0].model, meter.records[0].cost_usd) == ("decision", "d", None)
     assert meter.spent_usd == 0
-
-
-def test_budget_check_raises_once_spent():
-    meter = Meter(PRICES, 0.001)
-    client, _ = _client(meter, [200])
-    with meter.scope(model="m"):
-        client.post("https://x/openai/v1/responses", json={})
-    assert meter.over_budget()
-    with pytest.raises(BudgetExceeded):
-        meter.check()
 
 
 def test_pii_scan_reads_embedded_json_but_skips_identifier_keys():

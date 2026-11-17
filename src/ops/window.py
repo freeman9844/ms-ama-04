@@ -11,6 +11,9 @@ from ops.azcli import OpsError, Runner
 from ops.azdenv import get_env, provision, set_env
 
 CLOSED = "closed"
+CLOSING = "closing"
+# close의 프로비저닝이 끝났는지 기록합니다. 없으면(이전 버전 환경) OPERATOR_IP만 봅니다.
+WINDOW_STATE = "WINDOW_STATE"
 PUBLIC_IP_URL = "https://api.ipify.org"
 
 
@@ -40,22 +43,31 @@ def ensure_caphost_skip(runner: Runner, env: dict[str, str]) -> None:
 def open_window(runner: Runner, ip: str, *, acr: bool = False) -> str:
     ip = validate_operator_ip(ip)
     ensure_caphost_skip(runner, get_env(runner))
+    set_env(runner, WINDOW_STATE, "open")
     set_env(runner, "OPERATOR_IP", ip)
-    # 콘솔 허용 IP는 창을 닫아도 유지합니다(시연 중 콘솔 접속). close_window는 건드리지 않습니다.
-    set_env(runner, "CONSOLE_IP", ip)
-    set_env(runner, "ACR_PUBLIC", "true" if acr else "false")
-    provision(runner)
-    # 첫 프로비저닝이 App Gateway DNS 이름(APPGW_FQDN)을 만듭니다. 인증서 비밀 ID가 새로 생기면 한 번 더 돌려 게이트웨이를 만듭니다.
-    if ensure_console_cert(runner):
+    # 여기부터 실패하면 네트워크가 일부 열린 채일 수 있습니다. 자동으로 닫지 않고 닫는 명령을 안내합니다.
+    try:
+        # 콘솔 허용 IP는 창을 닫아도 유지합니다(시연 중 콘솔 접속). close_window는 건드리지 않습니다.
+        set_env(runner, "CONSOLE_IP", ip)
+        set_env(runner, "ACR_PUBLIC", "true" if acr else "false")
         provision(runner)
+        # 첫 프로비저닝이 App Gateway DNS 이름(APPGW_FQDN)을 만듭니다. 인증서 비밀 ID가 새로 생기면 한 번 더 돌려 게이트웨이를 만듭니다.
+        if ensure_console_cert(runner):
+            provision(runner)
+    except Exception as err:
+        raise OpsError(f"{err}\n배포 창이 일부 열렸을 수 있습니다. "
+                       "`python -m ops window close`로 닫으세요.") from err
     return ip
 
 
 def close_window(runner: Runner) -> None:
     ensure_caphost_skip(runner, get_env(runner))
+    # 프로비저닝이 성공해야 Azure에서 운영자 IP 규칙이 빠집니다. 그 전까지는 "닫는 중"으로 남깁니다.
+    set_env(runner, WINDOW_STATE, CLOSING)
     set_env(runner, "OPERATOR_IP", CLOSED)
     set_env(runner, "ACR_PUBLIC", "false")
     provision(runner)
+    set_env(runner, WINDOW_STATE, CLOSED)
 
 
 @dataclass(frozen=True)
@@ -65,10 +77,15 @@ class WindowStatus:
     current_ip: str | None
     acr_public: bool
     warning: str | None
+    closing: bool = False
 
 
 def window_status(runner: Runner, current_ip: str | None) -> WindowStatus:
     env = get_env(runner)
+    if env.get(WINDOW_STATE) == CLOSING:
+        return WindowStatus(True, None, current_ip, env.get("ACR_PUBLIC") == "true",
+                            "이전 `window close`의 프로비저닝이 끝나지 않아 Azure에 운영자 IP 규칙이 남아 있을 수 있습니다. "
+                            "`python -m ops window close`를 다시 실행하세요.", closing=True)
     allowed = env.get("OPERATOR_IP", CLOSED)
     is_open = allowed not in ("", CLOSED)
     warning = None

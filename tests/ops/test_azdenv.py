@@ -1,4 +1,20 @@
+import subprocess
+
+import pytest
+
+from ops import azcli
 from ops.azdenv import APP_SECRETS, provision
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_env_set_failure_does_not_print_secret_value(monkeypatch, stream):
+    monkeypatch.setattr(azcli.shutil, "which", lambda name: name)
+    monkeypatch.setattr(azcli.subprocess, "run",
+                        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, stdout="", stderr="env error"))
+    with pytest.raises(azcli.OpsError) as err:
+        azcli.subprocess_runner(["azd", "env", "set", "MOCK_CONSENT_SECRET", "s3cr3t"], stream=stream)
+    assert "s3cr3t" not in str(err.value)
+    assert "MOCK_CONSENT_SECRET" in str(err.value)
 
 
 def test_provision_generates_missing_app_secrets_once(fake_runner):

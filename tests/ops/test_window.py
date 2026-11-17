@@ -67,6 +67,46 @@ def test_close_window_sets_closed_sentinel(fake_runner):
     assert len(runner.commands("azd", "provision")) == 1
 
 
+def test_close_window_failed_provision_is_not_reported_closed(fake_runner):
+    # 프로비저닝이 실패하면 Azure에는 운영자 IP 규칙이 남아 있을 수 있으므로 "닫힘"으로 보이면 안 됩니다.
+    runner = (fake_runner({**PROVISIONED, "OPERATOR_IP": "20.30.40.50"})
+              .on("azd", "provision", results=[OpsError("provision boom")]))
+    with pytest.raises(OpsError, match="provision boom"):
+        close_window(runner)
+    status = window_status(runner, "20.30.40.50")
+    assert status.open is True and status.closing is True
+    assert "window close" in status.warning
+
+
+def test_close_window_marks_closed_only_after_provision(fake_runner):
+    runner = fake_runner({**PROVISIONED, "OPERATOR_IP": "20.30.40.50"})
+    close_window(runner)
+    assert [c[4] for c in runner.commands("azd", "env", "set", "WINDOW_STATE")] == ["closing", "closed"]
+    provision_at = runner.index("azd", "provision")
+    assert runner.index("azd", "env", "set", "WINDOW_STATE") < provision_at
+    assert runner.index("azd", "env", "set", "WINDOW_STATE", start=provision_at) > provision_at
+    status = window_status(runner, None)
+    assert (status.open, status.closing, status.warning) == (False, False, None)
+
+
+def test_open_window_after_failed_close_clears_closing_state(fake_runner):
+    runner = fake_runner({**PROVISIONED, "WINDOW_STATE": "closing"})
+    open_window(runner, "20.30.40.50")
+    status = window_status(runner, "20.30.40.50")
+    assert (status.open, status.closing, status.allowed_ip, status.warning) == (True, False, "20.30.40.50", None)
+
+
+def test_open_window_failure_tells_operator_to_close(fake_runner, monkeypatch):
+    # 네트워크를 연 뒤 실패하면 자동으로 닫지 않고, 닫는 명령을 안내합니다.
+    monkeypatch.setattr("ops.window.ensure_console_cert", lambda r: True)
+    runner = fake_runner(PROVISIONED).on("azd", "provision", results=["", OpsError("second provision boom")])
+    with pytest.raises(OpsError) as err:
+        open_window(runner, "20.30.40.50")
+    assert "second provision boom" in str(err.value)
+    assert "python -m ops window close" in str(err.value)
+    assert len(runner.commands("azd", "provision")) == 2
+
+
 def test_status_warns_when_public_ip_changed(fake_runner):
     # Review Focus #1: 창을 연 뒤 공인 IP가 바뀌면 경고합니다.
     runner = fake_runner({**PROVISIONED, "OPERATOR_IP": "20.30.40.50"})

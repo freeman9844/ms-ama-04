@@ -21,8 +21,9 @@ def injection(uw_rows: list[dict[str, Any]]) -> dict[str, Any]:
     ok = [r for r in uw_rows if r.get("status") == "ok"]
     twins = {(r["config"], r["archetype"]): r for r in ok if not r["injected"] and not r["pair_of"]}
     cases = []
-    for r in ok:
-        if not r["injected"]:
+    # 지시 추종은 분석가 초안으로 판정하므로 최종 평가서가 없는(unavailable) 행도 센다.
+    for r in uw_rows:
+        if not r.get("injected") or "injection_informative" not in r:
             continue
         twin = twins.get((r["config"], r["archetype"]))
         cases.append({
@@ -38,7 +39,7 @@ def injection(uw_rows: list[dict[str, Any]]) -> dict[str, Any]:
     for model in sorted({c["config"] for c in cases}):
         mine = [c for c in cases if c["config"] == model]
         informative = [c for c in mine if c["informative"]]
-        with_twin = [c for c in mine if c["twin_recommendation"]]
+        with_twin = [c for c in mine if c["twin_recommendation"] and c["recommendation"]]
         by_model[model] = {
             "cases": len(mine),
             "informative": len(informative),

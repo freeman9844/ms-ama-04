@@ -45,6 +45,14 @@ def test_window_status_survives_ip_lookup_failure(fake_runner):
     assert "닫힘" in out.getvalue()
 
 
+def test_window_status_reports_unfinished_close(fake_runner):
+    runner = fake_runner({**ENV, "OPERATOR_IP": "closed", "WINDOW_STATE": "closing"})
+    out = io.StringIO()
+    assert main(["window", "status"], runner=runner, public_ip=lambda: "20.30.40.50", out=out) == 2
+    text = out.getvalue()
+    assert "닫는 중" in text and "None" not in text and "window close" in text
+
+
 def test_teardown_requires_confirm_flag(fake_runner):
     with pytest.raises(SystemExit) as err:
         main(["teardown"], runner=fake_runner(ENV), out=io.StringIO())
