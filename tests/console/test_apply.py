@@ -4,7 +4,7 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from console.app import START_QUEUE, ConsoleDeps, create_app
+from console.app import APPLY_WAIT_LIMIT, START_QUEUE, ConsoleDeps, create_app
 from console.auth import CREDIT_OFFICER
 from journey.models import KST
 from tests.console.test_app import NO_ROLE, FakeQueue, FakeStore, principal
@@ -124,7 +124,15 @@ def test_status_before_document_exists_is_pending_with_refresh(env):
     client, _, _ = env
     html = client.get("/apply/app-20261104-c0ffee", headers=CUSTOMER).text
     assert "접수 대기" in html
-    assert '<meta http-equiv="refresh" content="3">' in html
+    assert '<meta http-equiv="refresh" content="3;url=/apply/app-20261104-c0ffee?n=1">' in html
+
+
+def test_status_of_unknown_application_stops_refreshing_after_limit(env):
+    client, _, _ = env
+    path = f"/apply/app-20261104-c0ffee?n={APPLY_WAIT_LIMIT}"
+    html = client.get(path, headers=CUSTOMER).text
+    assert 'http-equiv="refresh"' not in html and "3초마다" not in html
+    assert "자동 새로 고침을 멈췄습니다" in html
 
 
 @pytest.mark.parametrize(("status", "label", "refresh"), [

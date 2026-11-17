@@ -59,11 +59,6 @@ def add_business_days(d: date, n: int) -> date:
     return d
 
 
-def business_days_between(start: date, end: date) -> int:
-    """start~end(양끝 포함) 영업일 수."""
-    return sum(is_business_day(start + timedelta(days=i)) for i in range((end - start).days + 1))
-
-
 def month_add(year: int, month: int, n: int) -> tuple[int, int]:
     idx = year * 12 + month - 1 + n
     return idx // 12, idx % 12 + 1

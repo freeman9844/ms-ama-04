@@ -444,8 +444,16 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         "repayment": None,
         "case_id": None,
     }
-    if new:
-        alert_id = f"ew-{replay_id}-w{week:02d}"
+    alert_id = f"ew-{replay_id}-w{week:02d}"
+    # 재시도한 주차: 앞선 시도가 경보를 쓴 뒤 실패했으면 다시 조사하지 않고 저장된 경보(진행 상태 포함)를 쓴다.
+    stored = deps.store.read(ALERTS, alert_id, loan_id) if new else None
+    if stored is not None:
+        mon["seen_triggers"].extend(new)
+        entry["investigation"] = {"decision": "alert", "reason": "existing_alert", "record": {}}
+        entry["alert_id"] = alert_id
+        mon["alert_ids"].append(alert_id)
+        _escalate(deps, loan_id, replay_id, loan, alert_id, stored["severity"], rows[-1], hi, week, pg, lb)
+    elif new:
         ctx = EwContext(
             alert_id=alert_id,
             loan_id=loan_id,
@@ -964,20 +972,25 @@ def _expire_offer(deps: Deps, msg: OfferExpire) -> bool:
 
 
 def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
-    doc = deps.store.read(ALERTS, msg.alert_id, msg.loan_id)
-    request = (doc or {}).get("restructure")
-    if not request or request.get("status") != "pending_officer":
-        log.warning("대기 중인 재조정 요청 없음: %s", msg.alert_id)
-        if request:
-            # 재전달: 결정은 기록됐지만 대기 항목 갱신 전에 실패했을 수 있다. 다시 결정하지 않고 상태만 고친다.
-            _refresh_hold(deps, msg.loan_id)
+    for _ in range(WRITE_ATTEMPTS):
+        doc = deps.store.read(ALERTS, msg.alert_id, msg.loan_id)
+        request = (doc or {}).get("restructure")
+        if not request or request.get("status") != "pending_officer":
+            log.warning("대기 중인 재조정 요청 없음: %s", msg.alert_id)
+            if request:
+                # 재전달: 결정은 기록됐지만 대기 항목 갱신 전에 실패했을 수 있다. 다시 결정하지 않고 상태만 고친다.
+                _refresh_hold(deps, msg.loan_id)
+            return False
+        status = "approved" if msg.decision == "approve" else "declined"
+        request.update(
+            status=status, officer_id=msg.officer_id, reason=msg.reason, decided_at=deps.clock().isoformat()
+        )
+        doc["status"] = f"restructure_{status}"  # type: ignore[index]
+        if deps.store.replace(ALERTS, doc, doc.get("_etag")):  # type: ignore[arg-type, union-attr]
+            break
+    else:
+        log.warning("동시 수정이 이어져 재조정 결정을 기록하지 못함: %s", msg.alert_id)
         return False
-    status = "approved" if msg.decision == "approve" else "declined"
-    request.update(
-        status=status, officer_id=msg.officer_id, reason=msg.reason, decided_at=deps.clock().isoformat()
-    )
-    doc["status"] = f"restructure_{status}"  # type: ignore[index]
-    deps.store.upsert(ALERTS, doc)  # type: ignore[arg-type]
     _refresh_hold(deps, msg.loan_id)
     return True
 

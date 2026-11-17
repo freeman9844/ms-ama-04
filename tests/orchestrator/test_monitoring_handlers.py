@@ -938,6 +938,62 @@ def test_redelivered_restructure_decision_repairs_hold(mock_app, monkeypatch):
     assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
 
 
+def test_restructure_decision_keeps_concurrent_alert_update(mock_app, monkeypatch):
+    deps, _ = paused_inline(mock_app)
+    case_id = loan(deps)["monitoring"]["pause_case_id"]
+    assert decide_collections(deps, case_id, include_hardship=True) is True
+    real_read, raced = deps.store.read, []
+
+    def racing_read(container, item_id, partition_key):
+        doc = real_read(container, item_id, partition_key)
+        if item_id == case_id and not raced:
+            raced.append(1)  # 읽은 직후 다른 처리가 같은 문서를 고친다
+            concurrent = real_read(container, item_id, partition_key)
+            concurrent["event_error"] = "동시 수정"
+            deps.store.upsert(container, concurrent)
+        return doc
+
+    monkeypatch.setattr(deps.store, "read", racing_read)
+    assert decide_restructure(deps, case_id) is True
+    doc = real_read(ALERTS, case_id, LOAN)
+    assert doc["event_error"] == "동시 수정" and doc["restructure"]["status"] == "approved"
+    assert doc["status"] == "restructure_approved"
+
+
+def test_retried_week_reuses_stored_alert_without_reinvestigating(mock_app, monkeypatch):
+    agents = HighAgents()
+    deps = make_deps(mock_app, events=Outbox(), agents=agents)
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    real, failed = monitoring_module._repayment_week, []
+
+    def flaky(*args):
+        entry = args[-1]
+        if entry["alert_id"] and not failed:
+            failed.append(entry["week"])  # 경보를 쓴 뒤 대출 문서를 쓰기 전에 실패한다
+            raise RuntimeError("Cosmos 503")
+        return real(*args)
+
+    monkeypatch.setattr(monitoring_module, "_repayment_week", flaky)
+    for week in range(1, WEEKS + 1):
+        try:
+            process_week(deps, LOAN, replay_id, week)
+        except RuntimeError:
+            break
+    (week,) = failed
+    alert_id = f"ew-{replay_id}-w{week:02d}"
+    doc = deps.store.read(ALERTS, alert_id, LOAN)
+    doc.update(status="acknowledged", collections={"case_id": "rc-x"})
+    deps.store.upsert(ALERTS, doc)
+    investigations = agents.calls.count(EW_AGENT)
+    entry = process_week(deps, LOAN, replay_id, week)
+    assert agents.calls.count(EW_AGENT) == investigations
+    assert entry["alert_id"] == alert_id and entry["investigation"]["decision"] == "alert"
+    stored = deps.store.read(ALERTS, alert_id, LOAN)
+    assert (stored["status"], stored["collections"], stored["created_at"]) == ("acknowledged", {"case_id": "rc-x"}, doc["created_at"])
+    assert loan(deps)["monitoring"]["alert_ids"].count(alert_id) == 1
+
+
 def missed_without_agents(mock_app, **fields):
     deps = missing_first_due(make_deps(mock_app))
     if fields:

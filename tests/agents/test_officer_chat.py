@@ -71,6 +71,19 @@ def test_ask_sends_snapshot_history_question_and_deletes_conversation():
     assert runner.deleted == ["conv-1"]
 
 
+def test_ask_masks_question_and_history_before_sending():
+    runner = FakeRunner(result=_run())
+    history = [{"role": "user", "text": "가나상회 매출은?"}, {"role": "assistant", "text": "가나상회는 안정적"}]
+    mask = lambda s: s.replace("가나상회", "[[BIZNAME_0123456789]]")  # noqa: E731
+    OfficerChat(runner, "gpt-6-luna").ask({}, history, "가나상회 회부 사유?", "ko", mask=mask)
+    _, payload, _, _ = runner.calls[0]
+    assert "가나상회" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["question"] == "[[BIZNAME_0123456789]] 회부 사유?"
+    assert payload["history"] == [{"role": "user", "text": "[[BIZNAME_0123456789]] 매출은?"},
+                                  {"role": "assistant", "text": "[[BIZNAME_0123456789]]는 안정적"}]
+    assert history[0]["text"] == "가나상회 매출은?"
+
+
 @pytest.mark.parametrize("error", [GatewayThrottled("rate_limited", "conv-9"), AgentError("x", "conv-9")])
 def test_ask_deletes_conversation_on_error(error):
     runner = FakeRunner(error=error)

@@ -12,7 +12,7 @@
   <div>
     <p class="crumb"><a href="/">{{ _("홈") }} › {{ _("신청") }}</a> › {{ d.application_id }}</p>
     <h1>{{ d.application_id }} <span class="status s-{{ d.status }}">{{ d.status|status_label }}</span>
-      {% if d.sla %}<span class="badge {{ 'badge-red' if d.sla.escalated else 'badge-neutral' }}">SLA {{ _("초과") if d.sla.escalated else _("마감 %(t)s", t=d.sla.deadline) }}</span>{% endif %}</h1>
+      {% if d.sla %}<span class="badge {{ 'badge-red' if d.sla.escalated else 'badge-neutral' }}">SLA {{ _("초과") if d.sla.escalated else _("마감 %(t)s", t=d.sla.deadline|kst) }}</span>{% endif %}</h1>
   </div>
   <div class="actions">{% if d.monitoring %}<a class="button secondary" href="/loans/{{ d.application_id|path }}">{{ _("사후 모니터링") }}</a>{% endif %}</div>
 </div>
@@ -28,8 +28,8 @@
 <dl class="facts">
   <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(d.applicant_id, user.can_restore) }}</dd>
   <dt>{{ _("신청 금액") }}</dt><dd>{{ d.requested_amount_krw|krw }} / {{ _("%(n)s개월", n=d.requested_tenor_months) }}</dd>
-  <dt>{{ _("접수") }}</dt><dd>{{ d.received_at }}</dd>
-  {% if d.sla %}<dt>{{ _("SLA 마감") }}</dt><dd>{{ d.sla.deadline }}{% if d.sla.escalated %} ({{ _("초과") }}){% endif %}</dd>{% endif %}
+  <dt>{{ _("접수") }}</dt><dd>{{ d.received_at|kst }}</dd>
+  {% if d.sla %}<dt>{{ _("SLA 마감") }}</dt><dd>{{ d.sla.deadline|kst }}{% if d.sla.escalated %} ({{ _("초과") }}){% endif %}</dd>{% endif %}
   {% if d.flags %}<dt>{{ _("플래그") }}</dt><dd>{% for f in d.flags %}<span class="chip warn">{{ f }}</span>{% endfor %}</dd>{% endif %}
   {% if ui.gateway_blocks %}<dt>{{ _("AI 게이트웨이") }}</dt><dd>{% for b in ui.gateway_blocks %}<span class="chip warn">{{ _("콘텐츠 차단 · %(b)s", b=b) }}</span>{% endfor %}</dd>{% endif %}
   {% if d.withdrawal %}<dt>{{ _("동의 철회") }}</dt><dd>{{ d.withdrawal.consent_id }} · {{ d.withdrawal.requested_by }} · {{ d.withdrawal.at }}</dd>{% endif %}
@@ -352,7 +352,7 @@
 <div class="decision-layout">
 <section class="card">
 {% if d.officer_decision %}
-<p>{% if d.officer_decision.policy_override %}<span class="badge badge-red">{{ _("정책 예외 승인") }}</span> {% endif %}{{ d.officer_decision.decision }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
+<p>{% if d.officer_decision.policy_override %}<span class="badge badge-red">{{ _("정책 예외 승인") }}</span> {% endif %}{{ d.officer_decision.decision|decision_label }} · {{ d.officer_decision.amount_krw|krw }} · {{ d.officer_decision.officer_id }}</p>
 {% if d.officer_decision.conditions %}<ul>{% for c in d.officer_decision.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
 {% if d.officer_decision.reason %}<p>{{ d.officer_decision.reason|mt }}</p>{% endif %}
 {% endif %}
@@ -363,9 +363,10 @@
 {% if v.decidable and user.can_decide %}
 {% if error %}<p class="error" role="alert">{{ error }}{% if error_code %} ({{ error_code }}){% endif %}</p>{% endif %}
 <script src="/static/decision.js" defer></script>
-{% set locked = " disabled" if watch_url else "" %}
+{% set locked = " disabled" if watch_url or decision_pending else "" %}
 <form method="post" action="/applications/{{ d.application_id|path }}/decision" class="decision" data-decision-form{% if v.policy_blocked %} data-policy-blocked{% endif %}>
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="state" value="{{ state }}">
   {% if v.policy_blocked %}
   <input type="hidden" name="policy_override" value="">
   <p class="warn">{{ _("정책 결과상 거절입니다. 승인하면 정책 예외 승인으로 기록되며 사유가 필요합니다(상품 최대 1,000만 원).") }}</p>
@@ -380,7 +381,7 @@
   <label>{{ _("승인 금액(원, 한도 %(v)s)", v=v.max_amount_krw|krw) }}
     <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else d.requested_amount_krw }}"{{ locked }}></label>
   <label>{{ _("사유") }} <textarea name="reason" rows="3"{{ locked }}>{{ form.reason if form else "" }}</textarea></label>
-  <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("결정 보내기") }}</button>
+  <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if locked else _("결정 보내기") }}</button>
 </form>
 {% elif not d.officer_decision %}
 <p>{% if v.decidable %}{{ _("감사자 권한은 결정할 수 없습니다.") }}{% else %}{{ _("심사역 결정 단계가 아닙니다.") }}{% endif %}</p>

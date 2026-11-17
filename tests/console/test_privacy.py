@@ -349,6 +349,13 @@ def test_english_grievance_page_reads_stored_translations_of_its_application(env
     assert "<b>한도</b>가 너무 낮습니다" in _pending(en)
 
 
+def test_english_grievance_page_translates_counterfactual_explanation(env):
+    client, deps = _translating(env)
+    deps.privacy.grievances[("app-2", "grv-abc123")]["record"]["assessment"]["counterfactuals"] = [
+        {"metric_id": "M:dscr", "current": 1.1, "target": 1.25, "explanation": "DSCR가 기준을 넘으면 승인 가능"}]
+    assert "DSCR가 기준을 넘으면 승인 가능" in _pending(_english(client, "/grievances/app-2/grv-abc123"))
+
+
 def test_english_grievance_page_with_unreadable_source_sends_nothing(env, caplog):
     client, deps = _translating(env)
     deps.raw = BrokenRaw()
@@ -445,6 +452,15 @@ def test_rereview_is_validated_against_recorded_policy(env):
         "grievance_id": "grv-abc123", "application_id": "app-2", "outcome": "rereview", "officer_id": "oid-officer",
         "reason": "재심사", "new_decision": "approve", "amount_krw": 18_000_000, "conditions": []}
 
+
+def test_rereview_approval_outside_policy_is_rejected_with_specific_error(env):
+    client, queue, privacy = env
+    privacy.grievances[("app-2", "grv-abc123")]["record"]["policy"]["decision"] = "ineligible"
+    path = "/grievances/app-2/grv-abc123"
+    r = post(client, OFFICER, f"{path}/decision", path, outcome="rereview", new_decision="approve",
+             amount_krw="5,000,000", reason="재심사")
+    assert r.status_code == 422 and "rereview_outside_policy" in r.text and "이의 재심사로 승인할 수 없습니다" in r.text
+    assert queue.sent == []
 
 @pytest.mark.parametrize("fields", [{"outcome": "uphold", "reason": ""}, {"outcome": "maybe", "reason": "x"},
                                     {"outcome": "rereview", "reason": "x", "new_decision": ""}])

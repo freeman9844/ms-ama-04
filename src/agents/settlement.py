@@ -31,8 +31,6 @@ PAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("토스페이먼츠", ("토스페이먼츠",)),
 )
 OTHER = "기타"
-CADENCES = ("business_daily", "weekly", "semimonthly", "monthly")
-CADENCE_LABELS = {"business_daily": "매 영업일", "weekly": "주 1회", "semimonthly": "월 2회", "monthly": "월 1회"}
 _ANCHOR_GAP_DAYS = 6
 _MIN_MONTH_DAYS = 21
 _WEEKLY_LAGS_BD = range(1, 26)

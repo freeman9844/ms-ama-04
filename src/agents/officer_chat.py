@@ -5,7 +5,7 @@
 """
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,7 +74,11 @@ class OfficerChat:
         self._spec = officer_spec(model)
 
     def ask(self, snapshot: Mapping[str, Any], history: Sequence[Mapping[str, Any]], question: str,
-            language: str = "ko") -> ChatAnswer:
+            language: str = "ko", *, mask: Callable[[str], str] | None = None) -> ChatAnswer:
+        # 질문·앞선 대화는 심사역이 쓴 자유 문장이라 mask(그 건의 가명처리기)가 있으면 가려서 보낸다.
+        if mask is not None:
+            question = mask(question)
+            history = [{**turn, "text": mask(str(turn.get("text", "")))} for turn in history]
         payload = json.dumps({"snapshot": snapshot, "history": list(history), "question": question,
                               "answer_language": language}, ensure_ascii=False)
         try:

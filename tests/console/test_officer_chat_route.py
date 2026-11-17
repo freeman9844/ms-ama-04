@@ -19,7 +19,11 @@ class FakeChat:
     def __init__(self, error=None):
         self.error, self.calls = error, []
 
-    def ask(self, snapshot, history, question, language="ko"):
+    def ask(self, snapshot, history, question, language="ko", *, mask=None):
+        self.mask = mask
+        if mask is not None:
+            question = mask(question)
+            history = [{**t, "text": mask(t["text"])} for t in history]
         self.calls.append((snapshot, history, question))
         self.language = language
         if self.error:
@@ -59,12 +63,31 @@ def test_chat_answers_in_page_language(make_doc, raw, key):
     assert chat.language == "en"
 
 
-def test_chat_never_reads_raw_and_sends_no_pii(make_doc, raw, key):
+def test_chat_sends_no_pii_and_masks_officer_text_with_case_entities(make_doc, raw, key):
     chat = FakeChat()
-    _post(_client(make_doc, raw, key, chat), key, {"question": "요약해 줘"})
-    assert raw.reads == []
-    text = json.dumps(chat.calls[0][0], ensure_ascii=False)
+    history = [{"role": "user", "text": "김대표 이체는?"}, {"role": "assistant", "text": "자료에 없음"}]
+    _post(_client(make_doc, raw, key, chat), key, {"question": "빈스카페 김대표의 상환 여력은?", "history": history})
+    text = json.dumps(chat.calls[0], ensure_ascii=False)
     assert "빈스카페" not in text and "김대표" not in text and "seller-dailylook-01" not in text
+    assert "[[" in chat.calls[0][2] and "[[" in chat.calls[0][1][0]["text"]
+
+
+def test_chat_refuses_when_raw_cannot_be_read(make_doc, key):
+    class Broken:
+        def get_json(self, container, name):
+            raise OSError("blob down")
+
+    chat = FakeChat()
+    r = _post(_client(make_doc, Broken(), key, chat), key, {"question": "빈스카페는?"})
+    assert r.status_code == 502 and chat.calls == []
+
+
+def test_chat_without_raw_uses_pattern_masking(make_doc, key):
+    from tests.console.conftest import FakeRaw
+
+    chat = FakeChat()
+    r = _post(_client(make_doc, FakeRaw({}), key, chat), key, {"question": "010-1234-5678 번호는?"})
+    assert r.status_code == 200 and "010-1234-5678" not in chat.calls[0][2]
 
 
 def test_chat_trims_history(make_doc, raw, key):

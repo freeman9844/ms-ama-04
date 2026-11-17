@@ -12,7 +12,9 @@ import json
 import logging
 import re
 import secrets
+import threading
 import time
+from functools import partial
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import parse_qs, quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
@@ -34,7 +36,7 @@ from agents.monitoring import WEEKS
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
-from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply
+from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply, validate_request
 from console.dashboard import (
     RECOMMENDATION_LABELS,
     detail_summary,
@@ -93,8 +95,8 @@ from journey.models import (
     replay_held,
     replay_in_progress,
 )
-from journey.validation import validate_officer_decision
-from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
+from agents.data_assembly import build_pseudonymizer
+from journey.validation import REREVIEW_ERRORS, validate_officer_decision, validate_rereview_decision
 from shared.pseudonymize import Pseudonymizer
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
@@ -119,6 +121,10 @@ DETAIL_REFRESH_SECONDS = 10
 # 사후 모니터링(/loans/{id})의 모든 자동 새로 고침 주기(재생 진행·요청 반영 대기).
 MONITORING_REFRESH_SECONDS = 7
 WATCH_LIMIT = 12
+# 고객 신청 현황(/apply/{id})이 문서 생성을 기다리는 최대 새로 고침 횟수(3초 × 40 = 2분).
+APPLY_WAIT_LIMIT = 40
+# 접수한 심사역 결정 표시의 최대 유지 시간. 큐 처리가 멈춰도 이 시간이 지나면 다시 결정할 수 있다.
+DECISION_MARK_SECONDS = 300
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
 HTMX_SRI = "sha384-2OatzQy1H+Zd/IIrjr1TcuDGqLXeHhbooAyJY1KdQMKnr4LZ22k31GBLdYKHmVjg"
 # form-action은 넣지 않는다: Easy Auth 세션 만료 시 로그인 리디렉션(login.microsoftonline.com)을 막는다.
@@ -134,6 +140,7 @@ DECISION_ERRORS = {
     "amount_exceeds_policy": "승인 금액이 정책 한도를 넘습니다.",
     "amount_exceeds_product": "예외 승인 금액이 상품 최대 한도(1,000만 원)를 넘습니다.",
     "conditional_retired": "조건부 승인은 더 이상 쓰지 않습니다. 승인 또는 거절을 고르세요.",
+    **REREVIEW_ERRORS,
 }
 
 
@@ -199,10 +206,30 @@ def watch_url(request: Request, path: str, tag: str) -> str | None:
     return f"{path}?since={quote(since, safe='')}&n={n + 1}"
 
 
+def retry_url(request: Request, path: str, limit: int) -> str | None:
+    """문서가 아직 없는 화면의 다음 새로 고침 URL. ?n=으로 횟수를 세어 limit회 뒤에는 멈춘다(없는 ID를 끝없이 읽지 않게)."""
+    try:
+        n = int(request.query_params.get("n", "0"))
+    except ValueError:
+        n = limit
+    return None if n >= limit else f"{path}?n={n + 1}"
+
+
 def _krw(value: Any) -> str:
     if not isinstance(value, int) or isinstance(value, bool):
         return "-"
     return f"₩{value:,}" if i18n.current() == "en" else f"{value:,}원"
+
+
+def _kst(value: Any) -> str:
+    """ISO 시각을 KST 'YYYY-MM-DD HH:MM'으로 보인다. 읽을 수 없으면 원문 그대로."""
+    if not isinstance(value, str):
+        return "-" if value is None else str(value)
+    try:
+        d = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return (d.astimezone(KST) if d.tzinfo else d).strftime("%Y-%m-%d %H:%M")
 
 
 def _templates() -> Environment:
@@ -210,6 +237,7 @@ def _templates() -> Environment:
     env.install_gettext_callables(gettext=i18n.gettext, ngettext=lambda s, p, n: i18n.gettext(s if n == 1 else p),
                                   pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
+    env.filters["kst"] = _kst
     env.filters["status_label"] = lambda s: i18n.label(STATUS_LABELS, s)
     env.filters["path"] = lambda s: quote(str(s), safe="")
     env.filters["monitoring_label"] = lambda s: i18n.label(MONITORING_LABELS, s, "재생 전")
@@ -256,6 +284,14 @@ async def _form(request: Request) -> dict[str, str]:
 
 class _BadBody(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class Posted:
+    """CSRF를 확인한 폼 POST: 로그인 주체와 폼 값."""
+
+    user: Principal
+    form: dict[str, str]
 
 
 async def _json_body(request: Request) -> dict[str, Any]:
@@ -394,14 +430,49 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(403, "invalid csrf token")
         return form
 
+    # 폼 POST는 이벤트 루프에서 본문만 읽고(아래 의존성), 저장소·큐·화면 렌더는 동기 엔드포인트로 둬서
+    # FastAPI가 스레드 풀에서 돌린다. 느린 Cosmos·Blob·Service Bus 호출이 워커의 다른 요청을 막지 않게 한다.
+    async def decider_form(request: Request) -> Posted:
+        user = decider(request)
+        return Posted(user, await checked_form(request, user))
+
+    # 접수한 심사역 결정 표시(application_id → (보낼 때 문서 지문, 만료 시각)). 오케스트레이터는 먼저 온 결정만
+    # 반영하므로, 같은 문서 상태에 온 두 번째 결정은 202로 받아 조용히 버려지지 않게 여기서 409로 돌려보낸다.
+    # 문서가 바뀌면(반영·거부 기록) 지문이 달라져 표시는 저절로 풀린다. 프로세스 메모리라 레플리카 하나(maxReplicas 1)를 전제한다.
+    decision_marks: dict[str, tuple[str, float]] = {}
+    decision_lock = threading.Lock()
+
+    def decision_pending(application_id: str, state: str) -> bool:
+        with decision_lock:
+            mark = decision_marks.get(application_id)
+            return mark is not None and mark[0] == state and mark[1] > time.monotonic()
+
+    def reserve_decision(application_id: str, state: str) -> bool:
+        now = time.monotonic()
+        with decision_lock:
+            for key in [k for k, (_tag, expires) in decision_marks.items() if expires <= now]:
+                del decision_marks[key]
+            mark = decision_marks.get(application_id)
+            if mark is not None and mark[0] == state:
+                return False
+            decision_marks[application_id] = (state, now + DECISION_MARK_SECONDS)
+            return True
+
+    def release_decision(application_id: str, state: str) -> None:
+        with decision_lock:
+            if (decision_marks.get(application_id) or ("",))[0] == state:
+                del decision_marks[application_id]
+
     def detail(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
+        state = state_tag(doc)
+        ctx.setdefault("decision_pending", decision_pending(doc["application_id"], state))
         raw = load_raw(deps.raw, doc) if doc.get("consent") else None
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
         return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"]),
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
-                      op=opinion_panel(view), in_progress=in_progress,
+                      op=opinion_panel(view), in_progress=in_progress, state=state,
                       consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
                       **ctx)
 
@@ -425,9 +496,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return render("new.html", decider(request))
 
     @app.post("/applications")
-    async def submit(request: Request):
-        user = decider(request)
-        form = await checked_form(request, user)
+    def submit(posted: Posted = Depends(decider_form)):
+        user, form = posted.user, posted.form
+        if code := validate_request(form, DEMO_APPLICANTS):
+            return render("new.html", user, 422, error=_(APPLY_ERRORS[code]), form=form)
         try:
             req = StartRequest(
                 application_id=deps.new_application_id(),
@@ -439,8 +511,6 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             )
         except ValidationError:
             return render("new.html", user, 422, error=_("신청 정보가 올바르지 않습니다."), form=form)
-        if not MIN_TENOR_MONTHS <= req.requested_tenor_months <= MAX_TENOR_MONTHS:
-            return render("new.html", user, 422, error=_(APPLY_ERRORS["tenor_invalid"]), form=form)
         deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
 
@@ -451,6 +521,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(401, "login required")
         return user
 
+    async def customer_form(request: Request) -> Posted:
+        user = customer(request)
+        return Posted(user, await checked_form(request, user))
+
     def apply_form(user: Principal, status_code: int = 200, **ctx: Any) -> HTMLResponse:
         return render("apply.html", user, status_code, consent_items=CONSENT_ITEMS, purpose=CONSENT_PURPOSE,
                       ttl_days=CONSENT_TTL_DAYS, **ctx)
@@ -460,9 +534,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return apply_form(customer(request))
 
     @app.post("/apply")
-    async def apply_submit(request: Request):
-        user = customer(request)
-        form = await checked_form(request, user)
+    def apply_submit(posted: Posted = Depends(customer_form)):
+        user, form = posted.user, posted.form
         code = validate_apply(form, DEMO_APPLICANTS)
         if code:
             return apply_form(user, 422, error=_(APPLY_ERRORS[code]), error_code=code, form=form)
@@ -483,27 +556,36 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         doc = deps.store.get(application_id)
         if doc is not None and doc.get("source") != "customer":
             raise HTTPException(404, "not a customer application")
+        wait_url = None if doc else retry_url(request, f"/apply/{quote(application_id, safe='')}", APPLY_WAIT_LIMIT)
         return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
-                      seller=seller_label(doc["applicant_id"]) if doc else None)
+                      seller=seller_label(doc["applicant_id"]) if doc else None, waiting=doc is None,
+                      wait_url=wait_url)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
     def show(application_id: str, request: Request) -> HTMLResponse:
         user = viewer(request)
         doc = deps.store.get(application_id)
-        if doc is None:
-            return render("pending.html", user, 404, application_id=application_id)
         path = f"/applications/{quote(application_id, safe='')}"
+        if doc is None:
+            return render("pending.html", user, 404, application_id=application_id,
+                          retry_url=retry_url(request, path, WATCH_LIMIT))
         return detail(user, doc, watch_url=watch_url(request, path, state_tag(doc)))
 
     @app.post("/applications/{application_id}/decision", response_class=HTMLResponse)
-    async def decide(application_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        form = await checked_form(request, user)
+    def decide(application_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user, form = posted.user, posted.form
         doc = deps.store.get(application_id)
         if doc is None:
             raise HTTPException(404, "application not found")
         if doc.get("status") not in DECIDABLE:
             raise HTTPException(409, "application is not awaiting an officer decision")
+        state = state_tag(doc)
+        if form.get("state", state) != state:
+            return detail(user, doc, 409, error=_("신청 상태가 바뀌었습니다. 바뀐 내용을 확인한 뒤 다시 결정해 주세요."),
+                          form=form)
+        taken = _("이미 다른 결정이 접수되었습니다. 반영될 때까지 기다려 주세요.")
+        if decision_pending(application_id, state):
+            return detail(user, doc, 409, error=taken)
         kind = form.get("decision", "")
         amount_text = form.get("amount_krw", "").strip()
         amount = None if kind == "decline" or not amount_text else _int(amount_text)
@@ -512,7 +594,6 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             "decision": kind,
             "officer_id": user.user_id,
             "amount_krw": amount,
-            "conditions": [c.strip() for c in form.get("conditions", "").splitlines() if c.strip()],
             "reason": form.get("reason", "").strip(),
             "policy_override": form.get("policy_override", "") == "1",
         }
@@ -522,9 +603,15 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             decision, error = validate_officer_decision(raw_decision, doc.get("policy"))
         if error:
             return detail(user, doc, 422, error=_(DECISION_ERRORS.get(error, error)), error_code=error, form=form)
+        if not reserve_decision(application_id, state):
+            return detail(user, doc, 409, error=taken)
         message = OfficerMessage(application_id=application_id, decision=decision.model_dump(mode="json"))
-        deps.queue.send(DECISION_QUEUE, message.model_dump(mode="json"))
-        return render("sent.html", user, 202, application_id=application_id, decision=decision, since=state_tag(doc))
+        try:
+            deps.queue.send(DECISION_QUEUE, message.model_dump(mode="json"))
+        except Exception:
+            release_decision(application_id, state)
+            raise
+        return render("sent.html", user, 202, application_id=application_id, decision=decision, since=state)
 
     @app.post("/applications/{application_id}/chat")
     async def officer_chat(application_id: str, request: Request) -> JSONResponse:
@@ -537,19 +624,25 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return _chat_error("bad_request")
         if deps.chat is None:
             return _chat_error("disabled")
-        doc = deps.store.get(application_id)
+        doc = await run_in_threadpool(deps.store.get, application_id)
         if doc is None:
             return _chat_error("not_found")
         question = validate_question(body.get("question"))
         if question is None:
             return _chat_error("invalid_question")
-        # 원천 Blob을 읽지 않는다(raw=None): 스냅샷에는 저장된 가명 텍스트만 들어간다.
+        # 스냅샷은 원천 없이(raw=None) 저장된 가명 텍스트로만 만든다. 원천은 심사역이 쓴 질문·대화를 그 건의
+        # 가명처리기로 가리는 데만 쓴다. 원천을 읽다 오류가 나면 엔티티 없이 가린 문장을 보내지 않고 실패로 답한다.
         snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False))
+        raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
+        if not readable:
+            return _chat_error("failed")
+        masker = (build_pseudonymizer(deps.pseudonym_key, raw.profile, raw.transactions) if raw is not None
+                  else Pseudonymizer(deps.pseudonym_key))
         started = time.monotonic()
         result, answer = "ok", None
         try:
-            answer = await run_in_threadpool(deps.chat.ask, snapshot, clean_history(body.get("history")), question,
-                                             i18n.current())
+            answer = await run_in_threadpool(partial(deps.chat.ask, mask=masker.mask), snapshot,
+                                             clean_history(body.get("history")), question, i18n.current())
         except GatewayThrottled:
             result = "throttled"
         except GatewayBlocked:
@@ -618,14 +711,17 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         replay_id = (loan.get("monitoring") or {}).get("replay_id")
         return monitoring_store().list_alerts(loan["id"], replay_id) if replay_id else []
 
-    def loan_sent(user: Principal, loan: dict[str, Any], message: str, note: str | None = None) -> HTMLResponse:
+    def loan_sent(user: Principal, loan: dict[str, Any], message: str, note: str | None = None,
+                  alerts: list[dict[str, Any]] | None = None) -> HTMLResponse:
+        """alerts는 라우트가 이미 읽었으면 넘겨 받아 경보 조회를 한 번만 한다."""
         return render("loan_sent.html", user, 202, loan_id=loan["id"], message=message, note=note,
-                      since=state_tag(loan, loan_alerts(loan)))
+                      since=state_tag(loan, loan_alerts(loan) if alerts is None else alerts))
 
     def loan_page(user: Principal, loan: dict[str, Any], status_code: int = 200,
-                  request: Request | None = None, **ctx: Any) -> HTMLResponse:
+                  request: Request | None = None, alerts: list[dict[str, Any]] | None = None,
+                  **ctx: Any) -> HTMLResponse:
         mon = loan.get("monitoring") or {}
-        alerts = loan_alerts(loan)
+        alerts = loan_alerts(loan) if alerts is None else alerts
         if request is not None:
             ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
         raw = load_monitoring_raw(deps.raw, loan)
@@ -648,9 +744,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return loan_page(user, loan_or_404(loan_id), request=request)
 
     @app.post("/loans/{loan_id}/replay", response_class=HTMLResponse)
-    async def replay(loan_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        await checked_form(request, user)
+    def replay(loan_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user = posted.user
         loan = loan_or_404(loan_id)
         if replay_in_progress(loan.get("monitoring"), deps.clock()):
             return loan_page(user, loan, 409, error=_("이미 재생이 진행 중입니다."))
@@ -661,9 +756,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return loan_sent(user, loan, _("사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다."))
 
     @app.post("/loans/{loan_id}/replay/{action}", response_class=HTMLResponse)
-    async def replay_resume_or_stop(loan_id: str, action: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        await checked_form(request, user)
+    def replay_resume_or_stop(loan_id: str, action: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user = posted.user
         if action not in ("resume", "stop"):
             raise HTTPException(404, "unknown replay action")
         loan = loan_or_404(loan_id)
@@ -678,16 +772,16 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return loan_sent(user, loan, text)
 
     @app.post("/loans/{loan_id}/alerts/{alert_id}/restructure", response_class=HTMLResponse)
-    async def restructure(loan_id: str, alert_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        form = await checked_form(request, user)
+    def restructure(loan_id: str, alert_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user, form = posted.user, posted.form
         loan = loan_or_404(loan_id)
+        alerts = loan_alerts(loan)
         # 대상은 미납 추심 건(rc-) 또는 재조정 요청이 붙은 옛 경보 문서(ew-). 둘 다 문서 id로 찾는다.
-        alert = next((a for a in loan_alerts(loan) if a.get("id") == alert_id), None)
+        alert = next((a for a in alerts if a.get("id") == alert_id), None)
         if alert is None:
             raise HTTPException(404, "alert not found")
         if (alert.get("restructure") or {}).get("status") != "pending_officer":
-            raise HTTPException(409, "restructure request is not pending")
+            return loan_page(user, loan, 409, alerts=alerts, error=_("심사역 결정을 기다리는 재조정 요청이 없습니다."))
         reason = form.get("reason", "").strip()
         try:
             # 심사역 ID는 폼이 아니라 로그인 주체에서만 가져온다.
@@ -696,14 +790,15 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 officer_id=user.user_id, reason=reason,
             )
         except ValidationError:
-            return loan_page(user, loan, 422, error=_("재조정 결정 형식이 올바르지 않습니다."))
+            return loan_page(user, loan, 422, alerts=alerts, error=_("재조정 결정 형식이 올바르지 않습니다."))
         if not reason:
-            return loan_page(user, loan, 422, error=_("사유를 입력해야 합니다."))
+            return loan_page(user, loan, 422, alerts=alerts, error=_("사유를 입력해야 합니다."))
         # kind(기본값 restructure)는 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
         return loan_sent(
             user, loan, _("재조정 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision),
             note=_("결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요.") if replay_held(loan.get("monitoring")) else None,
+            alerts=alerts,
         )
 
     def held_note(loan: dict[str, Any]) -> str | None:
@@ -712,27 +807,27 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return None
 
     @app.post("/loans/{loan_id}/cases/{case_id}/proposal", response_class=HTMLResponse)
-    async def collections_proposal(loan_id: str, case_id: str, request: Request) -> HTMLResponse:
+    def collections_proposal(loan_id: str, case_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
         """추심 제안 승인·수정·반려. 고객 문구는 보내기 전에 여기서도 같은 규칙으로 검사한다."""
-        user = decider(request)
-        form = await checked_form(request, user)
+        user, form = posted.user, posted.form
         loan = loan_or_404(loan_id)
-        case = next((a for a in loan_alerts(loan) if a.get("id") == case_id and a.get("kind") == "repayment_case"),
+        alerts = loan_alerts(loan)
+        case = next((a for a in alerts if a.get("id") == case_id and a.get("kind") == "repayment_case"),
                     None)
         if case is None:
             raise HTTPException(404, "case not found")
         proposal = case.get("proposal") or {}
         if proposal.get("status") != "pending_officer":
-            return loan_page(user, loan, 409, error=_("심사역 승인을 기다리는 추심 제안이 없습니다."))
+            return loan_page(user, loan, 409, alerts=alerts, error=_("심사역 승인을 기다리는 추심 제안이 없습니다."))
         decision = form.get("decision", "")
         reason = form.get("reason", "").strip()
         text = form.get("text", "").strip() if decision == "modify" else None
         if decision in ("approve", "modify"):
             issues = message_issues(str(proposal.get("text") or "") if text is None else text)
             if issues:
-                return loan_page(user, loan, 422, error=_("고객 문구를 보낼 수 없습니다: ") + " ".join(_issue_text(i) for i in issues))
+                return loan_page(user, loan, 422, alerts=alerts, error=_("고객 문구를 보낼 수 없습니다: ") + " ".join(_issue_text(i) for i in issues))
         if decision == "reject" and not reason:
-            return loan_page(user, loan, 422, error=_("반려 사유를 입력해야 합니다."))
+            return loan_page(user, loan, 422, alerts=alerts, error=_("반려 사유를 입력해야 합니다."))
         include = form.get("include_hardship") == "1" if decision in ("approve", "modify") and proposal.get("hardship") else None
         try:
             message = CollectionsDecision(
@@ -740,14 +835,14 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 officer_id=user.user_id, text=text, include_hardship=include, reason=reason,
             )
         except ValidationError:
-            return loan_page(user, loan, 422, error=_("추심 결정 형식이 올바르지 않습니다."))
+            return loan_page(user, loan, 422, alerts=alerts, error=_("추심 결정 형식이 올바르지 않습니다."))
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
-        return loan_sent(user, loan, _("추심 제안 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision), note=held_note(loan))
+        return loan_sent(user, loan, _("추심 제안 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision),
+                         note=held_note(loan), alerts=alerts)
 
     @app.post("/loans/{loan_id}/plan/{change_id}", response_class=HTMLResponse)
-    async def plan_change(loan_id: str, change_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        form = await checked_form(request, user)
+    def plan_change(loan_id: str, change_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user, form = posted.user, posted.form
         loan = loan_or_404(loan_id)
         change = (loan.get("repayment") or {}).get("plan_change")
         if not change or change.get("change_id") != change_id:
@@ -768,10 +863,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return loan_sent(user, loan, _("플랜 변경 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision), note=held_note(loan))
 
     @app.post("/loans/{loan_id}/offer/expire", response_class=HTMLResponse)
-    async def offer_expire(loan_id: str, request: Request) -> HTMLResponse:
+    def offer_expire(loan_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
         """고객 응답 없이 계속: 열린 플랜 제안을 닫는다(그 뒤 고객 선택은 오케스트레이터가 버린다)."""
-        user = decider(request)
-        await checked_form(request, user)
+        user = posted.user
         loan = loan_or_404(loan_id)
         offer = (loan.get("repayment") or {}).get("offer")
         if not offer or offer.get("status") != "open":
@@ -852,9 +946,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return borrower_page(viewer(request), applicant_id)
 
     @app.post("/borrower/{applicant_id}/consents/{consent_id}/revoke", response_class=HTMLResponse)
-    async def borrower_revoke(applicant_id: str, consent_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        await checked_form(request, user)
+    def borrower_revoke(applicant_id: str, consent_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user = posted.user
         doc = privacy().get_consent(consent_id)
         if doc is None or doc.get("applicant_id") != applicant_id:
             raise HTTPException(404, "consent not found")
@@ -870,9 +963,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                     back, _("차주 화면으로"))
 
     @app.post("/borrower/{applicant_id}/grievances", response_class=HTMLResponse)
-    async def borrower_grievance(applicant_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        form = await checked_form(request, user)
+    def borrower_grievance(applicant_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user, form = posted.user, posted.form
         privacy()
         application_id = form.get("application_id", "")
         doc = deps.store.get(application_id)
@@ -893,10 +985,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                     back, _("차주 화면으로"))
 
     @app.post("/borrower/{applicant_id}/plan", response_class=HTMLResponse)
-    async def borrower_plan_choice(applicant_id: str, request: Request) -> HTMLResponse:
+    def borrower_plan_choice(applicant_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
         """셀프 상환 플랜 선택. 만료(고객 응답 없이 계속)·응답이 끝난 제안에는 고를 수 없다(409)."""
-        user = decider(request)
-        form = await checked_form(request, user)
+        user, form = posted.user, posted.form
         loan = monitoring_store().get_loan(form.get("loan_id", ""))
         if loan is None or loan.get("applicant_id") != applicant_id:
             raise HTTPException(404, "loan not found")
@@ -917,9 +1008,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return sent(user, text, f"/borrower/{quote(applicant_id, safe='')}#self-plan", _("차주 화면으로"))
 
     @app.post("/applications/{application_id}/consents/{consent_id}/{action}", response_class=HTMLResponse)
-    async def consent_demo(application_id: str, consent_id: str, action: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        await checked_form(request, user)
+    def consent_demo(application_id: str, consent_id: str, action: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user = posted.user
         if action not in DEMO_ACTIONS:
             raise HTTPException(404, "unknown action")
         doc = privacy().get_consent(consent_id)
@@ -993,9 +1083,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return render("grievance.html", user, texts=grievance_texts(doc), g=doc)
 
     @app.post("/grievances/{application_id}/{grievance_id}/decision", response_class=HTMLResponse)
-    async def grievance_decision(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
-        user = decider(request)
-        form = await checked_form(request, user)
+    def grievance_decision(application_id: str, grievance_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+        user, form = posted.user, posted.form
         doc = grievance_or_404(application_id, grievance_id)
         if doc.get("status") != "pending_officer":
             raise HTTPException(409, "grievance is not pending")
@@ -1017,13 +1106,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 grievance_id=grievance_id, application_id=application_id, outcome=outcome,
                 officer_id=user.user_id, reason=form.get("reason", ""), new_decision=new_decision or None,
                 amount_krw=amount,
-                conditions=[c.strip() for c in form.get("conditions", "").splitlines() if c.strip()] if rereview else [],
             )
         except ValidationError:
             return invalid(_("처리 결과와 사유를 확인하세요(재심사에는 새 결정이 필요합니다)."))
         if rereview:
             proposed = message.model_dump(include={"officer_id", "amount_krw", "conditions", "reason"})
-            _proposed, error = validate_officer_decision(
+            _proposed, error = validate_rereview_decision(
                 {**proposed, "decision": message.new_decision}, (doc.get("record") or {}).get("policy")
             )
             if error:

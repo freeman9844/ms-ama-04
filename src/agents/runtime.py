@@ -3,7 +3,7 @@
 probe(2026-10-31)로 확인한 REST 형태만 쓴다.
 - 버전 생성: POST {project}/agents/{name}/versions?api-version=v1 (같은 정의면 같은 버전)
 - 대화 생성: POST {project}/openai/v1/conversations
-- 응답 생성: POST {project}/openai/v1/responses (agent_reference + conversation)
+- 응답 생성: POST {project}/openai/v1/responses (agent_reference(이름 + 이 프로세스가 만든 버전) + conversation)
 도구는 이 프로세스 안에서 실행하고, 도구 예외 내용은 모델에 보내지 않는다.
 """
 
@@ -307,6 +307,9 @@ class FoundryAgents:
         containers: list[str],
     ) -> AgentRun:
         ref = {"type": "agent_reference", "name": spec.name}
+        if version:
+            # 이 프로세스가 만든 버전에 고정한다. 이름만 쓰면 최신 버전이라 배포 중 옛 인스턴스가 새 지시문으로 돈다.
+            ref["version"] = version
 
         def respond(payload: Any) -> dict[str, Any]:
             body = {"agent_reference": ref, "conversation": conversation_id, "input": payload}

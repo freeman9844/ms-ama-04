@@ -356,6 +356,7 @@ def test_formatters():
     assert dashboard.man(40_000_000) == "4,000만" and dashboard.man(0) == "0"
     assert dashboard.krw_text(1_000) == "1,000원" and dashboard.krw_text(None) == "-"
     assert dashboard.clock("bad") == "" and dashboard.clock(None) == ""
+    assert dashboard.clock("2026-01-01T01:00:00+00:00") == "10:00:00"
 
 
 def test_status_labels_are_shared_with_app():

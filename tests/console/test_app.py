@@ -252,6 +252,25 @@ def test_decision_only_while_awaiting_officer(env):
     assert queue.sent == []
 
 
+def test_post_handlers_read_the_store_off_the_event_loop(env):
+    import asyncio
+
+    client, queue = env
+    store = client.app.state.deps.store
+
+    class OffLoopStore:
+        def get(self, application_id):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return store.get(application_id)
+            raise AssertionError("blocking store read on the event loop")
+
+    token = csrf(client, OFFICER)
+    client.app.state.deps.store = OffLoopStore()
+    assert decide(client, OFFICER, token).status_code == 202 and len(queue.sent) == 1
+
+
 def test_form_must_be_urlencoded_and_small(env):
     client, queue = env
     token = csrf(client, OFFICER)
@@ -284,7 +303,8 @@ def test_new_application_is_enqueued_and_redirects(env):
 
 @pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_amount_krw": "10000001"},
                                     {"requested_tenor_months": "2"}, {"requested_tenor_months": "7"},
-                                    {"requested_tenor_months": "12"}, {"applicant_id": ""}, {"requested_amount_krw": "lots"}])
+                                    {"requested_tenor_months": "12"}, {"applicant_id": ""}, {"requested_amount_krw": "lots"},
+                                    {"requested_amount_krw": "499999"}, {"applicant_id": "seller-unknown"}])
 def test_new_application_validation(env, fields):
     client, queue = env
     token = csrf(client, OFFICER, "/applications/new")
@@ -380,13 +400,54 @@ def test_decision_form_is_locked_while_the_sent_decision_is_pending(env):
     assert '<textarea name="reason" rows="3" disabled>' in waiting and 'value="decline" disabled>' in waiting
 
 
+def test_second_decision_on_the_same_document_is_rejected(env, make_doc):
+    client, queue = env
+    assert decide(client, OFFICER, csrf(client, OFFICER)).status_code == 202
+    second = decide(client, MANAGER, csrf(client, MANAGER), decision="decline", reason="상환 여력 부족")
+    assert second.status_code == 409 and second.headers["content-type"].startswith("text/html")
+    assert "이미 다른 결정이 접수되었습니다" in second.text
+    assert '<button type="submit" disabled>결정 반영 대기 중</button>' in second.text
+    assert '<button type="submit" disabled>결정 반영 대기 중</button>' in client.get(
+        "/applications/app-1", headers=MANAGER).text
+    assert len(queue.sent) == 1
+    # 오케스트레이터가 첫 결정을 거부해 문서가 바뀌면 다시 결정할 수 있다.
+    doc = make_doc()
+    doc["decision_attempts"] = [{"at": "2026-11-01T09:00:00+09:00", "error": "amount_exceeds_policy"}]
+    client.app.state.deps.store.docs["app-1"] = doc
+    assert decide(client, MANAGER, csrf(client, MANAGER), decision="decline", reason="x").status_code == 202
+    assert len(queue.sent) == 2
+
+
+def test_decision_from_a_stale_page_is_rejected(env, make_doc):
+    client, queue = env
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    state = re.search(r'name="state" value="([0-9a-f]{12})"', page).group(1)
+    token = csrf(client, OFFICER)
+    doc = make_doc()
+    doc["decision_attempts"] = [{"at": "2026-11-01T09:00:00+09:00", "error": "amount_exceeds_policy"}]
+    client.app.state.deps.store.docs["app-1"] = doc
+    resp = decide(client, OFFICER, token, state=state, reason="재검토")
+    assert resp.status_code == 409 and "신청 상태가 바뀌었습니다" in resp.text and "재검토" in resp.text
+    assert queue.sent == []
+    fresh = re.search(r'name="state" value="([0-9a-f]{12})"', resp.text).group(1)
+    assert fresh != state and decide(client, OFFICER, token, state=fresh).status_code == 202
+
+
 def test_application_detail_pages_refresh_every_ten_seconds(env, make_doc):
     client, _ = env
     client.app.state.deps.store.docs["app-1"] = make_doc(status="received")
     assert '<meta http-equiv="refresh" content="10">' in client.get("/applications/app-1", headers=OFFICER).text
     pending = client.get("/applications/app-9", headers=OFFICER).text
-    assert '<meta http-equiv="refresh" content="10">' in pending and "10초마다" in pending
+    assert '<meta http-equiv="refresh" content="10;url=/applications/app-9?n=1">' in pending and "10초마다" in pending
     assert 'hx-trigger="every 3s"' in client.get("/", headers=OFFICER).text
+
+
+def test_unknown_application_stops_refreshing_after_watch_limit(env):
+    client, _ = env
+    assert 'content="10;url=/applications/app-9?n=12"' in client.get("/applications/app-9?n=11", headers=OFFICER).text
+    stopped = client.get("/applications/app-9?n=12", headers=OFFICER)
+    assert stopped.status_code == 404 and 'http-equiv="refresh"' not in stopped.text
+    assert "자동 새로 고침을 멈췄습니다" in stopped.text and "10초마다" not in stopped.text
 
 
 def test_list_shows_business_name_to_deciders_and_id_to_auditors(env):
@@ -423,3 +484,17 @@ def test_summary_tab_shows_officer_decision_once_decided(env, make_doc):
     card = page[page.index('id="tab-summary"'):page.index('id="tab-cashflow"')]
     assert 'class="card summary-officer"' in card and "심사역 결정" in card and ">승인<" in card
     assert "신청 금액" in card and "승인 금액" in card and "5,000,000원" in card
+
+
+def test_detail_shows_kst_times_and_decision_label(env, make_doc):
+    client, _ = env
+    doc = make_doc(status="approved", received_at="2026-10-31T00:00:00+00:00")
+    doc["sla"] = {**doc["sla"], "deadline": "2026-11-01T00:00:00Z"}
+    doc["officer_decision"] = {"decision": "approve", "amount_krw": 5_000_000, "officer_id": "o1", "conditions": [],
+                               "reason": "", "policy_override": False, "at": "2026-11-09T05:00:00+00:00"}
+    client.app.state.deps.store.docs["app-1"] = doc
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert "<dd>2026-10-31 09:00</dd>" in page and "<dd>2026-11-01 09:00</dd>" in page
+    assert "마감 2026-11-01 09:00" in page and "T00:00:00" not in page
+    tab = page[page.index('id="tab-decision"'):]
+    assert "승인 · 5,000,000원" in tab and "approve ·" not in tab

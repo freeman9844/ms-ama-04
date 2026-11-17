@@ -244,6 +244,14 @@ def test_restructure_decision_uses_login_identity(setup):
                                                "officer_id": "oid-officer", "reason": "3개월 유예"})]
 
 
+def test_loan_decision_reads_alerts_once(setup):
+    client, _, store, _ = setup()
+    form = {"csrf": csrf(client), "decision": "approve", "reason": "3개월 유예"}
+    store.alert_queries.clear()
+    assert client.post("/loans/app-1/alerts/rc-rp-1-i1/restructure", data=form, headers=OFFICER).status_code == 202
+    assert store.alert_queries == [("app-1", "rp-1")]
+
+
 @pytest.mark.parametrize("fields, status", [
     ({"decision": "approve", "reason": " "}, 422),
     ({"decision": "maybe", "reason": "x"}, 422),
@@ -259,7 +267,9 @@ def test_restructure_decision_needs_pending_request_of_current_replay(setup, mas
     client, queue, *_ = setup(alerts=[make_case(mask, restructure_status="approved")])
     token = csrf(client)
     path = "/loans/app-1/alerts/rc-rp-1-i1/restructure"
-    assert client.post(path, data={"csrf": token, "decision": "approve", "reason": "x"}, headers=OFFICER).status_code == 409
+    r = client.post(path, data={"csrf": token, "decision": "approve", "reason": "x"}, headers=OFFICER)
+    assert r.status_code == 409 and r.headers["content-type"].startswith("text/html")
+    assert "재조정 요청이 없습니다" in r.text
     other, queue2, *_ = setup(loan=make_loan(replay_id="rp-2"))
     assert other.post(path, data={"csrf": csrf(other), "decision": "approve", "reason": "x"},
                       headers=OFFICER).status_code == 404

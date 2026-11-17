@@ -6,7 +6,7 @@
 """
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from agents.grounding import numbers, ungrounded
 from agents.runtime import AgentSpec
 from agents.underwriting import AgentRunner, _Session
+from shared.pseudonymize import has_token
 
 CONSENT_NOTICE_AGENT = "consent-notice-agent"
 GRIEVANCE_AGENT = "grievance-reply-agent"
@@ -47,6 +48,7 @@ GRIEVANCE_INSTRUCTIONS = """너는 한국 소상공인 대출사의 이의제기
 - outcome이 재심사이면 '재심사' 결과와 새 결정(new_decision)을 그대로 쓰고, 금액(amount_krw)이 있으면 그대로 쓴다.
 - improvements가 있으면 무엇이 개선되면 결과가 달라질 수 있는지 알려 준다.
 - 숫자는 입력에 있는 값만 그대로 쓴다. 입력에 없는 숫자, 금리, 약속은 쓰지 않는다.
+- [[BIZNAME_...]] 같은 토큰은 가려진 정보다. 회신에 옮기거나 복원·추측하지 않는다.
 - title은 30자 이내, body는 여섯 문장 이내."""
 
 DRAFT_SCHEMA: dict[str, Any] = {
@@ -174,19 +176,22 @@ def _draft(
     check: Any,
     template: Any,
     model: str,
+    model_facts: Mapping[str, Any] | None = None,
 ) -> Notice:
+    """model_facts: 모델에 보낼 사실(가명처리한 것). 검사도 이것으로 하고, 템플릿은 원래 사실로 쓴다."""
+    sent = facts if model_facts is None else model_facts
     if runner is None:
         fallback = template(facts)
         return Notice(fallback.title, fallback.body, "template", [], {"error": "agents_disabled"})
     session = _Session(runner)
-    run, error = session.run(spec, json.dumps(facts, ensure_ascii=False), {})
+    run, error = session.run(spec, json.dumps(sent, ensure_ascii=False), {})
     conversations = {cid: _delete(runner, cid) for cid in session.conversations}
     if run is None:
         fallback = template(facts)
         return Notice(fallback.title, fallback.body, "template", [], {"error": error, "conversations": conversations})
     record = {**run.record(), "model": model, "conversations": conversations}
     draft: Draft = run.output  # type: ignore[assignment]
-    issues = check(facts, draft)
+    issues = check(sent, draft)
     if issues:
         fallback = template(facts)
         return Notice(fallback.title, fallback.body, "template", issues, record)
@@ -233,7 +238,7 @@ def _grievance_numbers(facts: Mapping[str, Any]) -> list[float]:
     values = [v for r in facts["reasons"] for v in (r["observed"], r["threshold"])]
     values += [v for c in facts["improvements"] for v in (c["current"], c["target"])]
     values.append(facts.get("amount_krw"))
-    values += [n for _, n in numbers(facts["officer_reason"])]
+    values += [n for _, n in numbers(facts.get("officer_reason", ""))]
     values += [n for c in facts["improvements"] for _, n in numbers(c["explanation"])]
     return [float(v) for v in values if isinstance(v, int | float) and not isinstance(v, bool)]
 
@@ -243,12 +248,16 @@ def check_grievance_reply(facts: Mapping[str, Any], draft: Draft) -> list[str]:
     required = [OUTCOME_KEYWORDS[outcome]]
     if outcome == "rereview":
         required.append(facts["new_decision"])
-    return _common(draft, _grievance_numbers(facts)) + _missing(draft.body, required)
+    issues = _common(draft, _grievance_numbers(facts)) + _missing(draft.body, required)
+    if has_token(f"{draft.title} {draft.body}"):
+        issues.append("가명 토큰 포함")
+    return issues
 
 
 def template_grievance_reply(facts: Mapping[str, Any]) -> Draft:
     reasons = "; ".join(r["message"] for r in facts["reasons"]) or "정책 기준"
-    tips = " ".join(c["explanation"] for c in facts["improvements"])
+    # 분석가 설명에는 가명 토큰이 남아 있을 수 있어 그런 설명은 차주 회신에 싣지 않는다.
+    tips = " ".join(c["explanation"] for c in facts["improvements"] if not has_token(c["explanation"]))
     if facts["outcome"] == OUTCOME_LABELS["uphold"]:
         body = (
             f"이의제기를 검토한 결과 원결정({facts['original_decision']})을 유지합니다. "
@@ -265,6 +274,19 @@ def template_grievance_reply(facts: Mapping[str, Any]) -> Draft:
     return Draft(title="이의제기 처리 결과 안내", body=body)
 
 
-def write_grievance_reply(facts: Mapping[str, Any], *, runner: AgentRunner | None, model: str) -> Notice:
+def write_grievance_reply(
+    facts: Mapping[str, Any],
+    *,
+    runner: AgentRunner | None,
+    model: str,
+    mask: Callable[[str], str] | None = None,
+) -> Notice:
+    """mask: 그 건의 가명처리기. 심사역 사유는 자유 문장이라 mask로 가려 모델에 보내고, mask가 없으면 보내지 않는다.
+
+    템플릿 대체 문안은 원래 사유를 쓴다(모델을 거치지 않는다).
+    """
     spec = _spec(GRIEVANCE_AGENT, model, GRIEVANCE_INSTRUCTIONS)
-    return _draft(spec, facts, runner, check_grievance_reply, template_grievance_reply, model)
+    model_facts = {k: v for k, v in facts.items() if k != "officer_reason"}
+    if mask is not None:
+        model_facts["officer_reason"] = mask(facts["officer_reason"])
+    return _draft(spec, facts, runner, check_grievance_reply, template_grievance_reply, model, model_facts)

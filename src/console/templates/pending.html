@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% set nav = "home" %}
-{% block head %}<meta http-equiv="refresh" content="{{ detail_refresh_seconds }}">{% endblock %}
+{% block head %}{% if retry_url %}<meta http-equiv="refresh" content="{{ detail_refresh_seconds }};url={{ retry_url }}">{% endif %}{% endblock %}
 {% block main %}
 <h1>{{ application_id }}</h1>
-<p>{{ _("신청 문서가 아직 없습니다. 오케스트레이터가 큐 메시지를 처리하면 자동으로 표시됩니다(%(n)s초마다 새로 고침).", n=detail_refresh_seconds) }}</p>
+{% if retry_url %}<p>{{ _("신청 문서가 아직 없습니다. 오케스트레이터가 큐 메시지를 처리하면 자동으로 표시됩니다(%(n)s초마다 새로 고침).", n=detail_refresh_seconds) }}</p>{% else %}<p>{{ _("신청 문서가 아직 없습니다. 자동 새로 고침을 멈췄습니다. 신청번호를 확인하거나 잠시 뒤 직접 새로 고쳐 주세요.") }}</p>{% endif %}
 <p><a href="/">{{ _("목록으로") }}</a></p>
 {% endblock %}

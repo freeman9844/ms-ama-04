@@ -63,6 +63,11 @@ def validate_apply(form: dict[str, str], applicants: tuple[str, ...]) -> str | N
     """오류 코드를 돌려준다. 동의를 가장 먼저 본다."""
     if not all(form.get(f) == "on" for f in CONSENT_FIELDS):
         return "consent_required"
+    return validate_request(form, applicants)
+
+
+def validate_request(form: dict[str, str], applicants: tuple[str, ...]) -> str | None:
+    """신청인·금액·기간 오류 코드. 고객 신청(/apply)과 콘솔 신규 신청이 같은 기준을 쓴다."""
     if form.get("applicant_id", "").strip() not in applicants:
         return "applicant_invalid"
     amount = _digits(form.get("requested_amount_krw", ""))

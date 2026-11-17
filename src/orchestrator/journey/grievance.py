@@ -3,17 +3,22 @@
 접수 시점의 판단 기록(정책 사유, 분석 요약·counterfactual, 심사역 결정)을 스냅숏으로 남기고,
 처리 결과(원결정 유지 또는 재심사)와 회신 초안을 grievances 문서에 기록한다. 신청 문서는 바꾸지 않는다
 (재심사 결과의 실행은 별도 절차). 회신 에이전트에는 판단 기록만 주고 차주가 쓴 내용은 주지 않는다.
+심사역 사유는 자유 문장이라 그 신청의 가명처리기로 가려 보내고, 원천을 읽지 못하면 보내지 않는다.
+재심사로는 정책 밖 예외 승인을 할 수 없다(`rereview_outside_policy`).
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
 
+from agents.data_assembly import build_pseudonymizer
 from agents.notices import grievance_facts, write_grievance_reply
+from agents.pretranslate import load_case_raw
 from journey.activities import Deps, update_doc
 from journey.models import GrievanceDecision, GrievanceSubmission
-from journey.validation import validate_officer_decision
+from journey.validation import validate_rereview_decision
 
 log = logging.getLogger("journey.grievance")
 GRIEVANCES_CONTAINER = "grievances"
@@ -39,6 +44,20 @@ def _snapshot(application: dict[str, Any]) -> dict[str, Any]:
         ),
         "officer_decision": application.get("officer_decision"),
     }
+
+
+def _reason_mask(deps: Deps, grievance: dict[str, Any]) -> Callable[[str], str] | None:
+    """심사역 사유를 가릴 그 신청의 가명처리기. 원천이 없으면 패턴만, 읽다 예외가 나면 None(사유를 보내지 않는다)."""
+    try:
+        case = load_case_raw(
+            GRIEVANCES_CONTAINER, grievance, deps.raw, lambda container, ident: deps.store.read(container, ident, ident)
+        )
+    except Exception as e:  # noqa: BLE001 - 엔티티 없이 가린 사유가 상호·이름을 그대로 보낼 수 있다
+        # 검증 오류 메시지에 원천 값이 들어가므로 종류만 남긴다.
+        log.warning("이의 회신 원천 읽기 실패로 심사역 사유를 빼고 보냄: %s %s", grievance.get("grievance_id"), type(e).__name__)
+        return None
+    profile, transactions = case if case else (None, ())
+    return build_pseudonymizer(deps.pseudonym_key, profile, transactions).mask
 
 
 def handle_grievance(deps: Deps, body: str) -> str:
@@ -108,7 +127,7 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
             "conditions": msg.conditions,
             "reason": msg.reason,
         }
-        _, error = validate_officer_decision(proposed, record["policy"])
+        _, error = validate_rereview_decision(proposed, record["policy"])
         if error:
             attempt = {"at": at, "error": error, "payload": msg.model_dump(mode="json")}
 
@@ -121,7 +140,8 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
             update_doc(deps.store, GRIEVANCES_CONTAINER, msg.grievance_id, msg.application_id, reject)
             return "rejected"
     decision = {**msg.model_dump(mode="json", exclude={"grievance_id", "application_id"}), "at": at}
-    reply = write_grievance_reply(grievance_facts(record, decision), runner=deps.agents, model=deps.grievance_model)
+    mask = _reason_mask(deps, current) if deps.agents is not None else None
+    reply = write_grievance_reply(grievance_facts(record, decision), runner=deps.agents, model=deps.grievance_model, mask=mask)
     resolved = False
 
     def resolve(doc: dict[str, Any]) -> bool | None:

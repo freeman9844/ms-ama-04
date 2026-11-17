@@ -217,6 +217,94 @@ def test_decision_for_unknown_resolved_or_invalid_is_dropped(deps):
     assert grievance(deps)["decision"]["reason"] != "두 번째"
 
 
+@pytest.mark.parametrize("policy", [None, {**APPLICATION["policy"], "decision": "ineligible", "max_amount_krw": 0}])
+def test_rereview_approval_outside_policy_is_not_supported(deps, policy):
+    deps.store.upsert("applications", {**APPLICATION, "policy": policy})
+    submit(deps)
+    assert decide(deps, outcome="rereview", new_decision="approve", amount_krw=5_000_000) == "rejected"
+    doc = grievance(deps)
+    assert doc["status"] == "pending_officer" and doc["decision"] is None and doc["reply"] is None
+    assert [a["error"] for a in doc["decision_attempts"]] == ["rereview_outside_policy"]
+
+
+PROFILE = {
+    "applicant_id": "seller-dailylook-01",
+    "business_name": "데일리룩상회",
+    "business_reg_no": "123-45-67890",
+    "representative_name": "김민수",
+    "industry": "의류",
+    "region": "서울",
+    "business_age_months": 30,
+}
+TXN = {
+    "txn_id": "t1",
+    "booked_on": "2026-10-01",
+    "amount_krw": -1_000_000,
+    "balance_after_krw": 5_000_000,
+    "description": "급여 이서연",
+    "txn_type_code": "TRANSFER_OUT",
+}
+NAMED_REASON = "데일리룩상회 김민수 대표의 추가 매출 자료를 확인했으나 DSCR 기준 미달입니다."
+
+
+class MemoryRaw:
+    def __init__(self, blobs=None, error=None):
+        self.blobs, self.error = blobs or {}, error
+
+    def get_json(self, container, name):
+        if self.error:
+            raise self.error
+        return self.blobs.get((container, name))
+
+
+def with_consent(deps, raw):
+    deps.store.upsert("applications", {**APPLICATION, "consent": {"consent_id": "c1"}})
+    return replace(deps, raw=raw)
+
+
+def test_officer_reason_is_pseudonymized_for_reply_agent(deps):
+    raw = MemoryRaw({("consent-c1", "profile.json"): PROFILE, ("consent-c1", "transactions.json"): [TXN]})
+    runner = ReplyRunner(Draft(title="이의제기 처리 결과", body="검토 결과 원결정(거절)을 유지합니다."))
+    deps = replace(with_consent(deps, raw), agents=runner)
+    submit(deps)
+    assert decide(deps, reason=NAMED_REASON) == "resolved"
+    sent = runner.inputs[0]
+    assert "데일리룩상회" not in sent and "김민수" not in sent and "[[BIZNAME_" in sent and "[[PERSON_" in sent
+    assert grievance(deps)["decision"]["reason"] == NAMED_REASON
+
+
+def test_officer_reason_is_not_sent_when_raw_load_fails(deps):
+    runner = ReplyRunner(Draft(title="이의제기 처리 결과", body="검토 결과 원결정(거절)을 유지합니다."))
+    deps = replace(with_consent(deps, MemoryRaw(error=RuntimeError("blob down"))), agents=runner)
+    submit(deps)
+    assert decide(deps, reason=NAMED_REASON) == "resolved"
+    sent = runner.inputs[0]
+    assert "officer_reason" not in sent and "데일리룩상회" not in sent and "추가 매출 자료" not in sent
+    assert grievance(deps)["reply"]["source"] == "agent"
+
+
+def test_officer_reason_uses_pattern_masking_without_raw(deps):
+    runner = ReplyRunner(Draft(title="이의제기 처리 결과", body="검토 결과 원결정(거절)을 유지합니다."))
+    deps = replace(with_consent(deps, MemoryRaw()), agents=runner)
+    submit(deps)
+    assert decide(deps, reason="연락처 010-1234-5678로 확인했으나 미달입니다.") == "resolved"
+    assert "010-1234-5678" not in runner.inputs[0] and "[[PHONE_" in runner.inputs[0]
+
+
+def test_reply_with_pseudonym_token_falls_back_to_template(deps):
+    token = "[[BIZNAME_0123456789]]"
+    counterfactuals = [
+        {**APPLICATION["assessment"]["counterfactuals"][0], "explanation": f"{token}의 DSCR이 1.25 이상이면 결과가 달라질 수 있다."}
+    ]
+    deps.store.upsert("applications", {**APPLICATION, "assessment": {**APPLICATION["assessment"], "counterfactuals": counterfactuals}})
+    runner = ReplyRunner(Draft(title="이의제기 처리 결과", body=f"{token}님, 검토 결과 원결정(거절)을 유지합니다."))
+    submit(deps)
+    assert decide(replace(deps, agents=runner)) == "resolved"
+    reply = grievance(deps)["reply"]
+    assert reply["source"] == "template" and any("토큰" in i for i in reply["issues"])
+    assert "[[" not in reply["title"] + reply["body"]
+
+
 def test_agent_reply_is_grounded_and_never_sees_borrower_text(deps):
     draft = Draft(title="이의제기 처리 결과", body="검토 결과 원결정(거절)을 유지합니다. 주요 사유는 DSCR 기준 미달입니다.")
     runner = ReplyRunner(draft)

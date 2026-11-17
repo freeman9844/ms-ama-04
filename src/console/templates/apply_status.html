@@ -1,5 +1,5 @@
 {% extends "apply_base.html" %}
-{% block head %}{% if s.refresh %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block head %}{% if wait_url %}<meta http-equiv="refresh" content="3;url={{ wait_url }}">{% elif s.refresh and not waiting %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
 {% block main %}
 <h1>{{ _("신청 진행 현황") }}</h1>
 <section class="card">
@@ -7,7 +7,7 @@
   <p class="apply-status s-{{ s.tone }}">{{ s.label }}</p>
   <p>{{ s.message }}</p>
   {% if s.amount_krw %}<p>{{ _("승인 금액") }}: <strong>{{ s.amount_krw|krw }}</strong></p>{% endif %}
-  {% if s.refresh %}<p class="note">{{ _("3초마다 자동으로 새로 고칩니다.") }}</p>{% endif %}
+  {% if waiting and not wait_url %}<p class="note">{{ _("자동 새로 고침을 멈췄습니다. 잠시 뒤 직접 새로 고쳐 주세요.") }}</p>{% elif s.refresh %}<p class="note">{{ _("3초마다 자동으로 새로 고칩니다.") }}</p>{% endif %}
 </section>
 <p><a href="/apply">{{ _("새 신청") }}</a></p>
 {% endblock %}

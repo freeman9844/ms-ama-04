@@ -107,7 +107,8 @@ def test_run_executes_tool_calls_and_validates_output():
     assert first["input"] == "신청 app-1"
     for body in (first, second):
         assert body["conversation"] == "conv_1"
-        assert body["agent_reference"] == {"type": "agent_reference", "name": "data-assembly"}
+        # 이 프로세스가 만든 버전에 고정한다(배포 중 다른 인스턴스가 만든 새 지시문으로 돌지 않게).
+        assert body["agent_reference"] == {"type": "agent_reference", "name": "data-assembly", "version": "3"}
     assert [(o["type"], o["call_id"], json.loads(o["output"])) for o in second["input"]] == [
         ("function_call_output", "c1", {"ok": "profile"}),
         ("function_call_output", "c2", {"ok": "tax"}),

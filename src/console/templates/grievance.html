@@ -28,7 +28,7 @@
 {% endif %}
 {% if r.assessment and r.assessment.counterfactuals %}
 <h3>{{ _("개선 조건(반사실)") }}</h3>
-<ul>{% for cf in r.assessment.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation }}</li>{% endfor %}</ul>
+<ul>{% for cf in r.assessment.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation|mt }}</li>{% endfor %}</ul>
 {% endif %}
 </section>
 <section>

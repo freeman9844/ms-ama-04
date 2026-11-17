@@ -88,6 +88,8 @@ def _dt(iso: Any) -> datetime | None:
 
 def clock(iso: Any) -> str:
     d = _dt(iso)
+    if d and d.tzinfo:
+        d = d.astimezone(KST_OFFSET)
     return d.strftime("%H:%M:%S") if d else ""
 
 
