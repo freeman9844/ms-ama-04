@@ -567,18 +567,23 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             source="customer",
         )
         deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
-        return RedirectResponse(f"/apply/{quote(req.application_id, safe='')}", status_code=303)
+        return RedirectResponse(f"/apply/{quote(req.application_id, safe='')}?applicant_id={quote(req.applicant_id, safe='')}",
+                                status_code=303)
 
     @app.get("/apply/{application_id}", response_class=HTMLResponse)
-    def apply_status(application_id: str, request: Request) -> HTMLResponse:
+    def apply_status(application_id: str, request: Request, applicant_id: str | None = None) -> HTMLResponse:
         user = customer(request)
         doc = deps.store.get(application_id)
         if doc is not None and doc.get("source") != "customer":
             raise HTTPException(404, "not a customer application")
+        # 문서가 생기기 전(접수 직후 대기)에는 신청할 때 고른 사업자로 메뉴를 유지한다.
+        chosen = doc.get("applicant_id") if doc else (applicant_id if applicant_id in DEMO_APPLICANTS else None)
         wait_url = None if doc else retry_url(request, f"/apply/{quote(application_id, safe='')}", APPLY_WAIT_LIMIT)
+        if wait_url and chosen:
+            wait_url += f"&applicant_id={quote(chosen, safe='')}"
         return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
-                      seller=seller_label(doc["applicant_id"]) if doc else None, waiting=doc is None,
-                      wait_url=wait_url, applicant_id=doc.get("applicant_id") if doc else None)
+                      seller=seller_label(chosen) if chosen else None, waiting=doc is None,
+                      wait_url=wait_url, applicant_id=chosen)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
     def show(application_id: str, request: Request) -> HTMLResponse:

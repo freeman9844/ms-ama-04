@@ -178,7 +178,9 @@ def test_borrower_index_lists_demo_applicants(env):
     client, _, _ = env
     page = client.get("/borrower", headers=CUSTOMER).text
     assert 'href="/borrower/seller-dailylook-01"' in page and 'href="/borrower/seller-candle-05"' in page
-    assert '<li class="n-status active"><a href="/borrower">고객 선택</a>' in page
+    assert '<li class="n-status active"><a href="/borrower">사업자 선택</a>' in page
+    english = client.get("/borrower", headers={**CUSTOMER, "Cookie": "lang=en"}).text
+    assert "<h1>Select business</h1>" in english and "Customer choice" not in english
     assert 'class="n-apply' not in page
 
 

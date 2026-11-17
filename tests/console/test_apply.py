@@ -73,6 +73,15 @@ def test_apply_without_known_applicant_goes_to_customer_select(env, path):
     assert response.status_code == 303 and response.headers["location"] == "/borrower"
 
 
+def test_waiting_status_page_keeps_chosen_applicant_menu(env):
+    client, _, _ = env
+    html = client.get("/apply/app-not-yet?applicant_id=seller-candle-05", headers=CUSTOMER).text
+    assert 'href="/apply?applicant_id=seller-candle-05"' in html and 'href="/borrower/seller-candle-05"' in html
+    assert 'url=/apply/app-not-yet?n=1&amp;applicant_id=seller-candle-05' in html
+    unknown = client.get("/apply/app-not-yet?applicant_id=nope", headers=CUSTOMER).text
+    assert "/borrower/nope" not in unknown and 'href="/apply?applicant_id=nope"' not in unknown and "&amp;applicant_id=nope" not in unknown
+
+
 def test_unknown_applicant_post_goes_to_customer_select(env):
     client, _, queue = env
     response = apply(client, applicant_id="seller-unknown-99")
@@ -93,7 +102,7 @@ def test_valid_application_is_enqueued_as_customer(env):
     client, _, queue = env
     response = apply(client)
     assert response.status_code == 303
-    assert response.headers["location"] == "/apply/app-20261104-c0ffee"
+    assert response.headers["location"] == "/apply/app-20261104-c0ffee?applicant_id=seller-dailylook-01"
     [(name, message)] = queue.sent
     assert name == START_QUEUE
     assert message["source"] == "customer"
