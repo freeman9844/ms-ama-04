@@ -1,3 +1,64 @@
-# Episode order for the list pages. Each entry: {ref, days, title_en, title_ko}.
-# Every ref needs both an en and a ko post (checked by blog/tools/check_site.py).
-[]
+- ref: day-01
+  days: "2026-10-26"
+  title_en: "Picking Up Where a Login Error Left Off"
+  title_ko: "로그인 오류에서 멈춘 일을 다시 잇다"
+- ref: day-02
+  days: "2026-10-27"
+  title_en: "Asking \"Why?\" Before Saying \"Go\""
+  title_ko: "'진행' 전에 '왜요?'를 묻다"
+- ref: day-03
+  days: "2026-10-28"
+  title_en: "Back to the Assignment Text"
+  title_ko: "과제 원문으로 돌아가다"
+- ref: day-04
+  days: "2026-10-29 – 2026-10-30"
+  title_en: "Using the Agent as a Research Partner"
+  title_ko: "에이전트를 리서치 동료로 쓰다"
+- ref: day-05
+  days: "2026-10-31"
+  title_en: "Same Prompt, Three Folders"
+  title_ko: "같은 요청, 세 개의 폴더"
+- ref: day-06
+  days: "2026-11-01"
+  title_en: "When Security Gets in the Way of the Demo"
+  title_ko: "보안이 데모를 막을 때"
+- ref: day-07
+  days: "2026-11-02"
+  title_en: "Cutting Back What the Agent Added"
+  title_ko: "에이전트가 더한 것을 덜어내다"
+- ref: day-08
+  days: "2026-11-03"
+  title_en: "Five Folders at Once"
+  title_ko: "다섯 개 폴더를 동시에"
+- ref: day-09
+  days: "2026-11-04"
+  title_en: "\"Am I Changing Too Much?\""
+  title_ko: "\"너무 많이 바꾸고 있지 않나요?\""
+- ref: day-10
+  days: "2026-11-05"
+  title_en: "Narrowing Down to One"
+  title_ko: "하나로 좁히다"
+- ref: day-11
+  days: "2026-11-06 – 2026-11-07"
+  title_en: "Ask the Price First"
+  title_ko: "가격부터 묻다"
+- ref: day-12
+  days: "2026-11-08"
+  title_en: "A Separate Session for Questions"
+  title_ko: "질문은 다른 세션에서"
+- ref: day-13
+  days: "2026-11-09 – 2026-11-10"
+  title_en: "\"That's Not in the Data\""
+  title_ko: "\"자료에 없습니다\"라는 답"
+- ref: day-14
+  days: "2026-11-11"
+  title_en: "Not Sales — High-Interest Borrowing"
+  title_ko: "매출이 아니라 고금리 차입"
+- ref: day-15
+  days: "2026-11-12 – 2026-11-16"
+  title_en: "From Features to Deliverables"
+  title_ko: "기능에서 산출물로"
+- ref: day-16
+  days: "2026-11-17"
+  title_en: "Reviewing Everything, Then Writing This Blog"
+  title_ko: "전체를 리뷰하고, 이 블로그를 쓰기로 하다"
