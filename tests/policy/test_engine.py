@@ -151,6 +151,7 @@ def test_reason_carries_observed_and_threshold(make_features, rules):
     r002 = d.reason_codes[0]
     assert (r002.code, r002.field, r002.observed, r002.threshold) == ("R002", "dscr", 0.8, 1.0)
 
+
 SELLER = dict(mkt_tenure_months=24, mkt_rating=4.7, mkt_review_count=500, mkt_return_rate_90d=0.03,
               mkt_cancel_rate_90d=0.02, mkt_pending_settlement_krw=2_000_000)
 
@@ -206,6 +207,17 @@ def test_v4_seller_refers(make_features, rules, field, value, code):
     d = evaluate(make_features(**(SELLER | {field: value})), rules)
     assert d.decision is Decision.REFER and _codes(d) == [code]
     assert d.cash_only.decision is Decision.ELIGIBLE and d.cash_only.reason_codes == ()
+
+
+def test_r900_cancels_tentative_substitution(make_features, rules):
+    e = explain(make_features(months_of_history=4, business_age_months=8, requested_amount_krw=8_000_000,
+                              avg_monthly_inflow_krw=300_000, **(SELLER | {"mkt_pending_settlement_krw": 0})), rules)
+    s001 = next(t for t in e.substitutions if t.code == "S001")
+    assert s001.target_hit and s001.conditions_met and not s001.applied and s001.blocked_by == ("R900",)
+    d = e.decision
+    assert d.decision is Decision.INELIGIBLE and d.max_amount_krw == 0
+    assert "R900" in _codes(d) and "S001" not in _codes(d)
+    assert next(c for c in e.checks if c.code == "R001").result == "hit"
 
 
 def test_settlement_cap_raises_limit(make_features, rules):

@@ -74,6 +74,7 @@ class SyntheticCase:
     opening_balance_krw: int
     marketplace: MarketplaceStore | None = None
 
+
 def stress_lending(persona: Persona, onset: date, end: date) -> list[Event]:
     """기준일 60일 전부터 2주마다 대부·P2P에서 빌리고, 빌린 건마다 매주 금요일 상환한다."""
     proceeds = round(persona.monthly_sales_krw * STRESS_PROCEEDS_RATIO, -5)

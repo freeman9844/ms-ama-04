@@ -81,8 +81,8 @@
 
   | 지표 | 정의 |
   |---|---|
-  | `mkt_tenure_months` | 가장 이른 입점일부터 기준일까지 개월 수(내림) |
-  | `mkt_rating` | 플랫폼 평점의 리뷰 수 가중 평균, 소수 둘째 자리 |
+  | `mkt_tenure_months` | 가장 이른 입점일부터 기준일까지 개월 수(내림, 입점일이 기준일보다 늦으면 0) |
+  | `mkt_rating` | 플랫폼 평점의 리뷰 수 가중 평균, 소수 둘째 자리. 리뷰 수 합이 0이면 단순 평균으로 대신한다 |
   | `mkt_review_count` | 플랫폼 리뷰 수 합 |
   | `mkt_return_rate_90d` | 최근 90일 반품액 합 ÷ 총매출 합(총매출 0이면 `None`) |
   | `mkt_cancel_rate_90d` | 최근 90일 취소액 합 ÷ 총매출 합 |
@@ -90,7 +90,7 @@
   | `mkt_pending_settlement_krw` | Σ(정산 예정금 − 선정산 양도분), 0 미만이면 0 |
 
 - **근거 ID:** `get_metrics`의 지표 맵에 `M:mkt_tenure_months`·`M:mkt_rating`·`M:mkt_review_count`·`M:mkt_return_rate_90d`·`M:mkt_cancel_rate_90d`·`M:mkt_days_since_suspension`·`M:mkt_pending_settlement_krw`가 들어간다(값이 `None`이면 넣지 않음). 정책 사유가 있으면 `P:R003`·`P:R109`·`P:R110`·`P:S001`의 `observed`·`threshold`(예: `P:S001:observed`)가 근거가 된다. `P:S002`는 사유 코드를 남기지 않는 `outcome: pass` 규칙이라 근거 ID가 생기지 않는다. 숫자 대조(`check_grounding`)는 기존 방식 그대로다.
-- **지시문:** 분석가는 셀러 지표를 `M:mkt_*` ID와 값만 인용하고, 정책 사유에 S001이 있으면 확인 사항 하나 이상에 `P:S001` 근거를 단다(검증 실패로 처리하지 않는 지시문 요구). 리뷰 원문이나 판매정지 사유 원문은 쓰지 않는다(자료에 없다). 승인·거절을 지시하지 않는 규칙과 "정책이 ineligible이면 decline/refer만" 규칙은 그대로다. 대체로 정책이 refer를 내면 그 결과를 따른다.
+- **지시문:** 분석가는 셀러 지표를 `M:mkt_*` ID와 값만 인용하고, 정책 사유에 S001이 있으면 확인 사항 하나 이상에 `P:S001` 근거를 단다(검증 실패로 처리하지 않는 지시문 요구). 리뷰 원문이나 판매정지 사유 원문은 쓰지 않는다(자료에 없다). 승인·거절을 지시하지 않는 규칙과 "정책이 ineligible이면 decline/refer만" 규칙은 그대로다. 대체 규칙(S001)으로 정책이 refer를 내면 그 결과를 따른다.
 - **확인 사항 근거 확장:** 심사역 확인 사항의 유효 근거 접두사(`OFFICER_CHECK_PREFIXES`, `src/agents/underwriting.py`)가 `M:pg_`·`P:R107:`·`P:R108:`에 더해 `M:mkt_`·`P:R003:`·`P:R109:`·`P:R110:`·`P:S001:`·`P:S002:`로 넓어졌다. 정산 자료가 없어도 마켓 자료가 있으면 확인 사항을 쓸 수 있다. 콘솔 상세의 `마켓 셀러` 탭과 정책 판정 탭이 같은 지표와 "현금흐름만 볼 때 → 셀러 데이터 반영" 비교를 보여 준다.
 - **평가:** 심사 suite에 판매정지 케이스 `ev-uhealsusp`(정상 계절형 셀러에 기준일 40일 전 판매정지, `StoreOverride(suspended_days_ago=40)`)를 더했고, 이력 부족(THIN_FILE)과 이 케이스의 행에 `seller_evidence_cited`(분석가 초안의 주장이 `M:mkt_`·`P:S001`·`P:R003`·`P:R109`·`P:R110`을 하나라도 인용했는지)를 싣는다(`SELLER_EVIDENCE`, `src/evals/suites/underwriting.py`). 컨텍스트는 운영과 같이 `compute_underwriting(..., marketplace=...)`로 만든다. 이 지표의 모델 실측은 아직 없다.
 

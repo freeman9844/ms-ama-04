@@ -13,7 +13,8 @@ CONSENT_FIELDS = ("consent_account", "consent_tax", "consent_pg")
 CONSENT_ITEMS = (
     ("consent_account", "은행 계좌 거래내역", "입출금 내역과 잔액(최근 12개월)"),
     ("consent_tax", "홈택스 세금 신고 자료", "부가가치세·종합소득세 신고 내역"),
-    ("consent_pg", "PG·마켓플레이스 정산 내역", "스마트스토어·쿠팡 등 채널별 매출과 정산"),
+    ("consent_pg", "PG·마켓플레이스 정산 내역",
+     "스마트스토어·쿠팡 등 채널별 매출·정산, 평점·리뷰 수·판매자 등급·판매정지 이력"),
 )
 APPLY_ERRORS = {
     "consent_required": "데이터 3종에 모두 동의해야 신청할 수 있습니다.",

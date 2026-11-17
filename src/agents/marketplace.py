@@ -10,7 +10,7 @@ FLAG_MARKETPLACE_UNAVAILABLE = "marketplace_unavailable"
 
 def _tenure_months(opened_on: date, as_of: date) -> int:
     months = (as_of.year - opened_on.year) * 12 + as_of.month - opened_on.month
-    return months - 1 if as_of.day < opened_on.day else months
+    return max(0, months - 1 if as_of.day < opened_on.day else months)
 
 
 def store_summary(store: MarketplaceStore | None, as_of: date) -> dict:

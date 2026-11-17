@@ -105,6 +105,8 @@ class RuleSet(_Model):
         sub_codes = [s.code for s in self.substitutions]
         if len(sub_codes) != len(set(sub_codes)):
             raise ValueError("대체 코드가 중복되었다")
+        if any(s.replaces in knockout_codes for s in self.substitutions) and self.limit_boost is None:
+            raise ValueError("탈락 규칙을 대체하는 규칙셋에는 limit_boost가 필요하다")
         targets = [s.replaces for s in self.substitutions]
         if len(targets) != len(set(targets)):
             raise ValueError("한 규칙을 두 대체가 겨냥한다")

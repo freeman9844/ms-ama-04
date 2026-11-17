@@ -8,7 +8,7 @@ from evals.datasets import TRUTH_LABEL
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
-from shared.contracts import MKT_FEATURES
+from shared.contracts import MKT_FEATURES, CashFlowFeatures
 
 AS_OF = date(2026, 11, 2)
 AMOUNT = 3_300_000
@@ -243,6 +243,18 @@ def test_compute_underwriting_sets_mkt_features(cases):
     for name in MKT_FEATURES:
         assert getattr(uw.features, name) == uw.marketplace[name]
     assert uw.features.mkt_rating is not None and uw.features.mkt_tenure_months is not None
+
+
+def test_future_store_opening_gives_zero_tenure_and_valid_features(cases):
+    store = cases["seller-dailylook-01"].marketplace
+    future = store.model_copy(update={"platforms": tuple(
+        p.model_copy(update={"opened_on": AS_OF + timedelta(days=60)}) for p in store.platforms)})
+    case = cases["seller-dailylook-01"]
+    uw = compute_underwriting(
+        "app-future", case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
+        requested_amount_krw=AMOUNT, requested_tenor_months=TENOR, marketplace=future)
+    assert uw.features.mkt_tenure_months == 0
+    CashFlowFeatures.model_validate(uw.features.model_dump())
 
 
 def test_compute_underwriting_without_marketplace_keeps_none(cases):

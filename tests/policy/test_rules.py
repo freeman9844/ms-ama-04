@@ -80,6 +80,13 @@ def test_rejects_duplicate_substitution_code():
         RuleSet.model_validate(data)
 
 
+def test_rejects_knockout_substitution_without_limit_boost():
+    data = _data()
+    del data["limit_boost"]
+    with pytest.raises(ValidationError, match="limit_boost"):
+        RuleSet.model_validate(data)
+
+
 def test_v2_only_raises_product_max_over_v1():
     v1 = load_rules(DEFAULT_RULES_PATH.with_name("v1.yaml"))
     v2 = load_rules(DEFAULT_RULES_PATH.with_name("v2.yaml"))
