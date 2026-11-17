@@ -24,6 +24,8 @@
 - 배포 창 동안에는 운영자 IP에서 데이터 평면에 접근할 수 있다. `window status`로 확인하고 작업 후 바로 닫는다. (P2)
 - 테넌트 정책(MCAPS)의 Modify 정책이 Key Vault·Cosmos·Storage의 `publicNetworkAccess`를 Disabled로, 로컬 인증을 끈다. 배포 창이 실제로 여는 것은 Foundry 계정·ACR·Functions뿐이고, 닫힌 서비스의 데이터 작업은 VNet 안 Job으로 한다(정책 우회 없음). (P2)
 - 앱 비밀은 운영자 PC의 azd `.env`에 평문으로 있다. 운영 설계는 Key Vault 참조와 정기 교체다. (P3)
+- Key Vault 제거 보호(purge protection)는 끈 채 둔다(수용한 예외). teardown이 결정적 이름 `kv<접미사>`를 다시 쓰려고 삭제한 볼트를 purge하는데(`src/ops/lifecycle.py`), 제거 보호를 켜면 보존 기간(7일) 동안 같은 이름으로 다시 만들 수 없다. 그래서 soft delete(7일)만 있고, 그 사이 권한 있는 주체가 purge하면 비밀을 복구할 수 없다. 비밀은 가명 키·게이트웨이 인증서뿐이고 둘 다 ops가 다시 만든다. 운영 전환 시 제거 보호를 켜고 teardown purge를 뺀다(`infra/modules/keyvault.bicep`).
+- App Gateway ID(`id-appgw`)의 Key Vault Secrets User는 인증서 비밀 하나가 아니라 볼트 범위라 가명 키도 읽을 수 있다. 인증서 비밀 `appgw-console`은 첫 provision 뒤 ops가 만들고 같은 배포에서 게이트웨이가 바로 읽어야 해, 비밀 범위 역할로 바꾸면 새 환경에서 권한 전파 지연으로 게이트웨이 생성이 실패할 수 있다.
 - Easy Auth는 클라이언트 비밀 없이 id_token(암시적 흐름)만 쓴다. 운영 설계는 인증 코드 흐름이다. (P4b)
 - 데모 모드(`CONSOLE_AUTH_ENABLED=false`)에서는 WAF 운영자 IP 규칙만 진입을 막고, 결정 기록의 심사역 ID는 고정 값 `demo-operator`다. (P4b)
 - 데모 인증(Easy Auth 꺼짐 + WAF 운영자 IP 규칙만)은 모든 결정을 고정 주체 `demo-operator`로 기록해 감사 추적에 실제 신원이 없다. 복원은 환경 변수로 끝나지 않고 `window open` → `deploy console` → `window close` 재배포(실측 약 12분, `docs/runbook/deploy-history.md:250`)와 테넌트 관리자 동의가 선행돼야 한다([ADR-007](adr/ADR-007-demo-auth-mode.md), `src/console/adapters.py:229`).
@@ -101,7 +103,8 @@
 - 재조정 결정은 기록만 하고 상환 원장(회차·상환일)을 실제로 바꾸지 않는다. 상환 원장을 바꾸는 것은 승인된 셀프 상환 플랜뿐이다. (P5a, 2026-11-11 갱신)
 - 갱신은 안내만 하고 실제 연장(재동의)은 하지 않는다. 안내·회신 발송은 시뮬레이션이며 문서에만 남긴다. (P5b)
 - 재심사 결과는 이의제기 문서에 기록만 하고 신청 문서나 대출을 바꾸지 않는다. (P5b)
-- Mock 동의 레지스트리는 메모리에 있어 재시작 뒤 철회는 `absent`(이미 없음)로 기록된다. (P5b)
+- 정책 결과가 거절(`ineligible`)이거나 없는 건은 이의 재심사로 승인할 수 없다(`rereview_outside_policy`, 상태 변경 없음). 정책 밖 예외 승인은 원 심사 결정에서만 한다. (2026-11-17)
+- Mock 동의 레지스트리는 메모리에 있어 재시작하면 발급 기록이 사라진다. 형식이 맞는 동의 ID의 철회는 재시작 뒤에도 받아 `revoked`로 기록하고 그 토큰을 거절한다(철회 목록 자체는 다시 재시작하면 사라짐). (P5b)
 - 승인 뒤 심사 동의를 끝내면 그 대출의 사후 재생을 시작할 수 없다(프로필 원천 데이터가 지워짐). (P5b)
 - 데이터 조립 중 철회가 오면 여정이 실패하고, 방금 쓴 원천 데이터를 지운 뒤(`late_cleanup`) 멈춘다. 철회 종료(`withdrawn`)는 심사역 대기 단계에서만 처리한다. (P5b)
 - Durable 실행 기록은 지우지 않는다(동의 ID와 상태만 있고 개인정보 없음). (P5b)

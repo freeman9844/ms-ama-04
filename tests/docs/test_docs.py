@@ -42,7 +42,9 @@ PLACEHOLDER = re.compile(r"[<>*…{}]")
 
 def hub_docs() -> list[Path]:
     docs = (ROOT / "docs").rglob("*.md")
-    return [ROOT / "README.md", *sorted(p for p in docs if "superpowers" not in p.relative_to(ROOT / "docs").parts)]
+    # superpowers: 설계·계획 작업 문서, diagrams: 그림 생성기 입력 spec(허브 문서 아님)
+    skip = {"superpowers", "diagrams"}
+    return [ROOT / "README.md", *sorted(p for p in docs if not skip & set(p.relative_to(ROOT / "docs").parts))]
 
 
 def _text(doc: Path) -> str:

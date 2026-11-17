@@ -98,7 +98,7 @@ flowchart TB
 | AI 게이트웨이 | API Management Developer, 내부 VNet 모드(`snet-apim`) | 에이전트별 TPM 한도, 콘텐츠 안전(Prompt Shields), 토큰 지표(agent·model) | 없음(본문 미기록) | 에이전트별 구독 키(Foundry 연결) → APIM MI로 Foundry 호출 | `infra/modules/apim.bicep`, `infra/modules/foundry/gateway-connections.bicep`, `src/agents/gateway.py` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
 | Container Registry | Azure Container Registry + PE | 콘솔·Policy·Mock·Job 컨테이너 이미지 | 이미지 | MI `AcrPull`, 배포 창에 운영자 push | `infra/modules/acr.bicep` |
-| smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | id-eval: Blob `eval-reports`(쓰기)·Foundry/OpenAI; id-ops: Cosmos(읽기)·큐; id-smoke: Cosmos·Blob(읽기)·큐·Service Bus(송신)·Key Vault·Foundry(전 경로 점검) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
+| smoke/eval/ops Job | Container Apps Job internal `cae-int` | 배포 후 스모크, 분류·심사 평가, 운영 리포트 생성 | id-eval: Blob `eval-reports`(쓰기)·Foundry/OpenAI; id-ops: Cosmos(읽기)·큐; id-smoke: Cosmos·Blob(읽기)·큐·Service Bus(송신)·Key Vault(비밀 목록만, Key Vault Reader)·Foundry(전 경로 점검) | Managed Identity(`id-smoke`/`id-eval`/`id-ops`) | `infra/modules/smoke-job.bicep`, `infra/modules/eval-job.bicep` |
 | Service Bus | Service Bus Premium + PE | `consent`·`flow.updated`·`alert.raised`·`repayment.updated`·`grievance` 토픽. 평상시 pause(삭제) | 없음 | Managed Identity | `infra/modules/servicebus.bicep`, `src/ops/lifecycle.py` |
 | 데이터 저장소 | Cosmos DB(NoSQL), Blob Storage | 신청·동의·분류·대출·경보·삭제 증명·이의, 원천 데이터·리포트 | — | Cosmos SQL RBAC, Storage Entra RBAC | `infra/modules/cosmos.bicep`, `infra/modules/storage.bicep` |
 | 플랫폼 | Key Vault, Managed Identity, App Insights, Log Analytics | 비밀·무키 인증·관측성 | — | RBAC | `infra/modules/keyvault.bicep`, `infra/modules/identities.bicep`, `infra/modules/monitoring.bicep` |
@@ -117,7 +117,7 @@ Mock API는 우리 시스템 구성요소가 아니라 **외부 기관의 대역
 | `/pg/settlements`, `/pg/flow` | PG사(카드·간편결제 정산, 대출 후 정산·주문) | PG사 정산 API |
 | `/admin/faults`, `FAULT_MODE` | 제공기관 장애(503 전부·원천별 첫 요청) | 없음(시연·장애 시나리오 전용) |
 
-동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 Mock API의 메모리 레지스트리로, 외부 기관 내부를 흉내 낸 것이라 영속화하지 않았다. 토큰은 HMAC 서명과 만료를 스스로 담아 재시작 뒤에도 유효하지만 철회 목록은 사라진다. 그래서 복제본을 1개로 고정하고, 재시작 뒤 철회는 `absent`로 기록한다([ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md)).
+동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 Mock API의 메모리 레지스트리로, 외부 기관 내부를 흉내 낸 것이라 영속화하지 않았다. 토큰은 HMAC 서명과 만료를 스스로 담아 재시작 뒤에도 유효하지만 철회 목록은 사라진다. 그래서 복제본을 1개로 고정하고, 재시작 뒤에도 형식이 맞는 동의 ID면 철회를 받아 그 ID의 토큰을 거절한다(`revoked`로 기록, [ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md)).
 > 상위 Spec 대비: Spec §2.3은 Service Bus Premium을 상시 가정하지만, 비용 때문에 평상시 pause(네임스페이스 삭제)한다. 이때 `SERVICEBUS_FQDN`이 비어 트리거를 등록하지 않고, `src/orchestrator/journey/monitoring.py`의 `handle_replay`가 `monitoring-replay` 큐로 같은 처리를 인라인 수행한다.
 
 ## 네트워크
@@ -156,7 +156,7 @@ flowchart TB
 
 ## AI 게이트웨이
 
-모든 운영 LLM 호출은 APIM(Developer, 내부 VNet 모드)을 지난다([ADR-010](adr/ADR-010-ai-gateway.md)). `AI_GATEWAY_ROUTING=true`(Bicep)면 에이전트마다 Foundry BYOM 연결 `gw-*`가 있고, Agent Service는 `POST /openai/deployments/<모델>/chat/completions`로 APIM을 부른다. 정책은 콘텐츠 안전(Prompt Shields) → 에이전트별 `llm-token-limit`(TPM) → 관리 ID 인증 → 토큰 지표 순이다. 프롬프트가 1만 자를 넘으면 Prompt Shields가 거부하므로 그때는 카테고리 검사만 돌고 모델 배포의 `Microsoft.DefaultV2` 필터가 남는다. 거래 분류 Decision-1은 `AI_GATEWAY_URL`의 decision API(콘텐츠 안전 없음)로 가고, 평가 채점자(quality-judge)는 직접 호출한다. 429는 `GatewayThrottled`, 403(Agent Service에는 HTTP 424 + `innerStatusCode 403`으로 전달)은 `GatewayBlocked`로 분류한다. 게이트웨이 경로는 도구 호출이 적어 라우팅된 에이전트에만 `GATEWAY_MAX_ROUNDS = 12`를 쓴다([에이전트](agents.md#공통-런타임)). 에이전트별 연결·TPM은 [에이전트](agents.md#공통-런타임)에 있다.
+모든 운영 LLM 호출은 APIM(Developer, 내부 VNet 모드)을 지난다([ADR-010](adr/ADR-010-ai-gateway.md)). `AI_GATEWAY_ROUTING=true`(Bicep)면 에이전트마다 Foundry BYOM 연결 `gw-*`가 있고, Agent Service는 `POST /openai/deployments/<모델>/chat/completions`로 APIM을 부른다. 정책은 제품 확인(제품 없는 `master` 등 구독은 403) → 콘텐츠 안전(Prompt Shields) → 에이전트별 `llm-token-limit`(TPM, 제품 단위 카운터) → 관리 ID 인증 → 토큰 지표 순이다. 프롬프트가 1만 자를 넘으면 Prompt Shields가 거부하므로 그때는 카테고리 검사만 돌고 모델 배포의 `Microsoft.DefaultV2` 필터가 남는다. 거래 분류 Decision-1은 `AI_GATEWAY_URL`의 decision API(콘텐츠 안전 없음)로 가고, 평가 채점자(quality-judge)는 직접 호출한다. 429는 `GatewayThrottled`, 403(Agent Service에는 HTTP 424 + `innerStatusCode 403`으로 전달)은 `GatewayBlocked`로 분류한다. 게이트웨이 경로는 도구 호출이 적어 라우팅된 에이전트에만 `GATEWAY_MAX_ROUNDS = 12`를 쓴다([에이전트](agents.md#공통-런타임)). 에이전트별 연결·TPM은 [에이전트](agents.md#공통-런타임)에 있다.
 
 ## 신청 1건 흐름
 
