@@ -128,3 +128,29 @@ def test_main_instruments_fastapi_manually_only_when_monitor_is_on(monkeypatch, 
         sys.modules.pop("policy.main", None)
     assert seen["name"] == "policy.otel" and seen["fastapi_auto"] is False
     assert (seen.get("app") is module.app) is configured
+
+
+def test_api_omits_cash_only_without_marketplace_features(client, make_features):
+    from pydantic import BaseModel, ConfigDict
+
+    class PolicyDecisionBeforeV4(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        schema_version: str
+        application_id: str
+        decision: str
+        max_amount_krw: int
+        rate_band: str | None
+        reason_codes: tuple[dict, ...]
+        rules_version: str
+
+    body = client.post("/v1/decisions", json=make_features(months_of_history=3).model_dump(mode="json")).json()
+    assert "cash_only" not in body and body["rate_band"] is None
+    PolicyDecisionBeforeV4.model_validate(body)
+
+
+def test_api_includes_cash_only_with_marketplace_features(client, make_features):
+    f = make_features(mkt_tenure_months=24, mkt_rating=3.8, mkt_review_count=500)
+    body = client.post("/v1/decisions", json=f.model_dump(mode="json")).json()
+    assert body["decision"] == "refer" and [c["code"] for c in body["reason_codes"]] == ["R110"]
+    assert body["cash_only"] == {"decision": "eligible", "max_amount_krw": 3_000_000, "reason_codes": []}
+    assert PolicyDecision.model_validate(body).cash_only.decision == "eligible"

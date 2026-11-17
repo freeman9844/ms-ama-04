@@ -3,9 +3,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from policy.engine import evaluate
+from policy.engine import decision_payload, evaluate
 from policy.rules import RuleSet
-from shared.contracts import CashFlowFeatures, PolicyDecision
+from shared.contracts import CashFlowFeatures
 
 FAULT_MODES = ("none", "unavailable")
 
@@ -28,7 +28,7 @@ def create_app(rules: RuleSet, fault: str = "none") -> FastAPI:
         return {"status": "ok", "rules_version": rules.version}
 
     @app.post("/v1/decisions")
-    def decide(features: CashFlowFeatures) -> PolicyDecision:
-        return evaluate(features, rules)
+    def decide(features: CashFlowFeatures) -> dict:
+        return decision_payload(evaluate(features, rules))
 
     return app

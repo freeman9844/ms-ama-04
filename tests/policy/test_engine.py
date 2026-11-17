@@ -150,3 +150,79 @@ def test_reason_carries_observed_and_threshold(make_features, rules):
     d = evaluate(make_features(dscr=0.8), rules)
     r002 = d.reason_codes[0]
     assert (r002.code, r002.field, r002.observed, r002.threshold) == ("R002", "dscr", 0.8, 1.0)
+
+SELLER = dict(mkt_tenure_months=24, mkt_rating=4.7, mkt_review_count=500, mkt_return_rate_90d=0.03,
+              mkt_cancel_rate_90d=0.02, mkt_pending_settlement_krw=2_000_000)
+
+
+def test_s001_turns_r001_knockout_into_refer(make_features, rules):
+    e = explain(make_features(months_of_history=4, business_age_months=8, requested_amount_krw=8_000_000,
+                              avg_monthly_inflow_krw=6_000_000, **SELLER), rules)
+    d = e.decision
+    assert d.decision is Decision.REFER and {r.code for r in d.reason_codes} == {"S001"}
+    s001 = d.reason_codes[0]
+    assert (s001.field, s001.observed, s001.threshold) == ("mkt_tenure_months", 24.0, 18.0)
+    assert next(c for c in e.checks if c.code == "R001").result == "substituted"
+    assert next(c for c in e.checks if c.code == "R104").result == "substituted"
+    assert all(t.applied and t.blocked_by == () for t in e.substitutions)
+    assert e.limit.substituted_cap_krw == 5_000_000 and d.max_amount_krw == 5_000_000
+    assert d.cash_only.decision is Decision.INELIGIBLE
+    assert {r.code for r in d.cash_only.reason_codes} == {"R001", "R104"}
+
+
+def test_r002_blocks_substitution(make_features, rules):
+    e = explain(make_features(months_of_history=4, dscr=0.9, **SELLER), rules)
+    s = next(t for t in e.substitutions if t.code == "S001")
+    assert s.conditions_met and not s.applied and s.blocked_by == ("R002", "R901")
+    assert {c.kind for c in s.conditions} == {"substitution"} and {c.result for c in s.conditions} == {"hit"}
+    assert next(c for c in e.checks if c.code == "R001").result == "hit"
+    assert {"R001", "R002"} <= {r.code for r in e.decision.reason_codes}
+    assert e.limit.substituted_cap_krw is None
+
+
+def test_substitution_needs_all_condition_values(make_features, rules):
+    e = explain(make_features(months_of_history=4, **(SELLER | {"mkt_return_rate_90d": None})), rules)
+    s = next(t for t in e.substitutions if t.code == "S001")
+    assert s.target_hit and not s.conditions_met and not s.applied
+    assert next(c for c in s.conditions if c.field == "mkt_return_rate_90d").result == "not_applied"
+    d = e.decision
+    assert d.decision is Decision.INELIGIBLE and "R001" in {r.code for r in d.reason_codes}
+
+
+def test_s002_waives_r104_without_reason(make_features, rules):
+    d = evaluate(make_features(business_age_months=8, **SELLER), rules)
+    assert d.decision is Decision.ELIGIBLE and d.reason_codes == ()
+    assert d.cash_only.decision is Decision.REFER and _codes(d.cash_only) == ["R104"]
+
+
+def test_r003_recent_suspension_knockout(make_features, rules):
+    d = evaluate(make_features(**SELLER, mkt_days_since_suspension=40), rules)
+    assert d.decision is Decision.INELIGIBLE and [r.code for r in d.reason_codes] == ["R003"]
+    assert d.cash_only.decision is Decision.ELIGIBLE
+
+
+@pytest.mark.parametrize("field,value,code", [("mkt_return_rate_90d", 0.18, "R109"), ("mkt_rating", 3.8, "R110")])
+def test_v4_seller_refers(make_features, rules, field, value, code):
+    d = evaluate(make_features(**(SELLER | {field: value})), rules)
+    assert d.decision is Decision.REFER and _codes(d) == [code]
+    assert d.cash_only.decision is Decision.ELIGIBLE and d.cash_only.reason_codes == ()
+
+
+def test_settlement_cap_raises_limit(make_features, rules):
+    e = explain(make_features(avg_monthly_inflow_krw=2_000_000, requested_amount_krw=5_000_000,
+                              mkt_pending_settlement_krw=5_000_000), rules)
+    assert e.limit.inflow_cap_krw == 3_000_000 and e.limit.settlement_cap_krw == 4_000_000
+    assert e.limit.pending_settlement_ratio == 0.8 and e.limit.substituted_cap_krw is None
+    assert e.decision.max_amount_krw == 4_000_000
+    assert e.decision.cash_only.max_amount_krw == 3_000_000
+
+
+def test_no_mkt_values_no_cash_only(make_features, rules):
+    assert evaluate(make_features(), rules).cash_only is None
+
+
+def test_v3_ruleset_has_no_settlement_cap(make_features, rules_v3):
+    e = explain(make_features(avg_monthly_inflow_krw=2_000_000, requested_amount_krw=5_000_000,
+                              mkt_pending_settlement_krw=5_000_000), rules_v3)
+    assert e.limit.pending_settlement_ratio is None and e.limit.settlement_cap_krw == 0
+    assert e.decision.max_amount_krw == 3_000_000 and e.substitutions == ()
