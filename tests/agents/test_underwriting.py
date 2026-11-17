@@ -19,6 +19,7 @@ from agents.underwriting import (
     MAX_OFFICER_CHECKS,
     MAX_ROUNDS,
     REVIEWER_AGENT,
+    REVIEWER_INSTRUCTIONS,
     REVIEWER_OUTPUT_SCHEMA,
     AnalystDraft,
     UnderwritingContext,
@@ -176,6 +177,26 @@ def test_get_metrics_exposes_catalog_policy_and_classification(cases):
     assert out["flags"] == []
 
 
+def test_get_metrics_lists_out_of_range_watch_metrics(cases):
+    ctx = context(cases, "seller-mangwon-02")
+    out = ctx.handlers()["get_metrics"]({})
+    ratio = out["metrics"]["M:tax_bank_match_ratio"]
+    assert ratio < 0.7 and ctx.policy["decision"] == "eligible"
+    assert out["watch"] == [{"metric_id": "M:tax_bank_match_ratio", "observed": ratio}]
+    assert context(cases).handlers()["get_metrics"]({})["watch"] == []
+
+
+def test_missing_tax_filings_are_not_a_watch_signal(cases):
+    ctx = context(cases, "seller-mangwon-02")
+    no_filings = replace(ctx, features={**ctx.features, "tax_bank_match_ratio": 0.0})
+    assert no_filings.handlers()["get_metrics"]({})["watch"] == []
+
+
+def test_instructions_ask_to_cite_watch_metrics_as_risk():
+    assert "watch" in ANALYST_INSTRUCTIONS and "M:tax_bank_match_ratio" in ANALYST_INSTRUCTIONS
+    assert "watch" in REVIEWER_INSTRUCTIONS
+
+
 def test_monthly_series_has_ids_and_seasonality_index(cases):
     rows = context(cases).handlers()["get_monthly_series"]({})["months"]
     assert len(rows) == 12
@@ -319,6 +340,14 @@ def test_reviewer_gets_full_seasonal_index_when_claim_cites_index(cases):
     assert series["months"] == {r["month"]: ctx.catalog[f"S:{r['month']}:index"] for r in ctx.monthly}
     plain = json.loads(_reviewer_input(ctx, draft()).split("\n", 1)[1])
     assert "seasonal_index" not in plain
+
+
+def test_reviewer_gets_watch_when_claim_cites_watch_metric(cases):
+    ctx = context(cases, "seller-mangwon-02")
+    claim = {"text": "세금·계좌 일치율이 낮아 신고 매출 확인이 필요하다.", "metric_ids": ["M:tax_bank_match_ratio"], "txn_ids": []}
+    payload = json.loads(_reviewer_input(ctx, draft(claims=[claim])).split("\n", 1)[1])
+    assert payload["watch"] == ctx.watch() and payload["watch"]
+    assert "watch" not in json.loads(_reviewer_input(ctx, draft()).split("\n", 1)[1])
 
 
 def test_supported_check_is_kept_with_verdict(cases):

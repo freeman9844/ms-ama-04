@@ -7,6 +7,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from agents.features import WATCH_METRICS
 from console import charts, i18n
 from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, man
 from console.i18n import _
@@ -33,7 +34,7 @@ SIGNAL_RULES: dict[str, tuple[str, float]] = {
     "revenue_trend_ratio": ("refer", 0.8),
     "pg_top_platform_share": ("refer", 0.8),
     "pg_reconciliation_ratio": ("refer", 0.9),
-    "tax_bank_match_ratio": ("watch", 0.7),  # 정책 v3에서 R101 삭제 — 참고 지표로만 표시
+    "tax_bank_match_ratio": ("watch", WATCH_METRICS["tax_bank_match_ratio"]),  # 정책 v3에서 R101 삭제 — 참고 지표로만 표시
     "mkt_days_since_suspension": ("knockout", 90),
     "mkt_return_rate_90d": ("refer", 0.15),
     "mkt_rating": ("refer", 4.0),

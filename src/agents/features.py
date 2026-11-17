@@ -97,6 +97,11 @@ def _month(d: date) -> tuple[int, int]:
     return (d.year, d.month)
 
 
+# 정책 판정에 쓰지 않는 참고 지표 → 하한. 값이 0보다 크고 하한 미만이면 주의(watch)다(0은 자료 없음).
+# 세금·계좌 일치율은 정책 v3에서 R101을 삭제했지만(간이·면세 사업자 오탐) 심사역 참고용으로 남긴다.
+WATCH_METRICS: dict[str, float] = {"tax_bank_match_ratio": 0.7}
+
+
 def _tax_match(transactions: Sequence[Transaction], categories: dict[str, Category], filings: Sequence[TaxFiling]) -> float:
     if not filings:
         return 0.0
