@@ -16,8 +16,17 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from agents.classify import RULES_VERSION, Category, classify
+from agents.marketplace import features_of as marketplace_features_of
+from agents.marketplace import store_summary
 from agents.pg_ledger import features_of, ledger_summary
-from shared.contracts import ApplicantProfile, CashFlowFeatures, PgSettlement, TaxFiling, Transaction
+from shared.contracts import (
+    ApplicantProfile,
+    CashFlowFeatures,
+    MarketplaceStore,
+    PgSettlement,
+    TaxFiling,
+    Transaction,
+)
 from shared.krcalendar import add_business_days
 
 ANNUAL_RATE = 0.08  # 신규 대출 월상환액 추정용 가정 금리(원리금 균등)
@@ -76,6 +85,7 @@ class Underwriting:
     expense_breakdown: list[dict[str, int | str]] = field(default_factory=list)
     expense_monthly: list[dict[str, int | str]] = field(default_factory=list)
     pg_ledger: dict = field(default_factory=lambda: {"available": False})
+    marketplace: dict = field(default_factory=lambda: {"available": False})
 
 
 def monthly_installment(principal: int, tenor_months: int, annual_rate: float = ANNUAL_RATE) -> float:
@@ -226,6 +236,7 @@ def compute_underwriting(
     overrides: Mapping[str, Category] | None = None,
     semantic_labels: Mapping[str, str] | None = None,
     pg_settlements: Sequence[PgSettlement] | None = None,
+    marketplace: MarketplaceStore | None = None,
 ) -> Underwriting:
     rules = {t.txn_id: classify(t) for t in transactions}
     args = (application_id, profile, transactions, tax_filings)
@@ -240,6 +251,8 @@ def compute_underwriting(
     features = _conservative(base.features, adjusted.features)
     pg = ledger_summary(pg_settlements or (), transactions, data_end(transactions, as_of))
     features = features.model_copy(update=features_of(pg))
+    market = store_summary(marketplace, as_of)
+    features = features.model_copy(update=marketplace_features_of(market))
     signals = {
         **adjusted.signals,
         "semantic_overrides": len(applied),
@@ -259,6 +272,7 @@ def compute_underwriting(
         expense_breakdown=expense_breakdown(transactions, adjusted.categories, semantic_labels or {}, as_of),
         expense_monthly=expense_monthly(transactions, adjusted.categories, semantic_labels or {}, as_of),
         pg_ledger=pg,
+        marketplace=market,
     )
 
 

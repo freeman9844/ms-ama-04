@@ -33,6 +33,7 @@ from mockapis.app import create_app as create_mock_app
 from mockapis.demo import build_demo_cases
 from policy.app import create_app as create_policy_app
 from policy.rules import load_rules
+from shared.contracts import MKT_FEATURES
 
 AS_OF = date(2026, 11, 2)
 SECRET = b"s" * 32
@@ -265,6 +266,39 @@ def test_underwrite_with_unparseable_pg_json_flags(deps, monkeypatch):
     monkeypatch.setattr(deps.raw, "get_json", broken)
     result = underwrite(deps, underwrite_input(consent["consent_id"]))
     assert result["pg_ledger"] == {"available": False} and "pg_ledger_unavailable" in result["flags"]
+
+
+def test_underwrite_returns_marketplace_features(deps):
+    consent, _ = assembled(deps)
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["marketplace"]["available"] is True
+    assert result["features"]["mkt_rating"] == result["marketplace"]["mkt_rating"] is not None
+    assert "marketplace_unavailable" not in result["flags"]
+
+
+def test_underwrite_missing_marketplace_no_flag(deps):
+    consent, _ = assembled(deps)
+    deps.raw.blobs.pop((f"consent-{consent['consent_id']}", "marketplace.json"))
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["marketplace"] == {"available": False} and "marketplace_unavailable" not in result["flags"]
+    assert all(result["features"][name] is None for name in MKT_FEATURES)
+
+
+def test_underwrite_empty_marketplace_store_is_unavailable_without_flag(deps):
+    consent, _ = assembled(deps)
+    deps.raw.blobs[(f"consent-{consent['consent_id']}", "marketplace.json")] = {
+        "schema_version": "1", "as_of": AS_OF.isoformat(), "platforms": [], "penalties": []}
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert result["marketplace"] == {"available": False} and "marketplace_unavailable" not in result["flags"]
+
+
+def test_underwrite_flags_corrupt_marketplace(deps):
+    consent, _ = assembled(deps)
+    deps.raw.blobs[(f"consent-{consent['consent_id']}", "marketplace.json")] = {"platforms": "oops"}
+    result = underwrite(deps, underwrite_input(consent["consent_id"]))
+    assert "marketplace_unavailable" in result["flags"]
+    assert result["marketplace"]["available"] is False
+    assert all(result["features"][name] is None for name in MKT_FEATURES)
 
 
 def test_underwrite_requires_raw_data(deps):

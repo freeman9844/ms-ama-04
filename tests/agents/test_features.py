@@ -8,6 +8,7 @@ from evals.datasets import TRUTH_LABEL
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
+from shared.contracts import MKT_FEATURES
 
 AS_OF = date(2026, 11, 2)
 AMOUNT = 3_300_000
@@ -19,7 +20,7 @@ def cases():
     return build_demo_cases(AS_OF)
 
 
-def _underwrite(cases, applicant_id, transactions=None, pg=True):
+def _underwrite(cases, applicant_id, transactions=None, pg=True, marketplace=False):
     case = cases[applicant_id]
     return compute_underwriting(
         f"app-{applicant_id}",
@@ -30,6 +31,7 @@ def _underwrite(cases, applicant_id, transactions=None, pg=True):
         requested_amount_krw=AMOUNT,
         requested_tenor_months=TENOR,
         pg_settlements=case.pg_settlements if pg else None,
+        marketplace=case.marketplace if marketplace else None,
     )
 
 
@@ -233,6 +235,20 @@ def test_pg_features_none_without_settlements(cases):
     uw = _underwrite(cases, "seller-dailylook-01", pg=False)
     assert uw.features.pg_reconciliation_ratio is None and uw.features.pg_top_platform_share is None
     assert uw.pg_ledger == {"available": False} and "pg_hhi" not in uw.signals
+
+
+def test_compute_underwriting_sets_mkt_features(cases):
+    uw = _underwrite(cases, "seller-dailylook-01", marketplace=True)
+    assert uw.marketplace["available"] is True
+    for name in MKT_FEATURES:
+        assert getattr(uw.features, name) == uw.marketplace[name]
+    assert uw.features.mkt_rating is not None and uw.features.mkt_tenure_months is not None
+
+
+def test_compute_underwriting_without_marketplace_keeps_none(cases):
+    uw = _underwrite(cases, "seller-dailylook-01")
+    assert uw.marketplace == {"available": False}
+    assert all(getattr(uw.features, name) is None for name in MKT_FEATURES)
 
 
 def test_data_end_is_next_business_day_after_last_transaction(cases):

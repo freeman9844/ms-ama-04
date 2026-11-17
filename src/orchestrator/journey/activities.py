@@ -13,13 +13,14 @@ from pydantic import TypeAdapter
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
 from agents.features import compute_underwriting, monthly_installment
+from agents.marketplace import FLAG_MARKETPLACE_UNAVAILABLE
 from agents.monitoring import Baseline, settlement_for
 from agents.pg_ledger import FLAG_PG_LEDGER_UNAVAILABLE
 from agents.translator import TRANSLATE_MODEL
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
-from shared.contracts import ApplicantProfile, PgSettlement, TaxFiling, Transaction
+from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 
 CONTAINERS = ("applications", "consents")
 CLASSIFICATION_CONTAINER = "classifications"
@@ -320,6 +321,17 @@ def _load_pg(deps: Deps, consent_id: str) -> tuple[list[PgSettlement], list[str]
         return [], [FLAG_PG_LEDGER_UNAVAILABLE]
 
 
+def _load_marketplace(deps: Deps, consent_id: str) -> tuple[MarketplaceStore | None, list[str]]:
+    """마켓 셀러 자료. 없으면 None, 손상이면 None + 플래그(심사는 계속한다)."""
+    try:
+        raw = deps.raw.get_json(raw_container(consent_id), "marketplace.json")
+        if raw is None:
+            return None, []
+        return MarketplaceStore.model_validate(raw), []
+    except ValueError:
+        return None, [FLAG_MARKETPLACE_UNAVAILABLE]
+
+
 def _semantic(
     deps: Deps, profile: ApplicantProfile, txns: list[Transaction], consent_id: str
 ) -> tuple[dict[str, Any] | None, dict[str, Category], dict[str, str]]:
@@ -347,6 +359,7 @@ def _semantic(
 def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     profile, txns, filings = _load(deps, payload["consent_id"])
     pg, pg_flags = _load_pg(deps, payload["consent_id"])
+    store, store_flags = _load_marketplace(deps, payload["consent_id"])
     classification, overrides, labels = _semantic(deps, profile, txns, payload["consent_id"])
     result = compute_underwriting(
         payload["application_id"],
@@ -359,12 +372,13 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         overrides=overrides,
         semantic_labels=labels,
         pg_settlements=pg,
+        marketplace=store,
     )
     as_of = date.fromisoformat(payload["as_of"])
     return {
         "features": result.features.model_dump(mode="json"),
         "signals": result.signals,
-        "flags": [*result.flags, *pg_flags],
+        "flags": [*result.flags, *pg_flags, *store_flags],
         "monthly": result.monthly,
         "expense_breakdown": result.expense_breakdown,
         "expense_monthly": result.expense_monthly,
@@ -372,6 +386,7 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         "classification": classification,
         "category_overrides": {k: v.value for k, v in overrides.items()},
         "pg_ledger": result.pg_ledger,
+        "marketplace": result.marketplace,
     }
 
 
