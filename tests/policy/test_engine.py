@@ -14,7 +14,7 @@ def _codes(decision):
     return [r.code for r in decision.reason_codes]
 
 
-@pytest.mark.parametrize("name", ["v1.yaml", "v2.yaml", "v3.yaml"])
+@pytest.mark.parametrize("name", ["v1.yaml", "v2.yaml", "v3.yaml", "v4.yaml"])
 @pytest.mark.parametrize("kw", [{}, {"business_age_months": 11}, {"months_of_history": 5}, {"dscr": 0.99}])
 def test_explain_matches_evaluate_across_versions(make_features, name, kw):
     rules = load_rules(RULESETS / name)
@@ -60,8 +60,8 @@ def test_explain_r900_r901_hit(make_features, rules):
     assert e.band.band is None and e.decision.max_amount_krw == 0
 
 
-def test_healthy_is_eligible(make_features, rules):
-    d = evaluate(make_features(), rules)
+def test_healthy_is_eligible(make_features, rules_v3):
+    d = evaluate(make_features(), rules_v3)
     assert d.decision is Decision.ELIGIBLE
     assert d.rate_band == "B"
     assert d.max_amount_krw == 3_000_000
@@ -106,9 +106,9 @@ def test_ineligible_includes_refer_reasons(make_features, rules):
     assert _codes(d) == ["R001", "R104"]
 
 
-def test_v3_skips_rules_with_missing_values(make_features, rules):
-    d = evaluate(make_features(), rules)  # 새 선택 필드 모두 None
-    assert rules.version == "2026.11-v3" and d.decision is Decision.ELIGIBLE and d.reason_codes == ()
+def test_v3_skips_rules_with_missing_values(make_features, rules_v3):
+    d = evaluate(make_features(), rules_v3)  # 새 선택 필드 모두 None
+    assert rules_v3.version == "2026.11-v3" and d.decision is Decision.ELIGIBLE and d.reason_codes == ()
 
 
 @pytest.mark.parametrize(("field", "value", "code"), [
@@ -117,13 +117,13 @@ def test_v3_skips_rules_with_missing_values(make_features, rules):
     ("pg_top_platform_share", 0.81, "R107"),
     ("pg_reconciliation_ratio", 0.89, "R108"),
 ])
-def test_v3_refer_rules(make_features, rules, field, value, code):
-    d = evaluate(make_features(**{field: value}), rules)
+def test_v3_refer_rules(make_features, rules_v3, field, value, code):
+    d = evaluate(make_features(**{field: value}), rules_v3)
     assert d.decision is Decision.REFER and _codes(d) == [code]
 
 
-def test_v3_has_no_tax_mismatch_rule(make_features, rules):
-    assert "R101" not in _codes(evaluate(make_features(tax_bank_match_ratio=0.0), rules))
+def test_v3_has_no_tax_mismatch_rule(make_features, rules_v3):
+    assert "R101" not in _codes(evaluate(make_features(tax_bank_match_ratio=0.0), rules_v3))
 
 
 def test_limit_capped_and_rounded(make_features, rules):

@@ -1,5 +1,8 @@
 import pytest
 
+from pathlib import Path
+
+import policy.rules
 from policy.rules import load_rules
 from shared.contracts import CashFlowFeatures
 
@@ -30,3 +33,8 @@ def make_features():
 @pytest.fixture
 def rules():
     return load_rules()
+
+
+@pytest.fixture
+def rules_v3():
+    return load_rules(Path(policy.rules.__file__).parent / "rulesets" / "v3.yaml")

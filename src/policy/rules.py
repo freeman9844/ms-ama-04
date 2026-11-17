@@ -8,10 +8,15 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from shared.contracts import MKT_FEATURES
+
 RESERVED_CODES = frozenset({"R900", "R901"})
-DEFAULT_RULES_PATH = Path(__file__).parent / "rulesets" / "v3.yaml"
+# 상환 능력(R002)과 플랫폼 제재(R003)는 셀러 평판으로 덮지 않는다.
+NON_SUBSTITUTABLE = frozenset({"R002", "R003"}) | RESERVED_CODES
+DEFAULT_RULES_PATH = Path(__file__).parent / "rulesets" / "v4.yaml"
 
 FeatureName = Literal[
+    *MKT_FEATURES,
     "months_of_history",
     "dscr",
     "cash_buffer_days",
@@ -55,12 +60,33 @@ class RateBand(_Model):
     min_dscr: float = Field(ge=0)
 
 
+class SubCondition(_Model):
+    field: FeatureName
+    op: Op
+    threshold: float
+
+
+class Substitution(_Model):
+    code: str = Field(pattern=r"^S\d{3}$")
+    message: str = Field(min_length=1)
+    replaces: str = Field(pattern=r"^R\d{3}$")
+    outcome: Literal["refer", "pass"]
+    when: tuple[SubCondition, ...] = Field(min_length=1)
+
+
+class LimitBoost(_Model):
+    pending_settlement_ratio: float = Field(gt=0, le=1)
+    substituted_max_amount_krw: int = Field(gt=0)
+
+
 class RuleSet(_Model):
     version: str = Field(min_length=1)
     product: ProductLimits
     knockouts: tuple[Condition, ...]
     refers: tuple[Condition, ...]
     rate_bands: tuple[RateBand, ...] = Field(min_length=1)
+    substitutions: tuple[Substitution, ...] = ()
+    limit_boost: LimitBoost | None = None
 
     @model_validator(mode="after")
     def _consistency(self) -> "RuleSet":
@@ -72,7 +98,23 @@ class RuleSet(_Model):
         mins = [b.min_dscr for b in self.rate_bands]
         if any(a <= b for a, b in zip(mins, mins[1:])):
             raise ValueError("rate_bands는 min_dscr 기준 엄격한 내림차순이어야 한다")
+        self._check_substitutions({c.code for c in self.knockouts}, set(codes))
         return self
+
+    def _check_substitutions(self, knockout_codes: set[str], rule_codes: set[str]) -> None:
+        sub_codes = [s.code for s in self.substitutions]
+        if len(sub_codes) != len(set(sub_codes)):
+            raise ValueError("대체 코드가 중복되었다")
+        targets = [s.replaces for s in self.substitutions]
+        if len(targets) != len(set(targets)):
+            raise ValueError("한 규칙을 두 대체가 겨냥한다")
+        for s in self.substitutions:
+            if s.replaces not in rule_codes:
+                raise ValueError(f"{s.code}: replaces {s.replaces}는 이 규칙셋의 탈락·회부 규칙이 아니다")
+            if s.replaces in NON_SUBSTITUTABLE:
+                raise ValueError(f"{s.code}: {s.replaces}는 대체할 수 없다")
+            if s.replaces in knockout_codes and s.outcome != "refer":
+                raise ValueError(f"{s.code}: 탈락 규칙의 대체는 refer만 가능하다")
 
 
 def load_rules(path: Path = DEFAULT_RULES_PATH) -> RuleSet:
