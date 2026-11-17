@@ -38,6 +38,7 @@ from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply, validate_request
 from console.dashboard import (
+    POLICY_DECISIONS,
     RECOMMENDATION_LABELS,
     detail_summary,
     home_summary,
@@ -252,6 +253,7 @@ def _templates() -> Environment:
     env.filters["seller_label"] = lambda s: data_label(seller_label(s))
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
     env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
+    env.filters["policy_label"] = lambda s: i18n.gettext(POLICY_DECISIONS[s][0]) if s in POLICY_DECISIONS else s or "-"
     for name, labels in (LABEL_FILTERS | MONITORING_FILTERS).items():
         env.filters[name] = lambda s, labels=labels: i18n.label(labels, s)
     env.filters["installment_label"] = installment_label

@@ -174,7 +174,19 @@ def test_snapshot_policy_rules_and_trace(make_doc, key):
     assert trace["band"]["band"] == p["rate_band"] == "B"
     assert trace["band"]["bands"] == p["rules"]["rate_bands"]
     assert trace["limit"]["limit_krw"] == p["max_amount_krw"] == 3_000_000
-    assert set(trace) == {"checks", "limit", "band"}
+    assert set(trace) == {"checks", "limit", "band", "substitutions"} and trace["substitutions"] == []
+
+
+def test_snapshot_includes_substitutions(make_doc, key):
+    seller = dict(months_of_history=4, mkt_tenure_months=30, mkt_rating=4.7, mkt_review_count=500,
+                  mkt_return_rate_90d=0.03, mkt_pending_settlement_krw=2_000_000)
+    p = _policy_of(_decided_doc(make_doc, version="2026.11-v4", **seller), key)
+    assert p["decision"] == "refer" and p["trace_note"] is None
+    assert [s["code"] for s in p["rules"]["substitutions"]] == ["S001", "S002"]
+    assert p["rules"]["limit_boost"] == {"pending_settlement_ratio": 0.8, "substituted_max_amount_krw": 5_000_000}
+    s001 = next(s for s in p["trace"]["substitutions"] if s["code"] == "S001")
+    assert s001["replaces"] == "R001" and s001["applied"] and s001["target_hit"]
+    assert p["trace"]["limit"]["substituted_cap_krw"] == 5_000_000
 
 
 def test_snapshot_trace_for_v1_decision(make_doc, key):

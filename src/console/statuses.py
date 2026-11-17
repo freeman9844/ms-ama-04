@@ -27,4 +27,5 @@ FLAG_LABELS = {
     "agent_assessment_mismatch": "데이터 수집 에이전트 보고와 코드 검증 불일치",
     "monitoring_unavailable": "사후 모니터링 시작 실패",
     "pg_ledger_unavailable": "정산 원장 손상(정산 지표 제외)",
+    "marketplace_unavailable": "마켓 판매 성과 손상(셀러 지표 제외)",
 }

@@ -15,6 +15,7 @@ from console.monitoring import CONTACT_STATUS_LABELS, PROPOSAL_LABELS, SEVERITY_
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
+from shared.contracts import MKT_FEATURES
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -36,6 +37,7 @@ RECOMMENDATIONS = (
 )
 RECOMMENDATION_LABELS = {key: label for key, label, _color in RECOMMENDATIONS}
 POLICY_DECISIONS = {"eligible": ("적격", "green"), "refer": ("심사역 회부", "amber"), "ineligible": ("부적격", "red")}
+MARKET_PENALTY_LABELS = {"suspension": "판매정지", "warning": "경고"}
 OFFICER_DECISIONS = {"approve": ("승인", "green"), "decline": ("거절", "red")}
 FUNNEL_NONE = {"policy": "판정 없음", "recommendation": "권고 없음", "officer": "미결정"}
 MODEL_COLORS = ("blue", "purple", "teal", "orange", "pink")
@@ -323,6 +325,37 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
                       n=pg.get("settlement_count", 0))}
 
 
+def _rate_text(v: Any) -> str:
+    return f"{v * 100:.1f}%" if charts.is_num(v) else "—"
+
+
+def _count_text(v: Any) -> str:
+    return f"{v:,}" if charts.is_num(v) else "—"
+
+
+def marketplace_card(summary: Any) -> dict[str, Any]:
+    """마켓 셀러 탭 카드. 옛 문서(marketplace 없음)·자료 없음은 available=False."""
+    if not isinstance(summary, Mapping) or not summary.get("available"):
+        return {"available": False}
+    rows = [p for p in summary.get("platforms") or () if isinstance(p, Mapping)]
+    platforms = [{
+        "platform": dt(p.get("platform")), "opened_on": p.get("opened_on") or "—",
+        "rating": f"{p['rating']:.1f}" if charts.is_num(p.get("rating")) else "—",
+        "review_count": _count_text(p.get("review_count")), "orders_90d": _count_text(p.get("orders_90d")),
+        "return_rate": _rate_text(p.get("return_rate_90d")), "cancel_rate": _rate_text(p.get("cancel_rate_90d")),
+        "grade": dt(p.get("seller_grade")) if p.get("seller_grade") else "—",
+        "pending": p.get("pending_settlement_krw"), "assigned": p.get("assigned_pending_krw"),
+    } for p in rows]
+    penalties = [{"platform": dt(p.get("platform")), "occurred_on": p.get("occurred_on"),
+                  "kind": i18n.label(MARKET_PENALTY_LABELS, p.get("kind"))}
+                 for p in summary.get("penalties") or () if isinstance(p, Mapping)]
+    total = lambda key: sum(p[key] for p in rows if charts.is_num(p.get(key)))  # noqa: E731
+    return {"available": True, "as_of": summary.get("as_of"), "platforms": platforms, "penalties": penalties,
+            "features": {k: summary.get(k) for k in MKT_FEATURES},
+            "pending": {"total": total("pending_settlement_krw"), "assigned": total("assigned_pending_krw"),
+                        "net": summary.get("mkt_pending_settlement_krw")}}
+
+
 def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
     uw = doc.get("underwriting") or {}
@@ -376,6 +409,7 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "review": review,
         "gateway_blocks": gateway_blocks(doc),
         "settlement": settlement_card(uw.get("pg_ledger")),
+        "marketplace": marketplace_card(uw.get("marketplace")),
     }
 
 

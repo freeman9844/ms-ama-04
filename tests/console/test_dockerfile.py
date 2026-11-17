@@ -70,6 +70,7 @@ def test_dockerfile_copies_everything_the_console_imports(tmp_path):
     assert (app / "opsmetrics" / "summary.py").exists()
     assert not (app / "evals" / "runner.py").exists()
     assert (app / "policy" / "engine.py").exists() and (app / "policy" / "rulesets" / "v3.yaml").exists()
+    assert (app / "policy" / "rulesets" / "v4.yaml").exists()
     assert not (app / "policy" / "app.py").exists() and not (app / "policy" / "main.py").exists()
 
 

@@ -10,6 +10,7 @@ from typing import Any, Protocol
 
 from agents.data_assembly import build_pseudonymizer
 from agents.evidence import build_catalog
+from console.officer_chat import policy_trace
 from shared.contracts import ApplicantProfile, Transaction
 
 DECIDABLE = frozenset({"awaiting_officer", "escalated"})
@@ -127,4 +128,28 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "decidable": doc.get("status") in DECIDABLE,
         "max_amount_krw": (policy or {}).get("max_amount_krw"),
         "policy_blocked": (policy or {}).get("decision") not in ("eligible", "refer"),
+        "policy_compare": _policy_compare(policy),
+        "substitutions": _substitutions(policy, uw.get("features"), doc.get("received_at")),
     }
+
+
+def _policy_compare(policy: Any) -> dict[str, Any] | None:
+    """v4 판정의 '현금흐름만 볼 때' 비교. cash_only가 null이거나 없는 판정(v3 이하)은 None."""
+    cash = policy.get("cash_only") if isinstance(policy, Mapping) else None
+    if not isinstance(cash, Mapping):
+        return None
+    return {"cash": {"decision": cash.get("decision"), "max": cash.get("max_amount_krw")},
+            "seller": {"decision": policy.get("decision"), "max": policy.get("max_amount_krw")}}
+
+
+def _substitutions(policy: Any, features: Any, received_at: Any) -> list[dict[str, Any]]:
+    """대상 규칙에 걸린 셀러 데이터 대체(S0xx)만 고른다. 계산 과정을 만들 수 없으면 빈 목록."""
+    trace = (policy_trace(policy, features, received_at) or {}).get("trace") or {}
+    rows = []
+    for s in trace.get("substitutions") or ():
+        if not s.get("target_hit"):
+            continue
+        state = "applied" if s.get("applied") else ("blocked" if s.get("conditions_met") else "unmet")
+        rows.append({"code": s.get("code"), "replaces": s.get("replaces"), "state": state,
+                     "blocked_by": list(s.get("blocked_by") or ())})
+    return rows

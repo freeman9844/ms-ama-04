@@ -79,6 +79,8 @@ def _rules(rules: RuleSet) -> dict[str, Any]:
         "knockouts": [c.model_dump() for c in rules.knockouts],
         "refers": [c.model_dump() for c in rules.refers],
         "rate_bands": [b.model_dump() for b in rules.rate_bands],
+        "substitutions": [s.model_dump() for s in rules.substitutions],
+        "limit_boost": rules.limit_boost.model_dump() if rules.limit_boost else None,
     }
 
 
@@ -97,7 +99,8 @@ def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[di
         return None, TRACE_NOTES["mismatch"]
     band = asdict(e.band)
     band["bands"] = [{"band": b, "min_dscr": m} for b, m in e.band.bands]
-    return {"checks": [asdict(c) for c in e.checks], "limit": asdict(e.limit), "band": band}, None
+    return {"checks": [asdict(c) for c in e.checks], "limit": asdict(e.limit), "band": band,
+            "substitutions": [asdict(s) for s in e.substitutions]}, None
 
 
 def _amended_since(version: Any, received_at: Any) -> bool:
@@ -133,6 +136,11 @@ def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, An
         "trace": trace,
         "trace_note": note,
     }
+
+
+def policy_trace(policy: Any, features: Any, received_at: Any = None) -> dict[str, Any] | None:
+    """정책 판정과 계산 과정(trace). 상세 화면의 셀러 데이터 대체 표도 이 결과를 쓴다."""
+    return _policy(policy, features, received_at)
 
 
 def _officer_checks(view: Mapping[str, Any]) -> list[dict[str, Any]]:

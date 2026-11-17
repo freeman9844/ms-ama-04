@@ -123,5 +123,12 @@
   "고객님, 대출 관련 확인할 사항이 있어 담당자가 영업시간 중 연락드릴 예정입니다.": "Hello, an officer will contact you during business hours about a matter regarding your loan.",
   "개인신용정보 제공 동의 만료 예정 안내": "Notice: your consent to share personal credit information is about to expire",
   "원천 데이터 삭제 완료 안내": "Notice: source data deletion completed",
-  "이의제기 처리 결과 안내": "Notice: result of your appeal"
+  "이의제기 처리 결과 안내": "Notice: result of your appeal",
+  "우수": "Excellent",
+  "일반": "Standard",
+  "최근 90일 판매정지 이력": "Marketplace suspension in the last 90 days",
+  "최근 90일 반품률 과다": "Excessive return rate in the last 90 days",
+  "마켓 평점 낮음": "Low marketplace rating",
+  "마켓 판매 이력으로 거래 이력 부족 대체": "Marketplace sales history substitutes for short transaction history",
+  "마켓 판매 이력으로 업력 부족 면제": "Marketplace sales history waives short business age"
 }

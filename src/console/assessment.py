@@ -15,6 +15,11 @@ from console.statuses import FLAG_LABELS
 PRODUCT_MAX_KRW = 10_000_000
 INFLOW_MULTIPLIER = 1.5
 LIMIT_UNIT_KRW = 100_000
+# 정책 v4 한도 보정(limit_boost). 정산 예정금 상한은 v4 판정에만, 대체 상한은 거절 기준을 대체한 판정에만 쓴다.
+PENDING_SETTLEMENT_RATIO = 0.8
+SUBSTITUTED_MAX_KRW = 5_000_000
+KNOCKOUT_SUBSTITUTIONS = frozenset({"S001"})
+BOOST_VERSIONS = frozenset({"2026.11-v4"})
 CAPACITY_CHART = {"width": 480, "height": 240}  # 반 폭 카드에서 글자가 너무 작아지지 않게 한다.
 
 # 지표 → (기준 종류, 정책 임계값). "min"은 임계값 미만이 위반, "max"는 초과가 위반이다.
@@ -29,10 +34,14 @@ SIGNAL_RULES: dict[str, tuple[str, float]] = {
     "pg_top_platform_share": ("refer", 0.8),
     "pg_reconciliation_ratio": ("refer", 0.9),
     "tax_bank_match_ratio": ("watch", 0.7),  # 정책 v3에서 R101 삭제 — 참고 지표로만 표시
+    "mkt_days_since_suspension": ("knockout", 90),
+    "mkt_return_rate_90d": ("refer", 0.15),
+    "mkt_rating": ("refer", 4.0),
 }
 # 값이 없으면(정산 자료 없음, 옛 심사분) 신호등에 올리지 않는다.
 OPTIONAL_SIGNALS = frozenset({"high_cost_lender_count", "revenue_trend_ratio", "pg_top_platform_share",
-                              "pg_reconciliation_ratio"})
+                              "pg_reconciliation_ratio", "mkt_days_since_suspension", "mkt_return_rate_90d",
+                              "mkt_rating"})
 # (지표, 이름, 방향, 강점 기준, 쉬운 설명). 설명의 %(v)s·%(pct)s·%(t)s는 관측값·백분율·정책 기준으로 채운다.
 # 이름·설명은 화면에 낼 때 번역한다.
 SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
@@ -54,6 +63,11 @@ SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
      "정산금 계좌 입금 %(v)s — 플랫폼 정산금의 %(pct)s%%가 이 계좌로 들어왔습니다(기준 %(t)s 이상)."),
     ("pg_top_platform_share", "최대 채널 비중", "max", 0.6,
      "최대 채널 비중 %(v)s — 정산 매출의 %(pct)s%%가 한 플랫폼에서 나옵니다(기준 %(t)s 이하)."),
+    ("mkt_days_since_suspension", "판매정지 후 경과일", "min", 365,
+     "판매정지 후 경과일 %(v)s일 — 마지막 판매정지가 %(v)s일 전입니다(기준 %(t)s일 이상)."),
+    ("mkt_return_rate_90d", "마켓 반품률", "max", 0.05,
+     "마켓 반품률 %(v)s — 최근 90일 주문의 %(pct)s%%가 반품됐습니다(기준 %(t)s 이하)."),
+    ("mkt_rating", "마켓 평점", "min", 4.5, "마켓 평점 %(v)s — 구매자 리뷰 평균 별점입니다(기준 %(t)s 이상)."),
 )
 SIGNAL_TONES = {"pass": "green", "refer": "amber", "watch": "amber", "knockout": "red", "unknown": "grey"}
 SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "watch": "주의(참고 지표)",
@@ -161,9 +175,15 @@ def _limit(doc: Mapping[str, Any], features: Mapping[str, Any], policy: Mapping[
     requested, inflow = doc.get("requested_amount_krw"), features.get("avg_monthly_inflow_krw")
     if not (charts.is_num(requested) and charts.is_num(inflow)):
         return None
-    candidates = [(_("신청액"), requested),
-                  (_("월평균 입금×%(m)s", m=f"{INFLOW_MULTIPLIER:g}"), int(inflow * INFLOW_MULTIPLIER)),
-                  (_("상품 최대"), PRODUCT_MAX_KRW)]
+    inflow_cap = (_("월평균 입금×%(m)s", m=f"{INFLOW_MULTIPLIER:g}"), int(inflow * INFLOW_MULTIPLIER))
+    pending = features.get("mkt_pending_settlement_krw")
+    if policy.get("rules_version") in BOOST_VERSIONS and charts.is_num(pending):
+        settlement_cap = (_("정산 예정금×%(r)s", r=f"{PENDING_SETTLEMENT_RATIO:g}"), int(pending * PENDING_SETTLEMENT_RATIO))
+        inflow_cap = max(inflow_cap, settlement_cap, key=lambda c: c[1])  # 같으면 입금 상한(엔진의 max와 같다)
+    candidates = [(_("신청액"), requested), inflow_cap, (_("상품 최대"), PRODUCT_MAX_KRW)]
+    codes = {r.get("code") for r in policy.get("reason_codes") or [] if isinstance(r, Mapping)}
+    if codes & KNOCKOUT_SUBSTITUTIONS:
+        candidates.append((_("대체 상한"), SUBSTITUTED_MAX_KRW))
     low = min(v for _label, v in candidates)
     computed = low - low % LIMIT_UNIT_KRW
     items = [(label, round(v / 10_000), "blue" if v == low else "grey") for label, v in candidates]

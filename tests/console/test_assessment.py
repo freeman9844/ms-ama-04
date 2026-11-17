@@ -30,6 +30,11 @@ def test_signal_thresholds_and_limits_match_policy_rules():
         f: "min" if op == "lt" else "max" for f, op in ops.items()}
     assert assessment.PRODUCT_MAX_KRW == rules.product.max_amount_krw
     assert assessment.INFLOW_MULTIPLIER == rules.product.inflow_multiplier
+    assert assessment.PENDING_SETTLEMENT_RATIO == rules.limit_boost.pending_settlement_ratio
+    assert assessment.SUBSTITUTED_MAX_KRW == rules.limit_boost.substituted_max_amount_krw
+    knockout_codes = {c.code for c in rules.knockouts}
+    assert assessment.KNOCKOUT_SUBSTITUTIONS == {s.code for s in rules.substitutions if s.replaces in knockout_codes}
+    assert rules.version in assessment.BOOST_VERSIONS
 
 
 def test_traffic_lights_colour_strength_and_plain_text(make_doc):
@@ -69,7 +74,8 @@ def test_tax_match_is_watch_not_refer(make_doc):
 
 def test_v3_optional_signals_hidden_when_missing(make_doc):
     fields = set(by_field(assessment_panels(view(make_doc, features=STRONG))))
-    assert not fields & {"revenue_trend_ratio", "high_cost_lender_count", "pg_reconciliation_ratio", "pg_top_platform_share"}
+    assert not fields & {"revenue_trend_ratio", "high_cost_lender_count", "pg_reconciliation_ratio",
+                         "pg_top_platform_share", "mkt_days_since_suspension", "mkt_return_rate_90d", "mkt_rating"}
 
 
 def test_v3_signal_refer_on_low_reconciliation(make_doc):
@@ -92,6 +98,24 @@ def test_limit_bars_highlight_the_binding_minimum(make_doc):
     assert [(b["label"], b["value"], b["color"]) for b in limit["bars"]["bars"]] == [
         ("신청액", 1000, "grey"), ("월평균 입금×1.5", 619, "blue"), ("상품 최대", 1000, "grey")]
     assert limit["binding"] == "월평균 입금×1.5" and limit["computed"] == 6_100_000
+
+
+def test_limit_uses_settlement_cap_and_substitution_cap(make_doc):
+    policy = {"decision": "refer", "max_amount_krw": 5_000_000, "rules_version": "2026.11-v4",
+              "reason_codes": [{"code": "S001", "message": "마켓 판매 이력으로 거래 이력 부족 대체"}]}
+    features = {**STRONG, "avg_monthly_inflow_krw": 2_000_000, "mkt_pending_settlement_krw": 10_000_000}
+    limit = assessment_panels(view(make_doc, features, policy, requested_amount_krw=8_000_000))["limit"]
+    assert [(b["label"], b["value"], b["color"]) for b in limit["bars"]["bars"]] == [
+        ("신청액", 800, "grey"), ("정산 예정금×0.8", 800, "grey"), ("상품 최대", 1000, "grey"),
+        ("대체 상한", 500, "blue")]
+    assert limit["binding"] == "대체 상한" and limit["computed"] == 5_000_000
+    # 정산 예정금이 입금 상한보다 작으면 입금 상한이 그대로 두 번째 후보다. v3 판정은 정산 예정금을 보지 않는다.
+    small = {**features, "mkt_pending_settlement_krw": 1_000_000}
+    limit = assessment_panels(view(make_doc, small, policy, requested_amount_krw=8_000_000))["limit"]
+    assert limit["bars"]["bars"][1]["label"] == "월평균 입금×1.5" and limit["computed"] == 3_000_000
+    v3 = {**policy, "rules_version": "2026.11-v3", "reason_codes": []}
+    limit = assessment_panels(view(make_doc, features, v3, requested_amount_krw=8_000_000))["limit"]
+    assert [b["label"] for b in limit["bars"]["bars"]] == ["신청액", "월평균 입금×1.5", "상품 최대"]
 
 
 def test_capacity_marks_months_short_of_debt_plus_new_installment(make_doc):

@@ -271,5 +271,6 @@
   "계좌에 들어오지 않은 정산 중 금액·기간 조건이 맞는 선지급성 입금과 짝지어진 건수입니다. 정산채권 양도 여부를 확인하는 단서입니다.": "Number of settlements that never reached the account but match an advance-like deposit by amount and timing. A clue for checking whether settlement receivables were assigned.",
   "채널 집중도(HHI)": "Channel concentration (HHI)",
   "플랫폼별 매출 비중 제곱의 합입니다. 1에 가까울수록 한 채널에 쏠려 있다는 뜻이며, 참고 지표로 정책 기준은 없습니다. 정책 기준(80% 이하, R107)은 최대 채널 비중 KPI에 적용됩니다.": "Sum of squared revenue shares per platform. Closer to 1 means revenue is concentrated in one channel. For reference only; there is no policy threshold. The policy threshold (≤ 80%, R107) applies to the largest channel share KPI.",
-  "최근 신청 100건(전체 채널)": "Latest 100 applications (all channels)"
+  "최근 신청 100건(전체 채널)": "Latest 100 applications (all channels)",
+  "마켓 판매 성과 손상(셀러 지표 제외)": "Marketplace performance data damaged (seller metrics excluded)"
 }

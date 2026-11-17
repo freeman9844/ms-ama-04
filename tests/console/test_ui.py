@@ -1,14 +1,20 @@
 """P7 화면 구성 고정: 차트·스테퍼·KPI가 나오고, 데모 대본 문구와 CSP 제약이 유지된다."""
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import console.app as console_app
+from agents.features import compute_underwriting
 from console.app import create_app
 from consolepreview.fixtures import build_deps
+from mockapis.demo import build_demo_cases
+from policy.engine import decision_payload, evaluate
+from policy.rules import load_rules, rules_for_version
+from shared.contracts import CashFlowFeatures
 
 TEMPLATES = Path(console_app.__file__).parent / "templates"
 
@@ -75,9 +81,10 @@ def test_detail_has_timeline_stepper_and_charts(client):
 def test_detail_tabs_and_assessment_panels(client):
     html = page(client, "/applications/app-20261103-p01")
     labels = re.findall(r'role="tab" aria-controls="tab-(\w+)"[^>]*>([^<]+)<', html)
-    assert labels == [("summary", "요약"), ("cashflow", "현금흐름"), ("policy", "정책 판정"), ("opinion", "에이전트 의견"),
-                      ("evidence", "근거 거래"), ("consent", "동의·데이터"), ("decision", "심사역 결정")]
-    assert html.count('role="tabpanel"') == 7 and '<script src="/static/tabs.js" defer></script>' in html
+    assert labels == [("summary", "요약"), ("cashflow", "현금흐름"), ("marketplace", "마켓 셀러"), ("policy", "정책 판정"),
+                      ("opinion", "에이전트 의견"), ("evidence", "근거 거래"), ("consent", "동의·데이터"),
+                      ("decision", "심사역 결정")]
+    assert html.count('role="tabpanel"') == 8 and '<script src="/static/tabs.js" defer></script>' in html
     assert 'data-default-tab="tab-decision"' in html
     assert 'class="chart gauge"' in html and 'class="chart donut"' in html and 'class="signals"' in html
     assert "한도 산정" in html and "상환 여력" in html and "지출 구성" in html and "남는 돈" in html
@@ -117,6 +124,63 @@ def test_detail_old_doc_shows_no_settlement():
     deps.store.docs["app-20261103-p01"]["underwriting"].pop("pg_ledger")
     html = page(TestClient(create_app(deps), follow_redirects=False), "/applications/app-20261103-p01")
     assert "정산 자료 없음" in html and "플랫폼별 정산 비중" not in html
+
+
+DEMO_AS_OF = date(2026, 11, 17)
+DEMO_APP = "app-20261103-p01"
+
+
+@pytest.fixture(scope="module")
+def demo_cases():
+    return build_demo_cases(DEMO_AS_OF)
+
+
+def _seller_page(demo_cases, applicant_id, amount=5_000_000):
+    """데모 셀러를 v4 엔진으로 심사한 문서(오케스트레이터 적재 모양)로 미리보기 신청 하나를 바꿔 그린다."""
+    case = demo_cases[applicant_id]
+    uw = compute_underwriting(DEMO_APP, case.profile, case.transactions, case.tax_filings, as_of=DEMO_AS_OF,
+                              requested_amount_krw=amount, requested_tenor_months=6,
+                              pg_settlements=case.pg_settlements, marketplace=case.marketplace)
+    deps = build_deps()
+    doc = deps.store.docs[DEMO_APP]
+    doc["requested_amount_krw"], doc["requested_tenor_months"] = amount, 6
+    doc["underwriting"] |= {"features": uw.features.model_dump(mode="json"), "marketplace": uw.marketplace}
+    doc["policy"] = decision_payload(evaluate(uw.features, load_rules()))
+    return page(TestClient(create_app(deps), follow_redirects=False), f"/applications/{DEMO_APP}")
+
+
+@pytest.mark.parametrize("cash_only", ["missing", None])
+def test_detail_renders_v3_doc_without_marketplace(cash_only):
+    deps = build_deps()
+    doc = deps.store.docs[DEMO_APP]
+    doc["underwriting"].pop("marketplace", None)
+    features = {k: v for k, v in doc["underwriting"]["features"].items() if not k.startswith("mkt_")}
+    doc["underwriting"]["features"] = features
+    doc["policy"] = evaluate(CashFlowFeatures(**features), rules_for_version("2026.11-v3")).model_dump(mode="json")
+    if cash_only == "missing":
+        doc["policy"].pop("cash_only")
+    html = page(TestClient(create_app(deps), follow_redirects=False), f"/applications/{DEMO_APP}")
+    assert "마켓 판매 성과 자료 없음" in html and "현금흐름만 볼 때" not in html and "셀러 데이터 대체" not in html
+
+
+def test_detail_shows_substitution_and_compare(demo_cases):
+    html = _seller_page(demo_cases, "seller-knitroom-04")
+    assert "R001 대체됨(S001)" in html and "R104 대체됨(S002)" in html
+    assert "현금흐름만 볼 때" in html and "셀러 데이터 반영" in html
+    panel = html.split('id="tab-marketplace"')[1].split('id="tab-policy"')[0]
+    assert "<th>플랫폼</th>" in panel and "<td>스마트스토어</td>" in panel and "마켓 판매 성과 자료 없음" not in panel
+    assert "대체 상한" in html and "후보 중 가장 작은 값을 10만 원 단위로 내림" in html
+
+
+def test_detail_shows_blocked_substitution(demo_cases):
+    html = _seller_page(demo_cases, "seller-tint-17")
+    assert "조건 충족, R002로 미적용" in html and "대체됨(S001)" not in html
+
+
+def test_detail_shows_suspension_penalty(demo_cases):
+    html = _seller_page(demo_cases, "seller-petfood-07")
+    panel = html.split('id="tab-marketplace"')[1].split('id="tab-policy"')[0]
+    assert "판매정지" in panel and "R003" in html and "현금흐름만 볼 때" in html
 
 
 def test_detail_tabs_show_notices_when_empty(client):

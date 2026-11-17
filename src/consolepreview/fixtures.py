@@ -1,7 +1,7 @@
 """미리보기용 합성 데이터와 메모리 저장소. 실제 차주·실제 측정값이 아니다(화면 확인 전용).
 
 신청 11건(상태 골고루), 대출 3건(재생 완료·재생 중·재생 전), 운영 측정 실행 1개를 만든다. 신청의 심사 지표·월별
-현금흐름·지출 구성·정책 판정은 데모·부하 셀러 합성 거래에 실제 엔진(agents.features, 정책 규칙 v3)을 돌려 만든다.
+현금흐름·지출 구성·정책 판정은 데모·부하 셀러 합성 거래에 실제 엔진(agents.features, 정책 규칙 v4)을 돌려 만든다.
 원천 데이터(RawStore)는 비워 두어 상세 화면은 가명 토큰 복원 불가 상태로 보인다.
 """
 
@@ -16,7 +16,7 @@ from console.app import ConsoleDeps
 from console.auth import CREDIT_OFFICER, Principal
 from mockapis.demo import build_demo_cases, build_load_cases
 from mockapis.synth import SyntheticCase
-from policy.engine import evaluate
+from policy.engine import decision_payload, evaluate
 from policy.rules import load_rules
 
 KST = timezone(timedelta(hours=9))
@@ -56,14 +56,15 @@ def _underwriting(app_id: str, case: SyntheticCase, amount: int) -> tuple[dict[s
     labels = {k: SEMANTIC_LABEL[v.value] for k, v in case.labels.items() if v.value in SEMANTIC_LABEL}
     uw = compute_underwriting(app_id, case.profile, case.transactions, case.tax_filings, as_of=AS_OF,
                               requested_amount_krw=amount, requested_tenor_months=TENOR, semantic_labels=labels,
-                              pg_settlements=case.pg_settlements)
+                              pg_settlements=case.pg_settlements, marketplace=case.marketplace)
     underwriting = {
         "features": uw.features.model_dump(mode="json"), "signals": uw.signals, "flags": uw.flags,
         "monthly": uw.monthly, "expense_breakdown": uw.expense_breakdown, "expense_monthly": uw.expense_monthly,
         "settlement_profile": settlement_for(case.transactions, {}, AS_OF, case.profile.industry),
         "classification": None, "category_overrides": {}, "pg_ledger": uw.pg_ledger,
+        "marketplace": uw.marketplace,
     }
-    return underwriting, evaluate(uw.features, load_rules()).model_dump(mode="json")
+    return underwriting, decision_payload(evaluate(uw.features, load_rules()))
 
 
 def _at(start: datetime, seconds: int) -> str:
