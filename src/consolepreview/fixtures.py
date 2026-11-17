@@ -407,8 +407,13 @@ class MemoryApplications:
     def list_recent(self, limit: int) -> list[dict[str, Any]]:
         rows = [{"id": d["id"], "applicant_id": d["applicant_id"], "status": d["status"],
                  "requested_amount_krw": d["requested_amount_krw"], "updated_at": d["updated_at"],
-                 "recommendation": (d.get("assessment") or {}).get("recommendation")} for d in self.docs.values()]
+                 "recommendation": (d.get("assessment") or {}).get("recommendation")} for d in self.docs.values()
+                if not d["id"].startswith("smoke-") and d.get("source") not in ("load", "fault")]
         return sorted(rows, key=lambda r: r["updated_at"], reverse=True)[:limit]
+
+    def list_status_rows(self) -> list[dict[str, Any]]:
+        return [{"status": d["status"], "recommendation": (d.get("assessment") or {}).get("recommendation")}
+                for d in self.docs.values()]
 
     def get(self, application_id: str) -> dict[str, Any] | None:
         return self.docs.get(application_id)

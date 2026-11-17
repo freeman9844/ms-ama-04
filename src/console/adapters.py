@@ -26,10 +26,16 @@ PROOFS = "deletion_proofs"
 GRIEVANCES = "grievances"
 TRANSLATIONS = "translations"
 PSEUDONYM_SECRET = "pseudonym-key"
+# 홈 신청 목록은 배포 smoke(ID smoke-*)와 부하 측정·장애 주입(source load·fault) 신청을 뺀다.
+# source가 없거나 null인 문서(심사역·고객 신청, 예전 문서)는 남긴다.
 LIST_QUERY = (
     "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, c.source, "
-    "c.assessment.recommendation AS recommendation FROM c ORDER BY c.updated_at DESC"
+    "c.assessment.recommendation AS recommendation FROM c "
+    "WHERE NOT STARTSWITH(c.id, 'smoke-') AND (NOT IS_STRING(c.source) OR c.source NOT IN ('load', 'fault')) "
+    "ORDER BY c.updated_at DESC"
 )
+# 홈 통계는 모든 신청(테스트 포함)을 집계한다. 상태·권고만 읽는다.
+STATUS_QUERY = "SELECT c.status, c.assessment.recommendation AS recommendation FROM c"
 
 
 class CosmosApplications:
@@ -41,6 +47,9 @@ class CosmosApplications:
             query=LIST_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
         )
         return list(items)
+
+    def list_status_rows(self) -> list[dict[str, Any]]:
+        return list(self._container.query_items(query=STATUS_QUERY, enable_cross_partition_query=True))
 
     def get(self, application_id: str) -> dict[str, Any] | None:
         try:

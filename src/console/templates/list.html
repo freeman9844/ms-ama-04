@@ -9,9 +9,9 @@
   </div>
   <div class="actions">{% if user.can_decide %}<a class="button" href="/applications/new">{{ _("새 신청") }}</a>{% endif %}</div>
 </div>
-<p class="note">{{ _("최근 %(n)s건 기준 집계입니다. 전체 신청 통계가 아닙니다.", n=limit) }}</p>
+<p class="note">{{ _("통계는 smoke·부하 측정을 포함한 모든 신청을 집계합니다.") }}</p>
 <div class="grid-4">
-  {{ ch.kpi(_("최근 신청"), _("%(n)s건", n=ui.total), _("최근 %(n)s건 기준", n=limit), "blue") }}
+  {{ ch.kpi(_("전체 신청"), _("%(n)s건", n=ui.total), _("모든 채널 포함"), "blue") }}
   {{ ch.kpi(_("심사역 대기"), _("%(n)s건", n=ui.awaiting), _("SLA 초과 %(n)s건", n=ui.escalated), "amber" if ui.awaiting else "neutral") }}
   {{ ch.kpi(_("진행 중"), _("%(n)s건", n=ui.in_progress), _("에이전트 파이프라인"), "blue") }}
   {{ ch.kpi(_("승인율"), "-" if ui.approval_rate is none else "%.0f%%"|format(ui.approval_rate * 100),
@@ -32,6 +32,7 @@
 </div>
 <section class="card">
   <h2>{{ _("신청 목록") }}</h2>
+  <p class="note">{{ _("최신 %(n)s건 · 배포 smoke·부하 측정·장애 주입 신청 제외", n=limit) }}</p>
   <table>
     <thead><tr><th>{{ _("신청 ID") }}</th><th>{{ _("신청인") }}</th><th>{{ _("상태") }}</th><th>{{ _("신청 금액") }}</th><th>{{ _("에이전트 권고") }}</th><th>{{ _("갱신 시각") }}</th></tr></thead>
     <tbody hx-get="/applications/rows" hx-trigger="every 3s" hx-swap="innerHTML">

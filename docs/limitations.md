@@ -115,7 +115,7 @@
 
 - App Insights 수집은 public 엔드포인트 + Entra 인증을 쓴다(Azure Monitor Private Link Scope 미사용). (P2)
 - 콘솔 인증 흐름(실제 Entra 로그인 → 결정)은 자동 테스트가 없다. smoke는 로그인 없는 접근이 Entra로 리디렉션되는지만 본다. (P4b)
-- 목록은 Cosmos 교차 파티션 `ORDER BY updated_at` 최근 50건이다(페이지 없음). (P4b)
+- 홈 신청 목록은 Cosmos 교차 파티션 `ORDER BY updated_at` 최신 20건이다(페이지 없음, smoke·부하 측정·장애 주입 신청 제외). 홈 통계는 모든 신청의 상태·권고를 매번 교차 파티션으로 읽어 집계하므로 신청이 크게 늘면 RU가 늘어난다. (P4b)
 - 콘솔이 보낸 결정의 결과는 상세 화면 새로 고침으로 확인한다. 큐 처리 실패는 오케스트레이터 로그에 남는다. (P4b)
 - 인라인 모드는 13주를 한 번의 큐 트리거 안에서 처리한다(Flex Consumption 기본 제한 30분). (P5a)
 - 서킷 브레이커는 Flex 인스턴스마다 따로다(분산 서킷은 운영 전환 과제). (P6b)

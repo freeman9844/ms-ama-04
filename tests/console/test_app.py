@@ -31,6 +31,9 @@ class FakeStore:
     def list_recent(self, limit):
         return list(self.docs.values())[:limit]
 
+    def list_status_rows(self):
+        return list(self.docs.values())
+
     def get(self, application_id):
         return self.docs.get(application_id)
 
@@ -85,6 +88,17 @@ def test_list_shows_recent_applications_with_polling(env):
     assert "새 신청" in client.get("/", headers=OFFICER).text
     rows = client.get("/applications/rows", headers=AUDITOR_H)
     assert "app-1" in rows.text and "<html" not in rows.text
+
+
+def test_home_lists_latest_20_but_counts_every_application(env, make_doc):
+    client, _ = env
+    store = client.app.state.deps.store
+    for i in range(3, 33):
+        store.docs[f"app-{i}"] = make_doc(id=f"app-{i}", application_id=f"app-{i}", status="approved")
+    page = client.get("/", headers=AUDITOR_H).text
+    assert page.count('<a href="/applications/app-') == 20
+    assert "32건" in page and "승인 31 · 거절 0" in page
+    assert client.get("/applications/rows", headers=AUDITOR_H).text.count('<a href="/applications/app-') == 20
 
 
 def test_officer_sees_restored_names_and_decision_form(env):
@@ -352,7 +366,8 @@ def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
     client, queue = demo_env
     page = client.get("/")
     assert page.status_code == 200
-    assert "데모 모드" in page.text and "/.auth/logout" not in page.text
+    assert "데모 모드" not in page.text and "demo-banner" not in page.text
+    assert "/.auth/logout" not in page.text
     assert "빈스카페(대표 김대표)는 계절성이 있다" in client.get("/applications/app-1").text
     token = csrf(client, {}, "/applications/new")
     resp = client.post("/applications", data={"csrf": token, "applicant_id": "seller-dailylook-01",

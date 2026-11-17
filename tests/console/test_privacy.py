@@ -31,6 +31,9 @@ class FakeStore:
     def list_recent(self, limit):
         return list(self.docs.values())[:limit]
 
+    def list_status_rows(self):
+        return list(self.docs.values())
+
     def get(self, application_id):
         return self.docs.get(application_id)
 

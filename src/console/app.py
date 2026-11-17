@@ -114,6 +114,8 @@ CSRF_HEADER = "X-CSRF-Token"
 chat_log = logging.getLogger("console.chat")
 mt_log = logging.getLogger("console.translate")
 LIST_LIMIT = 50
+# 홈 신청 목록 건수(테스트 신청 제외). 홈 통계는 건수 제한 없이 모든 신청을 집계한다.
+HOME_LIST_LIMIT = 20
 DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
 # 신청 상세(/applications/{id})의 모든 자동 새로 고침 주기.
@@ -146,6 +148,8 @@ DECISION_ERRORS = {
 
 class ApplicationStore(Protocol):
     def list_recent(self, limit: int) -> list[dict[str, Any]]: ...
+
+    def list_status_rows(self) -> list[dict[str, Any]]: ...
 
     def get(self, application_id: str) -> dict[str, Any] | None: ...
 
@@ -483,13 +487,14 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         user = viewer(request)
-        rows = deps.store.list_recent(LIST_LIMIT)
-        return render("list.html", user, rows=rows, ui=home_summary(rows), limit=LIST_LIMIT)
+        rows = deps.store.list_recent(HOME_LIST_LIMIT)
+        ui = home_summary(deps.store.list_status_rows())
+        return render("list.html", user, rows=rows, ui=ui, limit=HOME_LIST_LIMIT)
 
     @app.get("/applications/rows", response_class=HTMLResponse)
     def rows(request: Request) -> HTMLResponse:
         user = viewer(request)
-        return render("_rows.html", user, rows=deps.store.list_recent(LIST_LIMIT))
+        return render("_rows.html", user, rows=deps.store.list_recent(HOME_LIST_LIMIT))
 
     @app.get("/applications/new", response_class=HTMLResponse)
     def new_form(request: Request) -> HTMLResponse:

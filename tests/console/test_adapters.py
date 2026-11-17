@@ -10,6 +10,7 @@ from console.adapters import (
     GRIEVANCES_BY_APPLICANT,
     GRIEVANCES_QUERY,
     LOANS_QUERY,
+    STATUS_QUERY,
     CosmosApplications,
     CosmosMonitoring,
     CosmosPrivacy,
@@ -53,6 +54,20 @@ def test_list_recent_queries_projection_across_partitions():
     assert "ORDER BY c.updated_at DESC" in query and "c.assessment.recommendation AS recommendation" in query
     assert "c.source" in query
     assert "c.assessment " not in query.replace("c.assessment.recommendation", "")
+
+
+def test_list_recent_excludes_smoke_load_and_fault_runs():
+    where = LIST_QUERY.split(" WHERE ", 1)[1].split(" ORDER BY ")[0]
+    assert "NOT STARTSWITH(c.id, 'smoke-')" in where
+    assert "NOT IS_STRING(c.source) OR c.source NOT IN ('load', 'fault')" in where
+
+
+def test_list_status_rows_reads_every_application_with_minimal_projection():
+    container = FakeContainer([{"status": "approved", "recommendation": "approve"}])
+    assert CosmosApplications(container).list_status_rows() == [{"status": "approved", "recommendation": "approve"}]
+    kind, query, params, cross = container.calls[0]
+    assert (kind, query, params, cross) == ("query", STATUS_QUERY, None, True)
+    assert query == "SELECT c.status, c.assessment.recommendation AS recommendation FROM c"
 
 
 def test_get_reads_by_application_partition_and_maps_missing_to_none():

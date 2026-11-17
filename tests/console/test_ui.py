@@ -58,7 +58,7 @@ def test_home_has_kpis_donut_and_scope_note(client):
     html = page(client, "/")
     assert html.count('class="card kpi ') == 4
     assert 'class="chart donut"' in html and 'class="chart hbars"' in html
-    assert "최근 50건 기준" in html
+    assert "모든 신청을 집계합니다" in html and "최신 20건 · 배포 smoke·부하 측정·장애 주입 신청 제외" in html
     assert ">새 신청<" in html
     assert 'hx-get="/applications/rows"' in html
 
