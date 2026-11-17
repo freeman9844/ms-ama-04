@@ -24,8 +24,14 @@ a:hover { color: var(--accent-dark); }
 .n-home a::before { content: "▤"; }
 .n-loans a::before { content: "◔"; }
 .n-grievances a::before { content: "✎"; }
-.n-borrower a::before { content: "☺"; }
 .n-ops a::before { content: "▥"; }
+.n-apply a::before { content: "✚"; }
+.n-status a::before { content: "▤"; }
+.n-plans a::before { content: "◷"; }
+.n-notices a::before { content: "✉"; }
+.n-consents a::before { content: "☑"; }
+.sidebar .customer-link { display: block; margin-top: .5rem; }
+.customer-shell main { max-width: 860px; }
 .sidebar nav li a:hover { background: rgba(255, 255, 255, .06); color: #fff; }
 .sidebar nav li.active a { background: var(--nav-active); color: #fff; border-left-color: var(--accent); font-weight: 600; }
 .who { margin-top: auto; padding: .9rem 1.1rem; border-top: 1px solid rgba(255, 255, 255, .08); font-size: .85rem; }
@@ -34,9 +40,6 @@ a:hover { color: var(--accent-dark); }
 .who a { color: #9cc7f0; }
 .lang-switch { display: block; margin-top: .4rem; color: var(--nav-fg); }
 .lang-switch strong { color: #fff; font-weight: 600; }
-.apply-top { display: flex; justify-content: space-between; align-items: center; }
-.apply-top .lang-switch { margin: 0; color: #dbe9f7; font-size: .85rem; }
-.apply-top .lang-switch a { font-weight: 400; text-decoration: underline; }
 .content { min-width: 0; }
 .demo-banner { margin: 0; padding: .5rem 1.5rem; background: #fff4ce; color: #5c4400; border-bottom: 1px solid #e6c84f; }
 main { max-width: 1280px; padding: 1.2rem 1.5rem 3rem; }
@@ -258,10 +261,7 @@ form.inline button { padding: .2rem .6rem; font-size: .85em; }
   .step::before { display: none; }
 }
 
-/* 고객 신청 페이지(심사 메뉴 없는 레이아웃) */
-.apply-top { background: var(--accent-dark); color: #fff; padding: .8rem 1.5rem; }
-.apply-top a { color: #fff; font-weight: 600; text-decoration: none; }
-.apply-main { max-width: 720px; margin: 0 auto; }
+/* 고객 콘솔(신청·차주 화면) */
 .consent-item { display: block; padding: .6rem .8rem; margin: 0 0 .6rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .consent-item small { display: block; color: var(--muted); margin-left: 1.6rem; }
 .apply-status { font-size: 1.4rem; font-weight: 600; }

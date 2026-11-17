@@ -25,9 +25,9 @@ from journey.models import KST
 from journey.pretranslate import TRANSLATIONS, handle_changes
 from shared.contracts import ApplicantProfile, Transaction
 from shared.pseudonymize import Pseudonymizer
-from tests.console.test_i18n import EN_PAGES
+from tests.console.test_i18n import CUSTOMER_PAGES, EN_PAGES
 
-PAGES = [*EN_PAGES, "/borrower/seller-dailylook-01"]
+PAGES = [*EN_PAGES, *CUSTOMER_PAGES]
 EN_HEADERS = {"Cookie": "lang=en"}
 
 # 콘솔 코드가 조립해 저장 문서에 그대로 없는 문구(문구 → 이유). 문서 경로에서 온 문구는 ALLOWLIST에 더한다.
@@ -51,7 +51,7 @@ BLOBS = {
 }
 SYN_PAGES = [
     f"/applications/{APP}", f"/loans/{APP}", f"/grievances/{APP}/grv-syn-pending", f"/grievances/{APP}/grv-syn-done",
-    f"/borrower/{APPLICANT}",
+    f"/borrower/{APPLICANT}/notices", f"/borrower/{APPLICANT}/consents", f"/borrower/{APPLICANT}/grievances",
 ]
 
 
@@ -354,7 +354,7 @@ def test_synthetic_pages_wait_for_browser_translation_without_stored_ones(synthe
     assert _pending(_render(deps, {}, page))
 
 
-@pytest.mark.parametrize("page", [f"/applications/{APP}", f"/loans/{APP}", f"/borrower/{APPLICANT}"])
+@pytest.mark.parametrize("page", [f"/applications/{APP}", f"/loans/{APP}", f"/borrower/{APPLICANT}/notices"])
 def test_entity_masking_must_agree_between_trigger_and_console(synthetic_world, page):
     # 트리거가 원천을 못 읽은 것처럼(패턴 마스킹만) 번역하면 상호·대표자 이름 문구는 키가 달라 대기로 남는다.
     deps, documents, _ = synthetic_world

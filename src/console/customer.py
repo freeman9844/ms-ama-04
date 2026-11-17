@@ -50,7 +50,7 @@ def customer_status(doc: dict[str, Any] | None) -> CustomerStatus:
         amount = decision.get("amount_krw") or doc.get("requested_amount_krw")
         return CustomerStatus(_("승인"), "good", _("대출이 승인되었습니다."), False, amount)
     if status == "declined":
-        return CustomerStatus(_("거절"), "bad", _("이번 신청은 승인되지 않았습니다. 이의제기는 고객센터로 문의해 주세요."), False)
+        return CustomerStatus(_("거절"), "bad", _("이번 신청은 승인되지 않았습니다. 결정에 이의가 있으면 내 대출 관리의 이의제기 메뉴에서 제기해 주세요."), False)
     if status == "withdrawn":
         return CustomerStatus(_("동의 철회로 종료"), "bad", _("데이터 이용 동의가 철회되어 심사를 마쳤습니다."), False)
     if status in _ENDED:

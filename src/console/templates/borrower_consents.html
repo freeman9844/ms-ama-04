@@ -1,0 +1,25 @@
+{% extends "customer_base.html" %}
+{% set nav = "consents" %}
+{% block title %}{{ _("동의 관리") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
+{% block main %}
+<h1>{{ _("동의 관리") }}</h1>
+<section id="consents">
+{% for c in consents %}
+<article class="consent">
+  <h3>{{ _(c.purpose) }} <span class="status c-{{ c.status }}">{{ c.status|consent_status }}</span> <small>{{ c.consent_id }}</small></h3>
+  <p>{% for s in c.scopes %}<span class="chip">{{ s|scope_label }}</span>{% endfor %} · {{ _("만료 %(date)s", date=c.expires_at) }}{% if c.ended_at %} · {{ _("종료 %(date)s", date=c.ended_at) }}{% endif %}</p>
+  {% if c.deletion_proof_id %}<p><a href="/borrower/{{ applicant_id|path }}/consents/{{ c.deletion_proof_id|path }}/proof">{{ _("삭제 증명 보기") }}</a></p>{% endif %}
+  {% for n in c.notices or [] %}
+  <details><summary>{{ n.kind|notice_label }}: {{ n.title|mt }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body|mt_ref }}</p></details>
+  {% endfor %}
+  {% if c.status == "granted" %}
+  <form method="post" action="/borrower/{{ applicant_id|path }}/consents/{{ c.consent_id|path }}/revoke" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{{ _("동의 철회") }}</button>
+  </form>
+  {% endif %}
+</article>
+{% else %}
+<p>{{ _("동의 기록이 없습니다.") }}</p>
+{% endfor %}
+</section>
+{% endblock %}

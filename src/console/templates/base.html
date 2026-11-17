@@ -18,7 +18,6 @@
       <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="/">{{ _("신청") }}</a></li>
       <li class="n-loans{% if nav == 'loans' %} active{% endif %}"><a href="/loans">{{ _("사후 모니터링") }}</a></li>
       <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="/grievances">{{ _("이의제기") }}</a></li>
-      <li class="n-borrower{% if nav == 'borrower' %} active{% endif %}"><a href="/borrower">{{ _("차주 시뮬레이터") }}</a></li>
       <li class="n-ops{% if nav == 'ops' %} active{% endif %}"><a href="/ops">{{ _("운영 지표") }}</a></li>
     </ul>
   </nav>
@@ -26,6 +25,7 @@
     <span class="who-name">{{ user.name }}</span>
     <span class="who-roles">{{ user.roles|sort|join(", ") }}</span>
     {% if not demo %}<a href="/.auth/logout">{{ _("로그아웃") }}</a>{% endif %}
+    <a class="customer-link" href="/apply">{{ _("고객 콘솔 열기") }}</a>
     {% include "_lang.html" %}
   </div>
 </aside>

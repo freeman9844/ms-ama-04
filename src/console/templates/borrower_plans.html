@@ -1,0 +1,51 @@
+{% extends "customer_base.html" %}
+{% set nav = "plans" %}
+{% from "_plan.html" import plan_items %}
+{% block title %}{{ _("상환 플랜") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
+{% block main %}
+<h1>{{ _("상환 플랜") }}</h1>
+{% if error %}<p class="error" role="alert">{{ _(error) }}</p>{% endif %}
+<section id="self-plan">
+<h2>{{ _("상환 플랜 제안") }}</h2>
+{% for p in plans %}{% set o = p.offer %}
+<article class="plan">
+{% if not o %}
+<h3>{{ p.loan_id }}</h3>
+<p>{{ _("받은 상환 플랜 제안이 없습니다.") }}</p>
+{% else %}
+<h3>{{ p.loan_id }} <span class="status">{{ p.status|borrower_plan_label }}</span> <small>{{ _("%(date)s 안내", date=o.sent_on) }}</small></h3>
+{% if p.status == "open" %}
+<p class="note">{{ _("최근 자금 흐름을 고려해 다음 상환 방법 중 하나를 고르실 수 있습니다. 상환일 이동·분할납부는 심사역이 확인한 뒤 일정이 바뀌고, 지금 일정 유지는 바로 반영됩니다.") }}</p>
+{% elif p.status == "reviewing" %}
+<p class="note">{{ _("고르신 플랜을 심사역이 확인하고 있습니다. 확인 전까지는 지금 일정대로 상환됩니다.") }}</p>
+{% elif p.status == "approved" %}
+<p class="note">{{ _("고르신 플랜이 승인되어 상환 일정이 바뀌었습니다.") }}</p>
+{% elif p.status == "declined" %}
+<p class="note">{{ _("고르신 플랜이 반려되어 지금 일정대로 상환됩니다.") }}</p>
+{% elif p.status == "kept" %}
+<p class="note">{{ _("지금 일정대로 유지됩니다.") }}</p>
+{% elif p.status == "expired" %}
+<p class="note">{{ _("제안이 만료되었습니다. 지금 일정대로 상환됩니다.") }}</p>
+{% endif %}
+<table>
+  <thead><tr><th>{{ _("플랜") }}</th><th>{{ _("바뀔 일정") }}</th></tr></thead>
+  <tbody>{% for op in o.options or () %}
+<tr><td>{{ op.option|plan_option_label }}{% if op.option == o.choice %} <span class="chip">{{ _("선택") }}</span>{% endif %}</td>
+<td>{% if op["items"] %}{{ plan_items(op["items"]) }}{% else %}{{ _("지금 일정 그대로") }}{% endif %}</td></tr>
+{% endfor %}</tbody>
+</table>
+{% if p.status == "open" %}
+<form method="post" action="/borrower/{{ applicant_id|path }}/plan" class="decision">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="loan_id" value="{{ p.loan_id }}">
+  <input type="hidden" name="offer_id" value="{{ o.offer_id }}">
+  {% for op in o.options or () %}<button type="submit" name="option" value="{{ op.option }}">{{ _("%(plan)s 선택", plan=op.option|plan_option_label) }}</button> {% endfor %}
+</form>
+{% endif %}
+{% endif %}
+</article>
+{% else %}
+<p>{{ _("실행된 대출이 없습니다.") }}</p>
+{% endfor %}
+</section>
+{% endblock %}

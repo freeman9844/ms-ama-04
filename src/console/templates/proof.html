@@ -1,7 +1,7 @@
-{% extends "base.html" %}
-{% block title %}{{ _("삭제 증명 %(id)s", id=p.consent_id) }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
+{% extends layout|default("base.html") %}
+{% block title %}{{ _("삭제 증명 %(id)s", id=p.consent_id) }} · AMA Lending {{ _("고객 콘솔") if back_url else _("심사 콘솔") }}{% endblock %}
 {% block main %}
-<p>{% if p.application_id %}<a href="/applications/{{ p.application_id|path }}">← {{ _("신청 %(id)s", id=p.application_id) }}</a>{% endif %}</p>
+<p>{% if back_url %}<a href="{{ back_url }}">← {{ back_label }}</a>{% elif p.application_id %}<a href="/applications/{{ p.application_id|path }}">← {{ _("신청 %(id)s", id=p.application_id) }}</a>{% endif %}</p>
 <h1>{{ _("삭제 증명 %(id)s", id=p.consent_id) }} <span class="status {{ 'ok' if p.complete else 'warn' }}">{{ _("완료") if p.complete else _("미완료") }}</span></h1>
 <dl class="facts">
   <dt>{{ _("사유") }}</dt><dd>{{ p.reason|reason_label }} ({{ p.trigger }})</dd>

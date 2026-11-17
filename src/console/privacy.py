@@ -18,7 +18,7 @@ ITEM_LABELS = {
     "conversation": "Foundry 대화",
     "container": "코드 실행 컨테이너",
 }
-# 콘솔이 보내는 데모 명령. 철회(revoke)는 차주 시뮬레이터에서만 보낸다.
+# 콘솔이 보내는 데모 명령. 철회(revoke)는 고객 콘솔에서만 보낸다.
 DEMO_ACTIONS = {"expire_now": "지금 만료(데모)", "remind_now": "갱신 안내(데모)"}
 
 LABEL_FILTERS = {

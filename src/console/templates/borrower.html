@@ -1,112 +1,19 @@
-{% extends "base.html" %}
-{% set nav = "borrower" %}
-{% from "_plan.html" import plan_items %}
-{% block title %}{{ applicant_id }} · {{ _("차주 시뮬레이터") }}{% endblock %}
+{% extends "customer_base.html" %}
+{% set nav = "status" %}
+{% block title %}{{ _("신청 현황") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
 {% block main %}
-<p><a href="/borrower">← {{ _("차주 선택") }}</a></p>
-<h1>{{ applicant_id }} <small>{{ _("차주 화면(데모)") }}</small></h1>
-{% if error %}<p class="error" role="alert">{{ _(error) }}</p>{% endif %}
-
-{% if plans %}
-<section id="self-plan">
-<h2>{{ _("상환 플랜 제안") }}</h2>
-{% for p in plans %}{% set o = p.offer %}
-<article class="plan">
-{% if not o %}
-<h3>{{ p.loan_id }}</h3>
-<p>{{ _("받은 상환 플랜 제안이 없습니다.") }}</p>
-{% else %}
-<h3>{{ p.loan_id }} <span class="status">{{ p.status|borrower_plan_label }}</span> <small>{{ _("%(date)s 안내", date=o.sent_on) }}</small></h3>
-{% if p.status == "open" %}
-<p class="note">{{ _("최근 자금 흐름을 고려해 다음 상환 방법 중 하나를 고르실 수 있습니다. 상환일 이동·분할납부는 심사역이 확인한 뒤 일정이 바뀌고, 지금 일정 유지는 바로 반영됩니다.") }}</p>
-{% elif p.status == "reviewing" %}
-<p class="note">{{ _("고르신 플랜을 심사역이 확인하고 있습니다. 확인 전까지는 지금 일정대로 상환됩니다.") }}</p>
-{% elif p.status == "approved" %}
-<p class="note">{{ _("고르신 플랜이 승인되어 상환 일정이 바뀌었습니다.") }}</p>
-{% elif p.status == "declined" %}
-<p class="note">{{ _("고르신 플랜이 반려되어 지금 일정대로 상환됩니다.") }}</p>
-{% elif p.status == "kept" %}
-<p class="note">{{ _("지금 일정대로 유지됩니다.") }}</p>
-{% elif p.status == "expired" %}
-<p class="note">{{ _("제안이 만료되었습니다. 지금 일정대로 상환됩니다.") }}</p>
-{% endif %}
+<h1>{{ _("신청 현황") }}</h1>
+{% if rows %}
 <table>
-  <thead><tr><th>{{ _("플랜") }}</th><th>{{ _("바뀔 일정") }}</th></tr></thead>
-  <tbody>{% for op in o.options or () %}
-<tr><td>{{ op.option|plan_option_label }}{% if op.option == o.choice %} <span class="chip">{{ _("선택") }}</span>{% endif %}</td>
-<td>{% if op["items"] %}{{ plan_items(op["items"]) }}{% else %}{{ _("지금 일정 그대로") }}{% endif %}</td></tr>
-{% endfor %}</tbody>
-</table>
-{% if p.status == "open" and user.can_decide %}
-<form method="post" action="/borrower/{{ applicant_id|path }}/plan" class="decision">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <input type="hidden" name="loan_id" value="{{ p.loan_id }}">
-  <input type="hidden" name="offer_id" value="{{ o.offer_id }}">
-  {% for op in o.options or () %}<button type="submit" name="option" value="{{ op.option }}">{{ _("%(plan)s 선택", plan=op.option|plan_option_label) }}</button> {% endfor %}
-</form>
-{% endif %}
-{% endif %}
-</article>
-{% endfor %}
-</section>
-
-<section id="notices">
-<h2>{{ _("받은 안내") }}</h2>
-{% set notices = plans|map(attribute="notices")|sum(start=[]) %}
-{% if notices %}
-<table>
-  <thead><tr><th>{{ _("날짜") }}</th><th>{{ _("안내") }}</th><th>{{ _("상태") }}</th></tr></thead>
-  <tbody>{% for n in notices|sort(attribute="on") %}
-<tr><td>{{ n.on }}</td><td>{{ n.text|mt_ref if n.text else n.script_id|script_label }}</td>
-<td>{{ n.status|contact_status_label }}{% if n.reason %} · {{ n.reason|contact_reason_label }}{% endif %}</td></tr>
+  <thead><tr><th>{{ _("신청번호") }}</th><th>{{ _("접수일") }}</th><th>{{ _("신청 금액") }}</th><th>{{ _("상태") }}</th></tr></thead>
+  <tbody>{% for r in rows %}
+<tr><td>{% if r.link %}<a href="/apply/{{ r.application_id|path }}">{{ r.application_id }}</a>{% else %}{{ r.application_id }}{% endif %}</td>
+<td>{{ r.received_on }}</td><td>{{ r.amount_krw|krw if r.amount_krw else "—" }}</td>
+<td><span class="apply-status s-{{ r.s.tone }}">{{ r.s.label }}</span>{% if r.s.amount_krw %} · {{ _("승인 금액") }} {{ r.s.amount_krw|krw }}{% endif %}</td></tr>
 {% endfor %}</tbody>
 </table>
 {% else %}
-<p>{{ _("받은 안내가 없습니다.") }}</p>
+<p>{{ _("신청 기록이 없습니다.") }}</p>
 {% endif %}
-</section>
-{% endif %}
-
-<section>
-<h2>{{ _("동의 관리") }}</h2>
-{% for c in consents %}
-<article class="consent">
-  <h3>{{ _(c.purpose) }} <span class="status c-{{ c.status }}">{{ c.status|consent_status }}</span> <small>{{ c.consent_id }}</small></h3>
-  <p>{% for s in c.scopes %}<span class="chip">{{ s|scope_label }}</span>{% endfor %} · {{ _("만료 %(date)s", date=c.expires_at) }}{% if c.ended_at %} · {{ _("종료 %(date)s", date=c.ended_at) }}{% endif %}</p>
-  {% if c.deletion_proof_id %}<p><a href="/consents/{{ c.deletion_proof_id|path }}/proof">{{ _("삭제 증명 보기") }}</a></p>{% endif %}
-  {% for n in c.notices or [] %}
-  <details><summary>{{ n.kind|notice_label }}: {{ n.title|mt }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body|mt_ref }}</p></details>
-  {% endfor %}
-  {% if c.status == "granted" and user.can_decide %}
-  <form method="post" action="/borrower/{{ applicant_id|path }}/consents/{{ c.consent_id|path }}/revoke" class="inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit">{{ _("동의 철회") }}</button>
-  </form>
-  {% endif %}
-</article>
-{% else %}
-<p>{{ _("동의 기록이 없습니다.") }}</p>
-{% endfor %}
-</section>
-
-<section>
-<h2>{{ _("이의제기") }}</h2>
-{% set decided = applications|selectattr("officer_decision")|list %}
-{% if decided and user.can_decide %}
-<form method="post" action="/borrower/{{ applicant_id|path }}/grievances" class="decision">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label>{{ _("신청") }} <select name="application_id">{% for a in decided %}<option value="{{ a.application_id }}"{% if form and form.application_id == a.application_id %} selected{% endif %}>{{ a.application_id }} · {{ a.status|status_label }}</option>{% endfor %}</select></label>
-  <label>{{ _("이의 내용(1000자 이내)") }} <textarea name="text" rows="4" maxlength="1000">{{ form.text if form else "" }}</textarea></label>
-  <button type="submit">{{ _("이의제기 제출") }}</button>
-</form>
-{% elif not decided %}
-<p>{{ _("결정이 난 신청이 없어 이의제기를 할 수 없습니다.") }}</p>
-{% endif %}
-{% for g in grievances %}
-<article class="grievance">
-  <h3>{{ g.application_id }} <span class="status g-{{ g.status }}">{{ g.status|grievance_status }}</span> <small>{{ g.grievance_id }} · {{ g.submitted_at }}</small></h3>
-  <p class="quote">{{ g.text|mt_ref }}</p>
-  {% if g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title|mt }}</summary><p class="notice">{{ g.reply.body|mt_ref }}</p></details>{% endif %}
-</article>
-{% endfor %}
-</section>
+<p><a href="/apply?applicant_id={{ applicant_id|urlencode }}">{{ _("새 신청") }}</a></p>
 {% endblock %}

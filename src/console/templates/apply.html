@@ -1,4 +1,6 @@
-{% extends "apply_base.html" %}
+{% extends "customer_base.html" %}
+{% set nav = "apply" %}
+{% block title %}{{ _("운전자금 대출 신청") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
 {% block main %}
 <h1>{{ _("운전자금 대출 신청") }}</h1>
 <p class="note">{{ _("마켓플레이스 정산 데이터로 심사합니다. 서류 제출 없이 데이터 이용에 동의하면 바로 신청됩니다.") }}</p>
@@ -9,7 +11,7 @@
     <h2>{{ _("신청 사업자") }}</h2>
     <label>{{ _("사업자(데모)") }}
       <select name="applicant_id">
-      {% for a in demo_applicants %}<option value="{{ a }}"{% if form and form.applicant_id == a %} selected{% endif %}>{{ a|seller_label }}</option>{% endfor %}
+      {% for a in demo_applicants %}<option value="{{ a }}"{% if (form and form.applicant_id == a) or (not form and applicant_id == a) %} selected{% endif %}>{{ a|seller_label }}</option>{% endfor %}
       </select>
     </label>
   </section>

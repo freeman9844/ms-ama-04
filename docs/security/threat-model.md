@@ -134,7 +134,7 @@ flowchart TB
 |---|---|---|
 | 기본 체크 해제 | 전체 동의를 기본값으로 밀지는 않으나, 데모는 범위별 opt-in UI가 없어 세 범위를 함께 발급한다(`src/orchestrator/journey/activities.py:176-177`) | 데모 완화 |
 | 범위별 개별 동의 | 토큰에 범위를 담고 Mock API가 요청별 범위만 강제하나(`src/mockapis/consent.py:66-67`), 발급 단위는 세 범위 묶음이라 범위별 동의는 미구현 | 미구현 |
-| 철회도 동의만큼 쉽게 | 차주 화면 버튼이 `consent-commands` 큐로 `revoke`를 보낸다(`src/console/app.py:401-414`) | 구현 |
+| 철회도 동의만큼 쉽게 | 고객 콘솔 `동의 관리` 메뉴의 `동의 철회` 버튼이 `consent-commands` 큐로 `revoke`를 보낸다(`src/console/app.py`의 `borrower_revoke`) | 구현 |
 | 만료일 명시 | 안내문에 만료일·철회 방법·삭제 항목 수를 사실로 기재(`src/agents/notices.py:34`) | 구현 |
 
 > 데모 시나리오에는 동의 철회 장면이 없다(만료 처리로 삭제·증명을 보여준다).

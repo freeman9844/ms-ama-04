@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends layout|default("base.html") %}
 {% block main %}
 <p class="ok">{{ message }}</p>
 <p><a href="{{ back_url }}">{{ _(back_label) }}</a></p>

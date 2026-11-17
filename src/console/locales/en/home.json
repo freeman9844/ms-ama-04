@@ -236,7 +236,6 @@
   "표준 정산 주기 기준 추정": "Estimated from standard settlement cycles",
   "플랜 변경 결정 형식이 올바르지 않습니다.": "The plan change decision format is invalid.",
   "플랜 변경 결정(%(decision)s)을 큐에 보냈습니다.": "Sent the plan change decision (%(decision)s) to the queue.",
-  "플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 차주 화면에 표시됩니다.": "Plan (%(label)s) selected. The result appears on the borrower screen once an officer confirms.",
   "플랜(%(label)s)을 선택했습니다. 지금 일정대로 상환합니다.": "Plan (%(label)s) selected. Repayment continues on the current schedule.",
   "합성 데이터 기준": "Synthetic data",
   "현금 버퍼(일, 오른쪽 축)": "Cash buffer (days, right axis)",

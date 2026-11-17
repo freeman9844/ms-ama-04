@@ -51,8 +51,9 @@ def test_csp_is_unchanged(client):
     ("/", '<li class="n-home active"><a href="/">신청</a></li>'),
     ("/loans", '<li class="n-loans active">'),
     ("/grievances", '<li class="n-grievances active">'),
-    ("/borrower", '<li class="n-borrower active">'),
     ("/ops", '<li class="n-ops active">'),
+    ("/apply", '<li class="n-apply active">'),
+    ("/borrower", '<li class="n-status active">'),
 ])
 def test_sidebar_marks_current_screen(client, path, item):
     html = page(client, path)

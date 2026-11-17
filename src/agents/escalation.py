@@ -63,7 +63,7 @@ def stage_message(stage: int, *, due_on: date, amount: int, balance: int | None,
 
 
 def plan_link(applicant_id: str) -> str:
-    return f"/borrower/{applicant_id}#self-plan"
+    return f"/borrower/{applicant_id}/plans"
 
 
 def auto_contact(ref: str, script_id: str, text: str, contacts: Sequence[Mapping[str, Any]], on: date) -> dict[str, Any]:

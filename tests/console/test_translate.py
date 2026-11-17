@@ -21,7 +21,7 @@ from shared.pseudonymize import tokens
 from shared.segments import AGE_BANDS, SELLER_INDUSTRIES
 from shared.sellers import DEMO_SELLERS, LOAD_BUSINESS_NAMES
 from tests.console.conftest import KEY, PROFILE
-from tests.console.test_i18n import EN_PAGES, HANGUL
+from tests.console.test_i18n import CUSTOMER_PAGES, EN_PAGES, HANGUL
 
 EN = i18n.CATALOGS["en"]
 
@@ -149,7 +149,7 @@ def test_machine_translation_rejects_token_loss():
     assert out[0] == "" and machine.lookup(masked) is None
 
 
-@pytest.mark.parametrize("page", [*EN_PAGES, "/borrower/seller-dailylook-01"])
+@pytest.mark.parametrize("page", [*EN_PAGES, *CUSTOMER_PAGES])
 def test_english_pages_leave_only_pending_machine_translation(mt, page):
     client, deps = mt
     r = client.get(page, headers={"Cookie": "lang=en"})
@@ -254,7 +254,7 @@ def test_english_detail_uses_stored_translation_without_browser_call(mt):
     assert deps.translations.calls == ["app-20261103-p01"]
 
 
-@pytest.mark.parametrize("page", [DETAIL, "/loans/app-20261103-p03", "/borrower/seller-dailylook-01"])
+@pytest.mark.parametrize("page", [DETAIL, "/loans/app-20261103-p03", *CUSTOMER_PAGES])
 def test_korean_page_does_not_read_translations(mt, page):
     client, deps = mt
     deps.translations = fixtures.InMemoryTranslations()

@@ -1,0 +1,8 @@
+{% extends "customer_base.html" %}
+{% set nav = "select" %}
+{% block title %}{{ _("내 대출 관리") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
+{% block main %}
+<h1>{{ _("내 대출 관리") }}</h1>
+<p>{{ _("고객(셀러)을 고르면 신청 현황·상환 플랜·받은 안내·동의 관리·이의제기 메뉴가 열립니다. 데모라 로그인한 사용자가 고객을 직접 고릅니다.") }}</p>
+<ul>{% for a in demo_applicants %}<li><a href="/borrower/{{ a|path }}">{{ a|seller_label }}</a></li>{% endfor %}</ul>
+{% endblock %}

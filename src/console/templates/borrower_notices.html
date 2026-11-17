@@ -1,0 +1,20 @@
+{% extends "customer_base.html" %}
+{% set nav = "notices" %}
+{% block title %}{{ _("받은 안내") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
+{% block main %}
+<h1>{{ _("받은 안내") }}</h1>
+<section id="notices">
+{% set notices = plans|map(attribute="notices")|sum(start=[]) %}
+{% if notices %}
+<table>
+  <thead><tr><th>{{ _("날짜") }}</th><th>{{ _("안내") }}</th><th>{{ _("상태") }}</th></tr></thead>
+  <tbody>{% for n in notices|sort(attribute="on") %}
+<tr><td>{{ n.on }}</td><td>{{ n.text|mt_ref if n.text else n.script_id|script_label }}</td>
+<td>{{ n.status|contact_status_label }}{% if n.reason %} · {{ n.reason|contact_reason_label }}{% endif %}</td></tr>
+{% endfor %}</tbody>
+</table>
+{% else %}
+<p>{{ _("받은 안내가 없습니다.") }}</p>
+{% endif %}
+</section>
+{% endblock %}

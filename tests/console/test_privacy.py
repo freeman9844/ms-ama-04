@@ -1,4 +1,4 @@
-"""P5b 콘솔: 차주 시뮬레이터(동의 철회·이의제기), 동의 데모 버튼, 삭제 증명, 이의제기 처리."""
+"""P5b 콘솔: 고객 콘솔 내 대출 관리(동의 철회·이의제기), 동의 데모 버튼, 삭제 증명, 이의제기 처리."""
 import base64
 import json
 import re
@@ -161,48 +161,93 @@ def post(client, headers, path, token_path, **form):
     return client.post(path, headers=headers, data={"csrf": csrf(client, headers, token_path)} | form)
 
 
-# ── 차주 시뮬레이터 ──
+# ── 고객 콘솔(내 대출 관리) ──
 
-def test_nav_links_borrower_and_grievances(env):
+CUSTOMER = principal(oid="oid-seller", name="김셀러")
+HOME = "/borrower/seller-dailylook-01"
+
+
+def test_officer_sidebar_links_customer_console_and_grievances(env):
     client, _, _ = env
     page = client.get("/", headers=OFFICER).text
-    assert 'href="/borrower"' in page and 'href="/grievances"' in page
+    assert 'class="customer-link" href="/apply"' in page and 'href="/grievances"' in page
+    assert 'href="/borrower"' not in page
 
 
 def test_borrower_index_lists_demo_applicants(env):
     client, _, _ = env
-    page = client.get("/borrower", headers=OFFICER).text
+    page = client.get("/borrower", headers=CUSTOMER).text
     assert 'href="/borrower/seller-dailylook-01"' in page and 'href="/borrower/seller-candle-05"' in page
+    assert '<li class="n-status active"><a href="/borrower">' in page
 
 
-def test_borrower_page_shows_own_consents_notices_and_grievances(env):
+def test_customer_menu_links_every_page_of_the_chosen_seller(env):
     client, _, _ = env
-    page = client.get("/borrower/seller-dailylook-01", headers=OFFICER).text
+    page = client.get(HOME, headers=CUSTOMER).text
+    for sub in ("", "/plans", "/notices", "/consents", "/grievances"):
+        assert f'href="{HOME}{sub}"' in page
+    assert 'href="/apply?applicant_id=seller-dailylook-01"' in page and 'href="/borrower">' in page
+    assert '<li class="n-status active">' in page
+
+
+@pytest.mark.parametrize("path", ["/borrower", HOME, f"{HOME}/plans", f"{HOME}/consents", f"{HOME}/consents/c-0/proof"])
+def test_customer_pages_need_login_only(env, path):
+    client, _, _ = env
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers=CUSTOMER).status_code == 200
+
+
+def test_unknown_customer_menu_is_404(env):
+    client, _, _ = env
+    assert client.get(f"{HOME}/status", headers=CUSTOMER).status_code == 404
+    assert client.get(f"{HOME}/nope", headers=CUSTOMER).status_code == 404
+
+
+def test_status_page_lists_own_applications_with_customer_status(env):
+    client, _, _ = env
+    page = client.get(HOME, headers=CUSTOMER).text
+    assert "app-1" in page and "app-2" in page and "app-9" not in page
+    assert "승인" in page and "15,000,000원" in page and "심사" in page
+
+
+def test_consents_page_shows_own_consents_notices_proof_and_revoke(env):
+    client, _, _ = env
+    page = client.get(f"{HOME}/consents", headers=CUSTOMER).text
+    assert '<li class="n-consents active">' in page
     assert "c-1" in page and "c-0" in page and "c-9" not in page
     assert "계좌 거래내역" in page and "운전자금 대출 심사" in page
     assert "유효" in page and "만료" in page
     assert "동의 만료 예정 안내" in page and "2027년 1월 30일에 만료됩니다." in page
-    assert 'href="/consents/c-0/proof"' in page
+    assert f'href="{HOME}/consents/c-0/proof"' in page
     # 철회는 유효한 동의에만 있다.
-    assert 'action="/borrower/seller-dailylook-01/consents/c-1/revoke"' in page
+    assert f'action="{HOME}/consents/c-1/revoke"' in page
     assert "/consents/c-0/revoke" not in page
-    # 이의제기는 결정이 난 자기 신청에만 낼 수 있다.
+
+
+def test_grievances_page_offers_only_own_decided_applications(env):
+    client, _, _ = env
+    page = client.get(f"{HOME}/grievances", headers=CUSTOMER).text
+    assert '<li class="n-grievances active">' in page
     assert re.search(r'<option value="app-2"', page) and not re.search(r'<option value="app-1"', page)
     assert "원결정을 유지합니다." in page and "처리 대기" in page
     assert "&lt;b&gt;한도&lt;/b&gt;" in page
 
 
-def test_auditor_sees_borrower_page_without_forms(env):
+def test_customer_proof_page_uses_customer_layout_and_checks_owner(env):
     client, _, _ = env
-    page = client.get("/borrower/seller-dailylook-01", headers=AUDITOR_H).text
-    assert "c-1" in page and "/revoke" not in page and 'name="csrf"' not in page
+    page = client.get(f"{HOME}/consents/c-0/proof", headers=CUSTOMER).text
+    assert "transactions.json" in page and "customer-shell" in page
+    assert f'href="{HOME}/consents"' in page and 'href="/applications/app-2"' not in page
+    other = "/borrower/seller-knitroom-04/consents/c-0/proof"
+    assert client.get(other, headers=CUSTOMER).status_code == 404
+    assert client.get(f"{HOME}/consents/c-1/proof", headers=CUSTOMER).status_code == 404
 
 
 def test_revoke_sends_consent_command_as_borrower(env):
     client, queue, _ = env
-    path = "/borrower/seller-dailylook-01"
-    resp = post(client, OFFICER, f"{path}/consents/c-1/revoke", path)
+    resp = post(client, CUSTOMER, f"{HOME}/consents/c-1/revoke", f"{HOME}/consents")
     assert resp.status_code == 202
+    assert f'href="{HOME}/consents"' in resp.text and "customer-shell" in resp.text
     assert queue.sent == [("consent-commands", {"consent_id": "c-1", "action": "revoke",
                                                 "requested_by": "borrower:seller-dailylook-01", "application_id": "app-1"})]
 
@@ -210,27 +255,26 @@ def test_revoke_sends_consent_command_as_borrower(env):
 @pytest.mark.parametrize("consent_id, status", [("c-9", 404), ("c-x", 404), ("c-0", 409)])
 def test_revoke_only_own_granted_consent(env, consent_id, status):
     client, queue, _ = env
-    path = "/borrower/seller-dailylook-01"
-    assert post(client, OFFICER, f"{path}/consents/{consent_id}/revoke", path).status_code == status
+    path = f"{HOME}/consents"
+    assert post(client, CUSTOMER, f"{HOME}/consents/{consent_id}/revoke", path).status_code == status
     assert queue.sent == []
 
 
-def test_borrower_posts_need_csrf_and_decider_role(env):
+def test_borrower_posts_need_login_and_csrf(env):
     client, queue, _ = env
-    path = "/borrower/seller-dailylook-01"
-    token = csrf(client, OFFICER, path)
-    assert client.post(f"{path}/consents/c-1/revoke", headers=OFFICER, data={"csrf": ""}).status_code == 403
-    assert client.post(f"{path}/consents/c-1/revoke", headers=AUDITOR_H, data={"csrf": token}).status_code == 403
-    assert client.post(f"{path}/grievances", headers=AUDITOR_H,
-                       data={"csrf": token, "application_id": "app-2", "text": "x"}).status_code == 403
+    token = csrf(client, CUSTOMER, f"{HOME}/consents")
+    assert client.post(f"{HOME}/consents/c-1/revoke", headers=CUSTOMER, data={"csrf": ""}).status_code == 403
+    assert client.post(f"{HOME}/consents/c-1/revoke", data={"csrf": token}).status_code == 401
+    assert client.post(f"{HOME}/grievances", data={"csrf": token, "application_id": "app-2", "text": "x"}).status_code == 401
     assert queue.sent == []
 
 
 def test_grievance_submission_is_enqueued(env):
     client, queue, _ = env
-    path = "/borrower/seller-dailylook-01"
-    resp = post(client, OFFICER, f"{path}/grievances", path, application_id="app-2", text="  한도가 낮습니다  ")
+    path = f"{HOME}/grievances"
+    resp = post(client, CUSTOMER, path, path, application_id="app-2", text="  한도가 낮습니다  ")
     assert resp.status_code == 202
+    assert f'href="{path}"' in resp.text
     assert queue.sent == [("grievances", {"grievance_id": "grv-new001", "application_id": "app-2",
                                           "applicant_id": "seller-dailylook-01", "text": "한도가 낮습니다"})]
 
@@ -244,8 +288,11 @@ def test_grievance_submission_is_enqueued(env):
 ])
 def test_grievance_submission_validation(env, fields, status):
     client, queue, _ = env
-    path = "/borrower/seller-dailylook-01"
-    assert post(client, OFFICER, f"{path}/grievances", path, **fields).status_code == status
+    path = f"{HOME}/grievances"
+    resp = post(client, CUSTOMER, path, path, **fields)
+    assert resp.status_code == status
+    if status == 422:
+        assert '<li class="n-grievances active">' in resp.text
     assert queue.sent == []
 
 
@@ -399,7 +446,7 @@ def test_english_borrower_page_merges_entities_and_stored_translations_of_each_a
     from console.app import create_app
 
     client, deps = _borrower_env(env, raw)
-    path = "/borrower/seller-dailylook-01"
+    path = "/borrower/seller-dailylook-01/grievances"
     first = _english(client, path)
     assert first.status_code == 200 and deps.translations.calls == ["app-1", "app-2"]
     pending = [p for p in _pending(first) if "[[" in p and "문의" in p]
@@ -421,10 +468,10 @@ def test_english_borrower_page_with_one_unreadable_source_sends_nothing(env, raw
             return real.get_json(container, name)
 
     deps.raw = OneBroken()
-    en = _english(client, "/borrower/seller-dailylook-01")
+    en = _english(client, "/borrower/seller-dailylook-01/grievances")
     assert en.status_code == 200 and "data-mt=" not in en.text and "문의" in en.text
     deps.raw = real
-    assert _pending(_english(client, "/borrower/seller-dailylook-01"))
+    assert _pending(_english(client, "/borrower/seller-dailylook-01/grievances"))
 
 
 def test_uphold_decision_is_sent_with_principal(env):
@@ -508,6 +555,7 @@ def test_privacy_pages_404_when_not_configured(make_doc, raw, key):
 
 PLAN_PATH = "/borrower/seller-dailylook-01/plan"
 BORROWER = "/borrower/seller-dailylook-01"
+PLANS = f"{BORROWER}/plans"
 
 
 @pytest.fixture
@@ -528,13 +576,13 @@ def self_plan(page):
 
 
 def choose(client, **form):
-    return post(client, OFFICER, PLAN_PATH, BORROWER, **({"loan_id": "app-1", "offer_id": "of-rp-1"} | form))
+    return post(client, CUSTOMER, PLAN_PATH, f"{BORROWER}/consents", **({"loan_id": "app-1", "offer_id": "of-rp-1"} | form))
 
 
 def test_borrower_sees_open_offer_with_option_schedules(plan_env):
     client, _ = plan_env(plan_loan(offer_status="open", change_status=None, holds=("customer_response",),
                                    status="awaiting_customer"))
-    section = self_plan(client.get(BORROWER, headers=OFFICER).text)
+    section = self_plan(client.get(PLANS, headers=CUSTOMER).text)
     assert "상환 플랜 제안" in section
     for s in ("상환일 이동", "분할납부", "지금 일정 유지", "3회차", "2026-11-30 → 2026-12-04", "1,779,000원",
               "3-1회차", "3-2회차", "889,500원"):
@@ -543,9 +591,6 @@ def test_borrower_sees_open_offer_with_option_schedules(plan_env):
     assert 'name="loan_id" value="app-1"' in section and 'name="offer_id" value="of-rp-1"' in section
     for option in ("move", "split", "keep"):
         assert f'name="option" value="{option}"' in section
-    # 감사자는 보기만 한다.
-    auditor = self_plan(client.get(BORROWER, headers=AUDITOR_H).text)
-    assert "분할납부" in auditor and f'action="{PLAN_PATH}"' not in auditor
 
 
 def test_borrower_choice_queues_plan_choice(plan_env):
@@ -553,6 +598,7 @@ def test_borrower_choice_queues_plan_choice(plan_env):
                                        status="awaiting_customer"))
     resp = choose(client, option="move")
     assert resp.status_code == 202, resp.text
+    assert f'href="{PLANS}"' in resp.text and "상환 플랜 메뉴" in resp.text
     assert queue.sent == [("restructure-decisions", {"kind": "plan_choice", "loan_id": "app-1",
                                                      "offer_id": "of-rp-1", "option": "move"})]
 
@@ -574,14 +620,14 @@ def test_borrower_choice_unknown_option_is_422(plan_env):
     assert choose(client, option="move").status_code == 422
     assert choose(client, option="later").status_code == 422
     assert queue.sent == []
-    # 다른 차주의 대출·없는 대출은 404, 감사자는 403.
+    # 다른 차주의 대출·없는 대출은 404, 로그인이 없으면 401.
     other = plan_loan(offer_status="open", change_status=None) | {"applicant_id": "seller-knitroom-04"}
     client2, queue2 = plan_env(other)
     assert choose(client2, option="keep").status_code == 404
     assert choose(client2, option="keep", loan_id="app-x").status_code == 404
-    token = csrf(client, OFFICER, BORROWER)
-    assert client.post(PLAN_PATH, headers=AUDITOR_H, data={"csrf": token, "loan_id": "app-1", "offer_id": "of-rp-1",
-                                                           "option": "keep"}).status_code == 403
+    token = csrf(client, CUSTOMER, f"{BORROWER}/consents")
+    assert client.post(PLAN_PATH, data={"csrf": token, "loan_id": "app-1", "offer_id": "of-rp-1",
+                                         "option": "keep"}).status_code == 401
     assert queue2.sent == []
 
 
@@ -589,7 +635,7 @@ def test_expired_offer_is_shown_as_expired(plan_env):
     loan = plan_loan(offer_status="expired", change_status=None, holds=(), status="awaiting_resume")
     loan["repayment"]["offer"].update(choice=None, expired_at=NOW.isoformat(), expired_by="oid-officer")
     client, _ = plan_env(loan)
-    section = self_plan(client.get(BORROWER, headers=OFFICER).text)
+    section = self_plan(client.get(PLANS, headers=CUSTOMER).text)
     assert "만료" in section and f'action="{PLAN_PATH}"' not in section and "oid-officer" not in section
 
 
@@ -604,7 +650,7 @@ def test_responded_offer_shows_result_without_buttons(plan_env, offer_status, ch
     if change_status in ("approved", "declined"):
         loan["repayment"]["plan_change"].update(officer_id="oid-officer", decided_at=NOW.isoformat(), reason="내부 메모")
     client, _ = plan_env(loan)
-    section = self_plan(client.get(BORROWER, headers=OFFICER).text)
+    section = self_plan(client.get(PLANS, headers=CUSTOMER).text)
     assert text in section and f'action="{PLAN_PATH}"' not in section
     assert "oid-officer" not in section and "내부 메모" not in section
     if offer_status == "kept":
@@ -624,10 +670,11 @@ def test_borrower_sees_received_notices(plan_env):
          "officer_id": "oid-officer"},
     ]}}
     client, _ = plan_env(plan_loan(offer_status="open", change_status=None), contacts)
-    page = client.get(BORROWER, headers=OFFICER).text
+    page = client.get(f"{BORROWER}/notices", headers=CUSTOMER).text
     start = page.index('id="notices"')
     section = page[start:page.index("</section>", start)]
-    for s in ("받은 안내", "2026-09-10", "잔고 부족 예상 안내 문구입니다.", "2026-11-25", "5일 전 추가 안내 문구입니다.",
+    assert '<li class="n-notices active">' in page
+    for s in ("2026-09-10", "잔고 부족 예상 안내 문구입니다.", "2026-11-25", "5일 전 추가 안내 문구입니다.",
               "보류", "2026-10-01", "심사역이 승인한 안내 문구입니다.", "발송"):
         assert s in section, s
     assert section.index("2026-09-10") < section.index("2026-10-01") < section.index("2026-11-25")
@@ -637,8 +684,8 @@ def test_borrower_sees_received_notices(plan_env):
     assert "oid-officer" not in section
 
 
-def test_borrower_page_without_loan_has_no_plan_section(plan_env):
+def test_plans_page_without_own_loan_has_no_offer(plan_env):
     loan = plan_loan(offer_status="open", change_status=None) | {"applicant_id": "seller-knitroom-04"}
     client, _ = plan_env(loan)
-    page = client.get(BORROWER, headers=OFFICER).text
-    assert 'id="self-plan"' not in page and "c-1" in page
+    section = self_plan(client.get(PLANS, headers=CUSTOMER).text)
+    assert "실행된 대출이 없습니다." in section and "<form" not in section

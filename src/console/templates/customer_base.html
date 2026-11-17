@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="{{ locale() }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% block head %}{% endblock %}
+<title>{% block title %}AMA Lending {{ _("고객 콘솔") }}{% endblock %}</title>
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body>
+<div class="shell customer-shell">
+<aside class="sidebar">
+  <a class="brand" href="/apply">AMA Lending <small>{{ _("고객 콘솔") }}</small></a>
+  <nav aria-label="{{ _('고객 메뉴') }}">
+    <ul>
+      <li class="n-apply{% if nav == 'apply' %} active{% endif %}"><a href="/apply{% if applicant_id %}?applicant_id={{ applicant_id|urlencode }}{% endif %}">{{ _("대출 신청") }}</a></li>
+      {% if applicant_id %}{% set base = "/borrower/" ~ (applicant_id|path) %}
+      <li class="n-status{% if nav == 'status' %} active{% endif %}"><a href="{{ base }}">{{ _("신청 현황") }}</a></li>
+      <li class="n-plans{% if nav == 'plans' %} active{% endif %}"><a href="{{ base }}/plans">{{ _("상환 플랜") }}</a></li>
+      <li class="n-notices{% if nav == 'notices' %} active{% endif %}"><a href="{{ base }}/notices">{{ _("받은 안내") }}</a></li>
+      <li class="n-consents{% if nav == 'consents' %} active{% endif %}"><a href="{{ base }}/consents">{{ _("동의 관리") }}</a></li>
+      <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="{{ base }}/grievances">{{ _("이의제기") }}</a></li>
+      {% else %}
+      <li class="n-status{% if nav == 'select' %} active{% endif %}"><a href="/borrower">{{ _("내 대출 관리") }}</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+  <div class="who">
+    {% if applicant_id %}<span class="who-name">{{ applicant_id|seller_label }}</span>
+    <a href="/borrower">{{ _("고객 변경") }}</a>{% else %}<span>{{ _("고객을 선택하면 메뉴가 열립니다.") }}</span>{% endif %}
+    {% include "_lang.html" %}
+  </div>
+</aside>
+<div class="content">
+{% if demo %}<p class="demo-banner" role="note">{{ _("데모 환경입니다. 실제 대출이 실행되지 않으며 데이터는 모두 가상입니다.") }}</p>{% endif %}
+{% if mt_on %}<p class="mt-note" data-mt-note hidden>{{ _("점선 밑줄 문구는 기계 번역입니다. 마우스를 올리면 원문이 보입니다. 원문이 기준입니다.") }}</p>{% endif %}
+<main>
+{% block main %}{% endblock %}
+</main>
+</div>
+</div>
+{% block scripts %}{% endblock %}
+{% if mt_on %}<script src="/static/mt.js?v={{ mt_js_version }}" defer></script>{% endif %}
+</body>
+</html>

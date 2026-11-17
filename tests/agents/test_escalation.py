@@ -45,12 +45,12 @@ def test_stage_message_script_ids_and_balance():
 
 
 def test_self_plan_offer_has_link_and_options():
-    _, text = stage_message(2, due_on=date(2026, 12, 2), amount=1, balance=None, link="/borrower/s#self-plan")
-    assert "/borrower/s#self-plan" in text and "나눠" in text and "정산" in text
+    _, text = stage_message(2, due_on=date(2026, 12, 2), amount=1, balance=None, link="/borrower/s/plans")
+    assert "/borrower/s/plans" in text and "나눠" in text and "정산" in text
 
 
 def test_plan_link():
-    assert plan_link("seller-x") == "/borrower/seller-x#self-plan"
+    assert plan_link("seller-x") == "/borrower/seller-x/plans"
 
 
 def test_sim_now_is_10am_kst():

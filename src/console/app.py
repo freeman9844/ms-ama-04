@@ -2,8 +2,8 @@
 
 인증은 Container Apps 기본 인증(Easy Auth)이 맡고, 앱은 X-MS-CLIENT-PRINCIPAL의 앱 역할로 권한을 정한다.
 결정·신규 신청·사후 재생·재조정 결정·동의 명령·이의제기는 큐 메시지로만 오케스트레이터에 전달한다
-(콘솔은 Cosmos 읽기 전용). /borrower는 차주 화면을 흉내 낸 데모 시뮬레이터이고,
-/apply는 콘솔 역할 없이 셀러가 직접 신청하는 고객 페이지다.
+(콘솔은 Cosmos 읽기 전용). /apply·/borrower는 콘솔 역할 없이 셀러가 직접 신청하고 신청 현황·상환 플랜·
+안내·동의·이의제기를 보는 고객 콘솔이다(데모라 로그인한 사용자가 고객을 고른다).
 """
 
 import hashlib
@@ -126,6 +126,11 @@ MONITORING_REFRESH_SECONDS = 7
 WATCH_LIMIT = 12
 # 고객 신청 현황(/apply/{id})이 문서 생성을 기다리는 최대 새로 고침 횟수(3초 × 40 = 2분).
 APPLY_WAIT_LIMIT = 40
+# 고객 콘솔 '내 대출 관리' 메뉴(경로 끝 이름 → 템플릿). status는 /borrower/{id} 자체다.
+BORROWER_PAGES = {
+    "status": "borrower.html", "plans": "borrower_plans.html", "notices": "borrower_notices.html",
+    "consents": "borrower_consents.html", "grievances": "borrower_grievances.html",
+}
 # 접수한 심사역 결정 표시의 최대 유지 시간. 큐 처리가 멈춰도 이 시간이 지나면 다시 결정할 수 있다.
 DECISION_MARK_SECONDS = 300
 HTMX_SRC = "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js"
@@ -537,15 +542,17 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                       ttl_days=CONSENT_TTL_DAYS, **ctx)
 
     @app.get("/apply", response_class=HTMLResponse)
-    def apply_page(request: Request) -> HTMLResponse:
-        return apply_form(customer(request))
+    def apply_page(request: Request, applicant_id: str | None = None) -> HTMLResponse:
+        return apply_form(customer(request), applicant_id=applicant_id if applicant_id in DEMO_APPLICANTS else None)
 
     @app.post("/apply")
     def apply_submit(posted: Posted = Depends(customer_form)):
         user, form = posted.user, posted.form
         code = validate_apply(form, DEMO_APPLICANTS)
         if code:
-            return apply_form(user, 422, error=_(APPLY_ERRORS[code]), error_code=code, form=form)
+            chosen = form.get("applicant_id", "").strip()
+            return apply_form(user, 422, error=_(APPLY_ERRORS[code]), error_code=code, form=form,
+                              applicant_id=chosen if chosen in DEMO_APPLICANTS else None)
         req = StartRequest(
             application_id=deps.new_application_id(),
             applicant_id=form["applicant_id"].strip(),
@@ -566,7 +573,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         wait_url = None if doc else retry_url(request, f"/apply/{quote(application_id, safe='')}", APPLY_WAIT_LIMIT)
         return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
                       seller=seller_label(doc["applicant_id"]) if doc else None, waiting=doc is None,
-                      wait_url=wait_url)
+                      wait_url=wait_url, applicant_id=doc.get("applicant_id") if doc else None)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
     def show(application_id: str, request: Request) -> HTMLResponse:
@@ -889,10 +896,20 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "privacy views not configured")
         return deps.privacy
 
-    def sent(user: Principal, message: str, back_url: str, back_label: str) -> HTMLResponse:
-        return render("privacy_sent.html", user, 202, message=message, back_url=back_url, back_label=back_label)
+    def sent(user: Principal, message: str, back_url: str, back_label: str, **ctx: Any) -> HTMLResponse:
+        return render("privacy_sent.html", user, 202, message=message, back_url=back_url, back_label=back_label, **ctx)
 
-    def borrower_page(user: Principal, applicant_id: str, status_code: int = 200, **ctx: Any) -> HTMLResponse:
+    def customer_sent(user: Principal, applicant_id: str, page: str, message: str) -> HTMLResponse:
+        back = {"plans": _("상환 플랜으로"), "consents": _("동의 관리로"), "grievances": _("이의제기로")}[page]
+        return sent(user, message, borrower_url(applicant_id, page), back,
+                    layout="customer_base.html", applicant_id=applicant_id, nav=page)
+
+    def borrower_url(applicant_id: str, page: str = "status") -> str:
+        base = f"/borrower/{quote(applicant_id, safe='')}"
+        return base if page == "status" else f"{base}/{page}"
+
+    def borrower_page(user: Principal, applicant_id: str, page: str = "status", status_code: int = 200,
+                      **ctx: Any) -> HTMLResponse:
         store = privacy()
         consents = store.consents_for_applicant(applicant_id)
         applications = []
@@ -900,10 +917,16 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             doc = deps.store.get(application_id)
             if doc is not None and doc.get("applicant_id") == applicant_id:
                 applications.append(doc)
-        loans = borrower_loans(applicant_id, applications)
+        loans = borrower_loans(applicant_id, applications) if page in {"plans", "notices"} else []
+        rows = [
+            {"application_id": doc["application_id"], "received_on": str(doc.get("submitted_at") or "")[:10],
+             "amount_krw": doc.get("requested_amount_krw"), "s": customer_status(doc),
+             "link": doc.get("source") == "customer"}
+            for doc in sorted(applications, key=lambda d: str(d.get("submitted_at") or ""), reverse=True)
+        ]
         return render(
-            "borrower.html", user, status_code, texts=borrower_texts(applications, loans),
-            applicant_id=applicant_id, consents=consents,
+            BORROWER_PAGES[page], user, status_code, texts=borrower_texts(applications, loans),
+            applicant_id=applicant_id, consents=consents, rows=rows,
             applications=applications, grievances=store.grievances_for_applicant(applicant_id),
             plans=borrower_plans(loans), **ctx,
         )
@@ -925,7 +948,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return plans
 
     def borrower_texts(applications: list[dict[str, Any]], loans: list[dict[str, Any]]) -> PageTexts | None:
-        """차주 화면은 여러 신청이 섞이므로 신청·대출 원천의 엔티티를 합쳐 가명처리한다."""
+        """고객 콘솔 화면은 여러 신청이 섞이므로 신청·대출 원천의 엔티티를 합쳐 가명처리한다."""
         if i18n.current() == i18n.DEFAULT:
             return None
         cases, readable = [], True
@@ -944,16 +967,34 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
     @app.get("/borrower", response_class=HTMLResponse)
     def borrower_index(request: Request) -> HTMLResponse:
-        user = viewer(request)
+        user = customer(request)
         privacy()
-        return render("borrower_index.html", user)
+        return render("customer_select.html", user)
 
     @app.get("/borrower/{applicant_id}", response_class=HTMLResponse)
     def borrower(applicant_id: str, request: Request) -> HTMLResponse:
-        return borrower_page(viewer(request), applicant_id)
+        return borrower_page(customer(request), applicant_id)
+
+    @app.get("/borrower/{applicant_id}/{page}", response_class=HTMLResponse)
+    def borrower_menu(applicant_id: str, page: str, request: Request) -> HTMLResponse:
+        user = customer(request)
+        if page not in BORROWER_PAGES or page == "status":
+            raise HTTPException(404, "unknown page")
+        return borrower_page(user, applicant_id, page)
+
+    @app.get("/borrower/{applicant_id}/consents/{consent_id}/proof", response_class=HTMLResponse)
+    def borrower_proof(applicant_id: str, consent_id: str, request: Request) -> HTMLResponse:
+        user = customer(request)
+        store = privacy()
+        consent = store.get_consent(consent_id)
+        doc = store.get_proof(consent_id) if consent and consent.get("applicant_id") == applicant_id else None
+        if doc is None:
+            raise HTTPException(404, "deletion proof not found")
+        return render("proof.html", user, p=doc, layout="customer_base.html", applicant_id=applicant_id,
+                      nav="consents", back_url=borrower_url(applicant_id, "consents"), back_label=_("동의 관리로"))
 
     @app.post("/borrower/{applicant_id}/consents/{consent_id}/revoke", response_class=HTMLResponse)
-    def borrower_revoke(applicant_id: str, consent_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+    def borrower_revoke(applicant_id: str, consent_id: str, posted: Posted = Depends(customer_form)) -> HTMLResponse:
         user = posted.user
         doc = privacy().get_consent(consent_id)
         if doc is None or doc.get("applicant_id") != applicant_id:
@@ -965,12 +1006,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             application_id=doc.get("application_id"),
         )
         deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
-        back = f"/borrower/{quote(applicant_id, safe='')}"
-        return sent(user, _("동의 %(id)s 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.", id=consent_id),
-                    back, _("차주 화면으로"))
+        return customer_sent(user, applicant_id, "consents", _(
+            "동의 %(id)s 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.", id=consent_id))
 
     @app.post("/borrower/{applicant_id}/grievances", response_class=HTMLResponse)
-    def borrower_grievance(applicant_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+    def borrower_grievance(applicant_id: str, posted: Posted = Depends(customer_form)) -> HTMLResponse:
         user, form = posted.user, posted.form
         privacy()
         application_id = form.get("application_id", "")
@@ -985,14 +1025,14 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 text=form.get("text", ""),
             )
         except ValidationError:
-            return borrower_page(user, applicant_id, 422, error=_("이의 내용은 1~1000자로 입력해야 합니다."), form=form)
+            return borrower_page(user, applicant_id, "grievances", 422,
+                                 error=_("이의 내용은 1~1000자로 입력해야 합니다."), form=form)
         deps.queue.send(GRIEVANCE_QUEUE, message.model_dump(mode="json"))
-        back = f"/borrower/{quote(applicant_id, safe='')}"
-        return sent(user, _("이의제기 %(id)s를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.", id=message.grievance_id),
-                    back, _("차주 화면으로"))
+        return customer_sent(user, applicant_id, "grievances", _(
+            "이의제기 %(id)s를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.", id=message.grievance_id))
 
     @app.post("/borrower/{applicant_id}/plan", response_class=HTMLResponse)
-    def borrower_plan_choice(applicant_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
+    def borrower_plan_choice(applicant_id: str, posted: Posted = Depends(customer_form)) -> HTMLResponse:
         """셀프 상환 플랜 선택. 만료(고객 응답 없이 계속)·응답이 끝난 제안에는 고를 수 없다(409)."""
         user, form = posted.user, posted.form
         loan = monitoring_store().get_loan(form.get("loan_id", ""))
@@ -1000,19 +1040,19 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "loan not found")
         offer = (loan.get("repayment") or {}).get("offer")
         if not offer or offer.get("status") != "open" or offer.get("offer_id") != form.get("offer_id"):
-            return borrower_page(user, applicant_id, 409, error=_("이미 마감된 상환 플랜 제안입니다."))
+            return borrower_page(user, applicant_id, "plans", 409, error=_("이미 마감된 상환 플랜 제안입니다."))
         option = form.get("option", "")
         if option not in {o.get("option") for o in offer.get("options") or ()}:
-            return borrower_page(user, applicant_id, 422, error=_("제안에 없는 플랜입니다."))
+            return borrower_page(user, applicant_id, "plans", 422, error=_("제안에 없는 플랜입니다."))
         try:
             message = PlanChoice(kind="plan_choice", loan_id=loan["id"], offer_id=offer["offer_id"], option=option)
         except ValidationError:
-            return borrower_page(user, applicant_id, 422, error=_("제안에 없는 플랜입니다."))
+            return borrower_page(user, applicant_id, "plans", 422, error=_("제안에 없는 플랜입니다."))
         deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
         label = i18n.label(PLAN_OPTION_LABELS, message.option)
         text = (_("플랜(%(label)s)을 선택했습니다. 지금 일정대로 상환합니다.", label=label) if message.option == "keep"
-                else _("플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 차주 화면에 표시됩니다.", label=label))
-        return sent(user, text, f"/borrower/{quote(applicant_id, safe='')}#self-plan", _("차주 화면으로"))
+                else _("플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 상환 플랜 메뉴에 표시됩니다.", label=label))
+        return customer_sent(user, applicant_id, "plans", text)
 
     @app.post("/applications/{application_id}/consents/{consent_id}/{action}", response_class=HTMLResponse)
     def consent_demo(application_id: str, consent_id: str, action: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:

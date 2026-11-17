@@ -28,7 +28,7 @@ SCOPE_LABELS = {
     "pg": "카드·PG 정산 내역",
     "marketplace": "마켓 판매 성과",
 }
-REVOKE_PATH = "차주 화면의 '동의 관리'에서 '동의 철회'"
+REVOKE_PATH = "고객 콘솔 '동의 관리' 메뉴의 '동의 철회'"
 REVOKE_KEYWORDS = ("동의 관리", "동의 철회")
 REASON_LABELS = {"expired": "동의 기간 만료", "revoked": "동의 철회"}
 RETAINED = "심사 판단 기록(파생 지표와 근거 ID)"

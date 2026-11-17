@@ -57,6 +57,24 @@ def test_apply_page_needs_login_but_no_console_role(env):
     assert "사후 모니터링" not in html
 
 
+def test_apply_page_preselects_known_applicant_and_opens_its_menu(env):
+    client, _, _ = env
+    html = client.get("/apply?applicant_id=seller-candle-05", headers=CUSTOMER).text
+    assert '<option value="seller-candle-05" selected>' in html
+    assert '<li class="n-apply active">' in html and 'href="/borrower/seller-candle-05/grievances"' in html
+    unknown = client.get("/apply?applicant_id=nope", headers=CUSTOMER).text
+    assert " selected>" not in unknown and "/borrower/nope" not in unknown and 'href="/borrower"' in unknown
+
+
+def test_status_page_opens_menu_of_its_applicant_and_points_declined_to_grievances(env):
+    client, store, _ = env
+    store.docs["app-cust"]["status"] = "declined"
+    html = client.get("/apply/app-cust", headers=CUSTOMER).text
+    applicant = store.docs["app-cust"]["applicant_id"]
+    assert f'<li class="n-status active"><a href="/borrower/{applicant}">' in html
+    assert "이의제기 메뉴" in html and "고객센터" not in html
+
+
 def test_valid_application_is_enqueued_as_customer(env):
     client, _, queue = env
     response = apply(client)
