@@ -50,6 +50,19 @@ def test_secrets_and_emails():
     ]
 
 
+def test_windows_user_path_any_case():
+    rules = [f.rule for f in scan_text("c:\\users\\someone\\x\nC:\\USERS\\someone")]
+    assert rules == ["user_path", "user_path"]
+
+
+def test_fine_grained_github_pat():
+    assert [f.rule for f in scan_text("github_pat_11ABCDEFG0123456789_abcdefghij")] == ["secret"]
+
+
+def test_guid_joined_to_word_character():
+    assert [f.rule for f in scan_text("rg_9f4014cf-b673-466c-9f7e-9ae4c3db7387")] == ["guid"]
+
+
 def test_excerpt_does_not_leak_value(tmp_path):
     [f] = scan_text("x\nid 9f4014cf-b673-466c-9f7e-9ae4c3db7387", path="p.md")
     assert (f.path, f.line, f.excerpt) == ("p.md", 2, "9f40…")

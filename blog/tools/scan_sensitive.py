@@ -16,16 +16,19 @@ from typing import Iterable
 SCAN_SUFFIXES = {".md", ".html", ".yml"}
 DENYLIST_ENV = "BLOG_DENYLIST"
 
-_GUID = re.compile(r"\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b")
+_GUID = re.compile(
+    r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f])"
+)
 # 앞뒤로 숫자나 `.숫자`가 이어지면(버전 문자열 등) IP로 보지 않는다.
 _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_USER_PATH = re.compile(r"[A-Za-z]:\\{1,2}Users\\{1,2}|/Users/|/home/")
+_USER_PATH = re.compile(r"(?i:[A-Z]:\\{1,2}Users\\{1,2})|/Users/|/home/")
 _SECRET = re.compile(
     r"AccountKey="
     r"|SharedAccessSignature"
     r"|sig="
     r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|github_pat_[A-Za-z0-9_]{22,}"
     r"|eyJ[A-Za-z0-9_-]{20,}\."
     r"|Bearer [A-Za-z0-9._-]{20,}"
 )
