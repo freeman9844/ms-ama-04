@@ -980,3 +980,9 @@ python -m ops smoke
 - **변경**(`cd8c28b`·`e3bef2b`): 심사 콘솔의 차주 시뮬레이터를 고객 콘솔로 옮겼습니다. `/apply`(대출 신청)와 `/borrower/<신청인>`(신청 현황)·`/plans`·`/notices`·`/consents`·`/grievances`가 왼쪽 메뉴를 함께 쓰고, 로그인만 요구합니다(콘솔 역할 불필요). 심사역 사이드바에는 `고객 콘솔 열기` 링크만 남겼습니다. 셀프 상환 플랜 링크와 철회 안내 경로가 오케스트레이터 코드에 있어 둘 다 배포했습니다.
 - **배포:** `window open --acr`(4.6분) → `ops deploy orchestrator`(6.1분, `func-gaz7yh2zic7zc`) → `ops deploy console`(`console:20261117143826`, 5.0분) → **`window close`**(4.0분, `window status`: 닫힘) 뒤 `/loans` 200.
 - **라이브 확인:** `/loans`에 `고객 콘솔 열기`가 보이고 `차주 시뮬레이터`는 없습니다. `/apply`, `/borrower`, `seller-dailylook-01`의 신청 현황과 메뉴 4개는 200을 돌려주고, 없는 메뉴는 404입니다.
+
+## 2026-11-17 고객 콘솔 사업자 선택 배포
+
+- **변경**(`5a23114`·`b560036`·`08ef72f`, 스펙 `docs/superpowers/specs/2026-11-17-customer-console-seller-context-design.md`): 고객 콘솔에서 사업자를 먼저 고르게 했습니다. 사업자를 고르기 전에는 `대출 신청`을 포함한 메뉴가 보이지 않습니다. `/apply`는 고른 사업자로 고정되고(드롭다운 대신 `고객 변경` 링크), 사업자 없이 열거나 모르는 사업자면 `/borrower`로 303을 돌려줍니다. 제출 직후 대기 화면도 `applicant_id`를 이어받아 같은 사업자 메뉴를 보여 줍니다. 진입 화면 이름은 `사업자 선택`(EN "Select business")입니다.
+- **배포:** `window open --acr`(4.3분) → `ops deploy console`(`console:20261117153733`, 5.5분) → **`window close`**(4.0분, `window status`: 닫힘) 뒤 `/loans` 200.
+- **라이브 확인:** `/borrower`는 200이고 `사업자 선택`이 보이며 `대출 신청` 메뉴(`n-apply`)는 없습니다. `/apply`는 `/borrower`로 303, `/apply?applicant_id=seller-dailylook-01`는 200이고 hidden 입력만 있으며 드롭다운은 없습니다. `/loans`의 `고객 콘솔 열기`는 `/borrower`를 가리킵니다.
