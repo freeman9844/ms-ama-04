@@ -553,6 +553,31 @@ def test_blob_store_deletes_blobs_so_pending_container_is_empty_at_once(azure_er
     assert container.delete_requested and store.manifest("consent-x") == []
 
 
+def test_deletion_includes_marketplace_json(azure_errors):
+    container = AsyncDeleteContainer(["marketplace.json", "pg.json"])
+    store = BlobRawStore.__new__(BlobRawStore)
+    store._svc = SimpleNamespace(
+        get_container_client=lambda name: container,
+        delete_container=lambda name: container.delete_container(),
+    )
+    assert [b["name"] for b in store.manifest("consent-x")] == ["marketplace.json", "pg.json"]
+
+    assert store.delete_container("consent-x") is True
+    assert container.blobs == {} and container.delete_requested
+    assert store.manifest("consent-x") == []
+
+
+def test_deletion_proof_manifest_lists_marketplace_json(mock_client):
+    deps = make_deps(mock_client, FoundryRunner())
+    cid = granted(deps)["consent_id"]
+
+    delete_consent_data(deps, end(cid))
+
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert "marketplace.json" in [m["name"] for m in proof["manifest"]]
+    assert deps.raw.manifest(f"consent-{cid}") is None
+
+
 class FoundryLike(FoundryRunner):
     """실제 Foundry처럼 이미 지운 컨테이너를 다시 지우면 404라 False, 첫 대화 확인은 일시 실패(None)."""
 

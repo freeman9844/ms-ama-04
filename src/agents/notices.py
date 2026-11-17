@@ -22,7 +22,12 @@ CONSENT_NOTICE_AGENT = "consent-notice-agent"
 GRIEVANCE_AGENT = "grievance-reply-agent"
 KST = timezone(timedelta(hours=9))
 TITLE_MAX, BODY_MAX = 60, 1200
-SCOPE_LABELS = {"account": "계좌 거래내역", "tax": "세무 신고 내역", "pg": "카드·PG 정산 내역"}
+SCOPE_LABELS = {
+    "account": "계좌 거래내역",
+    "tax": "세무 신고 내역",
+    "pg": "카드·PG 정산 내역",
+    "marketplace": "마켓 판매 성과",
+}
 REVOKE_PATH = "차주 화면의 '동의 관리'에서 '동의 철회'"
 REVOKE_KEYWORDS = ("동의 관리", "동의 철회")
 REASON_LABELS = {"expired": "동의 기간 만료", "revoked": "동의 철회"}

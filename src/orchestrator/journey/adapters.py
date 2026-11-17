@@ -38,6 +38,7 @@ SOURCE_PATHS = {
     "transactions": "/mydata/transactions",
     "tax": "/tax/filings",
     "pg": "/pg/settlements",
+    "marketplace": "/marketplace/store",
     "flow": "/mydata/flow",
     "pg_flow": "/pg/flow",
 }

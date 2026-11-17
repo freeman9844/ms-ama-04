@@ -5,6 +5,7 @@ import pytest
 from agents.notices import (
     CONSENT_NOTICE_AGENT,
     GRIEVANCE_AGENT,
+    SCOPE_LABELS,
     Draft,
     check_grievance_reply,
     check_notice,
@@ -74,6 +75,10 @@ def test_renewal_facts_have_labels_and_no_identifiers():
     assert facts["expires_on"] == "2027년 1월 31일"
     assert facts["scopes"] == ["계좌 거래내역", "세무 신고 내역", "카드·PG 정산 내역"]
     assert "applicant_id" not in facts and "consent_id" not in facts
+
+
+def test_scope_label_marketplace():
+    assert SCOPE_LABELS["marketplace"] == "마켓 판매 성과"
 
 
 def test_check_notice_requires_date_scopes_and_revoke_path():

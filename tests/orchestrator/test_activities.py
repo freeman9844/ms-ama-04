@@ -168,7 +168,7 @@ def test_save_document_rejects_unknown_container(deps):
 
 def test_request_consent_stores_doc_without_token_and_publishes(deps):
     consent = consent_for(deps)
-    assert consent["token"] and consent["scopes"] == ["account", "tax", "pg"]
+    assert consent["token"] and consent["scopes"] == ["account", "tax", "pg", "marketplace"]
     doc = deps.store.read("consents", consent["consent_id"], consent["consent_id"])
     assert doc["application_id"] == "app-1"
     assert doc["raw_container"] == f"consent-{consent['consent_id']}"
@@ -200,7 +200,7 @@ def test_assemble_data_writes_raw_blobs_per_consent(deps):
     assert FLAG_AGENT_FALLBACK in report["flags"]
     container = f"consent-{consent['consent_id']}"
     names = {name for (c, name) in deps.raw.blobs if c == container}
-    assert names == {"profile.json", "transactions.json", "tax.json", "pg.json"}
+    assert names == {"profile.json", "transactions.json", "tax.json", "pg.json", "marketplace.json"}
     assert "token" not in json.dumps(report)
 
 

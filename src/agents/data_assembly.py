@@ -15,26 +15,33 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
-from shared.contracts import ApplicantProfile, PgSettlement, TaxFiling, Transaction
+from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.pseudonymize import Pseudonymizer
 
 AGENT_NAME = "data-assembly"
 DEFAULT_MODEL = "gpt-5.6-luna"
-SOURCES = ("profile", "transactions", "tax", "pg")
-SOURCE_SCOPE = {"profile": "account", "transactions": "account", "tax": "tax", "pg": "pg"}
+SOURCES = ("profile", "transactions", "tax", "pg", "marketplace")
+SOURCE_SCOPE = {
+    "profile": "account",
+    "transactions": "account",
+    "tax": "tax",
+    "pg": "pg",
+    "marketplace": "marketplace",
+}
 REQUIRED = ("profile", "transactions")
 MAX_ATTEMPTS = 3
 MAX_UNUSUAL = 5
 FLAG_AGENT_FALLBACK = "agent_fallback"
 FLAG_ASSESSMENT_MISMATCH = "agent_assessment_mismatch"
 
-Source = Literal["profile", "transactions", "tax", "pg"]
+Source = Literal["profile", "transactions", "tax", "pg", "marketplace"]
 
 _ADAPTERS: dict[str, TypeAdapter[Any]] = {
     "profile": TypeAdapter(ApplicantProfile),
     "transactions": TypeAdapter(list[Transaction]),
     "tax": TypeAdapter(list[TaxFiling]),
     "pg": TypeAdapter(list[PgSettlement]),
+    "marketplace": TypeAdapter(MarketplaceStore),
 }
 _UNUSUAL = re.compile(r"[\[\]{}<>]|지시|무시|승인|ignore|system|instruction", re.IGNORECASE)
 _PAYROLL = re.compile(r"^급여\s+(\S+)$")
@@ -188,6 +195,13 @@ def _summarize(source: str, parsed: Any) -> dict[str, Any]:
             "source": "tax",
             "count": len(parsed),
             "periods": [f"{f.period_start.isoformat()}~{f.period_end.isoformat()}" for f in parsed],
+        }
+    if source == "marketplace":
+        return {
+            "source": "marketplace",
+            "platforms": len(parsed.platforms),
+            "penalties": len(parsed.penalties),
+            "as_of": parsed.as_of.isoformat(),
         }
     dates = sorted(s.settled_on for s in parsed)
     return {

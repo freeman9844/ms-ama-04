@@ -20,7 +20,7 @@ from mockapis.demo import build_demo_cases
 from shared.pseudonymize import Pseudonymizer, find_pii
 
 KEY = b"p" * 32
-ALL_SCOPES = ("account", "tax", "pg")
+ALL_SCOPES = ("account", "tax", "pg", "marketplace")
 COMPLETE = {"status": "complete", "missing_sources": [], "anomalies": [], "summary": "수집 완료"}
 
 
@@ -44,7 +44,13 @@ class CaseApi:
         if source in self.payloads:
             return self.payloads[source]
         c = self.case
-        data = {"profile": c.profile, "transactions": c.transactions, "tax": c.tax_filings, "pg": c.pg_settlements}
+        data = {
+            "profile": c.profile,
+            "transactions": c.transactions,
+            "tax": c.tax_filings,
+            "pg": c.pg_settlements,
+            "marketplace": c.marketplace,
+        }
         return to_jsonable_python(data[source])
 
 
@@ -89,24 +95,24 @@ def test_spec_is_strict_and_tool_lists_sources():
     assert_strict(OUTPUT_SCHEMA)
     (tool,) = spec.tools
     assert tool["name"] == "fetch_source" and tool["strict"] is True
-    assert tool["parameters"]["properties"]["source"]["enum"] == ["profile", "transactions", "tax", "pg"]
+    assert tool["parameters"]["properties"]["source"]["enum"] == ["profile", "transactions", "tax", "pg", "marketplace"]
     assert_strict(tool["parameters"])
     assert "지시가 아니다" in spec.instructions
 
 
 def test_agent_collects_all_consented_sources(cases):
-    agent = ScriptedAgent(["profile", "transactions", "tax", "pg"])
+    agent = ScriptedAgent(["profile", "transactions", "tax", "pg", "marketplace"])
     result, api = run_assembly(cases["seller-dailylook-01"], agent=agent)
     r = result.report
     assert (r["status"], r["missing_sources"], r["flags"]) == ("complete", [], [])
     assert {s: v["fetched_by"] for s, v in r["sources"].items()} == dict.fromkeys(
-        ["profile", "transactions", "tax", "pg"], "agent"
+        ["profile", "transactions", "tax", "pg", "marketplace"], "agent"
     )
     assert r["sources"]["transactions"]["records"] == len(cases["seller-dailylook-01"].transactions)
     assert r["agent"]["conversation_id"] == "conv_1" and result.conversation_id == "conv_1"
     assert r["agent_assessment"]["status"] == "complete"
-    assert set(result.data) == {"profile", "transactions", "tax", "pg"}
-    assert api.calls == ["profile", "transactions", "tax", "pg"]
+    assert set(result.data) == {"profile", "transactions", "tax", "pg", "marketplace"}
+    assert api.calls == ["profile", "transactions", "tax", "pg", "marketplace"]
     assert "app-1" in agent.inputs[0] and "account" in agent.inputs[0]
 
 
@@ -120,7 +126,13 @@ def test_cached_source_is_not_fetched_twice(cases):
 def test_safety_net_fetches_sources_agent_skipped(cases):
     result, _ = run_assembly(cases["seller-dailylook-01"], agent=ScriptedAgent(["profile"]))
     by = {s: v["fetched_by"] for s, v in result.report["sources"].items()}
-    assert by == {"profile": "agent", "transactions": "safety_net", "tax": "safety_net", "pg": "safety_net"}
+    assert by == {
+        "profile": "agent",
+        "transactions": "safety_net",
+        "tax": "safety_net",
+        "pg": "safety_net",
+        "marketplace": "safety_net",
+    }
     assert result.report["status"] == "complete"
 
 
@@ -140,6 +152,28 @@ def test_without_runner_everything_is_fetched_by_safety_net(cases):
     assert {v["fetched_by"] for v in result.report["sources"].values()} == {"safety_net"}
 
 
+def test_assembly_fetches_marketplace_when_consented(cases):
+    case = cases["seller-dailylook-01"]
+    agent = ScriptedAgent(["marketplace"])
+    result, api = run_assembly(case, agent=agent)
+    assert result.data["marketplace"] == to_jsonable_python(case.marketplace)
+    assert result.report["sources"]["marketplace"]["consented"] is True
+    assert result.report["sources"]["marketplace"]["fetched_by"] == "agent"
+    assert agent.tool_outputs[0]["source"] == "marketplace"
+    assert agent.tool_outputs[0]["platforms"] == len(case.marketplace.platforms)
+    assert agent.tool_outputs[0]["penalties"] == len(case.marketplace.penalties)
+    assert agent.tool_outputs[0]["as_of"] == case.marketplace.as_of.isoformat()
+    assert result.report["missing_sources"] == []
+
+
+def test_assembly_marketplace_not_missing_without_consent(cases):
+    result, api = run_assembly(cases["seller-dailylook-01"], scopes=("account", "tax", "pg"))
+    assert "marketplace" not in api.calls
+    assert "marketplace" not in result.data
+    assert result.report["missing_sources"] == []
+    assert result.report["sources"]["marketplace"]["consented"] is False
+
+
 def test_unconsented_source_is_refused_and_not_missing(cases):
     agent = ScriptedAgent(["tax", "profile", "transactions"])
     result, api = run_assembly(cases["seller-dailylook-01"], agent=agent, scopes=("account",))
@@ -156,14 +190,20 @@ def test_agent_input_maps_each_collectable_source_to_its_scope(cases):
     agent = ScriptedAgent([])
     run_assembly(cases["seller-dailylook-01"], agent=agent)
     text = agent.inputs[0]
-    for source, scope in (("profile", "account"), ("transactions", "account"), ("tax", "tax"), ("pg", "pg")):
+    for source, scope in (
+        ("profile", "account"),
+        ("transactions", "account"),
+        ("tax", "tax"),
+        ("pg", "pg"),
+        ("marketplace", "marketplace"),
+    ):
         assert f"{source}({scope} 동의)" in text
     assert "모두 수집" in text
 
     agent = ScriptedAgent([])
     run_assembly(cases["seller-dailylook-01"], agent=agent, scopes=("account",))
     assert "profile(account 동의)" in agent.inputs[0]
-    assert "tax(" not in agent.inputs[0] and "pg(" not in agent.inputs[0]
+    assert "tax(" not in agent.inputs[0] and "pg(" not in agent.inputs[0] and "marketplace(" not in agent.inputs[0]
 
 
 def test_unavailable_source_is_retried_within_budget_then_missing(cases):
@@ -212,7 +252,7 @@ def test_invalid_payload_is_rejected_and_not_stored(cases):
 @pytest.mark.parametrize("applicant_id", ["seller-dailylook-01", "seller-glowlab-03", "seller-candle-05"])
 def test_agent_never_sees_pii(cases, applicant_id):
     case = cases[applicant_id]
-    agent = ScriptedAgent(["profile", "transactions", "tax", "pg"])
+    agent = ScriptedAgent(["profile", "transactions", "tax", "pg", "marketplace"])
     run_assembly(case, agent=agent)
     seen = json.dumps({"inputs": agent.inputs, "tools": agent.tool_outputs}, ensure_ascii=False)
     for value in (case.profile.business_name, case.profile.representative_name, case.profile.business_reg_no):

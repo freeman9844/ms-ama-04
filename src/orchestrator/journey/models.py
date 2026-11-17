@@ -19,7 +19,7 @@ from pydantic import (
 
 KST = timezone(timedelta(hours=9), "KST")
 APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
-CONSENT_SCOPES = ("account", "tax", "pg")
+CONSENT_SCOPES = ("account", "tax", "pg", "marketplace")
 CONSENT_PURPOSE = "운전자금 대출 심사"
 CONSENT_TTL_DAYS = 90
 MONITORING_SCOPES = ("account", "pg")

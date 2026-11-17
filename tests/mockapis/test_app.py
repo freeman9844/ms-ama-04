@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -7,7 +8,7 @@ from mockapis.app import create_app
 from mockapis.demo import FlowStore
 from mockapis.postloan import FlowScenario, generate_postloan
 from mockapis.synth import INJECTION_TEXT, Archetype, generate_case
-from shared.contracts import ApplicantProfile, PgSettlement, TaxFiling, Transaction
+from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.krcalendar import next_business_day
 
 KST = timezone(timedelta(hours=9))
@@ -96,6 +97,29 @@ def test_scope_enforced_403(client):
     r = client.get("/tax/filings", headers=h)
     assert r.status_code == 403
     assert r.json()["detail"]["code"] == "scope"
+
+
+def test_marketplace_store_endpoint(client):
+    h = _auth(_consent(client, scopes=("marketplace",))["token"])
+    r = client.get("/marketplace/store", headers=h)
+    assert r.status_code == 200
+    store = MarketplaceStore.model_validate(r.json())
+    assert store.platforms
+
+
+def test_marketplace_scope_enforced_403(client):
+    h = _auth(_consent(client, scopes=("account",))["token"])
+    r = client.get("/marketplace/store", headers=h)
+    assert r.status_code == 403
+    assert r.json()["detail"]["code"] == "scope"
+
+
+def test_marketplace_store_defaults_to_empty_store_without_marketplace_data(clock):
+    case = replace(generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1), marketplace=None)
+    c = TestClient(create_app({"a1": case}, SECRET, clock))
+    h = _auth(_consent(c, scopes=("marketplace",))["token"])
+    store = MarketplaceStore.model_validate(c.get("/marketplace/store", headers=h).json())
+    assert (store.platforms, store.penalties, store.as_of) == ((), (), clock().date())
 
 
 def test_revoke_then_401(client):

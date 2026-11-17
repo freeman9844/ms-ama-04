@@ -11,7 +11,15 @@ from mockapis.consent import ConsentError, ConsentRegistry, issue_token, verify_
 from mockapis.demo import FlowStore
 from mockapis.postloan import LoanTerms, PostLoanFlow
 from mockapis.synth import SyntheticCase
-from shared.contracts import ApplicantProfile, ConsentScope, PgFlow, PgSettlement, TaxFiling, Transaction
+from shared.contracts import (
+    ApplicantProfile,
+    ConsentScope,
+    MarketplaceStore,
+    PgFlow,
+    PgSettlement,
+    TaxFiling,
+    Transaction,
+)
 
 AuthHeader = Annotated[str | None, Header()]
 
@@ -171,6 +179,11 @@ def create_app(
     @app.get("/pg/settlements")
     def get_pg_settlements(authorization: AuthHeader = None) -> list[PgSettlement]:
         return list(authorize(authorization, ConsentScope.PG, "/pg/settlements").pg_settlements)
+
+    @app.get("/marketplace/store")
+    def get_marketplace_store(authorization: AuthHeader = None) -> MarketplaceStore:
+        case = authorize(authorization, ConsentScope.MARKETPLACE, "/marketplace/store")
+        return case.marketplace or MarketplaceStore(as_of=clock().date())
 
     @app.post("/admin/faults", status_code=204)
     def set_fault(req: FaultRequest) -> Response:
