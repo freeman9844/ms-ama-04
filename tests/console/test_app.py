@@ -311,7 +311,7 @@ def test_new_application_is_enqueued_and_redirects(env):
     assert datetime.fromisoformat(submitted_at).tzinfo is not None
     assert (queue_name, sent) == ("applications-start", {
         "application_id": "app-20261101-abc123", "applicant_id": "seller-dailylook-01",
-        "requested_amount_krw": 10_000_000, "requested_tenor_months": 6, "sla_hours": 24.0,
+        "requested_amount_krw": 10_000_000, "requested_tenor_months": 6, "sla_hours": 24.0, "close_hours": 168.0,
         "source": "console"})
 
 
@@ -513,3 +513,12 @@ def test_detail_shows_kst_times_and_decision_label(env, make_doc):
     assert "마감 2026-11-01 09:00" in page and "T00:00:00" not in page
     tab = page[page.index('id="tab-decision"'):]
     assert "승인 · 5,000,000원" in tab and "approve ·" not in tab
+
+
+def test_escalated_detail_shows_undecided_close_time(env, make_doc):
+    client, _ = env
+    doc = make_doc(status="escalated")
+    doc["sla"] = {"hours": 24, "close_hours": 168, "deadline": "2026-11-08T00:00:00Z", "escalated": True}
+    client.app.state.deps.store.docs["app-1"] = doc
+    page = client.get("/applications/app-1", headers=OFFICER).text
+    assert "<dt>미결 종료 예정</dt><dd>2026-11-08 09:00 (SLA 초과)</dd>" in page

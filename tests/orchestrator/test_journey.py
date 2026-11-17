@@ -241,16 +241,19 @@ def test_escalation_reuses_pending_event_task(run_journey):
     # 타이머가 이겨도 대기 중인 이벤트 태스크를 버리지 않는다
     assert [e.name for e in ctx.events] == ["officer_decision", "consent_withdrawn"]
     assert ctx.timers[0].input == datetime(2026, 11, 2, 15, 0, tzinfo=UTC)
-    assert ctx.timers[1].input == datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
+    # 미결 종료는 심사역 대기 시작부터 1주일(168시간)
+    assert ctx.timers[1].input == datetime(2026, 11, 8, 15, 0, tzinfo=UTC)
     sla = ctx.saved[-1]["sla"]
-    assert sla["escalated"] is True and sla["deadline"] == "2026-11-03T15:00:00+00:00"
+    assert sla["escalated"] is True and sla["deadline"] == "2026-11-08T15:00:00+00:00"
+    assert sla["close_hours"] == 168
 
 
 def test_second_timeout_closes_without_decision(run_journey):
-    result, ctx = run_journey({**START, "sla_hours": 0.5}, acts(), [("timer",), ("timer",)])
+    result, ctx = run_journey({**START, "sla_hours": 0.5, "close_hours": 2}, acts(), [("timer",), ("timer",)])
     assert result["status"] == "closed_no_decision"
     assert statuses(ctx)[-2:] == ["escalated", "closed_no_decision"]
     assert ctx.timers[0].input == datetime(2026, 11, 1, 15, 30, tzinfo=UTC)
+    assert ctx.timers[1].input == datetime(2026, 11, 1, 17, 0, tzinfo=UTC)
 
 
 def test_input_as_json_string_is_accepted(run_journey):

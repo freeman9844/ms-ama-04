@@ -55,7 +55,7 @@ def test_start_new_instance_uses_application_id():
     assert run(handle_start(client, json.dumps(START))) == "app-1"
     name, instance_id, payload = client.started[0]
     assert (name, instance_id) == (ORCHESTRATOR, "app-1")
-    assert payload == {**START, "sla_hours": 24.0}
+    assert payload == {**START, "sla_hours": 24.0, "close_hours": 168.0}
 
 
 def test_duplicate_start_is_ignored():

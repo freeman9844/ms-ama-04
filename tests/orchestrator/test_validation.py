@@ -78,6 +78,9 @@ def test_override_cap_matches_product_max():
         {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 13},
         {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 12, "x": 1},
         {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 12, "sla_hours": 0},
+        # 미결 종료는 SLA 초과보다 뒤여야 한다
+        {"application_id": "app-1", "applicant_id": "x", "requested_amount_krw": 1, "requested_tenor_months": 12,
+         "sla_hours": 24, "close_hours": 24},
     ],
 )
 def test_start_request_rejects_bad_input(payload):

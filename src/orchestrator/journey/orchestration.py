@@ -207,7 +207,7 @@ def journey(ctx: Any, retry: Any) -> Steps:
                 # 심사역은 에이전트 평가를 근거로 결정한다. 평가 없이 심사역 대기로 넘기지 않는다.
                 return (yield from _fail(ctx, retry, doc, "assess_credit", RuntimeError(error)))
 
-    return (yield from _await_officer(ctx, retry, doc, req.sla_hours))
+    return (yield from _await_officer(ctx, retry, doc, req.sla_hours, req.close_hours))
 
 
 def _run_error(record: Any) -> str:
@@ -257,10 +257,12 @@ def _assess(
     return f"에이전트 평가 없음({ASSESS_ATTEMPTS}회 시도): {error or '원인 미상'}"
 
 
-def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) -> Steps:
-    sla = timedelta(hours=sla_hours)
-    deadline = _now(ctx) + sla
-    doc["sla"] = {"hours": sla_hours, "deadline": deadline.isoformat(), "escalated": False}
+def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float, close_hours: float) -> Steps:
+    started = _now(ctx)
+    deadline = started + timedelta(hours=sla_hours)
+    # SLA를 넘기면 escalated로 표시하고, 대기 시작부터 close_hours가 지나도 결정이 없으면 미결 종료한다.
+    close_at = started + timedelta(hours=close_hours)
+    doc["sla"] = {"hours": sla_hours, "close_hours": close_hours, "deadline": deadline.isoformat(), "escalated": False}
     yield from _advance(ctx, retry, doc, Status.AWAITING_OFFICER)
 
     # 이벤트 태스크는 완료될 때까지 재사용한다. 타이머가 이겼다고 새로 만들면
@@ -303,7 +305,7 @@ def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float) 
         if doc["sla"]["escalated"]:
             yield from _advance(ctx, retry, doc, Status.CLOSED_NO_DECISION)
             return _result(doc)
-        deadline = _now(ctx) + sla
+        deadline = close_at
         doc["sla"].update(escalated=True, deadline=deadline.isoformat())
         yield from _advance(ctx, retry, doc, Status.ESCALATED)
 

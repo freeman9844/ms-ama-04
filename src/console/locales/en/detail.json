@@ -7,6 +7,7 @@
   "상태 기록 %(n)s건": "Status history (%(n)s)",
   "신청 금액": "Requested amount",
   "SLA 마감": "SLA deadline",
+  "미결 종료 예정": "Closes undecided at",
   "플래그": "Flags",
   "AI 게이트웨이": "AI gateway",
   "콘텐츠 차단 · %(b)s": "Content blocked · %(b)s",

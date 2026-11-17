@@ -94,6 +94,8 @@ class StartRequest(BaseModel):
     requested_amount_krw: int = Field(gt=0, le=10_000_000)
     requested_tenor_months: int = Field(ge=1, le=12)
     sla_hours: float = Field(default=24, gt=0, le=720)
+    # 심사역 대기 시작부터 미결 종료까지(기본 1주일). SLA 초과(sla_hours) 뒤에도 결정이 없으면 이 시각에 닫는다.
+    close_hours: float = Field(default=168, gt=0, le=720)
     submitted_at: datetime | None = None
     source: Literal["console", "customer", "load", "fault"] | None = None
     run_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
@@ -102,6 +104,12 @@ class StartRequest(BaseModel):
     @classmethod
     def _utc(cls, v: datetime | None) -> datetime | None:
         return v.replace(tzinfo=UTC) if v and v.tzinfo is None else v
+
+    @model_validator(mode="after")
+    def _close_after_sla(self) -> "StartRequest":
+        if self.close_hours <= self.sla_hours:
+            raise ValueError("close_hours는 sla_hours보다 커야 합니다")
+        return self
 
 
 class OfficerDecision(BaseModel):
