@@ -7,7 +7,7 @@
 <title>{% block title %}AMA Lending {{ _("고객 콘솔") }}{% endblock %}</title>
 <link rel="stylesheet" href="/static/console.css">
 </head>
-<body>
+{% set mt_on = mt_enabled and csrf and locale() == "en" %}<body{% if mt_on %} data-mt-csrf="{{ csrf }}"{% endif %}>
 <div class="shell customer-shell">
 <aside class="sidebar">
   <a class="brand" href="/apply">AMA Lending <small>{{ _("고객 콘솔") }}</small></a>

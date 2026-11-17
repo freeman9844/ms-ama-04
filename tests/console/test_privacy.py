@@ -457,6 +457,12 @@ def test_english_borrower_page_merges_entities_and_stored_translations_of_each_a
     assert "다른상점" in again.text and "inquiry" in again.text and not [p for p in _pending(again) if "문의" in p]
 
 
+def test_english_customer_page_with_pending_text_loads_mt_script_with_csrf(env, raw):
+    client, _ = _borrower_env(env, raw)
+    en = _english(client, "/borrower/seller-dailylook-01/grievances")
+    assert _pending(en) and "/static/mt.js" in en.text and 'data-mt-csrf="' in en.text
+
+
 def test_english_borrower_page_with_one_unreadable_source_sends_nothing(env, raw):
     client, deps = _borrower_env(env, raw)
     real = deps.raw
