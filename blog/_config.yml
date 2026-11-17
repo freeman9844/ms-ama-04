@@ -1,0 +1,25 @@
+title: Agent Dev Diary
+description: An anonymous, bilingual (English / 한국어) diary of building an AI agent.
+lang: en
+url: https://freeman9844.github.io
+baseurl: /ms-ama-04
+timezone: Asia/Seoul
+future: true
+
+theme: minima
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+markdown: kramdown
+
+header_pages:
+  - en/index.md
+  - ko/index.md
+
+exclude:
+  - tools
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor

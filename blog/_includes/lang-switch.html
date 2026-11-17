@@ -1,0 +1,22 @@
+{%- assign other_post = nil -%}
+{%- for p in site.posts -%}
+  {%- if p.ref == page.ref and p.lang != page.lang -%}
+    {%- assign other_post = p -%}
+    {%- break -%}
+  {%- endif -%}
+{%- endfor -%}
+<p class="lang-switch">
+{%- if page.lang == "ko" -%}
+  {%- if other_post -%}
+    <a href="{{ other_post.url | relative_url }}" hreflang="en" lang="en">English</a>
+  {%- else -%}
+    <span lang="en">English</span>
+  {%- endif %} · <strong>한국어</strong>
+{%- else -%}
+  <strong>English</strong> · {% if other_post -%}
+    <a href="{{ other_post.url | relative_url }}" hreflang="ko" lang="ko">한국어</a>
+  {%- else -%}
+    <span lang="ko">한국어</span>
+  {%- endif -%}
+{%- endif -%}
+</p>
