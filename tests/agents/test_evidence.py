@@ -56,6 +56,13 @@ def test_catalog_includes_reason_code_observations(catalogs):
     assert c["P:max_amount_krw"] == 0
 
 
+def test_catalog_includes_mkt_and_s001():
+    reason = {"code": "S001", "message": "판매정지", "field": "mkt_suspension_days", "observed": 24, "threshold": 18}
+    c = build_catalog({"mkt_rating": 4.7}, {}, [], {"max_amount_krw": 0, "reason_codes": [reason]})
+    assert c["M:mkt_rating"] == 4.7
+    assert c["P:S001:observed"] == 24 and c["P:S001:threshold"] == 18
+
+
 def test_all_catalog_ids_are_valid_evidence_ids(catalogs):
     import re
 

@@ -412,6 +412,7 @@ def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         categories={t.txn_id: overrides.get(t.txn_id) or classify(t).value for t in txns},
         mask=build_pseudonymizer(deps.pseudonym_key, profile, txns).mask,
         settlement=uw.get("pg_ledger"),
+        marketplace=uw.get("marketplace"),
     )
     result = assess(ctx, runner=deps.agents, analyst_model=deps.analyst_model, reviewer_model=deps.reviewer_model)
     _remember_foundry(deps, payload["consent_id"], result.conversations, result.containers)

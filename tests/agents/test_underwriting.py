@@ -231,7 +231,7 @@ def test_analyst_schema_requires_officer_checks():
     assert "officer_checks" in ANALYST_OUTPUT_SCHEMA["required"]
     item = ANALYST_OUTPUT_SCHEMA["properties"]["officer_checks"]["items"]
     assert item["required"] == ["text", "metric_ids"] and item["additionalProperties"] is False
-    assert "officer_checks" in ANALYST_INSTRUCTIONS and "정산 건전성" in ANALYST_INSTRUCTIONS
+    assert "officer_checks" in ANALYST_INSTRUCTIONS and "정산·셀러 건전성" in ANALYST_INSTRUCTIONS
     assert "6~8문장" in ANALYST_INSTRUCTIONS
     assert "거래 상대방 이름 대신" in ANALYST_INSTRUCTIONS and "일반 명사" in ANALYST_INSTRUCTIONS
 
@@ -243,7 +243,7 @@ def test_grounded_check_has_no_issues(cases):
 @pytest.mark.parametrize("check, issue", [
     ({"text": "확인", "metric_ids": []}, "officer_checks[0]: 근거 ID가 없다"),
     ({"text": "확인", "metric_ids": ["M:nope"]}, "officer_checks[0]: 알 수 없는 근거 ID"),
-    ({"text": "확인", "metric_ids": ["M:dscr"]}, "officer_checks[0]: 정산 근거(M:pg_*·P:R107·P:R108)가 없다"),
+    ({"text": "확인", "metric_ids": ["M:dscr"]}, "officer_checks[0]: 정산·셀러 근거(M:pg_*·M:mkt_*·P:R107·P:R108·P:R003·P:R109·P:R110·P:S001)가 없다"),
     ({"text": "입금 비율 55%를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"]},
      "officer_checks[0]: 인용 근거와 맞지 않는 수치"),
 ])
@@ -256,6 +256,45 @@ def test_check_grounding_limits_count_and_requires_settlement(cases):
     assert "officer_checks: 3개를 넘는다" in check_grounding(draft(officer_checks=[CHECK] * 4), context(cases))
     ctx = replace(context(cases), settlement={"available": False})
     assert "officer_checks: 정산 자료가 없는데 확인 사항이 있다" in check_grounding(draft(officer_checks=[CHECK]), ctx)
+
+
+def seller_only_context(cases):
+    ctx = context(cases)
+    return replace(
+        ctx, features={**ctx.features, "mkt_rating": 4.7},
+        settlement={"available": False}, marketplace={"available": True},
+    )
+
+
+def test_officer_check_with_only_seller_evidence_ok_without_pg(cases):
+    check = {"text": "평점 하락 원인을 확인한다.", "metric_ids": ["M:mkt_rating"]}
+    assert check_grounding(draft(officer_checks=[check]), seller_only_context(cases)) == []
+
+
+def test_officer_check_without_any_data_still_rejected(cases):
+    ctx = replace(context(cases), settlement={"available": False}, marketplace=None)
+    assert "officer_checks: 정산 자료가 없는데 확인 사항이 있다" in check_grounding(draft(officer_checks=[CHECK]), ctx)
+    ctx = replace(context(cases), settlement=None, marketplace={"available": False})
+    assert "officer_checks: 정산 자료가 없는데 확인 사항이 있다" in check_grounding(draft(officer_checks=[CHECK]), ctx)
+
+
+def test_officer_check_with_seller_evidence_is_not_flagged_as_missing_settlement_evidence(cases):
+    check = {"text": "확인", "metric_ids": ["M:dscr"]}
+    issues = check_grounding(draft(officer_checks=[check]), seller_only_context(cases))
+    assert any("정산·셀러 근거(M:pg_*·M:mkt_*·P:R107·P:R108·P:R003·P:R109·P:R110·P:S001)가 없다" in i for i in issues)
+
+
+def test_missing_s001_check_is_not_grounding_error(cases):
+    ctx = seller_only_context(cases)
+    reason = {"code": "S001", "message": "판매정지", "field": "mkt_suspension_days", "observed": 24, "threshold": 18}
+    ctx = replace(ctx, policy={**ctx.policy, "reason_codes": [*ctx.policy.get("reason_codes", ()), reason]})
+    check = {"text": "평점 하락 원인을 확인한다.", "metric_ids": ["M:mkt_rating"]}
+    assert check_grounding(draft(officer_checks=[check]), ctx) == []
+
+
+def test_instructions_cover_seller_evidence():
+    assert "M:mkt_" in ANALYST_INSTRUCTIONS and "P:S001" in ANALYST_INSTRUCTIONS
+    assert "정산·셀러 건전성" in ANALYST_INSTRUCTIONS
 
 
 WITH_CHECK = GOOD | {"officer_checks": [CHECK]}
