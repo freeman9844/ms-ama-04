@@ -986,3 +986,9 @@ python -m ops smoke
 - **변경**(`5a23114`·`b560036`·`08ef72f`, 스펙 `docs/superpowers/specs/2026-11-17-customer-console-seller-context-design.md`): 고객 콘솔에서 사업자를 먼저 고르게 했습니다. 사업자를 고르기 전에는 `대출 신청`을 포함한 메뉴가 보이지 않습니다. `/apply`는 고른 사업자로 고정되고(드롭다운 대신 `고객 변경` 링크), 사업자 없이 열거나 모르는 사업자면 `/borrower`로 303을 돌려줍니다. 제출 직후 대기 화면도 `applicant_id`를 이어받아 같은 사업자 메뉴를 보여 줍니다. 진입 화면 이름은 `사업자 선택`(EN "Select business")입니다.
 - **배포:** `window open --acr`(4.3분) → `ops deploy console`(`console:20261117153733`, 5.5분) → **`window close`**(4.0분, `window status`: 닫힘) 뒤 `/loans` 200.
 - **라이브 확인:** `/borrower`는 200이고 `사업자 선택`이 보이며 `대출 신청` 메뉴(`n-apply`)는 없습니다. `/apply`는 `/borrower`로 303, `/apply?applicant_id=seller-dailylook-01`는 200이고 hidden 입력만 있으며 드롭다운은 없습니다. `/loans`의 `고객 콘솔 열기`는 `/borrower`를 가리킵니다.
+
+## 2026-11-18 콘솔 비주얼 리디자인(B안) 배포
+
+- **변경**(`8f4459e`·`18164fd`·`820a0ca`, 스펙 `docs/superpowers/specs/2026-11-18-console-visual-redesign-design.md`): 두 콘솔을 핀테크 앱형(B안)으로 바꿨습니다. 그라데이션 로고, 심사 사이드바는 남색 그라데이션, 고객 사이드바는 흰 바탕, KPI 아이콘 칩, 720px 이하 1열 배치입니다. 고객 신청 현황·진행 화면 위에는 큰 금액과 4단계 진행(`접수`→`데이터 심사`→`심사역 검토`→`결과`)을 보여 주는 히어로 카드를, `사업자 선택`에는 머리글자 아바타 카드를 넣었습니다. 글자 대비는 AA에 맞췄습니다(보조 글자 `#626d7a`, 버튼 `#1f6ee8`).
+- **배포:** `window open --acr` → `ops deploy console`(`console:20261118054044`, 합계 약 10분). `agw-amalend`가 다시 `Stopped`라 라이브 확인이 시간 초과였고, `az network application-gateway start`(약 9분)로 다시 켰습니다. 그 뒤 **`window close`**(`window status`: 닫힘), `/loans` 200.
+- **라이브 확인:** `/static/console.css`에 B안 머리 주석·`--btn`·투명 포커스 outline이 있습니다. `/borrower`·`/loans`·`/apply?applicant_id=seller-dailylook-01`·`/borrower/seller-dailylook-01`는 모두 200이고 로고(`logo-mark`)가 있습니다. `/borrower`에는 사업자 카드가, `/borrower/seller-dailylook-01`에는 히어로 카드가 보입니다.
