@@ -1,9 +1,11 @@
 {% extends "customer_base.html" %}
+{% from "_progress.html" import hero %}
 {% set nav = "status" %}
 {% block title %}{{ _("신청 현황") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
 {% block main %}
 <h1>{{ _("신청 현황") }}</h1>
-{% if rows %}
+{% if rows %}{% set latest = rows[0] %}
+{{ hero(latest.s, latest.application_id, applicant_id|seller_label, latest.amount_krw, latest.tenor) }}
 <table>
   <thead><tr><th>{{ _("신청번호") }}</th><th>{{ _("접수일") }}</th><th>{{ _("신청 금액") }}</th><th>{{ _("상태") }}</th></tr></thead>
   <tbody>{% for r in rows %}

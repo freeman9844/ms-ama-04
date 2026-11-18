@@ -205,6 +205,57 @@ def test_approved_status_shows_officer_amount(env):
     assert ">승인</p>" in html and "6,000,000원" in html
 
 
+@pytest.mark.parametrize(("status", "current", "done"), [
+    (None, "접수", 0),
+    ("received", "데이터 심사", 1),
+    ("assessed", "데이터 심사", 1),
+    ("awaiting_officer", "심사역 검토", 2),
+    ("approved", "결과", 3),
+    ("declined", "결과", 3),
+    ("withdrawn", "결과", 3),
+])
+def test_progress_steps_follow_status(env, status, current, done):
+    client, store, _ = env
+    path = "/apply/app-20261104-c0ffee"
+    if status:
+        store.docs["app-cust"]["status"] = status
+        path = "/apply/app-cust"
+    html = client.get(path, headers=CUSTOMER).text
+    assert f'aria-current="step">{current}</li>' in html
+    assert html.count('class="step done"') == done
+    assert html.count('aria-current="step"') == 1
+
+
+def test_hero_shows_requested_amount_and_tenor(env):
+    client, store, _ = env
+    store.docs["app-cust"]["status"] = "received"
+    html = client.get("/apply/app-cust", headers=CUSTOMER).text
+    assert 'class="card hero-card"' in html
+    assert '<p class="hero-amount">30,000,000원</p>' in html and "12개월" in html
+
+
+def test_hero_shows_officer_amount_when_approved(env):
+    client, store, _ = env
+    store.docs["app-cust"].update(status="approved", officer_decision={"decision": "approve", "amount_krw": 6_000_000})
+    html = client.get("/apply/app-cust", headers=CUSTOMER).text
+    assert '<p class="hero-amount">6,000,000원</p>' in html and "step now tone-good" in html
+
+
+def test_waiting_hero_has_no_amount(env):
+    client, _, _ = env
+    html = client.get("/apply/app-20261104-c0ffee", headers=CUSTOMER).text
+    assert 'class="card hero-card"' in html and 'class="hero-amount"' not in html
+
+
+def test_progress_steps_in_english(env):
+    client, store, _ = env
+    store.docs["app-cust"]["status"] = "awaiting_officer"
+    html = client.get("/apply/app-cust", headers={**CUSTOMER, "Cookie": "lang=en"}).text
+    assert 'aria-current="step">Officer review</li>' in html
+    for korean in ("데이터 심사", "심사역 검토", "접수"):
+        assert f">{korean}</li>" not in html
+
+
 def test_status_page_does_not_expose_console_applications(env):
     client, _, _ = env
     assert client.get("/apply/app-console", headers=CUSTOMER).status_code == 404

@@ -1,15 +1,11 @@
 {% extends "customer_base.html" %}
+{% from "_progress.html" import hero %}
 {% set nav = "status" if applicant_id else "apply" %}
 {% block title %}{{ _("신청 진행 현황") }} · AMA Lending {{ _("고객 콘솔") }}{% endblock %}
 {% block head %}{% if wait_url %}<meta http-equiv="refresh" content="3;url={{ wait_url }}">{% elif s.refresh and not waiting %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
 {% block main %}
 <h1>{{ _("신청 진행 현황") }}</h1>
-<section class="card">
-  <p class="note">{{ _("신청번호 %(id)s", id=application_id) }}{% if seller %} · {{ seller }}{% endif %}</p>
-  <p class="apply-status s-{{ s.tone }}">{{ s.label }}</p>
-  <p>{{ s.message }}</p>
-  {% if s.amount_krw %}<p>{{ _("승인 금액") }}: <strong>{{ s.amount_krw|krw }}</strong></p>{% endif %}
-  {% if waiting and not wait_url %}<p class="note">{{ _("자동 새로 고침을 멈췄습니다. 잠시 뒤 직접 새로 고쳐 주세요.") }}</p>{% elif s.refresh %}<p class="note">{{ _("3초마다 자동으로 새로 고칩니다.") }}</p>{% endif %}
-</section>
+{{ hero(s, application_id, seller, requested_krw, tenor) }}
+{% if waiting and not wait_url %}<p class="note">{{ _("자동 새로 고침을 멈췄습니다. 잠시 뒤 직접 새로 고쳐 주세요.") }}</p>{% elif s.refresh %}<p class="note">{{ _("3초마다 자동으로 새로 고칩니다.") }}</p>{% endif %}
 <p><a href="/apply{% if applicant_id %}?applicant_id={{ applicant_id|urlencode }}{% endif %}">{{ _("새 신청") }}</a></p>
 {% endblock %}

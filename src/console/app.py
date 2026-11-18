@@ -257,6 +257,7 @@ def _templates() -> Environment:
     env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
     env.filters["seller_label"] = lambda s: data_label(seller_label(s))
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
+    env.filters["seller_initial"] = lambda s: str(translate.data(seller_name(s)) or s)[:1]
     env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
     env.filters["policy_label"] = lambda s: i18n.gettext(POLICY_DECISIONS[s][0]) if s in POLICY_DECISIONS else s or "-"
     for name, labels in (LABEL_FILTERS | MONITORING_FILTERS).items():
@@ -583,7 +584,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             wait_url += f"&applicant_id={quote(chosen, safe='')}"
         return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
                       seller=seller_label(chosen) if chosen else None, waiting=doc is None,
-                      wait_url=wait_url, applicant_id=chosen)
+                      wait_url=wait_url, applicant_id=chosen,
+                      requested_krw=doc.get("requested_amount_krw") if doc else None,
+                      tenor=doc.get("requested_tenor_months") if doc else None)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
     def show(application_id: str, request: Request) -> HTMLResponse:
@@ -930,7 +933,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         loans = borrower_loans(applicant_id, applications) if page in {"plans", "notices"} else []
         rows = [
             {"application_id": doc["application_id"], "received_on": str(doc.get("submitted_at") or "")[:10],
-             "amount_krw": doc.get("requested_amount_krw"), "s": customer_status(doc),
+             "amount_krw": doc.get("requested_amount_krw"), "tenor": doc.get("requested_tenor_months"),
+             "s": customer_status(doc),
              "link": doc.get("source") == "customer"}
             for doc in sorted(applications, key=lambda d: str(d.get("submitted_at") or ""), reverse=True)
         ]

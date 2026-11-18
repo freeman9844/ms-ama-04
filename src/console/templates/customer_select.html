@@ -4,5 +4,5 @@
 {% block main %}
 <h1>{{ _("사업자 선택") }}</h1>
 <p>{{ _("신청 사업자(셀러)를 고르면 그 사업자 기준으로 대출 신청·신청 현황·상환 플랜·받은 안내·동의 관리·이의제기 메뉴가 열립니다. 데모라 로그인한 사용자가 사업자를 직접 고릅니다.") }}</p>
-<ul>{% for a in demo_applicants %}<li><a href="/borrower/{{ a|path }}">{{ a|seller_label }}</a></li>{% endfor %}</ul>
+<ul class="seller-grid">{% for a in demo_applicants %}<li><a class="seller-card" href="/borrower/{{ a|path }}"><span class="avatar av-{{ loop.index0 % 6 + 1 }}" aria-hidden="true">{{ a|seller_initial }}</span> <span class="seller-card-label">{{ a|seller_label }}</span></a></li>{% endfor %}</ul>
 {% endblock %}

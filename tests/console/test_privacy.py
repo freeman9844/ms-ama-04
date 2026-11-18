@@ -213,6 +213,27 @@ def test_status_page_lists_own_applications_with_customer_status(env):
     assert "승인" in page and "15,000,000원" in page and "심사" in page
 
 
+def test_status_page_shows_latest_application_as_hero(env):
+    client, _, _ = env
+    page = client.get(HOME, headers=CUSTOMER).text
+    hero = page.split('class="card hero-card"', 1)[1].split("</section>", 1)[0]
+    first_row = re.search(r'<tbody>.*?<tr><td>(?:<a [^>]*>)?([\w-]+)', page, re.S).group(1)
+    assert first_row in hero and 'aria-current="step"' in hero
+
+
+def test_status_page_without_applications_has_no_hero(env):
+    client, _, _ = env
+    page = client.get("/borrower/seller-unknown-99", headers=CUSTOMER).text
+    assert "hero-card" not in page and "신청 기록이 없습니다." in page
+
+
+def test_borrower_index_shows_seller_cards_with_initial_avatar(env):
+    client, _, _ = env
+    page = client.get("/borrower", headers=CUSTOMER).text
+    assert '<ul class="seller-grid">' in page and 'class="seller-card" href="/borrower/seller-dailylook-01"' in page
+    assert re.search(r'<span class="avatar av-\d" aria-hidden="true">성</span>', page)
+
+
 def test_consents_page_shows_own_consents_notices_proof_and_revoke(env):
     client, _, _ = env
     page = client.get(f"{HOME}/consents", headers=CUSTOMER).text
