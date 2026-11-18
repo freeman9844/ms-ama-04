@@ -14,7 +14,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; letter-spacing: -.005em; }
 a { color: var(--accent-dark); }
-a:hover { color: var(--accent); }
+a:hover { color: #164fae; }
 
 /* 셸: 왼쪽 사이드바 + 본문 */
 .shell { display: grid; grid-template-columns: 236px 1fr; min-height: 100vh; }
@@ -99,7 +99,7 @@ dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: .3rem 1.2
 dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; }
 details { margin-top: .6rem; }
-details summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
+details summary { cursor: pointer; color: var(--accent-dark); font-size: .9rem; }
 
 /* 상태 배지 */
 .status, .badge, .pill { display: inline-block; padding: 0 .65rem; border-radius: 999px; background: #f2f4f6; color: var(--fg-2); font-size: .78rem; font-weight: 700; line-height: 1.65rem; white-space: nowrap; }
@@ -152,7 +152,7 @@ article.consent, article.grievance { background: var(--card); border: 1px solid 
 /* 폼·버튼 */
 form label { display: block; margin: .5rem 0; }
 form input[name], form select, form textarea { display: block; width: 100%; max-width: 32rem; padding: .6rem .8rem; font: inherit; border: 1px solid #c4cbd3; border-radius: var(--radius-btn); background: #fff; transition: border-color .15s, box-shadow .15s; }
-form input[name]:focus, form select:focus, form textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(49, 130, 246, .18); }
+form input[name]:focus, form select:focus, form textarea:focus { outline: 2px solid transparent; outline-offset: 1px; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(49, 130, 246, .18); }
 form input[type=radio], form input[type=checkbox] { display: inline-block; width: auto; padding: 0; margin: 0 .5rem 0 0; vertical-align: -2px; accent-color: var(--btn); }
 .actions select { min-width: 14rem; }
 fieldset { border: 1px solid var(--line); border-radius: 12px; max-width: 32rem; }
@@ -226,7 +226,7 @@ form.inline button { padding: .3rem .7rem; font-size: .85em; border-radius: 8px;
 .step-done::before, .step-warn::before, .step-current::before, .step-failed::before { background: var(--c-blue); }
 .step-dot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--c-grey); background: #fff; color: var(--muted); font-weight: 600; }
 .step-done .step-dot { background: var(--c-blue); border-color: var(--c-blue); color: #fff; }
-.step-current .step-dot { border-color: var(--c-blue); color: var(--c-blue); box-shadow: 0 0 0 4px #e8f3ff; animation: pulse 1.6s ease-in-out infinite; }
+.step-current .step-dot { border-color: var(--c-blue); color: var(--accent-dark); box-shadow: 0 0 0 4px #e8f3ff; animation: pulse 1.6s ease-in-out infinite; }
 .step-warn .step-dot { background: var(--c-amber); border-color: var(--c-amber); color: #fff; }
 .step-failed .step-dot { background: var(--c-red); border-color: var(--c-red); color: #fff; }
 .step-label { font-size: .85rem; font-weight: 600; }
