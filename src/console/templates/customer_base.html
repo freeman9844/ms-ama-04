@@ -10,7 +10,7 @@
 {% set mt_on = mt_enabled and csrf and locale() == "en" %}<body{% if mt_on %} data-mt-csrf="{{ csrf }}"{% endif %}>
 <div class="shell customer-shell">
 <aside class="sidebar">
-  <a class="brand" href="/borrower">AMA Lending <small>{{ _("고객 콘솔") }}</small></a>
+  <a class="brand" href="/borrower"><svg class="logo-mark" aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3182f6"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#logo-g)"/><text x="16" y="22" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">A</text></svg>AMA Lending <small>{{ _("고객 콘솔") }}</small></a>
   <nav aria-label="{{ _('고객 메뉴') }}">
     <ul>
       {% if applicant_id %}{% set base = "/borrower/" ~ (applicant_id|path) %}

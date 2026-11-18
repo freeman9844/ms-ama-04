@@ -231,3 +231,10 @@ def test_ops_has_gauges_stacked_and_fairness_columns(client):
     assert 'class="chart stacked-bar"' in html
     assert html.count('class="chart columns"') >= 2
     assert 'class="ops-alert"' in html
+
+
+@pytest.mark.parametrize("path", ["/", "/borrower"])
+def test_brand_shows_logo_mark(client, path):
+    html = page(client, path)
+    brand = html.split('class="brand"', 1)[1].split("</a>", 1)[0]
+    assert '<svg class="logo-mark" aria-hidden="true"' in brand and "AMA Lending" in brand

@@ -12,7 +12,7 @@
 {% set mt_on = mt_enabled and csrf and locale() == "en" %}<body{% if mt_on %} data-mt-csrf="{{ csrf }}"{% endif %}>
 <div class="shell">
 <aside class="sidebar">
-  <a class="brand" href="/">AMA Lending <small>{{ _("심사 콘솔") }}</small></a>
+  <a class="brand" href="/"><svg class="logo-mark" aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3182f6"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#logo-g)"/><text x="16" y="22" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">A</text></svg>AMA Lending <small>{{ _("심사 콘솔") }}</small></a>
   <nav aria-label="{{ _('주 메뉴') }}">
     <ul>
       <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="/">{{ _("신청") }}</a></li>
