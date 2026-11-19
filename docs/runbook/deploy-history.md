@@ -998,3 +998,8 @@ python -m ops smoke
 - `cea2438` 배포: Functions ZIP 성공, `console:20261119032949`, `eval:20261119033509`. SCM 403 재점검 시 `x-ms-forbidden-ip`와 창의 운영자 IP가 달랐습니다. 관측한 출발 IP만 임시 `/32`로 허용한 뒤 비인증 요청 401, ZIP 접수 202와 배포 성공을 확인했습니다. 임시 규칙과 진단 설정은 남지 않았으며 창을 닫았습니다.
 - 스모크 `job-smoke-uzklgbr` 성공. 심사·고객 콘솔과 사업자별 신청 현황이 HTTP 200이며 금액 라벨이 표시됩니다.
 - 합성 데이터 `classify` 1회(`job-eval-11cykut`): 구성마다 신청 10/10건 완료, 채점 그룹 152개. `decision-1+gpt-5.6-luna`의 macro F1 0.999, 폴백 26.9%; luna 단독 0.993, 폴백 100%; sol 단독 0.983. 세 구성 합계 미분류 17건이며 신청 실행 실패와 구별합니다. 추정 비용 $0.1109에 단가 미확인 Decision-1 호출 104회는 포함되지 않습니다.
+## 2026-11-19 마켓 판매 성과 심사 의견 배포와 평가
+
+- `2d17e53`의 오케스트레이터를 Functions에 ZIP 배포하고 평가 이미지를 `eval:20261119061840`으로 갱신했다. 콘솔 이미지는 바꾸지 않았다. 배포 창을 닫은 후 스모크 `job-smoke-qecrdzb` 성공과 심사 콘솔 `/loans` HTTP 200을 확인했다.
+- 합성 데이터 `underwriting` 평가 1회(`job-eval-x9w9ghx`): 검토자는 `gpt-5.6-luna`로 고정했다. 운영 분석가 `gpt-5.6-sol`은 11/11건에서 최종 근거 검사·독립 검토를 통과하고 정책과 일치했다. 비교 분석가 `gpt-5.6-luna`는 독립 검토 9/11건 통과로, 미통과 2건 중 1건은 최종 근거 검사도 실패했다. 전체 추정 비용은 $2.2719다.
+- [평가 보고서](../../eval/reports/job-eval-x9w9ghx/report.md) · [케이스별 결과](../../eval/reports/job-eval-x9w9ghx/summary.json) · [호출 지표](../../eval/reports/job-eval-x9w9ghx/calls.jsonl)
