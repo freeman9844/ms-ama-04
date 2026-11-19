@@ -380,7 +380,7 @@ ANALYST_DRAFT = {
     "counterfactuals": [],
     "officer_checks": [],
 }
-REVIEW = {"verdicts": [{"claim_index": 0, "supported": True, "reason": "일치"}], "feedback": "", "check_verdicts": []}
+REVIEW = {"verdicts": [{"claim_index": 0, "supported": True, "reason": "일치"}], "feedback": "", "check_verdicts": [], "summary_supported": True}
 
 
 class UnderwritingRunner:

@@ -134,6 +134,7 @@ class FakeAzure:
         return {
             "verdicts": [{"claim_index": c["claim_index"], "supported": True, "reason": "근거와 일치"} for c in claims],
             "feedback": "",
+            "summary_supported": True,
             "check_verdicts": [
                 {"check_index": c["check_index"], "supported": True, "reason": "근거와 일치"} for c in checks
             ],
