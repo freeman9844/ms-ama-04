@@ -27,7 +27,6 @@ _REVIEWING = frozenset(
     {"received", "consent_granted", "data_assembled", "data_incomplete", "underwritten", "assessed"}
 )
 _OFFICER = frozenset({"awaiting_officer", "escalated"})
-_ENDED = frozenset({"closed_no_decision", "failed"})
 
 
 @dataclass(frozen=True)
@@ -36,8 +35,22 @@ class CustomerStatus:
     tone: str
     message: str
     refresh: bool
-    step: int  # 진행 단계 0 접수 · 1 데이터 심사 · 2 심사역 검토 · 3 결과(_progress.html)
+    step: int | None  # 0 접수 · 1 데이터 심사 · 2 심사역 검토 · 3 결과
     amount_krw: int | None = None
+    approved: bool = False
+    stopped: bool = False
+
+
+def _interrupted_step(doc: dict[str, Any]) -> int | None:
+    for event in reversed(doc.get("timeline") or []):
+        state = event.get("status")
+        if state in _OFFICER:
+            return 2
+        if state == "received":
+            return 0
+        if state in _REVIEWING:
+            return 1
+    return None
 
 
 def customer_status(doc: dict[str, Any] | None) -> CustomerStatus:
@@ -48,17 +61,16 @@ def customer_status(doc: dict[str, Any] | None) -> CustomerStatus:
         return CustomerStatus(_("심사역 검토 중"), "pending", _("심사역이 신청 내용을 검토하고 있습니다."), True, 2)
     if status in {"approved", "conditionally_approved"}:
         decision = doc.get("officer_decision") or {}
-        amount = decision.get("amount_krw") or doc.get("requested_amount_krw")
-        return CustomerStatus(_("승인"), "good", _("대출이 승인되었습니다."), False, 3, amount)
+        return CustomerStatus(_("승인"), "good", _("대출이 승인되었습니다."), False, 3,
+                              amount_krw=decision.get("amount_krw"), approved=True)
     if status == "declined":
         return CustomerStatus(_("거절"), "bad", _("이번 신청은 승인되지 않았습니다. 결정에 이의가 있으면 내 대출 관리의 이의제기 메뉴에서 제기해 주세요."), False, 3)
-    if status == "withdrawn":
-        return CustomerStatus(_("동의 철회로 종료"), "bad", _("데이터 이용 동의가 철회되어 심사를 마쳤습니다."), False, 3)
-    if status in _ENDED:
-        return CustomerStatus(_("처리 종료"), "bad", _("신청 처리가 끝났습니다. 자세한 내용은 고객센터로 문의해 주세요."), False, 3)
     if status in _REVIEWING or status is None:
         return CustomerStatus(_("심사 중"), "pending", _("제출하신 데이터로 심사를 진행하고 있습니다."), True, 1)
-    return CustomerStatus(_("처리 종료"), "bad", _("신청 처리가 끝났습니다. 자세한 내용은 고객센터로 문의해 주세요."), False, 3)
+    step = _interrupted_step(doc)
+    if status == "withdrawn":
+        return CustomerStatus(_("동의 철회로 종료"), "bad", _("데이터 이용 동의가 철회되어 심사를 마쳤습니다."), False, step, stopped=True)
+    return CustomerStatus(_("처리 종료"), "bad", _("신청 처리가 끝났습니다. 자세한 내용은 고객센터로 문의해 주세요."), False, step, stopped=True)
 
 
 def validate_apply(form: dict[str, str], applicants: tuple[str, ...]) -> str | None:

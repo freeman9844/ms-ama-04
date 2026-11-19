@@ -502,8 +502,6 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     if deps.events is not None:
         if entry["alert_id"]:
             _publish_alert(deps, loan_id, entry["alert_id"])
-        if entry["case_id"]:
-            _publish_case(deps, loan_id, entry["case_id"])
     return entry
 
 
@@ -729,12 +727,25 @@ def _publish_alert(deps: Deps, loan_id: str, alert_id: str) -> None:
         _mark_publish_failed(deps, loan_id, alert_id, e)
 
 
-def _publish_case(deps: Deps, loan_id: str, case_id: str) -> None:
+def _publish_case(deps: Deps, loan_id: str, case_id: str) -> bool:
+    case = deps.store.read(ALERTS, case_id, loan_id)
+    if case is None:
+        raise RuntimeError(f"발행할 추심 건 없음: {case_id}")
+    if case.get("event_error"):
+        return False
+    if case.get("collections") is not None or case.get("event_published"):
+        return True
     message = RepaymentUpdated(type=TOPIC_REPAYMENT, loan_id=loan_id, case_id=case_id).model_dump(mode="json")
     try:
         deps.events.publish(TOPIC_REPAYMENT, message, f"{TOPIC_REPAYMENT}:{case_id}", session_id=loan_id)  # type: ignore[union-attr]
     except Exception as e:  # noqa: BLE001 - 추심 건은 남고 발행 실패를 기록한다. 주차 핸들러가 직접 잇는다
-        _mark_publish_failed(deps, loan_id, case_id, e)
+        case["event_error"] = f"{type(e).__name__}: {e}"[:300]
+    else:
+        case["event_published"] = True
+    # 발행 직후 추심 구독자가 쓴 제안을 덮지 않는다. 충돌 시 같은 메시지 ID로 복구한다.
+    if not deps.store.replace(ALERTS, case, case.get("_etag")):
+        raise RuntimeError(f"추심 이벤트 발행 결과 기록 충돌: {case_id}")
+    return bool(case.get("event_published"))
 
 
 def _mark_publish_failed(deps: Deps, loan_id: str, doc_id: str, e: Exception) -> None:
@@ -742,10 +753,6 @@ def _mark_publish_failed(deps: Deps, loan_id: str, doc_id: str, e: Exception) ->
     if doc is not None:
         doc["event_error"] = f"{type(e).__name__}: {e}"[:300]
         deps.store.upsert(ALERTS, doc)
-
-
-def _publish_failed(deps: Deps, loan_id: str, doc_id: str) -> bool:
-    return bool((deps.store.read(ALERTS, doc_id, loan_id) or {}).get("event_error"))
 
 
 def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:
@@ -760,7 +767,7 @@ def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:
     if last is None:
         return entry
     case_id = last.get("case_id")
-    if case_id and not _publish_failed(deps, msg.loan_id, case_id):
+    if case_id and _publish_case(deps, msg.loan_id, case_id):
         return entry  # repayment.updated → run_collections 뒤 handle_repayment_updated가 잇는다
     if case_id:
         run_collections(deps, msg.loan_id, case_id)  # 발행 실패: 여기서 추심을 돌리고 잇는다
@@ -861,8 +868,7 @@ def _decide_on_loan(deps: Deps, loan_id: str, decide: Any) -> bool:
         if deps.store.replace(LOANS, loan, loan.get("_etag")):
             _refresh_hold(deps, loan_id)
             return True
-    log.warning("동시 수정이 이어져 결정을 기록하지 못함: %s", loan_id)
-    return False
+    raise RuntimeError(f"동시 수정이 이어져 결정을 기록하지 못함: {loan_id}")
 
 
 def _open_offer_of(loan: dict[str, Any], offer_id: str) -> tuple[dict[str, Any] | None, bool | None]:
@@ -989,8 +995,7 @@ def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
         if deps.store.replace(ALERTS, doc, doc.get("_etag")):  # type: ignore[arg-type, union-attr]
             break
     else:
-        log.warning("동시 수정이 이어져 재조정 결정을 기록하지 못함: %s", msg.alert_id)
-        return False
+        raise RuntimeError(f"동시 수정이 이어져 재조정 결정을 기록하지 못함: {msg.alert_id}")
     _refresh_hold(deps, msg.loan_id)
     return True
 
@@ -1039,8 +1044,7 @@ def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
         if deps.store.replace(ALERTS, doc, doc.get("_etag")):  # type: ignore[union-attr]
             break
     else:
-        log.warning("동시 수정이 이어져 추심 결정을 기록하지 못함: %s", msg.case_id)
-        return False
+        raise RuntimeError(f"동시 수정이 이어져 추심 결정을 기록하지 못함: {msg.case_id}")
     if settled.contact is not None:
         _append_contact(deps, msg.loan_id, doc["replay_id"], settled.contact)
     _refresh_hold(deps, msg.loan_id)

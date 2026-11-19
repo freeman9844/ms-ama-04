@@ -1,6 +1,7 @@
 """분류 suite: classify_unresolved를 구성별(Decision-1+mini 폴백 / mini만 / gpt-5.4만)로 돌려 정답과 비교한다.
 
-정답 비교 단위는 고유 적요 그룹(파이프라인이 실제로 모델에 묻는 단위)이고, 거래 가중 정확도도 함께 낸다.
+macro F1은 파이프라인이 완료된 신청(apps)의 정답 있는 고유 적요 그룹만 채점한다.
+완료된 신청의 미분류는 오답이다. 신청 실패율의 분모는 예산으로 건너뛴 신청을 제외한 전체 시도다.
 """
 
 from collections import Counter
@@ -117,10 +118,11 @@ def run(
         state_truth: dict[tuple[str, ...], str] = {}
         sources: Counter[str] = Counter()
         totals: Counter[str] = Counter()
-        done = 0
+        attempted = done = 0
         for app in apps:
             if not budget_left(meter, result):
                 continue
+            attempted += 1
             mask = build_pseudonymizer(pseudonym_key, app.case.profile, app.transactions).mask
             fallback = LlmFallback(runner, cfg.fallback_model)
             entities = {**app.case.known_entities, app.case.profile.business_reg_no: "BIZNO"}
@@ -169,7 +171,11 @@ def run(
         calls = meter.model_calls(suite=SUITE, config=cfg.name)
         cost = cost_of(calls)
         result["configs"][cfg.name] = {
+            "attempted_apps": attempted,
             "apps": done,
+            "failed_apps": attempted - done,
+            "app_success_rate": rate(done, attempted),
+            "app_failure_rate": rate(attempted - done, attempted),
             "groups": len(truth_all),
             "macro_f1": macro_f1(truth_all, pred_all),
             "accuracy": accuracy(truth_all, pred_all),

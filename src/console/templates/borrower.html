@@ -11,7 +11,7 @@
   <tbody>{% for r in rows %}
 <tr><td>{% if r.link %}<a href="/apply/{{ r.application_id|path }}">{{ r.application_id }}</a>{% else %}{{ r.application_id }}{% endif %}</td>
 <td>{{ r.received_on }}</td><td>{{ r.amount_krw|krw if r.amount_krw else "—" }}</td>
-<td><span class="apply-status s-{{ r.s.tone }}">{{ r.s.label }}</span>{% if r.s.amount_krw %} · {{ _("승인 금액") }} {{ r.s.amount_krw|krw }}{% endif %}</td></tr>
+<td><span class="apply-status s-{{ r.s.tone }}">{{ r.s.label }}</span>{% if r.s.approved %} · {% if r.s.amount_krw is not none %}{{ _("승인 금액") }} {{ r.s.amount_krw|krw }}{% else %}{{ _("승인 금액 미확인") }}{% endif %}{% endif %}</td></tr>
 {% endfor %}</tbody>
 </table>
 {% else %}

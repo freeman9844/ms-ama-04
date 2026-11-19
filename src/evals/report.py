@@ -92,11 +92,18 @@ def build_summary(
 
 def _classify(s: dict[str, Any]) -> list[str]:
     out = ["## 2. 거래 분류", "", f"규칙(classify-v1)만으로 분류된 거래 비율: {_pct(s.get('rule_resolved_ratio'))} "
-           f"(전체 {s.get('total_txns', 0)}건). 아래는 규칙이 못 푼 고유 적요 그룹 기준이다.", ""]
+           f"(전체 {s.get('total_txns', 0)}건).", "",
+           "신청 성공률과 실패율의 분모는 구성별 전체 시도다. 예산 때문에 건너뛴 신청은 시도에 포함하지 않는다. "
+           "성공은 정답 여부가 아니라 분류 파이프라인이 결과를 반환했다는 뜻이다.", ""]
+    out += _table(["구성", "전체 시도(신청)", "성공", "실패", "성공률", "실패율"],
+                  [[name, _fmt(c.get("attempted_apps")), c["apps"], _fmt(c.get("failed_apps")),
+                    _pct(c.get("app_success_rate")), _pct(c.get("app_failure_rate"))] for name, c in s["configs"].items()])
+    out += ["macro F1은 실패한 신청을 제외하고, 성공한 신청에서 규칙이 못 푼 고유 적요 그룹 중 정답이 있는 그룹으로 "
+            "계산한다. 미분류 그룹은 오답으로 남는다. 폴백 비율은 캐시 미적중 그룹 중 폴백에 보낸 비율이다.", ""]
     rows = [[name, c["groups"], _fmt(c["macro_f1"]), _pct(c["accuracy"]), _pct(c["txn_accuracy"]), _pct(c["unresolved_rate"]),
              _pct(c["cache_hit_rate"]), _pct(c["fallback_rate"]), _fmt(c["model_calls_per_app"]), _usd(c["cost_usd"], c["unpriced_calls"])]
             for name, c in s["configs"].items()]
-    out += _table(["구성", "그룹", "macro F1", "정확도", "거래 가중 정확도", "미해결", "캐시 적중", "폴백 비율", "신청당 호출", "비용"], rows)
+    out += _table(["구성", "채점 그룹", "macro F1(성공 신청)", "정확도", "거래 가중 정확도", "미해결", "캐시 적중", "폴백 비율", "신청당 호출", "비용"], rows)
     for name, c in s["configs"].items():
         if c.get("threshold_curve"):
             out += [f"Decision-1 신뢰도 임계값별(구성 {name}, 운영값 0.7):", ""]
@@ -240,8 +247,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
               "- Decision-1은 공개 단가를 확인하지 못해 비용에서 빠져 있다(호출 수만 표시)."]
     f1 = [c.get("macro_f1") for c in s.get("classify", {}).get("configs", {}).values()]
     if len(f1) > 1 and None not in f1 and min(f1) >= CEILING_F1:
-        lines.append(f"- 분류 구성 {len(f1)}개 모두 macro F1이 {min(f1):.2f} 이상이다(천장 효과). "
-                     "이 표본으로는 구성 간 품질 차이를 가를 수 없고 비용·지연·fallback 비율로만 비교한다.")
+        lines.append(f"- 분류 구성 {len(f1)}개 모두 성공 신청의 macro F1이 {min(f1):.2f} 이상이다(천장 효과). "
+                     "이 점수만으로 구성 간 품질 차이를 가르기 어렵다. 신청 실패율과 비용·지연·폴백 비율도 함께 비교한다.")
     if summary["errors"]:
         lines += ["", "## 실행 오류", "", *(f"- {e}" for e in summary["errors"])]
     return "\n".join(lines) + "\n"

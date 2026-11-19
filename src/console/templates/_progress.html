@@ -2,13 +2,16 @@
 {% macro hero(s, application_id, seller=None, amount=None, tenor=None) -%}
 <section class="card hero-card">
   <p class="hero-meta">{% if seller %}{{ seller }} · {% endif %}{{ _("신청번호 %(id)s", id=application_id) }}</p>
-  {% set shown = s.amount_krw or amount %}
-  {% if shown %}<p class="hero-amount">{{ shown|krw }}</p>{% endif %}
-  {% if tenor or s.amount_krw %}<p class="hero-sub">{% if tenor %}{{ _("%(n)s개월", n=tenor) }}{% endif %}{% if tenor and s.amount_krw %} · {% endif %}{% if s.amount_krw %}{{ _("승인 금액") }}{% endif %}</p>{% endif %}
+  {% set shown = s.amount_krw if s.approved else amount %}
+  {% if shown is not none %}
+  <p class="hero-sub">{{ _("승인 금액") if s.approved else _("신청 금액") }}</p>
+  <p class="hero-amount">{{ shown|krw }}</p>
+  {% elif s.approved %}<p class="hero-sub">{{ _("승인 금액 미확인") }}</p>{% endif %}
+  {% if tenor %}<p class="hero-sub">{{ _("%(n)s개월", n=tenor) }}</p>{% endif %}
   <ol class="steps">
     {% for label in [_("접수"), _("데이터 심사"), _("심사역 검토"), _("결과")] %}
-    {% if loop.index0 < s.step %}<li class="step done">{{ label }}</li>
-    {% elif loop.index0 == s.step %}<li class="step now{% if s.step == 3 %} tone-{{ s.tone }}{% endif %}" aria-current="step">{{ label }}</li>
+    {% if s.step is not none and loop.index0 < s.step %}<li class="step done">{{ label }}</li>
+    {% elif loop.index0 == s.step %}<li class="step now{% if not s.refresh %} tone-{{ s.tone }}{% endif %}" aria-current="step">{{ label }}{% if s.stopped %} · {{ _("처리 중단") }}{% endif %}</li>
     {% else %}<li class="step">{{ label }}</li>{% endif %}
     {% endfor %}
   </ol>

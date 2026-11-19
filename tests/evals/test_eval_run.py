@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 from azure.core.credentials import AccessToken
 
@@ -8,7 +9,7 @@ from evals.backend import CachedToken, Models, fake_backend
 from evals.fake import FakeAzure
 from evals.metering import CallRecord, Meter
 from evals.runner import MAX_NAME, EvalRunner, eval_agent_name
-from evals.suites import underwriting
+from evals.suites import classify, underwriting
 from evals.suites.safety import injection
 from evals.suites.underwriting import build_context, judge_context
 from evals.transport import reassemble
@@ -113,7 +114,35 @@ def test_zero_budget_gives_partial_report_without_model_calls(tmp_path):
     assert summary["partial"]
     assert summary["by_model"] == {}
     assert summary["suites"]["underwriting"]["skipped"] > 0
+    for c in summary["suites"]["classify"]["configs"].values():
+        assert (c["attempted_apps"], c["apps"], c["failed_apps"]) == (0, 0, 0)
+        assert c["app_success_rate"] is None and c["app_failure_rate"] is None and c["macro_f1"] is None
     assert (tmp_path / "report.md").exists()
+
+
+def test_classify_failure_rate_includes_apps_excluded_from_f1(tmp_path, monkeypatch):
+    apps = datasets.classify_apps()[:3]
+    txn = apps[0].transactions[0].model_copy(update={
+        "txn_type_code": "AUTO_DEBIT", "amount_krw": -7000, "description": "KT 인터넷 요금",
+    })
+    apps[0] = replace(apps[0], transactions=(txn,), truth={txn.txn_id: "other_operating"})
+    monkeypatch.setattr(datasets, "classify_apps", lambda: apps)
+    real = classify.classify_unresolved
+
+    def flaky(txns, **kw):
+        if txns is not apps[0].transactions:
+            raise RuntimeError("pipeline failed")
+        return real(txns, **kw)
+
+    monkeypatch.setattr(classify, "classify_unresolved", flaky)
+    summary, _ = _run(tmp_path, "--suite", "classify")
+    markdown = report.render_markdown(summary)
+    for name, c in summary["suites"]["classify"]["configs"].items():
+        assert (c["attempted_apps"], c["apps"], c["failed_apps"]) == (3, 1, 2)
+        assert (c["app_success_rate"], c["app_failure_rate"]) == (0.3333, 0.6667)
+        assert (c["groups"], c["macro_f1"]) == (1, 1.0)
+        assert f"| {name} | 3 | 1 | 2 | 33.3% | 66.7% |" in markdown
+    assert "macro F1(성공 신청)" in markdown
 
 
 def test_report_flags_classify_ceiling_effect(tmp_path):

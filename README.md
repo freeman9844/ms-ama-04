@@ -45,7 +45,7 @@ flowchart LR
 | 월 고정비 | $304.73(Cost Management 하루치 × 30). 측정 뒤 추가: APIM 약 $51, Functions always ready 약 $62, App Gateway WAF v2 약 $370 | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
 | 건당 총비용(월 1,000건) | $0.35(정밀값 $0.3470) | [비용 모델](docs/cost-model.md), [load 보고서](ops/reports/load-20261102110233/report.md) 2장 |
 | 거래 분류: 규칙 선분류 비율 | 80.0%(전체 4,128건) | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |
-| 거래 분류: 범용 LLM 폴백 비율 | decision-1+mini 25.0% (mini 단독 100.0%), 두 구성 모두 macro F1 1.000 | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |
+| 거래 분류: 범용 LLM 폴백 비율 | 이전 `gpt-5.4-mini` 기준선: 캐시 미적중 그룹의 폴백 비율은 `decision-1` 병용 25.0%, mini 단독 100.0%. 두 구성 모두 신청 8건 시도·8건 성공(실패율 0%)이며, 성공 신청의 정답 있는 그룹 80개에서 macro F1 1.000. 운영 폴백 `gpt-5.6-luna`의 F1과 폴백 비율은 아직 재측정하지 않았다. | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |
 | 장애 2종 회복 | source-flaky: 신청 전부 `awaiting_officer` 복귀. policy-down: fail-closed로 `policy:failed`에서 멈추고 `awaiting_officer`로 넘김(판정 없이 진행 안 함) | [load 보고서](ops/reports/load-20261102110233/report.md) 4장 |
 
 증거와 보고서 전체 색인은 [증거 색인](docs/evidence.md)에 있다.

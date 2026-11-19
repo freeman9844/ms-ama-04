@@ -202,9 +202,16 @@ def mock_app():
     return create_mock_app(cases, SECRET, lambda: NOW, flows=FlowStore(cases, AS_OF))
 
 
+class RegistrationStore(MemoryStore):
+    def create_if_absent(self, container, document):
+        key = (container, document["id"])
+        self.docs.setdefault(key, deepcopy(document))
+        self.etags.setdefault(key, 1)
+
+
 def make_deps(mock_app, events=None, agents=None):
     return Deps(
-        store=MemoryStore(),
+        store=RegistrationStore(),
         raw=MemoryRaw(),
         mock=HttpMockApi(client=TestClient(mock_app)),
         policy=None,
@@ -232,7 +239,7 @@ def approved_loan(deps, applicant_id="seller-dailylook-01"):
             "requested_tenor_months": 12,
         },
     )
-    register_monitoring(
+    registration = register_monitoring(
         deps,
         {
             "application_id": LOAN,
@@ -245,6 +252,7 @@ def approved_loan(deps, applicant_id="seller-dailylook-01"):
             "underwriting": {k: uw[k] for k in ("features", "monthly", "settlement_profile")},
         },
     )
+    assert registration == {"loan_id": LOAN}
     return consent
 
 
@@ -379,8 +387,10 @@ def test_register_monitoring_builds_baseline_and_keeps_replay_state(mock_app):
     assert doc["baseline"]["installment_krw"] == round(monthly_installment(3_300_000, 12))
     assert doc["baseline"]["settlement"]["outflows"]["items"]
     replay(deps)
+    before_retry = loan(deps)
+    assert before_retry["monitoring"]["status"] == "completed" and before_retry["repayment"]["schedule"]
     approved_loan(deps)
-    assert loan(deps)["monitoring"]["status"] == "completed"
+    assert loan(deps) == before_retry
 
 
 def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_app):
@@ -588,6 +598,46 @@ def test_failure_after_claim_is_recorded_and_not_blocking(mock_app):
     mon = loan(deps)["monitoring"]
     assert mon["status"] == "failed" and "mock flow down" in mon["error"]
     assert replay(deps)["replay_id"] != mon["replay_id"]  # failed는 가드에 걸리지 않는다
+
+
+def test_redelivery_recovers_week_saved_before_repayment_publish(mock_app, monkeypatch):
+    outbox = Outbox()
+    deps = missing_first_due(make_deps(mock_app, events=outbox, agents=ScriptedAgents()))
+    approved_loan(deps)
+    replay(deps)
+    fail_once(monkeypatch, "_publish_case")
+    with pytest.raises(RuntimeError, match="503"):
+        pump(deps, outbox)
+    mon = loan(deps)["monitoring"]
+    assert mon["processed_week"] == 5 and not outbox.bodies(TOPIC_REPAYMENT)
+    body = outbox.bodies(TOPIC_FLOW)[-1]
+    handle_flow_update(deps, body)
+    assert json.loads(outbox.bodies(TOPIC_REPAYMENT)[0])["case_id"] == mon["weeks"][-1]["case_id"]
+    pump(deps, outbox)
+    assert loan(deps)["monitoring"]["holds"] == ["collections_proposal"]
+    assert deps.agents.calls.count(COLLECTIONS_AGENT) == 1
+
+
+@pytest.mark.parametrize("kind", ["collections", "restructure", "plan"])
+def test_unstored_decision_retries_after_write_conflicts(mock_app, monkeypatch, kind):
+    if kind == "plan":
+        deps, _ = high_replay(mock_app)
+        assert choose(deps, "move")
+        def send():
+            return decide_plan(deps)
+    else:
+        deps, _ = paused_inline(mock_app)
+        case_id = loan(deps)["monitoring"]["pause_case_id"]
+        if kind == "restructure":
+            assert decide_collections(deps, case_id, include_hardship=True)
+        def send():
+            return (decide_restructure if kind == "restructure" else decide_collections)(deps, case_id)
+    with monkeypatch.context() as patch:
+        patch.setattr(deps.store, "replace", lambda *args: False)
+        with pytest.raises(RuntimeError):
+            send()
+    assert send() is True
+    assert send() is False
 
 
 def test_repayment_updated_runs_collections_once(mock_app):
