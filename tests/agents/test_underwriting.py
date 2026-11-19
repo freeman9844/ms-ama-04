@@ -60,6 +60,7 @@ GOOD = {
     "officer_checks": [],
 }
 SUPPORTED = {
+    "summary_supported": True,
     "verdicts": [
         {"claim_index": 0, "supported": True, "reason": "M:dscr 값과 같다."},
         {"claim_index": 1, "supported": True, "reason": "M:cash_buffer_days 값과 같다."},
@@ -330,6 +331,33 @@ def test_reviewer_sees_checks_with_evidence(cases):
     assert "check_verdicts" in REVIEWER_OUTPUT_SCHEMA["required"]
 
 
+def test_reviewer_sees_market_evidence_even_when_analyst_omits_it(cases):
+    ctx = seller_only_context(cases)
+    ctx = replace(ctx, features={**ctx.features, "mkt_review_count": 0})
+    payload = json.loads(_reviewer_input(ctx, draft()).split("\n", 1)[1])
+    assert payload["market_evidence"] == {"M:mkt_rating": 4.7, "M:mkt_review_count": 0}
+    absent = json.loads(_reviewer_input(context(cases), draft()).split("\n", 1)[1])
+    assert absent["market_evidence"] == {}
+
+
+def test_summary_rejection_alone_returns_reason_to_analyst(cases):
+    reason = "정산 예정금을 이미 입금된 현금으로 보았다."
+    rejected = SUPPORTED | {"summary_supported": False, "feedback": reason}
+    runner = FakeRunner([GOOD, GOOD], [rejected, SUPPORTED | {"summary_supported": True}])
+    r = run_assess(context(cases), runner)
+    assert (r.assessment.review.passed, r.assessment.review.rounds) == (True, 2)
+    assert reason in runner.calls[2][1]
+
+
+def test_reviewer_can_compare_uncited_reconciliation_with_expected_settlement(cases):
+    ctx = context(cases)
+    for ratio in (0.9, 1.0):
+        changed = replace(ctx, features={**ctx.features, "pg_reconciliation_ratio": ratio})
+        payload = json.loads(_reviewer_input(changed, draft()).split("\n", 1)[1])
+        assert payload["cash_evidence"]["M:pg_reconciliation_ratio"] == ratio
+        assert payload["cash_evidence"]["M:dscr"] == ctx.catalog["M:dscr"]
+
+
 def test_reviewer_gets_full_seasonal_index_when_claim_cites_index(cases):
     ctx = context(cases)
     month = ctx.monthly[0]["month"]
@@ -551,6 +579,7 @@ def test_ungrounded_draft_is_revised_with_feedback(cases):
 
 def test_reviewer_rejection_triggers_revision(cases):
     rejected = {
+        "summary_supported": True,
         "verdicts": [
             {"claim_index": 0, "supported": False, "reason": "정책 하한과의 비교가 과장됐다."},
             {"claim_index": 1, "supported": True, "reason": "일치"},
@@ -566,7 +595,7 @@ def test_reviewer_rejection_triggers_revision(cases):
 
 
 def test_missing_verdict_is_not_a_pass(cases):
-    partial = {"verdicts": [SUPPORTED["verdicts"][0]], "feedback": "", "check_verdicts": []}
+    partial = SUPPORTED | {"verdicts": [SUPPORTED["verdicts"][0]]}
     runner = FakeRunner([GOOD] * MAX_ROUNDS, [partial] * MAX_ROUNDS)
     r = run_assess(context(cases), runner)
     assert r.assessment.review.passed is False
