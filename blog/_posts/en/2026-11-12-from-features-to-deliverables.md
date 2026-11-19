@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "From Features to Deliverables"
+title: "Assigning ownership of shared terms during parallel edits"
 date: 2026-11-12 09:00:00 +0900
 lang: en
 ref: day-15
 days: "2026-11-12 – 2026-11-16"
 permalink: /en/day-15/
-summary: "Five days in which the work turned from finishing features to producing deliverables: a slow review loop that wasn't the model's fault, a whitepaper and deck, and four parallel agents overwriting each other's words."
+summary: "As the work shifted from deployment to the paper and slides, the unit of contention changed."
 ---
-Last time, the early-warning and collections approval feature went from spec to working code in a day; on the morning of 11/12 it went live, and over the next five days the work slowly turned from building features to producing the things I would actually hand in. These five days are busy, so I'm picking three moments that taught me something about working with the agent.
+As the work shifted from deployment to the paper and slides, the unit of contention changed. Agents assigned separate files still edited a shared term inconsistently. File ownership prevented some collisions but did not establish who owned a definition used across deliverables.
 
-## What I was trying to do
+## Objective
 
 Two things, in order. First, close out the features. On 11/13, for example, I asked it to make collections approval send "only the message, without the counselling request," and chose to change the whole system rather than one case.
 
 Second, step back and ask what the capstone still needed. A working demo is only part of it. There is also a presentation and a written piece. The deck and a recording didn't exist yet, and the written piece was only a Korean draft.
 
-## How I handed it to the agent
+## Scope and procedure
 
 **A slow application.** On 11/12 I filed a new loan application on the live site and waited. Then I asked:
 
@@ -32,7 +32,7 @@ So I asked: "Please create the thought-leadership deliverable and the slide deck
 
 **Bilingual screens.** That evening I asked what the best way would be to switch the site between Korean and English. It laid out a design and I said "Yes"; it then restated what it thought I wanted, and I said "Go".
 
-## Where it went sideways
+## Observed problems
 
 **My question pointed at the model, but the cause was elsewhere, and the agent's first guess missed too.** The agent didn't just pick a faster model. Its answer opened by saying it was hard to promise that changing only the model would make things faster; this time the five minutes came more from the repeated rounds than from model speed. It went through the candidates: a lighter model might need more rounds, another's capacity was reserved for officer chat, and a third failed on the gateway path when tools and reasoning were combined. Then it named a different likely cause: a recent change that had made the summary longer. I chose to look at the rounds.
 
@@ -44,7 +44,7 @@ Three minutes later: "I found the cause. Earlier I guessed the summary-number ch
 
 So two of them collided. The home and detail agents both had entries for common words like "정책 판정" (policy decision) and "검토 에이전트" (review agent). Each changed its values to match the other's at the same moment, so they swapped places instead of agreeing. The home agent's log says: "The detail agent switched to my original values at the same moment, so I'm restoring them." The detail agent then messaged the home agent directly: "we just flip-flopped on shared keys."
 
-## How I got past it
+## Response and results
 
 **Rounds, not the model.** The proposed fix left the model alone. When a claim cites a monthly seasonal index, the reviewer now gets all twelve months plus the definition (1.0 = the monthly average over the period), and the analyst is told to cite every month it compares. I picked "go" in the form. After the deploy, a re-test with 8 new applications showed round-one passes going from 6/16 to 5/8 and seasonal-index rejections dropping to 0. A new application from the seller whose case had taken 303.7 seconds passed in one round, in 54.6 seconds.
 

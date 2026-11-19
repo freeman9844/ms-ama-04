@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "Reviewing Everything, Then Writing This Blog"
+title: "Separating read-only review from write access"
 date: 2026-11-17 09:00:00 +0900
 lang: en
 ref: day-16
 days: "2026-11-17"
 permalink: /en/day-16/
-summary: "On the last day I asked for one review of the whole codebase; the agent split it into four read-only reviewers and four fenced-in fixers, and in the afternoon the same habits went into planning this blog."
+summary: "For the whole-system review, four reviewers had read-only assignments and the subsequent fixes had explicit file boundaries."
 ---
-In the last episode the project turned from features into deliverables. This is the last day in the records, and it had two halves: in the morning I asked the agent to review the whole codebase one more time, and just after noon I asked it to help me write the blog you're reading now.
+For the whole-system review, four reviewers had read-only assignments and the subsequent fixes had explicit file boundaries. The test of that arrangement was a cross-cutting change: pseudonymizing officer input touched both the console and the orchestrator.
 
-## What I was trying to do
+## Objective
 
 The day started with housekeeping. At 9:00 a.m. I typed "commit please" (with a typo), and the agent committed the architecture diagrams, 29 files in Korean, English and agent-emphasis versions. I said yes to pushing.
 
 A minute later came the real request. The demo was deployed and working; I think, with the slides done, I wanted one last pass for problems a feature-by-feature build tends to miss.
 
-## How I handed it to the agent
+## Scope and procedure
 
 > "Please review and optimize the source as a whole."
 
@@ -40,7 +40,7 @@ The four reports came in between 9:16 and 9:19 a.m., and none of them had anythi
 
 The agent didn't wait for the slowest reviewer. At 9:18 a.m. it sent out three fixers; at 9:19 a.m., the fourth. The fixer briefs were stricter than the reviewer ones. Edit only your own area's folders, because other agents are editing the rest. Don't commit, stage, push or deploy. For every behavior change, write a failing test first. And: "if a finding is wrong, skip it and say why." One fix, masking the officer chat, touched both the orchestrator and console areas, so the agent kept that piece for itself. I don't know whether it remembered the parallel agents overwriting each other in the last episode, but this time every area had exactly one owner.
 
-## Where it went sideways
+## Observed problems
 
 **The fences leaked a little.** The orchestrator fixer saw one evaluation test fail and left it alone, because another agent was editing that file. The ops fixer's change broke a test outside its own area, as an intended effect: revoking a consent after a mock restart now records the revocation instead of returning 404. Neither reached over the fence. They reported it, and the main agent updated the one expectation that had really changed.
 
@@ -54,7 +54,7 @@ The agent didn't wait for the slowest reviewer. At 9:18 a.m. it sent out three f
 
 In between, as I often did, I asked it to check my IP and make the console reachable.
 
-## How I got past it
+## Response and results
 
 **One more reviewer, over everything.** Before telling me it was done, the agent committed the fixes as 4 commits grouped by area, and sent one more independent reviewer over the whole diff with five pointed questions, such as whether the new API Management check could break the live gateway connections, or whether anything still needed the Key Vault role it had just lost. At 10:09 a.m. the answer was "No significant issues found." The full suite showed 5,253 passed and 140 skipped.
 

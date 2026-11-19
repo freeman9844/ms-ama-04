@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "\"That's Not in the Data\""
+title: "Tracing a missing answer to the model's input"
 date: 2026-11-09 09:00:00 +0900
 lang: en
 ref: day-13
 days: "2026-11-09 – 2026-11-10"
 permalink: /en/day-13/
-summary: "My demo's review assistant said a rate band's criteria were \"not in the data\"; asking what it would need exposed a wiring gap, and the same shape turned up twice more in two days."
+summary: "The officer assistant could not explain the rate band."
 ---
-Last time I moved my "help me understand" questions into a separate session. On the 9th, the one that couldn't answer was my own demo: the loan officer's chat assistant told me that what I'd asked was "not in the data."
+The officer assistant could not explain the rate band. Its answer did not distinguish a missing policy rule from an existing rule omitted from its input. Before requesting more data, I followed the information from the policy decision to the chat context.
 
-## What I was trying to do
+## Objective
 
 By now the project was a running app getting small improvements. Just after midnight on the 9th, the agent reported a new chat panel live in the console's decision tab. The feature is called the review assistant: an LLM that answers a loan officer's questions about one application and cites its sources. Four test questions were answered, and an address question got "not in the data."
 
 Until the evening of the 10th, several of my messages show me clicking through screens and asking about what I saw: rate bands, alert levels, the ratios on the settlement screen.
 
-## How I handed it to the agent
+## Scope and procedure
 
 At 10:06 a.m. I pasted the assistant's answer back to the agent:
 
@@ -37,7 +37,7 @@ Then came a choice before code. The policy engine was a separate service the con
 
 One rule in the spec stood out. If recomputing a decision disagrees with the stored one, the chat drops the trace and says why, because that beats showing wrong reasoning. Per-band rates stayed out of scope, so for those the chat would keep saying "not in the data."
 
-## Where it went sideways
+## Observed problems
 
 **A rule file had changed under the same name.** Before the deploy, the log shows an English brief I never typed, sent to a "final whole-branch reviewer." It found one issue: on 11/04 a ruleset had been edited in place, changing the product's amount limits but keeping its version label. An old decision would have been "explained" with limits never applied to it. The 10:32 a.m. fix stops explaining those old decisions. Live, all four questions got answers. Band B was explained from a DSCR of 1.76 and the v3 table. The real rate per band was still "not in the data", and now that answer was the whole truth.
 
@@ -49,7 +49,7 @@ Each card was correct on its own, and together they told the reader something fa
 
 **The settlement ledger had more in it than we used.** On the evening of the 10th I asked for more explanation on the settlement reconciliation card, and for ideas: "Beyond cash flow, marketplace settlement looks like another important point." The agent's reply included a list titled "already in the ledger but unused": each channel's payout cycle, ad-cost offsets recorded apart from fees, and deposits from advance-payment companies marked "advance." It was the same shape as the rate band. The data was there; nothing was reading it.
 
-## How I got past it
+## Response and results
 
 **For the alert card, a real choice.** The agent took my "L4" at face value and turned it into options. A, display only: keep the behaviour, link the contact to the alert behind it, and fix the "no contact" wording. B, L4 autonomous action: the early-warning agent contacts borrowers itself, even with no missed payment, with more write permissions and revised specs. I picked A. The records don't say why; I can only note that I had just claimed L4 autonomy and then chose not to build it. At 4:51 p.m. the high alert card showed the chain: missed instalment → collections agent → hardship offer sent → rescheduling request waiting for the officer.
 

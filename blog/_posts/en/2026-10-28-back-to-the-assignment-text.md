@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "Back to the Assignment Text"
+title: "Tracing requirements independently of the running MVP"
 date: 2026-10-28 09:00:00 +0900
 lang: en
 ref: day-03
 days: "2026-10-28"
 permalink: /en/day-03/
-summary: "While Attempt 1 kept shipping features, I opened Attempt 2 in an empty repository, put the assignment text in a file, and asked basic questions until the answers became a design."
+summary: "While the first MVP continued to run in Azure, I put the assignment text in a second repository."
 ---
-In the last entry I learned to ask "why?" before saying "go"; on the 28th the "why" went one step further back, to what the assignment itself was asking for. The day had two tracks. Attempt 1, the cloud MVP from the first two entries, kept running through the day. At 1:56 p.m. a new, empty repository got its "Initial commit", and three minutes later I opened Attempt 2 in it. The records don't say why I started a second attempt that day, so I won't guess.
+While the first MVP continued to run in Azure, I put the assignment text in a second repository. Instead of using the implemented features as a specification, I asked the agent to tie its design answers back to the original requirements.
 
-## What I was trying to do
+## Objective
 
 Attempt 1 picked up where the night had left it. Before a rollout, the agent's preflight found the Fabric F2 capacity paused and SQL blocked (error 42131). It stopped and asked: resuming would restart billing, go ahead? I said yes. By 8:04 a.m. the new screens were live locally and merged into GitHub `main`.
 
@@ -22,7 +22,7 @@ The agent said yes, Bronze → Silver → Gold is a pattern Microsoft recommends
 
 Attempt 2 went the other way round: questions first, code later.
 
-## How I handed it to the agent
+## Scope and procedure
 
 At 1:59 p.m. I pasted an image of the case study and asked for the English original as a markdown file, then a Korean translation in a second file. Then:
 
@@ -36,7 +36,7 @@ Then the question that started it. At 3:22 p.m.:
 
 Not necessarily, the agent said, but there was no assignment spec in the conversation, so it couldn't confirm what would count. I told it: "Collaboration of five agents is the requirement." I then asked the same kind of question against the English original, and against the assessment criteria, which I had it turn into markdown and translate. By the original, the agent said, the Data Assembly Agent didn't need an LLM; the criteria didn't require every agent to be one; and the number five came from the assignment itself, not the criteria.
 
-## Where it went sideways
+## Observed problems
 
 Three times that afternoon, the agent's answer drifted away from what I meant.
 
@@ -50,7 +50,7 @@ Attempt 1 hit a different problem that evening. At 9:05 p.m. I reported an appli
 
 > "I can't check it. Please check it directly in Azure."
 
-## How I got past it
+## Response and results
 
 **For the drift, I pointed back at the source.** At 3:49 p.m.:
 

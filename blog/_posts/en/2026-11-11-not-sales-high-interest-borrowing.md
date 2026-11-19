@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "Not Sales — High-Interest Borrowing"
+title: "Separating a drop in sales from high-interest borrowing"
 date: 2026-11-11 09:00:00 +0900
 lang: en
 ref: day-14
 days: "2026-11-11"
 permalink: /en/day-14/
-summary: "I asked for more realistic post-loan data and got back a list of four gaps; one sentence from me about what was actually wrong set the direction for the rest of the day."
+summary: "My request for more realistic post-loan data didn't identify the risk the data should expose."
 ---
-The settlement-reconciliation feature from the last episode, the one that grew out of the assistant saying "that's not in the data," still had to reach the live environment when this day began. So the morning started with a deploy, and the real work only began at 10:26 a.m.
+My request for more realistic post-loan data didn't identify the risk the data should expose. A decline in sales and reliance on expensive borrowing call for different follow-up questions. Specifying the latter gave me a way to review both the generated evidence and the action attached to it.
 
-## What I was trying to do
+## Objective
 
 My first two messages were "again" at 8:07 a.m. and "keep going again" at 8:35 a.m. The deploy history says the first attempt failed on a temporary local DNS problem and was run again; I think my "again" was that rerun. By 9:09 a.m. the agent reported the feature deployed, checked on the live screens and pushed, and the test run reported 2,897 passing. At 10:08 a.m. I asked the agent to check my IP and whether the console was reachable. It found that my current IP wasn't on the WAF allow list, so the console was answering 403. It added `<my-ip>` to the list and confirmed both pages now returned 200.
 
 Then the actual job. After a loan is approved, AMALend replays 13 weeks of the seller's cash flow week by week, so the early-warning agent has something to watch. I wanted that replay to look more like a real marketplace seller.
 
-## How I handed it to the agent
+## Scope and procedure
 
 The request was one line:
 
@@ -35,7 +35,7 @@ All four were fair. But I think a list like that has a quiet risk. If I'd answer
 
 That sentence is where this post's title comes from. It was a complaint about what the data already did. In every seller that went bad, the only thing that went wrong was borrowing. No sales slump, no held payout, no wave of returns. Just high-interest loans stacking up until default. Real sellers, I think, usually end up borrowing at high rates because something else went wrong first.
 
-## Where it went sideways
+## Observed problems
 
 The direction itself held all day. At 10:29 a.m. the agent turned my sentence into a choice:
 
@@ -54,7 +54,7 @@ What went sideways was everything around that plan.
 
 **The final review found a seam.** By 6:27 p.m. all ten tasks had passed their own reviews, Tasks 3 and 5 only after a fix round for three Important findings each. The whole-branch review still came back "Ready to merge: With fixes": 0 Critical, 1 Important, 5 Minor. The Important one: the cause the early-warning agent picked never reached the collections agent. Each task had passed its own review, but the hand-off between two of them was missing.
 
-## How I got past it
+## Response and results
 
 **For the DNS failures, I said "retry," and the agent checked before retrying.** I typed "retry" at 3:57 p.m. and again at 4:00 p.m. The records don't show why I sent it twice. Before re-dispatching, the agent confirmed the working tree was clean and nothing had changed, then sent Task 6 out again. It finished at 4:21 p.m. with 4,571 tests passing; the count had jumped from the morning's 2,897 mainly because Task 3 widened one parametrized test matrix to five scenarios, adding 1,656 tests. Task 8 was a different case. That implementer had committed its console change before the connection dropped, but never wrote its report. After my "keep going again" at 5:33 p.m., the agent re-ran the full suite itself (4,577 passed), prepared a substitute report and sent the commit to review. Both times my message was just "retry" or "keep going," and both times the agent checked the state before doing anything.
 

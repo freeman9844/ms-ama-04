@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "Using the Agent as a Research Partner"
+title: "Keeping business assumptions separate from implementation results"
 date: 2026-10-29 09:00:00 +0900
 lang: en
 ref: day-04
 days: "2026-10-29 – 2026-10-30"
 permalink: /en/day-04/
-summary: "With a local demo already working, I spent two days asking the agent about the business instead of the code, saving each answer to a file as I went."
+summary: "A working local demo established feasibility, not a business case."
 ---
-In the last entry I went back to the assignment text and started Attempt 2 by asking the agent basic questions; these two days the questions moved from the design to the business around it.
+A working local demo established feasibility, not a business case. For two days I used the agent to investigate the latter. An answer in the conversation and a file I could inspect at the next design review turned out to be different deliverables.
 
-## What I was trying to do
+## Objective
 
 By midday on October 29, Attempt 2 had a local demo. The agent's own checkpoint summary describes it: React, TypeScript and SQLite, a separate HTTP mock data source, and real calls through the GitHub Copilot SDK, with a final review already done. The demo worked. What I didn't have was an answer to a plainer question: is this idea worth anything to a real lender?
 
 So for most of these two days I didn't ask for code. The five commits on the 29th are an initial commit, documents and merges, and the 30th has no commits at all. I spent the time asking questions about the business and having the agent write the answers into files.
 
-## How I handed it to the agent
+## Scope and procedure
 
 The first request, at 12:17 p.m., was short and had a typo in it:
 
@@ -42,7 +42,7 @@ From there the session was a chain of short questions, each one built on the las
 
 Every so often I typed "update the file" and the agent folded the recent discussion into a second notes file.
 
-## Where it went sideways
+## Observed problems
 
 **The research tools stumbled first.** Within six minutes of the first question on the 30th, three tool calls failed: a 504 from the GitHub tool, a web fetch that couldn't connect, and a timeout. The day before, a GitHub documentation page had returned 404. I don't think I noticed any of this at the time. The answer arrived at 11:36 a.m. anyway, and the saved file has source links. I can't tell from the records exactly which sources it finally reached.
 
@@ -58,7 +58,7 @@ None of this was a failure. But it was not cheerleading.
 
 **One save may not have happened.** At 12:34 p.m. I asked it to update the file. A minute later, before any reply shows up in the records, I asked the next question about business value. The next save, at 1:18 p.m., reports adding the business-value analysis; the one after that, at 2:19 p.m., lists the gap analysis, differentiation, platform data access and peer comparison. Neither summary mentions the architecture comparison from 12:27 p.m. From the records alone I can't tell whether it ever made it into the file.
 
-## How I got past it
+## Response and results
 
 **For the narrowing, I kept asking.** I didn't argue with the caveats. I asked the next question inside them. When the agent said head-on competition on "our AI scores credit better" would need real default data, I asked where the gap was instead. When it pointed to settlement-flow-based underwriting for online sellers, I asked how we would get the platform data, and the answer separated "the seller agreed" from "we have the right to use platform data for credit decisions." That chain of eight questions is, I think, the most useful thing these two days produced.
 

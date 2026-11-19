@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "A Separate Session for Questions"
+title: "Verifying architectural explanations against the implementation"
 date: 2026-11-08 09:00:00 +0900
 lang: en
 ref: day-12
 days: "2026-11-08"
 permalink: /en/day-12/
-summary: "While the main attempt built from midnight to midnight, I opened a second session just for 'help me understand' questions; it kept the builder on its plan, and one of its answers turned out to need checking."
+summary: "I separated architecture questions from the implementation session so that a request for an explanation wouldn't interrupt deployment."
 ---
-In the last episode I learned to ask the price before asking for a feature. On the 8th my questions were of a different kind, not "how much?" but "how does this actually work?", and for the first time I asked them in a separate window.
+I separated architecture questions from the implementation session so that a request for an explanation wouldn't interrupt deployment. The separation introduced a boundary: an answer from the second session was not an observation of the running system. I checked it before turning it into a change request.
 
-## What I was trying to do
+## Objective
 
 The main attempt had a long day. Just after midnight I approved a spec that started collections from a missed installment instead of an early-warning alert; by 9:31 a.m. seven of its tasks were committed with the full suite's 3,046 tests passing, and the agent then deployed and verified it on Azure. At 1 p.m. a question about using the marketplace settlement data turned into a design and a 14-task plan, run with subagents. The evening brought a model change and, at night, a chat panel for the loan officer.
 
 The problem was that I didn't understand my own system well enough anymore. Around noon I started asking in the main session: how often does the detail page refresh, what does the "declared revenue vs. bank revenue mismatch" rule mean, which policy rules exist, what does gpt-5.4-mini do in the data-assembly agent. The answers were good, but they were mixed into a session that was also provisioning and deploying. At 12:35 p.m. the agent wrote that it was opening the operations window (about 5 minutes), and at 12:37 p.m. my next message was a question about a model's role.
 
-## How I handed it to the agent
+## Scope and procedure
 
 At 1:37 p.m. I opened a separate Q&A session, on purpose. The main attempt was finishing the settlement design; I approved it at 1:42 p.m., and the agent went off to write the plan. My first message to the new session was:
 
@@ -31,7 +31,7 @@ Then I kept going. Between 1:37 and 4:23 p.m. I typed 27 messages into that sess
 
 I didn't plan an order. One answer raised the next question. I think that was the point: I could follow my curiosity for three hours while, from 2:20 p.m., the main attempt ran its 14-task plan, an implementer subagent and then a read-only reviewer for each task.
 
-## Where it went sideways
+## Observed problems
 
 **The wall leaked.** At 2:39–2:41 p.m. I typed three of the same questions into the main session: the precise roles of the two agents according to the assignment documents, what the officer should do about an early-warning alert, and what "rescheduling review" really means. I had asked the Q&A session exactly these at 2:14, 2:18 and 2:20 p.m. The main agent was mid-task; just before my question it had written "Three failures, all expected fixture values (tenor 12). Updating them." It answered me anyway, between commits. A few minutes later, two messages further on (one of them comes up below), I asked:
 
@@ -49,7 +49,7 @@ The main agent said the direction and most facts were right, then listed problem
 
 One thing stayed unconfirmed: in the later morning runs, the deploy log says week 7 fell back with `agent_error` with no HTTP error or 429 at all. The error text was never checked; the log only guesses a tool-round limit or a schema mismatch.
 
-## How I got past it
+## Response and results
 
 **I used each session for what it was good at.** The Q&A session took the wide, cheap questions; when an answer mattered, I asked the main session, which had the day's context, to check it. That's how the forecast overstatement got caught.
 

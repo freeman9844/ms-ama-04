@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "Picking Up Where a Login Error Left Off"
+title: "Separating authentication from deployment prerequisites"
 date: 2026-10-26 09:00:00 +0900
 lang: en
 ref: day-01
 days: "2026-10-26"
 permalink: /en/day-01/
-summary: "I came back ready to fight a login error; the agent checked the present state first, and the real blockers turned out to be model capacity and a Spark dependency."
+summary: "I resumed work in an environment that had previously failed at login."
 ---
-This diary follows an internal architect program's capstone: a demo called AMALend, an agentic cash-flow lending app on Azure. I built it with an AI coding agent, GitHub Copilot CLI, and it was my first time working this way. The Azure parts are the backdrop. What I want to write down is how I learned to work with the agent, including the parts that went wrong.
+I resumed work in an environment that had previously failed at login. Before trying the old fix, I checked whether authentication still failed. Model capacity and a Spark dependency turned out to be separate constraints on the deployment.
 
-## What I was trying to do
+## Objective
 
 Day one is not really day one. The repository for what I'll call Attempt 1 already had its first commits from the day before: the case study, a Korean translation, and a document explaining the capstone. The commit history for the 26th also shows a full working day before any conversation I have on record: a requirements analysis and a database design in the morning, a short "two-agent MVP" spec and plan in mid-afternoon, then six feature commits by about 6 p.m. Fixed test data and a mock API, workflow storage in Fabric SQL, Foundry and Fabric clients, notebook calculations, two guarded agents, and a presenter wizard.
 
@@ -18,7 +18,7 @@ Then progress stopped. What I remembered was an Azure login error. By the plan, 
 
 So at 6:45 p.m. the goal was simple: get unstuck and finish the MVP on real Azure.
 
-## How I handed it to the agent
+## Scope and procedure
 
 My opening move was lazy, and it worked better than I expected. I attached a file from the previous session, a log of syncing to GitHub, and typed nothing else. The agent didn't guess. It asked what I wanted to do with the file and offered choices; I picked "continue the previous work." It then switched this machine to `main` and confirmed the local branch matched the remote. I think the earlier work had happened on a different machine, because syncing this one was the first thing it had to do.
 
@@ -39,7 +39,7 @@ My reply was one word: "go."
 
 For the rest of the evening, my side of the conversation was mostly that word. Six of the messages I typed that day were "go," "keep going," or "approve." The real decisions happened somewhere else: in the agent's approval prompts. Before anything that cost money or changed my machine, it stopped and asked a multiple-choice question, and I mostly answered by picking an option.
 
-## Where it went sideways
+## Observed problems
 
 **The model I wanted had no room.** I wrote: "Use gpt-6.1-sol for the model." The agent checked the quota in Korea Central and came back with a problem: for that model on GlobalStandard, usage was already over the limit and new capacity was zero. It offered two paths: a different deployment type, or stay on GlobalStandard and look into a quota increase. I chose to stay. It wrote the choice into the design, noted that my existing allocation lived in a different region, and said plainly that it had *not* assumed that allocation could be moved. Then it pointed me to the quota increase form. Correct, but I was blocked.
 
@@ -47,7 +47,7 @@ For the rest of the evening, my side of the conversation was mostly that word. S
 
 **Plenty of small stumbles, too.** The log for that day shows fourteen tool failures: line ranges out of bounds, patches that didn't match the file, paths that didn't exist, a 504 from a GitHub tool, a documentation page that returned 404. The agent got past almost all of them by itself. I don't think I noticed most of them at the time.
 
-## How I got past it
+## Response and results
 
 **For capacity, I asked a different question.** Instead of waiting on a quota request, I asked: "Other GPT-6 models?" The agent queried the region and returned a short table. Three other GPT-6 models had 200,000–250,000 TPM free; the one I wanted had zero. It suggested gpt-6-sol and flagged that price and tool-calling compatibility still needed checking. I said "Make it gpt-6-sol," and two minutes later the design and plan were updated. Nothing had been deployed yet.
 

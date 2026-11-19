@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "\"Am I Changing Too Much?\""
+title: "Measuring change scope against the minimum workflow"
 date: 2026-11-04 09:00:00 +0900
 lang: en
 ref: day-09
 days: "2026-11-04"
 permalink: /en/day-09/
-summary: "After a morning of saying \"go\", I asked one attempt how big the change had become. The honest answer was 52 files and about 22,000 lines, so we cut back to a minimal flow."
+summary: "After repeatedly approving work on the seventh attempt, I asked for the size of the change: 52 committed files and roughly 22,000 lines."
 ---
-In the last entry I had five folders running at once. This one is about the moment one of those folders made me stop and ask how big things had become.
+After repeatedly approving work on the seventh attempt, I asked for the size of the change: 52 committed files and roughly 22,000 lines. Size alone wasn't a defect. It told me how much I would have to review before I could vouch for the minimum workflow.
 
-## What I was trying to do
+## Objective
 
 In Attempt 7, the plan was to grow the existing lending MVP into a consent-first, five-agent design, where a Consent Lifecycle step is always called before anything else. The agent was working in an isolated worktree, so the original MVP stayed as it was.
 
@@ -20,7 +20,7 @@ Then came the morning. Between 8:01 a.m. and 12:53 p.m. I sent "go" five times. 
 
 The reports covered Fabric provisioning, deployment and publishing CLIs, SQL bootstrap, model budgets, and an image check. Each sounded reasonable on its own. I think that is exactly why I didn't see the total.
 
-## How I handed it to the agent
+## Scope and procedure
 
 At 1:30 p.m. I finally asked:
 
@@ -39,7 +39,7 @@ My reply a minute later was that recommendation, repeated almost word for word. 
 
 "Yes, please go ahead." Twenty-three minutes later it was committed: four business-code files changed, no new infrastructure, database or screens.
 
-## Where it went sideways
+## Observed problems
 
 "So can I test it now?" Not quite: the server had to be restarted with the new code first. The 1,334 offline tests had passed, and a live test with Fabric and Foundry needed separate approval because it could cost money. I asked it to prepare and guide me. In the approval prompt I chose a live test on the existing resources and said I would pause the capacity myself. The agent reminded me that this meant the F2 would keep billing until I told it the test was over.
 
@@ -53,7 +53,7 @@ The answer was yes, with steps, and with a catch. The same heartbeat code existe
 
 Three minutes later I noticed something else: "The UI looks different too, doesn't it?" It did. The sidebar, dashboard and style improvements had been *uncommitted* changes in the original folder. The new worktree was built from commits, so it never had them. The agent was direct about it: telling me earlier that it would use the existing UI as it was had been inaccurate, and it apologized.
 
-## How I got past it
+## Response and results
 
 I didn't roll back. Instead I asked whether the old UI improvements could be used on the current branch. The agent drew a tight scope: move 13 UI files (styles, templates, icons, page scripts) and their tests. The original folder would stay as it was, the consent and analysis logic would not change, and the heartbeat error would *not* be fixed in this step. I approved, and it was committed at 3:22 p.m.
 

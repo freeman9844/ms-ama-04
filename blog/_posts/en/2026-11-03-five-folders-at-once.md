@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "Five Folders at Once"
+title: "Distinguishing parallel work from verified throughput"
 date: 2026-11-03 09:00:00 +0900
 lang: en
 ref: day-08
 days: "2026-11-03"
 permalink: /en/day-08/
-summary: "Five folders had sessions on the same day. The live rehearsal found a real Service Bus bug, but the clearest pattern in the log was every agent waiting for my next \"go\"."
+summary: "Agents were active in five workspaces, but their approvals and results still converged on one reviewer."
 ---
-In the last entry I cut back things the agent had added; on the 3rd, what grew instead was the number of folders I had open. Five places had sessions that day: Attempt 3, Attempt 5, Attempt 6, Attempt 7 (which started that afternoon) and the main attempt. The log counts 61 commits and 58 tool failures across them. The records don't say why I kept all five going at once, so I won't guess. What they do show is how the day looked from my side of the keyboard.
+Agents were active in five workspaces, but their approvals and results still converged on one reviewer. Commit volume could not establish whether the Service Bus path delivered a message; that took a rehearsal. The distinction that mattered was work started versus work verified.
 
-## What I was trying to do
+## Objective
 
 Each folder had its own goal.
 
@@ -20,7 +20,7 @@ Each folder had its own goal.
 - **Attempt 5** was a local demo, and I was asking it how it would look on Azure.
 - **Attempt 7** began at 1:41 p.m. by syncing a repository that held an earlier two-agent MVP. It used the same gpt-6-sol and Fabric F2 setup as Attempt 1, so I think it was that code.
 
-## How I handed it to the agent
+## Scope and procedure
 
 Mostly with one word. Between 7:05 and 7:06 a.m. I answered four folders: "subagent" as the execution method in the main attempt, "go" in Attempt 3, "go" in Attempt 5, and "merge" for Attempt 6's finished branch. At 9:43 a.m. it happened again: "go" in Attempt 6, "current status?" in Attempt 5, "start now" for the main rehearsal, and "go" in Attempt 3 a minute later.
 
@@ -30,7 +30,7 @@ The more interesting hand-offs were in the main attempt. When the agent proposed
 
 > "Fix it right away."
 
-## Where it went sideways
+## Observed problems
 
 **The console kept refusing me.** Partway through the deployment the agent stopped to tell me my PC's public IP had changed, and that Azure still returned 403 even after it allowed the new address. I picked "reopen," and by 10:44 a.m. two IPs were on the console's allow list. At 1:12 p.m. I was back:
 
@@ -51,7 +51,7 @@ The agent had decided earlier to leave these defects out of this branch. Its end
 
 **One sentence, two folders.** At 3:49 p.m., right after the main attempt merged, I typed: "The UI is too simple overall. Make it flashier, use lots of graphs and steps, so it looks more like something a company would use." At 3:58 p.m. I sent Attempt 7 the exact same sentence, plus a request to clearly separate the customer application screen from the admin screen. The two agents took very different routes.
 
-## How I got past it
+## Response and results
 
 **For the bug, the agent ran its usual loop, just faster.** A subagent implemented both fixes (1,016 tests passing), a separate reviewer checked them, and the redeploy took 7.6 minutes. At 2:01 p.m. I wrote "I clicked it," and three minutes later the Service Bus replay finished end to end for the first time: 13 weeks processed, three alerts.
 

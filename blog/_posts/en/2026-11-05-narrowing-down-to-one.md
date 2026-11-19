@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "Narrowing Down to One"
+title: "Closing an experiment without leaving its resources running"
 date: 2026-11-05 09:00:00 +0900
 lang: en
 ref: day-10
 days: "2026-11-05"
 permalink: /en/day-10/
-summary: "Three side attempts left their last records, one of them only after I asked it to delete its cloud resources and pause Fabric; the main attempt got through a false secret alert and a long AI-gateway build."
+summary: "Retiring a workspace does not stop its deployed resources."
 ---
-In the last entry I asked Attempt 7 whether I was changing too much; on November 5 the narrowing happened one level up. By the end of the day, the main attempt was the only one of my parallel attempts still leaving records.
+Retiring a workspace does not stop its deployed resources. As three attempts wound down, I treated ending development, deleting Azure resources, and pausing Fabric capacity as separate operations. Work on the surviving implementation's AI gateway continued.
 
-## What I was trying to do
+## Objective
 
 Four sessions had activity that day, and they did not look alike.
 
@@ -24,7 +24,7 @@ The other three were at different points:
 
 The records don't say why Attempts 3 and 6 stopped, so I won't guess. They simply end on this day.
 
-## How I handed it to the agent
+## Scope and procedure
 
 Attempt 7 shows the step-by-step approval style. The agent found two blockers (authentication tied to my PC's Azure CLI login, and a local-HTTP-only setting) and asked before fixing them. It noticed that the existing Fabric F2 capacity had been paused at 12:37 a.m., and that the SQL database behind it was therefore disabled. Resuming it would restart billing, so it asked. I chose to resume. Then it asked again before generating files, and a third time before creating anything: a small hosting setup (Container Apps, a registry, Log Analytics and a managed identity) at about $39.21 a month, with two compatibility warnings spelled out. I approved all three items in one answer.
 
@@ -36,7 +36,7 @@ At 7:57 a.m. I brought a new idea to the main attempt:
 
 That started a brainstorming round in approval prompts: which approach, which features had to show in the demo (I picked token metrics, a single path, token limits and content safety), which tier, and what to do when content safety fires. On the tier, the agent recommended Developer, since the demo needed no SLA and Developer cost one fourteenth of Standard v2. Then came a four-part design, and I answered each part with "yes."
 
-## Where it went sideways
+## Observed problems
 
 **A secret alert on a public repository.** At 1:27 a.m. I pasted an alert from a secret-scanning service into the main session: two "Generic High Entropy Secret" incidents, each pointing at two commits in the public repository. My own words above the paste were short: "Please fix the security issue at the bottom," plus a note that it didn't need to go through `.gitignore`. I think I was relying on the agent to judge the alert; I don't see any attempt of mine to judge it in the records.
 
@@ -46,7 +46,7 @@ That started a brainstorming round in approval prompts: which approach, which fe
 
 **Attempt 7 ended with a bill still running.** At 7:55 a.m. I wrote to Attempt 7: "Please delete the deployed Azure environment." By 8:26 a.m. it had deleted the four hosting resources and two permissions it had added. Its report ended with a line in bold: Fabric F2 was still running, so billing continued.
 
-## How I got past it
+## Response and results
 
 **For the alert, the agent explained it and then asked.** At 1:56 a.m. it reported that nothing secret had leaked. The flagged values were built-in Azure role IDs for Key Vault, public constants, and the scanner had reacted to the word "Secrets" in the variable names. It renamed the variables, ran 105 infrastructure tests, and then asked how to treat the two old commits that still held the flagged values. I chose to rewrite the history. The agent rewrote all 228 commits, masking sensitive values along the way, scanned the full history again with zero hits, confirmed the final files were unchanged, kept a backup bundle in its session folder, and force-pushed. It also reminded me that closing the remaining alerts was my job.
 

@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "Asking \"Why?\" Before Saying \"Go\""
+title: "Checking whether a second environment was necessary"
 date: 2026-10-27 09:00:00 +0900
 lang: en
 ref: day-02
 days: "2026-10-27"
 permalink: /en/day-02/
-summary: "The agent asked me to approve a second cloud environment; I asked why first, and the honest answer was that the demo didn't need it."
+summary: "My approval to proceed became a quote for a second cloud environment a few hours later."
 ---
-The last entry ended with the demo finally running on real Azure and with a rule I wanted to keep: decisions that cost money stay with me. This entry starts with an approval I had already given in one word, a little before 1 a.m., and with the question I asked when the price tag for it showed up later that morning.
+My approval to proceed became a quote for a second cloud environment a few hours later. Before approving the spend, I asked which step the running demo could not perform. That was a different question from whether the agent could provision another environment.
 
-## What I was trying to do
+## Objective
 
 By midnight the main thing was done. The agent's 12:06 a.m. summary said the three demo scenarios had been checked on real cloud resources, and that decisions survived a restart. It also said it had held off on recreating a separate environment "until further approval," and reminded me that the Fabric F2 capacity was still Active and billing at about $0.42 an hour.
 
 So the plan for the 27th was not "build the MVP" anymore. It was: actually use the demo, then make it better. Attempt 1's history shows 45 commits that day: AI-written reports, tabs and charts, a reset button for test customers, more realistic mock data, and a design for a review chat. But the part I want to write about happened before any of that, at 7:35 a.m.
 
-## How I handed it to the agent
+## Scope and procedure
 
 At 12:57 a.m. I had typed one word: "approve." The agent replied that it understood this as approval to recreate a separate environment, and that it would check costs and a deployment preview first. I can't tell from the records whether that is what I meant. Given its previous message, it was a fair reading.
 
@@ -42,7 +42,7 @@ The same thing happened later, in a different shape. At 9:20 a.m., after it had 
 
 What followed was a pattern I saw all day. The agent asked one decision at a time, through forms: generate once and store, or on every view (it recommended storing, so reloads don't cost money); then a design document, a six-step plan, and "Native" execution (it implements, one fresh reviewer checks the whole branch) versus "Subagent-driven" (an implementer and reviewer per step, at higher cost). The reviewer found nothing critical and, per the agent's notes, two integration problems, which it reproduced and fixed. Only then did it ask to touch the live demo, with a ceiling: at most three model calls of up to 6,000 completion tokens and 90 seconds each.
 
-## Where it went sideways
+## Observed problems
 
 **A paused capacity looked like a broken demo.** At 7:57 a.m. the web app couldn't reach SQL: error 42131, because the F2 was `Paused`. The agent said plainly, "This is not a login problem," and asked me to approve resuming the billing. I did.
 
@@ -52,7 +52,7 @@ What followed was a pattern I saw all day. The agent asked one decision at a tim
 
 **And the screens got slow.** I typed: "The screens are slow to load." Twenty-five minutes later the agent reported the customer screen going from 34 seconds to 2.3, the admin list from 29 to 2.9, the collection page from 16 to 4, and the review page from 11 to 2.3. It had cut duplicate database reads and unneeded report loading.
 
-## How I got past it
+## Response and results
 
 **For the login, I changed the question.** Instead of another round of logging in, I typed into the approval form: "Please turn off the login authentication in the application." The agent didn't just switch it off. It came back with a narrower version: an option that disables only the app's Graph presenter check, only for the local demo, with the default left on. Tokens for Azure SQL, Fabric and the model, permission checks, consent checks and CSRF protection would all stay. "So Azure's own authentication doesn't go away." I approved, and at 2:15 p.m. the customer screen opened.
 

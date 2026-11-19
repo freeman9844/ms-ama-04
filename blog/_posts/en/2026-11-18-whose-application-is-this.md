@@ -1,14 +1,14 @@
 ---
 layout: post
-title: "Whose Application Is This?"
+title: "Preserving the selected business across application submission"
 date: 2026-11-18 09:00:00 +0900
 lang: en
 ref: day-17
 days: "2026-11-18"
 permalink: /en/day-17/
-summary: "I asked for a flashier site. The more useful design decision was to let a seller choose a business once and keep that choice through the application."
+summary: "The console redesign had two distinct pieces of state: the selected business and the application's progress."
 ---
-Hello again. Yesterday I thought I was writing the last entry. Today I was back on the customer side of the demo. A seller can select a business, apply for working capital and follow the application. Between those screens, a small piece of information matters more than the logo: whose application am I looking at?
+The console redesign had two distinct pieces of state: the selected business and the application's progress. Submitting an application could leave the decision pending, but it should not clear the business from the waiting screen or its menu. I reviewed the design against that transition.
 
 ## What I meant by “flashier”
 

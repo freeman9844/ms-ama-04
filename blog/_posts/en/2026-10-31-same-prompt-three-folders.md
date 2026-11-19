@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "Same Prompt, Three Folders"
+title: "Finding the unit of model work in the specification"
 date: 2026-10-31 09:00:00 +0900
 lang: en
 ref: day-05
 days: "2026-10-31"
 permalink: /en/day-05/
-summary: "I sent the same brainstorming request to three fresh folders; each one asked different questions, and in the one that became the project, a single question about the spec changed part of the design."
+summary: "Three workspaces received the same starting request and produced different design questions."
 ---
-In the last entry I used the agent as a research partner on Attempt 2; on October 31 I went back to building, and the records show I started three times on the same day.
+Three workspaces received the same starting request and produced different design questions. To evaluate the specification I asked how many model calls one application would generate. Reasoning about that unit of work exposed a design choice while it was still cheap to change.
 
-## What I was trying to do
+## Objective
 
 The goal hadn't changed: understand the assignment and get a working demo on real Azure. At 10:03 a.m. a new folder got its first commit and a brainstorming request. I'll call it Attempt 3. Attempt 4 started the same way at 10:18–10:19 a.m., and a third folder at 1:06–1:07 p.m. From here on, this blog calls that third folder the main attempt.
 
@@ -18,7 +18,7 @@ The records don't say why I opened three folders, or why the third one became th
 
 By midnight the three folders held 86 commits between them: 26 in Attempt 3, 4 in Attempt 4 and 56 in the main attempt. The log also shows 37 tool failures across the day.
 
-## How I handed it to the agent
+## Scope and procedure
 
 The request, translated:
 
@@ -34,7 +34,7 @@ Attempt 4's copy asked for a "detailed" summary; otherwise the text was the same
 
 So the same day holds two opposite answers on the same topic. Attempt 4's plan blocked Global Standard at 11:43 a.m.; at 1:33 p.m. I told the main attempt it needed Global Standard. The records don't show how I got from one to the other.
 
-## Where it went sideways
+## Observed problems
 
 **Sending the request a second time.** At 1:03 p.m. I pasted the brainstorming request into Attempt 4 again. The agent didn't start over: "This assignment is already done through a design spec and an implementation plan. Rather than brainstorming again from scratch, I'll just re-summarize the core requirements you asked for, based on the original text." Four minutes later the same words went into the new folder. Attempt 4's records for the day stop after that reply. The agent reads the folder's history, so a "fresh start" in an old folder isn't fresh.
 
@@ -46,7 +46,7 @@ So the same day holds two opposite answers on the same topic. Attempt 4's plan b
 
 **Attempt 3's reviews kept finding things.** In the evening Attempt 3 ran nine tasks, each sent to a fresh implementer subagent and then to an independent reviewer. Seven of the nine came back "NEEDS_FIXES" on the first review. One example: a cash buffer of exactly 30 days was judged *below* the 30-day threshold, because a rounded decimal division left it at 29.999….
 
-## How I got past it
+## Response and results
 
 **For the spec, one question was enough.** The agent proposed a tiered pipeline: rules first, then removing duplicates, then a batched LLM call, then a cache. I added: "For this kind of thing, a model like Microsoft-Decision-1 seems like a good option (cheap and fast)." The updated spec reads rules → deduplication → Microsoft-Decision-1 → mini LLM fallback → cache. It also gained metrics such as call count and cache hit rate, and a risk note that Korean classification quality was not yet verified. I approved at 2:07 p.m. I think that one question was among the most useful things I typed that day.
 

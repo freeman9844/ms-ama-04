@@ -1,16 +1,16 @@
 ---
 layout: post
-title: "When Security Gets in the Way of the Demo"
+title: "Scoping an authentication exception for the demo"
 date: 2026-11-01 09:00:00 +0900
 lang: en
 ref: day-06
 days: "2026-11-01"
 permalink: /en/day-06/
-summary: "The officer console's login blocked my own demo, so I asked for it to be switched off; the useful part was how narrowly the agent did it and how it wrote down the way back."
+summary: "Login prevented me from demonstrating the officer workflow."
 ---
-Last time, one request went into three folders on the same day. On November 1 three folders were moving again: the main attempt, Attempt 3, and a brand-new Attempt 5 whose first commit landed just before noon. Reading the records back, each of them made a different trade between security and getting something on screen.
+Login prevented me from demonstrating the officer workflow. The demonstration concerned what happened after sign-in, not how sign-in worked. That distinction determined which control could be relaxed, which access restrictions still mattered, and what had to be reversible.
 
-## What I was trying to do
+## Objective
 
 In the main attempt, the morning's job was the officer console: the screen where a credit officer reviews an application and decides. On paper it was well guarded. Entra ID login with three app roles (CreditOfficer, CreditManager, Auditor), plus an IP allow list.
 
@@ -18,7 +18,7 @@ Before writing the plan, the agent probed and reported that one way of wiring lo
 
 By 11:32 a.m. the console was live, and the smoke test had passed all 25 checks. One of them confirmed that an anonymous request gets sent to the Entra login screen. What was left was the part only I could do: open it in a browser, log in, submit an application, make a decision.
 
-## How I handed it to the agent
+## Scope and procedure
 
 I didn't describe the problem in words. I pasted a screenshot and asked:
 
@@ -26,7 +26,7 @@ I didn't describe the problem in words. I pasted a screenshot and asked:
 
 The screen was an admin approval page. The agent granted the login permissions (openid, profile, email) directly to my own account. It noted that the grant covered one account: mine. Then it gave me a six-item checklist, which I answered through the approval form. Login: success. The page that shows my roles: `{"detail":"Not Found"}`. Submitting a new application: failed, with the browser saying I didn't have permission to view the page. The last three items: unchecked.
 
-## Where it went sideways
+## Observed problems
 
 **The login was fixed, and the button still didn't work.** At 11:40 a.m. the agent explained the first wall. The tenant blocks users from consenting to apps on their own, and my account only had a read-only directory role, so I couldn't grant admin consent either. Its workaround, a manual grant through the Graph API, was flagged plainly: not in Bicep yet, to be added before redeploying and recorded in its ledger. Login and the list page now worked. The role was confirmed too, because the new-application screen opened, and that screen needs CreditOfficer.
 
@@ -48,7 +48,7 @@ At 6:26 p.m. the agent reported that the plan had put even *writing* the Bicep b
 
 The agent built a dark "Mission Control" dashboard on small fixed mock data. It was merged at 4:31 p.m. with 23 tests and 11 Chrome demo runs passing, and grew to eight sample companies by evening. In its design prompts, the agent had said the screen would separate "UI simulation" from "real Azure run." Still, at 7:02 p.m. I asked, "Has the LLM been applied?" The answer: "No. Right now it's a UI mock demo that doesn't call an LLM." I think the screen looked convincing enough that I wanted to hear it said directly.
 
-## How I got past it
+## Response and results
 
 Back in the main attempt, what the agent built was not "delete the login." It was a switch, and a narrow one:
 

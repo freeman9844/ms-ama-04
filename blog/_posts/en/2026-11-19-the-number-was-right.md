@@ -1,14 +1,14 @@
 ---
 layout: post
-title: "The Number Was Right. Was the Money There?"
+title: "Checking a settlement amount is not checking its availability"
 date: 2026-11-19 09:00:00 +0900
 lang: en
 ref: day-18
 days: "2026-11-19"
 permalink: /en/day-18/
-summary: "An expected settlement and a bank deposit can carry the same number. I asked the agent to help an officer tell which one could fund the next payment."
+summary: "An expected settlement can match the ledger exactly without having reached the bank account."
 ---
-Hello again. Yesterday's screen made it easier to find an application. Today's question was what an officer would learn by opening it. If the AI repeated the figures already on screen, the officer still had to do the underwriting work from scratch.
+An expected settlement can match the ledger exactly without having reached the bank account. A numeric check could therefore pass even when the repayment conclusion was wrong. We asked the analyst to compare bank and marketplace evidence and gave the reviewer a separate verdict on the opinion as a whole.
 
 ## Changing the assignment for two agents
 

@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "Ask the Price First"
+title: "Separating the WAF's fixed cost from AI cost per application"
 date: 2026-11-06 09:00:00 +0900
 lang: en
 ref: day-11
 days: "2026-11-06 – 2026-11-07"
 permalink: /en/day-11/
-summary: "Before asking for a WAF in front of everything, I asked what it would cost each month; the number became part of the design, and the live rollout still needed two fixes the plan hadn't seen coming."
+summary: "Before adding a WAF at the public entry point, I asked what it would cost to leave running."
 ---
-In the last episode the other attempts stopped. These two days are the first whose records show only the main attempt, and the first thing I typed on the 6th, just after 1 a.m., was a question about money.
+Before adding a WAF at the public entry point, I asked what it would cost to leave running. A monthly infrastructure estimate and the model cost of processing one application answer different questions. One informed the deployment choice; the other needed measurement on the actual request path.
 
-## What I was trying to do
+## Objective
 
 The loan officer's console was running in an external Container Apps environment, open only to my IP. The next step I had in mind was to put an Application Gateway with WAF v2 at the very front of the architecture.
 
 But before asking for it, I asked a different question first.
 
-## How I handed it to the agent
+## Scope and procedure
 
 > "If I put App Gateway v2 and a WAF at the very front, how much will the cost go up? And if I leave the test environment as it is instead of deleting it, roughly how much will it cost each month?"
 
@@ -34,7 +34,7 @@ The spec was committed at 1:13 a.m. While writing the plan, the agent flagged a 
 
 The plan was finished at 7:53 a.m. with seven tasks, and I chose to run it with subagents: each task went to a fresh implementer agent, then to a fresh reviewer. Between 7:54 and 9:02 a.m., tasks 1–6 went through that loop. The reviewers found one Important issue in total: the docs' quick-start ran the smoke check before the gateway existed. It was fixed in one round, and 1,949 tests were passing.
 
-## Where it went sideways
+## Observed problems
 
 Task 7 was the live rollout, which started by deleting the old console and its environment, and before it the agent asked again. The console would be down for about 30–60 minutes, and the gateway "also adds about $370/month in fixed cost." I approved.
 
@@ -54,7 +54,7 @@ There were two causes: my IP had changed again, and the gateway had been stopped
 
 The cause: through the API Management gateway's chat completions path, gpt-6.1-sol rejected function tools together with reasoning, with a 400 error. And the old design passed the application on to the officer with only a flag. My first pick for a fix wasn't supported by the model, and the next question arrived in English. I answered with "Explain in Korean." With the measured results in front of me in Korean, I chose gpt-5.6-sol, the one with twice the unit price.
 
-## How I got past it
+## Response and results
 
 **For the rollout, the live fixes became code.** Both fixes came with tests. A final whole-branch review approved it with no Critical or Important findings and two optional Minor ones; 1,950 tests passed, and the agent asked before pushing. Then I asked for two clean-ups: "Please delete the NSGs that aren't attached to a subnet" (five were deleted; three in use remain) and "Please update the spec with whatever is needed from what we've done so far." The spec now records what changed from the plan.
 

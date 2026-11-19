@@ -1,22 +1,22 @@
 ---
 layout: post
-title: "Cutting Back What the Agent Added"
+title: "Reducing a signed deployment approval design to the demo requirements"
 date: 2026-11-02 09:00:00 +0900
 lang: en
 ref: day-07
 days: "2026-11-02"
 permalink: /en/day-07/
-summary: "In 26 minutes I approved a signed-approval deployment design layer by layer; when the five-task plan arrived I asked for changes, and the cut-back plan had three tasks."
+summary: "Each step of the signed deployment approval design looked reasonable in isolation."
 ---
-In the last entry I switched off a security control that was blocking the demo; this day the same move came back in a different shape: taking out things the agent had built up, sometimes less than an hour after I had approved them. Four folders had sessions on the 2nd: Attempt 3, Attempt 5, Attempt 6 (which started that afternoon) and the main attempt. The log counts 136 commits across them. Most of this entry is about one hour in Attempt 3.
+Each step of the signed deployment approval design looked reasonable in isolation. Read together, the five tasks mixed the behavior needed for the demo with the work of operating the approval system itself. I used the behavior we could actually demonstrate to narrow the plan to three tasks.
 
-## What I was trying to do
+## Objective
 
 Attempt 3 was building a deployment pipeline for the lending demo, and that morning it reached the question of who may say "deploy now." I first picked an existing organisation controller as the approval source. The agent asked for its API documentation and added: "If no controller is available yet, tell me 'none'. I won't implement against an API that doesn't exist." I answered "none," and we agreed to build packaging and CI first and defer approval integration. By 12:34 p.m. that part had passed an independent review, and the agent stopped at the line I had drawn.
 
 So the open item in the early afternoon was the deferred deployment approval.
 
-## How I handed it to the agent
+## Scope and procedure
 
 At 1:24 p.m. I typed one word:
 
@@ -31,7 +31,7 @@ The agent reminded me that I had deferred this, and offered the remaining option
 
 That made five approvals in 26 minutes. Every question said clearly that nothing real (no keys, no services, no cloud calls) would be created yet. I think that care is part of why it was so easy to keep saying yes: each step was safe on its own. I don't think I was adding up the steps.
 
-## Where it went sideways
+## Observed problems
 
 At 2:03 p.m. the plan arrived: five tasks, from a signing tool through a Blob execution record and coordinator API to wiring and handover, each with failing tests and an independent review.
 
@@ -58,7 +58,7 @@ The third one is the interesting one, because the agent slowed down: "This isn't
 
 **The main attempt** had a quieter case. At 1:19 p.m. the agent asked me to score three underwriting explanations from its evaluation run, 1–5 on three criteria, as an underwriter would. I answered 5/5/5 for all three. Twenty-three minutes later, after a whole-branch review, it came back: "I had put 5/5/5 in as the default earlier, which may have influenced your judgment. Please look at the signals below and re-check the scores. You can leave them as they are." Two of the three explanations had failed the automatic evidence check. I can't tell from the records whether I read them closely the first time, and I don't see a new score afterwards; my next answer was "merge." This time the agent had added a default value, not a feature.
 
-## How I got past it
+## Response and results
 
 **In Attempt 3, the agent did the cutting properly once I asked.** At 2:20 p.m. it recommended withdrawing the signature-and-hash design and switching to "human check plus a single deployment runner":
 
