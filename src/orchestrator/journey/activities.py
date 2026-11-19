@@ -42,6 +42,10 @@ _PG = TypeAdapter(list[PgSettlement])
 
 
 class DocumentStore(Protocol):
+    def create_if_absent(self, container: str, document: dict[str, Any]) -> None:
+        """최초 문서만 원자적으로 생성한다. 이미 있으면 변경 없이 성공한다."""
+        ...
+
     def upsert(self, container: str, document: dict[str, Any]) -> None: ...
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None: ...
     def replace(self, container: str, document: dict[str, Any], etag: str | None) -> bool:
@@ -429,8 +433,7 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     profile = deps.raw.get_json(raw_container(payload["consent_id"]), "profile.json")
     if profile is None:
         raise RuntimeError(f"원천 프로필 없음: {payload['consent_id']}")
-    existing = deps.store.read(LOANS_CONTAINER, loan_id, loan_id) or {}
-    deps.store.upsert(
+    deps.store.create_if_absent(
         LOANS_CONTAINER,
         {
             "id": loan_id,
@@ -447,7 +450,7 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
                 payload["underwriting"],
                 installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
             ).to_dict(),
-            "monitoring": existing.get("monitoring"),
+            "monitoring": None,
             "updated_at": deps.clock().isoformat(),
         },
     )

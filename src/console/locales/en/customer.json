@@ -24,6 +24,8 @@
   "신청 진행 현황": "Application status",
   "신청번호 %(id)s": "Application no. %(id)s",
   "승인 금액": "Approved amount",
+  "승인 금액 미확인": "Approved amount unavailable",
+  "처리 중단": "Processing stopped",
   "3초마다 자동으로 새로 고칩니다.": "This page refreshes every 3 seconds.",
   "자동 새로 고침을 멈췄습니다. 잠시 뒤 직접 새로 고쳐 주세요.": "Auto-refresh has stopped. Please refresh the page yourself in a moment.",
   "새 신청": "New application",

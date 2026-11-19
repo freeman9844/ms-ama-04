@@ -122,6 +122,14 @@ class CosmosStore:
 
         self._db = CosmosClient(endpoint, credential=credential).get_database_client(database)
 
+    def create_if_absent(self, container: str, document: dict[str, Any]) -> None:
+        from azure.cosmos.exceptions import CosmosResourceExistsError
+
+        try:
+            self._db.get_container_client(container).create_item(document)
+        except CosmosResourceExistsError:
+            pass
+
     def upsert(self, container: str, document: dict[str, Any]) -> None:
         self._db.get_container_client(container).upsert_item(document)
 

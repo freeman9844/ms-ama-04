@@ -212,7 +212,6 @@ def test_approved_status_shows_officer_amount(env):
     ("awaiting_officer", "심사역 검토", 2),
     ("approved", "결과", 3),
     ("declined", "결과", 3),
-    ("withdrawn", "결과", 3),
 ])
 def test_progress_steps_follow_status(env, status, current, done):
     client, store, _ = env
@@ -226,12 +225,40 @@ def test_progress_steps_follow_status(env, status, current, done):
     assert html.count('aria-current="step"') == 1
 
 
-def test_hero_shows_requested_amount_and_tenor(env):
+@pytest.mark.parametrize(("status", "history", "stage", "done"), [
+    ("failed", ["received"], "접수", 0),
+    ("failed", ["received", "consent_granted"], "데이터 심사", 1),
+    ("withdrawn", ["received", "consent_granted", "awaiting_officer"], "심사역 검토", 2),
+    ("closed_no_decision", ["awaiting_officer", "escalated"], "심사역 검토", 2),
+    ("failed", [], None, 0),
+])
+def test_stopped_application_never_completes_unreached_stages(env, status, history, stage, done):
     client, store, _ = env
-    store.docs["app-cust"]["status"] = "received"
+    store.docs["app-cust"].update(status=status, timeline=[{"status": s} for s in [*history, status]])
+    html = client.get("/apply/app-cust", headers=CUSTOMER).text
+    assert html.count('class="step done"') == done
+    if stage:
+        assert f'aria-current="step">{stage} · 처리 중단</li>' in html
+    else:
+        assert 'aria-current="step"' not in html
+
+
+@pytest.mark.parametrize("status", ["received", "declined"])
+def test_hero_shows_requested_amount_and_tenor(env, status):
+    client, store, _ = env
+    store.docs["app-cust"]["status"] = status
     html = client.get("/apply/app-cust", headers=CUSTOMER).text
     assert 'class="card hero-card"' in html
     assert '<p class="hero-amount">30,000,000원</p>' in html and "12개월" in html
+    assert "신청 금액" in html.split('class="card hero-card">')[1].split("</section>")[0]
+
+
+@pytest.mark.parametrize("status", ["approved", "conditionally_approved"])
+def test_missing_decision_amount_is_not_replaced_with_request(env, status):
+    client, store, _ = env
+    store.docs["app-cust"].update(status=status, officer_decision={})
+    html = client.get("/apply/app-cust", headers=CUSTOMER).text
+    assert "승인 금액 미확인" in html and 'class="hero-amount"' not in html
 
 
 def test_hero_shows_officer_amount_when_approved(env):
