@@ -6,32 +6,7 @@ Case Study 18 캡스톤 데모다. 소상공인 운전자금 대출 심사를 2�
 
 ## 아키텍처 한눈에
 
-```mermaid
-flowchart LR
-  officer["심사역 / 운영자"]
-  subgraph azure["Azure Korea Central (VNet 격리, 데이터 평면 Private Endpoint)"]
-    gw["Application Gateway WAF v2<br/>공용 IP, 운영자 IP만"]
-    console["Officer Console<br/>internal cae-int, 데모 인증"]
-    orch["Journey Orchestrator<br/>Durable Functions"]
-    foundry["Foundry 에이전트 + 모델"]
-    apim["API Management<br/>AI 게이트웨이(내부 모드)"]
-    policy["Policy Engine<br/>결정론적 규칙"]
-    mock["Mock MyData/세무/PG API<br/>(외부 기관 대역)"]
-    data["Cosmos / Blob / 큐"]
-  end
-  officer -->|HTTPS| gw
-  gw -->|운영자 IP만| console
-  console -->|명령 큐| orch
-  console -->|읽기| data
-  orch <--> foundry
-  foundry -->|모델 호출, 에이전트별 TPM| apim
-  orch -->|거래 분류 Decision-1| apim
-  apim -->|관리 ID 인증| foundry
-  orch <--> policy
-  orch <--> mock
-  orch --> data
-  officer -.->|배포 창에만 Functions·Foundry·ACR 개방| orch
-```
+[![AMALend Azure 아키텍처: 심사역 콘솔, 대출 단계를 조율하는 Durable Functions, 대출 심사·사후 관리·콘솔 지원을 맡는 Foundry 에이전트 10개의 연결 관계](docs/diagrams/architecture-v3-en-agents/02-amalend-agents-en.png)](docs/diagrams/architecture-v3-en-agents/02-amalend-agents-en.png)
 
 자세히: [아키텍처](docs/architecture.md) · [에이전트](docs/agents.md) · [ADR 색인](docs/adr/README.md)
 
