@@ -10,23 +10,6 @@ Case Study 18 캡스톤 데모다. 소상공인 운전자금 대출 심사를 2�
 
 자세히: [아키텍처](docs/architecture.md) · [에이전트](docs/agents.md) · [ADR 색인](docs/adr/README.md)
 
-## 실측 결과(합성 데이터 기준)
-
-모든 수치는 합성 데이터로 측정한 것이며 실제 고객·실제 성능이 아니다. 신청 24건 표본이라 경향으로만 읽는다([한계](docs/limitations.md)).
-
-| 지표 | 값 | 출처 |
-|---|---|---|
-| SLO1: 접수 → 심사역 대기열 p95 | 1.2분(목표 ≤ 10분, n=24) | [load 보고서](ops/reports/load-20261102110233/report.md) 1장 |
-| SLO2: 에이전트 단계 성공률 | 100.0%(72/72, 목표 ≥ 99.0%) | [load 보고서](ops/reports/load-20261102110233/report.md) 1장 |
-| 건당 AI 비용 | $0.0423(캐시 할인 미반영 상한). AI 게이트웨이 경유·분석가 `gpt-5.6-sol` 재측정 $0.0738(n=10, `load-20261107122036`) | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
-| 월 고정비 | $304.73(Cost Management 하루치 × 30). 측정 뒤 추가: APIM 약 $51, Functions always ready 약 $62, App Gateway WAF v2 약 $370 | [load 보고서](ops/reports/load-20261102110233/report.md) 2장, [비용 모델](docs/cost-model.md) |
-| 건당 총비용(월 1,000건) | $0.35(정밀값 $0.3470) | [비용 모델](docs/cost-model.md), [load 보고서](ops/reports/load-20261102110233/report.md) 2장 |
-| 거래 분류: 규칙 선분류 비율 | 80.0%(전체 4,128건) | [P6a 평가](eval/reports/job-eval-9imbutm/report.md) 2장 |
-| 거래 분류: 범용 LLM 폴백 비율 | 11월 19일 운영 구성 `decision-1+gpt-5.6-luna`: 폴백 26.9%, 성공 신청 10/10건·채점 그룹 152개에서 macro F1 0.999. 같은 평가의 luna 단독은 폴백 100%, F1 0.993. 이전 mini 기준선은 표본이 달라 직접 비교하지 않는다. | [재평가 실행 기록](docs/runbook/deploy-history.md#2026-11-19-상환-처리-배포와-거래-분류-재평가) · [이전 기준선](eval/reports/job-eval-9imbutm/report.md) |
-| 장애 2종 회복 | source-flaky: 신청 전부 `awaiting_officer` 복귀. policy-down: fail-closed로 `policy:failed`에서 멈추고 `awaiting_officer`로 넘김(판정 없이 진행 안 함) | [load 보고서](ops/reports/load-20261102110233/report.md) 4장 |
-
-증거와 보고서 전체 색인은 [증거 색인](docs/evidence.md)에 있다.
-
 ## 빠른 시작
 
 로컬 테스트(Python 3.12, Windows PowerShell):
