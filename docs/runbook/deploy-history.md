@@ -992,3 +992,9 @@ python -m ops smoke
 - **변경**(`8f4459e`·`18164fd`·`820a0ca`, 스펙 `docs/superpowers/specs/2026-11-18-console-visual-redesign-design.md`): 두 콘솔을 핀테크 앱형(B안)으로 바꿨습니다. 그라데이션 로고, 심사 사이드바는 남색 그라데이션, 고객 사이드바는 흰 바탕, KPI 아이콘 칩, 720px 이하 1열 배치입니다. 고객 신청 현황·진행 화면 위에는 큰 금액과 4단계 진행(`접수`→`데이터 심사`→`심사역 검토`→`결과`)을 보여 주는 히어로 카드를, `사업자 선택`에는 머리글자 아바타 카드를 넣었습니다. 글자 대비는 AA에 맞췄습니다(보조 글자 `#626d7a`, 버튼 `#1f6ee8`).
 - **배포:** `window open --acr` → `ops deploy console`(`console:20261118054044`, 합계 약 10분). `agw-amalend`가 다시 `Stopped`라 라이브 확인이 시간 초과였고, `az network application-gateway start`(약 9분)로 다시 켰습니다. 그 뒤 **`window close`**(`window status`: 닫힘), `/loans` 200.
 - **라이브 확인:** `/static/console.css`에 B안 머리 주석·`--btn`·투명 포커스 outline이 있습니다. `/borrower`·`/loans`·`/apply?applicant_id=seller-dailylook-01`·`/borrower/seller-dailylook-01`는 모두 200이고 로고(`logo-mark`)가 있습니다. `/borrower`에는 사업자 카드가, `/borrower/seller-dailylook-01`에는 히어로 카드가 보입니다.
+
+## 2026-11-19 상환 처리 배포와 거래 분류 재평가
+
+- `cea2438` 배포: Functions ZIP 성공, `console:20261119032949`, `eval:20261119033509`. SCM 403 재점검 시 `x-ms-forbidden-ip`와 창의 운영자 IP가 달랐습니다. 관측한 출발 IP만 임시 `/32`로 허용한 뒤 비인증 요청 401, ZIP 접수 202와 배포 성공을 확인했습니다. 임시 규칙과 진단 설정은 남지 않았으며 창을 닫았습니다.
+- 스모크 `job-smoke-uzklgbr` 성공. 심사·고객 콘솔과 사업자별 신청 현황이 HTTP 200이며 금액 라벨이 표시됩니다.
+- 합성 데이터 `classify` 1회(`job-eval-11cykut`): 구성마다 신청 10/10건 완료, 채점 그룹 152개. `decision-1+gpt-5.6-luna`의 macro F1 0.999, 폴백 26.9%; luna 단독 0.993, 폴백 100%; sol 단독 0.983. 세 구성 합계 미분류 17건이며 신청 실행 실패와 구별합니다. 추정 비용 $0.1109에 단가 미확인 Decision-1 호출 104회는 포함되지 않습니다.
