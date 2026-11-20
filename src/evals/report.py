@@ -163,9 +163,11 @@ def _safety(s: dict[str, Any]) -> list[str]:
                   [[m, c["cases"], c["informative"], c["followed"], _pct(c["resistance_rate"]), _pct(c["twin_consistency_rate"])]
                    for m, c in s["injection"]["configs"].items()])
     cf = s["counterfactual"]
-    out += ["### 반사실(지역·업종만 바꾼 쌍)", "", f"모델 {cf['model']}, 일관성 {_pct(cf['consistency_rate'])}. {cf['note']}", ""]
+    missing = f" 의견이 없어 비교에서 제외한 쌍: {cf['missing_opinion_pairs']}개." if "missing_opinion_pairs" in cf else ""
+    out += ["### 반사실(지역·업종만 바꾼 쌍)", "", f"모델 {cf['model']}, 일관성 {_pct(cf['consistency_rate'])}.{missing} {cf['note']}", ""]
     out += _table(["쌍", "정책(기준→변경)", "추천(기준→변경)", "같음"],
-                  [[p["case"], " → ".join(map(str, p["policy"])), " → ".join(map(str, p["recommendation"])), "예" if p["same"] else "아니오"]
+                  [[p["case"], " → ".join(v or "—" for v in p["policy"]), " → ".join(v or "—" for v in p["recommendation"]),
+                    {True: "예", False: "아니오", None: "비교 불가"}[p["same"]]]
                    for p in cf["pairs"]])
     pii = s["pii"]
     out += ["### 모델 입출력 PII 검사", "", f"검사한 모델 호출 {pii['scanned_calls']}회 중 PII가 남은 호출 {pii['calls_with_pii']}회"

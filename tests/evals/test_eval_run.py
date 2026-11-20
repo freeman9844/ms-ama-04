@@ -9,7 +9,7 @@ from evals.backend import CachedToken, Models, fake_backend
 from evals.fake import FakeAzure
 from evals.metering import CallRecord, Meter
 from evals.runner import MAX_NAME, EvalRunner, eval_agent_name
-from evals.suites import classify, underwriting
+from evals.suites import classify, safety, underwriting
 from evals.suites.safety import injection
 from evals.suites.underwriting import build_context, judge_context
 from evals.transport import reassemble
@@ -88,6 +88,24 @@ def test_injection_counts_followed_drafts_even_without_final_assessment():
     ]
     out = injection(rows)["configs"]["m"]
     assert (out["cases"], out["informative"], out["followed"], out["resistance_rate"]) == (2, 2, 1, 0.5)
+
+
+def test_fairness_excludes_missing_opinions_on_either_side(monkeypatch):
+    case = datasets.underwriting_cases()[0]
+    pairs = [replace(case, pair_of=str(i), case_id=f"twin-{i}") for i in range(4)]
+    base = {"config": "m", "status": "ok", "policy": "eligible", "recommendation": "approve"}
+    rows = [base | {"case": str(i)} for i in range(3)] + [
+        base | {"case": "3", "status": "unavailable", "recommendation": None}]
+    twin_recs = {"twin-0": "approve", "twin-1": "refer", "twin-2": None}
+    monkeypatch.setattr(safety, "run_case", lambda pair, *args, **kw: {
+        "policy": "eligible", "recommendation": twin_recs[pair.case_id]})
+    result = {"failures": []}
+    out = safety.counterfactual(pairs, rows, "m", reviewer_model="r", meter=Meter(load_prices(), 5.0),
+                                runner=None, pseudonym_key=b"k" * 32, result=result)
+    assert out["consistency_rate"] == 0.5
+    assert out["missing_opinion_pairs"] == 2
+    assert [r["same"] for r in out["pairs"]] == [True, False, None, None]
+    assert [(f["type"], f["case"]) for f in result["failures"]] == [("counterfactual_flip", "twin-1")]
 
 
 def test_fake_run_writes_all_suites_and_cleans_up(tmp_path):

@@ -217,6 +217,7 @@ def test_reason_code_pattern():
 
 def _assessment(**kw):
     base = dict(
+        schema_version="2",
         application_id="app-1",
         recommendation=Recommendation.APPROVE,
         summary="현금흐름이 안정적이다.",
@@ -268,7 +269,16 @@ def test_stored_conditional_assessment_round_trips_without_reinterpretation():
                                "reduced_payment_months": [1, 2], "rationale": "비수기 감액"},
     }
     assert stored_credit_assessment.validate_python(raw).model_dump(mode="json") == raw
+    unversioned_legacy = {k: v for k, v in raw.items() if k != "schema_version"}
+    assert stored_credit_assessment.validate_python(unversioned_legacy).schema_version == "1"
     assert stored_credit_assessment.validate_python(_assessment().model_dump()) == _assessment()
+    with pytest.raises(ValidationError):
+        stored_credit_assessment.validate_python(_assessment().model_dump(exclude={"schema_version"}))
+
+
+def test_v2_contract_cannot_represent_unreviewed_opinion():
+    with pytest.raises(ValidationError):
+        _assessment(review=ReviewOutcome(passed=False, rounds=1, issues=("근거 부족",)))
 
 
 def test_failed_review_needs_issues():

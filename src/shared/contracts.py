@@ -351,8 +351,14 @@ class _Assessment(Contract):
 class CreditAssessment(_Assessment):
     """신규 의견은 신청액 전액만 평가한다. 최종 결정권은 심사역에게 있다."""
 
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["2"]
     recommendation: Recommendation
+
+    @model_validator(mode="after")
+    def _reviewed(self) -> "CreditAssessment":
+        if not self.review.passed:
+            raise ValueError("검토를 통과해야 전액 의견을 발행할 수 있다")
+        return self
 
 
 class LegacyCreditAssessment(_Assessment):

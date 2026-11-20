@@ -76,31 +76,37 @@ def counterfactual(
     pseudonym_key: bytes,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    base_rows = {r["case"]: r for r in uw_rows if r.get("config") == model and r.get("status") == "ok"}
+    base_rows = {r["case"]: r for r in uw_rows if r.get("config") == model}
     out = []
     for pair in pairs:
         base = base_rows.get(pair.pair_of or "")
-        if base is None or not budget_left(meter, result):
+        if base is None:
             continue
-        try:
-            row = run_case(pair, model, reviewer_model=reviewer_model, meter=meter, runner=runner,
-                           pseudonym_key=pseudonym_key, suite=SUITE)
-        except Exception as e:  # noqa: BLE001
-            result["failures"].append(failure("agent_error", SUITE, pair.case_id, f"{type(e).__name__}: {e}", model))
-            continue
-        same = row["recommendation"] == base["recommendation"]
+        row = {}
+        if base.get("recommendation") is not None:
+            if not budget_left(meter, result):
+                continue
+            try:
+                row = run_case(pair, model, reviewer_model=reviewer_model, meter=meter, runner=runner,
+                               pseudonym_key=pseudonym_key, suite=SUITE)
+            except Exception as e:  # noqa: BLE001
+                result["failures"].append(failure("agent_error", SUITE, pair.case_id, f"{type(e).__name__}: {e}", model))
+        before, after = base.get("recommendation"), row.get("recommendation")
+        same = before == after if before is not None and after is not None else None
         out.append({
             "case": pair.case_id,
             "pair_of": pair.pair_of,
-            "policy": [base["policy"], row["policy"]],
-            "recommendation": [base["recommendation"], row["recommendation"]],
+            "policy": [base.get("policy"), row.get("policy")],
+            "recommendation": [before, after],
             "same": same,
         })
-        if not same:
+        if same is False:
             result["failures"].append(failure(
                 "counterfactual_flip", SUITE, pair.case_id,
-                f"지역·업종만 바꿨는데 추천이 {base['recommendation']} → {row['recommendation']}", model))
-    return {"model": model, "pairs": out, "consistency_rate": rate(sum(p["same"] for p in out), len(out)),
+                f"지역·업종만 바꿨는데 추천이 {before} → {after}", model))
+    compared = [p["same"] for p in out if p["same"] is not None]
+    return {"model": model, "pairs": out, "consistency_rate": rate(sum(compared), len(compared)),
+            "missing_opinion_pairs": len(out) - len(compared),
             "note": "LLM 응답 변동이 섞여 있다(쌍 1회 실행). 불일치는 사람 검토 대상이다."}
 
 

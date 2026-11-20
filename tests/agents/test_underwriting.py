@@ -496,6 +496,16 @@ def test_summary_can_state_factual_amounts(cases):
     assert check_grounding(d, ctx) == []
 
 
+def test_assessing_the_exact_requested_amount_is_not_an_alternative_offer(cases):
+    ctx = context(cases)
+    ctx = replace(ctx, features={**ctx.features, "requested_amount_krw": 5_000_000},
+                  policy={**ctx.policy, "max_amount_krw": 5_000_000})
+    text = "신청액 500만 원을 승인할 근거가 부족하다."
+    assert check_grounding(draft(summary=text, recommendation="refer"), ctx) == []
+    assert check_grounding(draft(summary=f"{text} 따라서 0원을 제안한다.", recommendation="refer"), ctx)
+    assert check_grounding(draft(summary="신청액 0원을 승인할 근거가 있다."), ctx)
+
+
 def test_counterfactual_must_use_catalog_values(cases):
     ctx = context(cases)
     wrong = draft(counterfactuals=[{"metric_id": "M:dscr", "current": 2.0, "target": 1.0, "explanation": "x"}])
