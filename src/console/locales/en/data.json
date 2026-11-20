@@ -1,4 +1,10 @@
 {
+  "신청액은 정책 한도 이내이며 상환 여력과 현금 완충일수가 전액 승인을 뒷받침합니다.": "The request is within the policy limit. Repayment capacity and the cash buffer support full approval.",
+  "정책상 회부입니다. 회부 사유와 거래 근거를 대조한 뒤 신청액 전액을 재심사하세요.": "Policy requires referral. Verify the referral reasons against the transactions before reassessing the full request.",
+  "현재 정책으로는 신청액 전액을 승인할 수 없습니다. 정책 판정과 한도를 확인하세요.": "Current policy does not allow full approval. Check the policy decision and limit.",
+  "정산 명세와 계좌 입금을 대조하세요.": "Compare settlement statements with bank deposits.",
+  "대표자 월평균 인출": "Average monthly owner withdrawals",
+  "현금 버퍼가 30일 이상이면 한도 여유가 커진다": "A cash buffer of at least 30 days provides more headroom.",
   "성수데일리룩": "Seongsu Daily Look",
   "망원식탁마켓": "Mangwon Table Market",
   "해운대뷰티랩": "Haeundae Beauty Lab",

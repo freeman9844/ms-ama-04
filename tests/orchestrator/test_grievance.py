@@ -32,7 +32,7 @@ APPLICATION = {
         "rules_version": "2026.10",
     },
     "assessment": {
-        "recommendation": "decline",
+        "schema_version": "2", "review": {"passed": True}, "recommendation": "decline",
         "summary": "현금흐름이 상환액 대비 부족하다.",
         "claims": [{"text": "DSCR 1.1", "metric_ids": ["M:dscr"]}],
         "counterfactuals": [
@@ -126,6 +126,7 @@ def test_submission_records_snapshot_and_publishes_without_text(deps):
     assert record["policy"]["reason_codes"] == APPLICATION["policy"]["reason_codes"]
     assert record["policy"]["max_amount_krw"] == 20_000_000
     assert record["assessment"] == {
+        "schema_version": "2", "review": {"passed": True}, "recommendation": "decline",
         "summary": APPLICATION["assessment"]["summary"],
         "counterfactuals": APPLICATION["assessment"]["counterfactuals"],
     }

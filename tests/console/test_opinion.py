@@ -10,19 +10,21 @@ def view(make_doc, claims=(), run=None, steps=None, **assessment):
     doc["assessment_run"] = run
     if steps is not None:
         doc["steps"] = steps
-    return {"doc": doc, "policy": doc["policy"], "assessment": doc["assessment"], "claims": list(claims),
-            "assessment_run": run}
+    return {"doc": doc, "policy": doc["policy"], "assessment": doc["assessment"], "claims": list(claims)}
 
 
 def test_no_assessment_has_no_panel(make_doc):
     assert opinion_panel({"doc": make_doc(), "assessment": None}) is None
 
 
-def test_recommendation_against_policy_is_called_out(make_doc):
-    same = opinion_panel(view(make_doc, recommendation="approve"))["recommendation"]
-    against = opinion_panel(view(make_doc, recommendation="decline"))["recommendation"]
+def test_eligibility_permits_but_does_not_decide_full_approval(make_doc):
+    v = view(make_doc, recommendation="approve")
+    v["doc"]["requested_amount_krw"] = v["policy"]["max_amount_krw"]
+    same = opinion_panel(v)["recommendation"]
+    v["assessment"]["recommendation"] = "decline"
+    against = opinion_panel(v)["recommendation"]
     assert same["aligned"] and same["policy"] == "적격" and same["meaning"]
-    assert not against["aligned"] and "엇갈립니다" in against["relation"] and against["tone"] == "red"
+    assert "적격은 전액 승인을 뜻하지 않습니다" in against["relation"] and against["tone"] == "red"
 
 
 def test_claims_table_labels_values_and_evidence_mix(make_doc):
@@ -50,21 +52,13 @@ def test_evidence_label_and_value_formats():
     assert evidence_value("M:dscr", "x") == "없음"
 
 
-def test_structure_marks_reduced_and_low_months(make_doc):
-    doc_view = view(make_doc, proposed_structure={
-        "amount_krw": 15_000_000, "tenor_months": 12, "schedule": "seasonal", "reduced_payment_months": [2],
-        "rationale": "2월 매출이 낮다"})
-    doc_view["doc"]["underwriting"]["monthly"] = [
-        {"month": "2026-01", "revenue": 50_000_000}, {"month": "2026-02", "revenue": 20_000_000},
-        {"month": "2026-03", "revenue": 50_000_000}, {"month": "2026-04", "revenue": 30_000_000}]
-    st = opinion_panel(doc_view)["structure"]
-    assert dict(st["rows"])["신청액 대비"] == "50%" and dict(st["rows"])["감액 월"] == "2월"
-    assert dict(st["rows"])["상환 방식"] == "계절 감액 상환" and dict(st["rows"])["월 원금(균등 기준)"] == "1,250,000원"
-    assert [(b["label"], b["value"]) for b in st["bars"]["bars"]] == [("신청액", 3000), ("정책 한도", 2000),
-                                                                       ("제안 금액", 1500)]
-    bars = [g["bars"][0]["parts"][0] for g in st["season"]["chart"]["groups"]]
-    assert [(b["value"], b["color"]) for b in bars] == [(1.33, "blue"), (0.53, "amber"), (1.33, "blue"), (0.8, "blue")]
-    assert [c for _, c in st["season"]["legend"]] == ["blue", "amber", "purple"]
+def test_eligible_but_over_cap_explains_full_request_nonapproval(make_doc):
+    v = view(make_doc, recommendation="decline")
+    v["doc"]["requested_amount_krw"] = 5_000_000
+    v["policy"]["max_amount_krw"] = 3_000_000
+    rec = opinion_panel(v)["recommendation"]
+    assert rec["aligned"] and "신청액이 정책 한도를 초과" in rec["relation"]
+    assert "3,000,000" not in rec["relation"]
 
 
 def test_counterfactual_rows_show_change(make_doc):
@@ -89,7 +83,7 @@ RUN = {"models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.4-mini"}, "rounds
 
 
 def test_reflection_loop_rounds_tools_and_no_arguments(make_doc):
-    loop = opinion_panel(view(make_doc, run=RUN))["loop"]
+    loop = opinion_panel(view(make_doc), RUN)["loop"]
     assert [(r["n"], r["outcome"], r["tone"], r["tools"], r["tokens"], r["reviewer"]) for r in loop["rows"]] == [
         (1, "근거 보완 요청", "amber", 2, 900, "건너뜀(근거 검사 미통과)"),
         (2, "검토 지적", "amber", 1, 1100, "지적 1건"),
@@ -102,8 +96,8 @@ def test_reflection_loop_rounds_tools_and_no_arguments(make_doc):
 
 def test_failed_analyst_round_shows_error(make_doc):
     run = {"rounds": [{"round": 1, "analyst_error": "HTTP 400 bad"}]}
-    row = opinion_panel(view(make_doc, run=run))["loop"]["rows"][0]
-    assert (row["outcome"], row["tone"]) == ("분석 실패", "red") and ("오류", "HTTP 400 bad") in row["issues"]
+    row = opinion_panel(view(make_doc), run)["loop"]["rows"][0]
+    assert (row["outcome"], row["tone"]) == ("분석 실패", "red") and "HTTP 400 bad" not in str(row)
 
 
 def test_usage_uses_last_assess_step_by_model(make_doc):
@@ -123,7 +117,7 @@ def test_usage_uses_last_assess_step_by_model(make_doc):
 
 def test_officer_checks_states(make_doc, key):
     view = detail_view(make_doc(), None, key, restore=False)  # 평가서에 officer_checks 키 없음
-    assert opinion_panel(view)["officer_checks"]["state"] == "legacy"
+    assert opinion_panel(view)["officer_checks"]["state"] == "empty"
     doc = make_doc()
     doc["assessment"]["officer_checks"] = [
         {"text": "선정산 계약서를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"], "supported": True},

@@ -18,6 +18,7 @@ from mockapis.demo import build_demo_cases, build_load_cases
 from mockapis.synth import SyntheticCase
 from policy.engine import decision_payload, evaluate
 from policy.rules import load_rules
+from shared.opinions import opinion_state
 
 KST = timezone(timedelta(hours=9))
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=KST)
@@ -77,35 +78,31 @@ def _timeline(start: datetime, statuses: tuple[str, ...], extra: tuple[tuple[str
     return out
 
 
-def _man(krw: float) -> str:
-    return f"{round(krw / 10_000):,}"
-
-
 REC_OF = {"eligible": "approve", "refer": "refer", "ineligible": "decline"}
-DECISION_KO = {"eligible": "적격", "refer": "검토 필요", "ineligible": "부적격"}
+OPINION_SUMMARIES = {
+    "approve": "신청액은 정책 한도 이내이며 상환 여력과 현금 완충일수가 전액 승인을 뒷받침합니다.",
+    "refer": "정책상 회부입니다. 회부 사유와 거래 근거를 대조한 뒤 신청액 전액을 재심사하세요.",
+    "decline": "현재 정책으로는 신청액 전액을 승인할 수 없습니다. 정책 판정과 한도를 확인하세요.",
+    "conditional": "과거 조건부 승인 의견입니다.",
+}
 
 
 def _assessment(app_id: str, rec: str, uw: dict[str, Any], policy: dict[str, Any], amount: int) -> dict[str, Any]:
-    f, s = uw["features"], uw["signals"]
+    f = uw["features"]
     limit = policy["max_amount_krw"] or 0
-    structure = None
-    if rec != "decline" and limit > 0:
-        structure = {"amount_krw": min(amount, limit), "tenor_months": TENOR, "schedule": "level",
-                     "reduced_payment_months": [],
-                     "rationale": f"월 상환액이 월평균 정산 입금 {_man(f['avg_monthly_inflow_krw'])}만 원 대비 작다."}
-    return {
-        "application_id": app_id,
+    if rec != "conditional" and amount > limit:
+        rec = "decline"
+    assessment = {
+        "application_id": app_id, "schema_version": "2",
         "recommendation": rec,
-        "summary": (f"최근 {s['months_used']}개월 월평균 정산 입금 {_man(f['avg_monthly_inflow_krw'])}만 원, "
-                    f"DSCR {f['dscr']:.2f}, 현금 버퍼 {f['cash_buffer_days']:.0f}일이다. "
-                    f"정책 판정은 {DECISION_KO[policy['decision']]}이다."),
+        "summary": OPINION_SUMMARIES[rec],
         "claims": [
             {"text": f"DSCR {f['dscr']:.2f}", "metric_ids": ["M:dscr"], "txn_ids": []},
-            {"text": f"현금 버퍼 {f['cash_buffer_days']:.0f}일", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
-            {"text": f"대표자 월평균 인출 {_man(s['avg_monthly_owner_draw_krw'])}만 원",
-             "metric_ids": ["S:avg_monthly_owner_draw_krw"], "txn_ids": []},
+            {"text": "현금 완충일수", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
+            {"text": "대표자 월평균 인출", "metric_ids": ["M:avg_monthly_owner_draw_krw"], "txn_ids": []},
         ],
-        "proposed_structure": structure,
+        "officer_checks": [{"text": "정산 명세와 계좌 입금을 대조하세요.",
+                            "metric_ids": ["M:pg_reconciliation_ratio"], "supported": True}],
         "counterfactuals": [
             {"metric_id": "M:cash_buffer_days", "current": f["cash_buffer_days"], "target": 30.0,
              "explanation": "현금 버퍼가 30일 이상이면 한도 여유가 커진다"},
@@ -113,6 +110,11 @@ def _assessment(app_id: str, rec: str, uw: dict[str, Any], policy: dict[str, Any
         "review": {"passed": True, "rounds": 2, "issues": []},
         "models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.6-luna"},
     }
+    if rec == "conditional":
+        assessment.update(schema_version="1", proposed_structure={
+            "amount_krw": min(amount, limit), "tenor_months": TENOR, "schedule": "level",
+            "reduced_payment_months": [], "rationale": "과거 심사 조건"})
+    return assessment
 
 
 def _doc(n: int, status: str, timeline: list[dict], *, rec: str | None = "policy", amount: int = 8_000_000,
@@ -385,7 +387,7 @@ def _projected(i: int, industry: str, rec: str, region: str, age: str, outcomes:
                   {"step": "assess", "outcome": outcomes[1], "agent": True, "usage": usage}],
         "timeline": [{"status": "awaiting_officer", "at": (sub + timedelta(minutes=3 + i % 5)).isoformat()}],
         "flags": [], "policy": {"decision": "eligible", "reason_codes": []},
-        "assessment": {"recommendation": rec}, "officer_decision": None,
+        "assessment": {"schema_version": "2", "review": {"passed": True}, "recommendation": rec}, "officer_decision": None,
     }
 
 
@@ -408,12 +410,12 @@ class MemoryApplications:
     def list_recent(self, limit: int) -> list[dict[str, Any]]:
         rows = [{"id": d["id"], "applicant_id": d["applicant_id"], "status": d["status"],
                  "requested_amount_krw": d["requested_amount_krw"], "updated_at": d["updated_at"],
-                 "recommendation": (d.get("assessment") or {}).get("recommendation")} for d in self.docs.values()
+                 "recommendation": opinion_state(d.get("assessment"))} for d in self.docs.values()
                 if not d["id"].startswith("smoke-") and d.get("source") not in ("load", "fault")]
         return sorted(rows, key=lambda r: r["updated_at"], reverse=True)[:limit]
 
     def list_status_rows(self) -> list[dict[str, Any]]:
-        return [{"status": d["status"], "recommendation": (d.get("assessment") or {}).get("recommendation")}
+        return [{"status": d["status"], "recommendation": opinion_state(d.get("assessment"))}
                 for d in self.docs.values()]
 
     def get(self, application_id: str) -> dict[str, Any] | None:

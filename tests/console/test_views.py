@@ -28,14 +28,12 @@ def test_restore_shows_real_names_in_assessment_and_transactions(raw, make_doc, 
     ]
 
 
-def test_assessment_run_issues_follow_the_same_pii_view(raw, make_doc, key, mask):
-    run = {"rounds": [{"round": 1, "review_issues": [mask("김대표 인출 근거 부족")]}]}
+def test_rejected_drafts_are_audit_only_even_with_restore(raw, make_doc, key):
+    run = {"rounds": [{"round": 1, "review_issues": ["감액 대출 311만 원"]}]}
     doc = make_doc(assessment_run=run)
-    restored = detail_view(doc, load_raw(raw, doc), key, restore=True)["assessment_run"]
-    masked = detail_view(doc, load_raw(raw, doc), key, restore=False)["assessment_run"]
-    assert restored["rounds"][0]["review_issues"] == ["김대표 인출 근거 부족"]
-    assert "김대표" not in str(masked) and "[[PERSON_" in str(masked)
-    assert detail_view(make_doc(), None, key, restore=True)["assessment_run"] is None
+    for restore in (True, False):
+        assert "311만 원" not in str(detail_view(doc, load_raw(raw, doc), key, restore=restore))
+    assert doc["assessment_run"] == run
 
 
 def test_without_restore_everything_stays_pseudonymized(raw, make_doc, key):

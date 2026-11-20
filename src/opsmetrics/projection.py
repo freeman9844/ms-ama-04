@@ -3,6 +3,8 @@
 import re
 from typing import Any
 
+from shared.opinions import CURRENT, opinion_state
+
 _LOAD_ID = re.compile(r"^load-(healthy|mismatch|stress|thin)-\d+$")
 _STEP_KEYS = ("step", "outcome", "started_at", "ended_at", "duration_ms", "agent", "usage", "detail")
 
@@ -18,6 +20,7 @@ def _reason(r: Any) -> Any:
 
 def project(doc: dict[str, Any]) -> dict[str, Any]:
     policy, assessment, officer = doc.get("policy"), doc.get("assessment"), doc.get("officer_decision")
+    rec = opinion_state(assessment)
     return {
         "application_id": doc.get("application_id"),
         "applicant_id": doc.get("applicant_id"),
@@ -32,7 +35,8 @@ def project(doc: dict[str, Any]) -> dict[str, Any]:
         "flags": list(doc.get("flags") or []),
         "policy": {"decision": policy.get("decision"), "reason_codes": [_reason(r) for r in policy.get("reason_codes") or []]}
         if isinstance(policy, dict) else None,
-        "assessment": {"recommendation": assessment.get("recommendation")} if isinstance(assessment, dict) else None,
+        "assessment": ({"schema_version": "2", "recommendation": rec, "review": {"passed": True}}
+                       if rec in CURRENT else {"recommendation": "legacy"} if rec == "legacy" else None),
         "officer_decision": officer.get("decision") if isinstance(officer, dict) else None,
         "policy_override": isinstance(officer, dict) and officer.get("policy_override") is True,
         "requested_amount_krw": doc.get("requested_amount_krw"),

@@ -40,10 +40,10 @@ def test_snapshot_keeps_whitelisted_sections(make_doc, key):
                                                "threshold": 1.25}]
     assert snap["policy"]["max_amount_krw"] == 20_000_000
     opinion = snap["agent_opinion"]
-    assert opinion["recommendation"] == "approve" and opinion["review_passed"] is True
+    assert opinion["recommendation"] == "decline" and opinion["review_passed"] is True
     assert opinion["claims"][1] == {"text": "DSCR 1.8로 정책 기준을 넘는다",
                                     "evidence": {"S:2026-09:index": 1.0, "P:R101:threshold": 1.25}}
-    assert opinion["proposed_structure"]["amount_krw"] == 20_000_000
+    assert "proposed_structure" not in opinion
     assert snap["officer_decision"] is None and snap["truncated"] is False
 
 
@@ -109,6 +109,30 @@ def test_snapshot_excludes_identifiers(make_doc, key):
 def test_snapshot_without_policy_or_assessment(make_doc, key):
     snap = build_snapshot(_view(make_doc, key, status="assessing", policy=None, assessment=None))
     assert snap["policy"] is None and snap["agent_opinion"] is None
+
+
+def test_archived_chat_context_never_contains_old_claims_or_structure(make_doc, key):
+    doc = make_doc()
+    a = doc["assessment"]
+    a.pop("schema_version")
+    a.update(summary="311만 원 제안", proposed_structure={"amount_krw": 3_110_000})
+    snap = build_snapshot(detail_view(doc, None, key, restore=False))
+    assert snap["agent_opinion"] == {"state": "legacy"}
+    assert "311만" not in str(snap) and "3110000" not in str(snap)
+
+
+def test_review_stamp_does_not_make_an_explicit_counteroffer_displayable(make_doc, key):
+    from agents.pretranslate import extract
+
+    doc = make_doc()
+    a = doc["assessment"]
+    a["summary"] = "311만 원 감액은 권고하지 않습니다."
+    a["claims"][0]["text"] = "대안 금액: 311만 원"
+    a["officer_checks"] = [{"text": "311만 원 승인 권고", "metric_ids": ["M:dscr"]}]
+    v = detail_view(doc, None, key, restore=False)
+    assert "311만" not in str(v) and "311만" not in str(build_snapshot(v))
+    assert "311만" not in str(extract("applications", doc))
+    assert a["claims"][1]["text"] in str(v) and "311만" in a["summary"]
 
 
 def test_snapshot_trims_claims_from_end_to_cap(make_doc, key):

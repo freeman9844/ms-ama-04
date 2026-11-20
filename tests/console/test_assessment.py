@@ -155,17 +155,17 @@ def test_overspending_has_no_leftover_slice(make_doc):
 def test_summary_kpis_claim_checks_and_empty_document(make_doc):
     claims = [{"evidence": [("M:dscr", 1.8)]}, {"evidence": [("M:dscr", 1.8), ("S:x", None)]}, {"evidence": []}]
     v = view(make_doc, STRONG, claims=claims)
-    v["assessment"] = {**v["assessment"], "recommendation": "conditional"}
+    v["assessment"] = {**v["assessment"], "recommendation": "decline"}
     p = assessment_panels(v)
     s = p["summary"]
-    assert (s["decision"], s["recommendation"], s["review"]) == ("적격", "승인 권고(조건 제안)", "통과 · 1회")
+    assert (s["decision"], s["recommendation"], s["review"]) == ("적격", "전액 승인 비권고", "통과 · 1회")
     assert s["gauge_text"] == "67%" and s["gauge_sub"] == "한도 20,000,000원 / 신청 30,000,000원"
     assert p["claims"] == [{"ok": True, "missing": []}, {"ok": False, "missing": ["S:x"]}, {"ok": True, "missing": []}]
     empty = assessment_panels({"doc": make_doc("received", underwriting=None, assessment=None), "policy": None,
                                "assessment": None, "features": {}, "claims": []})
     assert empty["signals"] == [] and empty["capacity"] is None and empty["limit"] is None
     assert empty["expenses"] is None and empty["summary"]["gauge_text"] == "-"
-    assert empty["summary"]["recommendation"] == "권고 없음"
+    assert empty["summary"]["recommendation"] == "의견 없음"
 
 
 def test_summary_officer_decision_only_for_approve_or_decline(make_doc):

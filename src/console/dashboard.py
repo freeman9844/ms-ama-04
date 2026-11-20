@@ -29,17 +29,17 @@ GROUPS = (
     ("progress", "진행 중", "blue"),
 )
 RECOMMENDATIONS = (
-    ("approve", "승인", "green"),
-    ("conditional", "승인 권고(조건 제안)", "blue"),
-    ("refer", "심사역 회부", "purple"),
-    ("decline", "거절", "red"),
-    ("none", "권고 없음", "neutral"),
+    ("approve", "전액 승인 권고", "green"),
+    ("refer", "판단 보류", "purple"),
+    ("decline", "전액 승인 비권고", "red"),
+    ("legacy", "과거 의견", "neutral"),
+    ("none", "의견 없음", "neutral"),
 )
 RECOMMENDATION_LABELS = {key: label for key, label, _color in RECOMMENDATIONS}
 POLICY_DECISIONS = {"eligible": ("적격", "green"), "refer": ("심사역 회부", "amber"), "ineligible": ("부적격", "red")}
 MARKET_PENALTY_LABELS = {"suspension": "판매정지", "warning": "경고"}
 OFFICER_DECISIONS = {"approve": ("승인", "green"), "decline": ("거절", "red")}
-FUNNEL_NONE = {"policy": "판정 없음", "recommendation": "권고 없음", "officer": "미결정"}
+FUNNEL_NONE = {"policy": "판정 없음", "recommendation": "의견 없음", "officer": "미결정"}
 MODEL_COLORS = ("blue", "purple", "teal", "orange", "pink")
 KST_OFFSET = timezone(timedelta(hours=9))
 STEPS = (
@@ -708,7 +708,7 @@ def ops_summary(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[st
             if pct is None:
                 tip = _("%(value)s 추천 없음", value=value)
             else:
-                tip = _("%(value)s 추천 approve율 %(pct)s%% · 추천 완료 %(n)s건", value=value, pct=f"{pct:.1f}",
+                tip = _("%(value)s 전액 승인 권고율 %(pct)s%% · 현행 검토 의견 %(n)s건", value=value, pct=f"{pct:.1f}",
                         n=r.get("assessed"))
                 if r.get("insufficient"):
                     tip += " · " + _("표본 부족")

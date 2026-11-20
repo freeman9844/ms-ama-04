@@ -73,7 +73,7 @@ SIGNALS: tuple[tuple[str, str, str, float, str], ...] = (
 SIGNAL_TONES = {"pass": "green", "refer": "amber", "watch": "amber", "knockout": "red", "unknown": "grey"}
 SIGNAL_STATE_LABELS = {"pass": "통과", "refer": "주의(회부 기준)", "watch": "주의(참고 지표)",
                        "knockout": "위반(거절 기준)", "unknown": "값 없음"}
-RECOMMENDATION_TONES = {"approve": "green", "conditional": "blue", "refer": "purple", "decline": "red"}
+RECOMMENDATION_TONES = {"approve": "green", "refer": "purple", "decline": "red"}
 # 요약 탭 심사역 결정 카드. 옛 문서의 conditional은 승인으로 본다(심사역 결정에 조건부 승인 없음).
 OFFICER_DECISIONS = {"approve": ("승인", "green"), "conditional": ("승인", "green"), "decline": ("거절", "red")}
 APPROVED = frozenset({"approve", "conditional"})
@@ -114,7 +114,7 @@ def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
     policy, assessment = view.get("policy") or {}, view.get("assessment") or {}
     decision = policy.get("decision")
     decision_label, decision_tone = POLICY_DECISIONS.get(decision, (decision or "판정 없음", "neutral"))
-    rec = assessment.get("recommendation")
+    rec = view.get("opinion_state") or assessment.get("recommendation") or "none"
     review = assessment.get("review") or {}
     review_text = "-"
     if review:
@@ -125,7 +125,7 @@ def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
     gauge = charts.gauge(limit, requested)
     return {
         "decision": _(decision_label), "decision_tone": decision_tone,
-        "recommendation": i18n.label(RECOMMENDATION_LABELS, rec) if rec else _("권고 없음"),
+        "recommendation": i18n.label(RECOMMENDATION_LABELS, rec),
         "recommendation_tone": RECOMMENDATION_TONES.get(rec or "", "neutral"),
         "review": review_text, "review_tone": "green" if review.get("passed") else ("red" if review else "neutral"),
         "gauge": gauge,

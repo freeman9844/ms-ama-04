@@ -45,7 +45,8 @@ class FakeStore:
                         "status": "awaiting_officer" if reached else "underwritten", "run_id": run_id,
                         "submitted_at": m["submitted_at"], "timeline": timeline,
                         "business_name": "원문상호", "narrative": "에이전트서술",
-                        "assessment": {"recommendation": "approve", "rationale": "판단서술"},
+                        "assessment": {"schema_version": "2", "review": {"passed": True},
+                                       "recommendation": "approve", "summary": "판단서술"},
                         "steps": [{"step": "assess", "outcome": "ok", "agent": True, "usage": usage}]})
         return out
 
@@ -196,7 +197,7 @@ def test_docs_keep_only_projected_fields(tmp_path):
     text = (tmp_path / "docs.json").read_text(encoding="utf-8")
     assert "원문상호" not in text and "에이전트서술" not in text and "판단서술" not in text
     doc = json.loads(text)["runs"]["load-1"][0]
-    assert "business_name" not in doc and doc["assessment"] == {"recommendation": "approve"}
+    assert "business_name" not in doc and doc["assessment"] == {"schema_version": "2", "review": {"passed": True}, "recommendation": "approve"}
 
 
 def test_collect_mode_projects_stored_docs(tmp_path):

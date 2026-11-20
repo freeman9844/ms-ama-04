@@ -10,8 +10,10 @@ from typing import Any, Protocol
 
 from agents.data_assembly import build_pseudonymizer
 from agents.evidence import build_catalog
+from console.i18n import _
 from console.officer_chat import policy_trace
 from shared.contracts import ApplicantProfile, Transaction
+from shared.opinions import opinion_state, published_opinion
 
 DECIDABLE = frozenset({"awaiting_officer", "escalated"})
 
@@ -84,8 +86,11 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         if uw and policy
         else {}
     )
-    assessment = _map_strings(doc["assessment"], model_text) if doc.get("assessment") else None
-    assessment_run = _map_strings(doc["assessment_run"], model_text) if doc.get("assessment_run") else None
+    state = opinion_state(doc.get("assessment"))
+    assessment = _map_strings(published_opinion(doc.get("assessment"), doc.get("requested_amount_krw")), model_text)
+    display_doc = {k: v for k, v in doc.items() if k not in ("assessment", "assessment_run")}
+    if (error := doc.get("error")) and error.get("stage") in ("assess", "assess_credit"):
+        display_doc["error"] = {"stage": error["stage"], "message": _("의견 없음")}
     claims = [
         {
             "text": c["text"],
@@ -116,10 +121,10 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         if t.txn_id in wanted
     ]
     return {
-        "doc": doc,
+        "doc": display_doc,
         "pii": pii,
+        "opinion_state": state,
         "assessment": assessment,
-        "assessment_run": assessment_run,
         "claims": claims,
         "officer_checks": officer_checks,
         "transactions": transactions,

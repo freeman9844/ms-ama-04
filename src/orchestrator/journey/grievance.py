@@ -38,7 +38,8 @@ def _snapshot(application: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
         "assessment": (
-            {"summary": assessment.get("summary"), "counterfactuals": assessment.get("counterfactuals", [])}
+            {k: assessment[k] for k in ("schema_version", "recommendation", "review", "summary", "counterfactuals")
+             if k in assessment}
             if assessment
             else None
         ),
@@ -149,7 +150,8 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
         resolved = doc["status"] == PENDING  # 재시도마다 다시 판단한다(그사이 다른 처리가 끝났을 수 있다)
         if not resolved:
             return False
-        doc.update(status=RESOLVED[msg.outcome], decision=decision, reply={**reply.as_dict(), "at": at}, resolved_at=at)
+        doc.update(status=RESOLVED[msg.outcome], decision=decision,
+                   reply={**reply.as_dict(), "at": at, "full_request_review": True}, resolved_at=at)
         return None
 
     update_doc(deps.store, GRIEVANCES_CONTAINER, msg.grievance_id, msg.application_id, resolve)

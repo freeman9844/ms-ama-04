@@ -10,12 +10,13 @@ from typing import Any
 
 from opsmetrics.labels import STEP_LABELS
 from opsmetrics.slo import nearest_rank
+from shared.opinions import opinion_state
 
 POLICY_ORDER = ("eligible", "refer", "ineligible")
-RECOMMENDATION_ORDER = ("approve", "conditional", "refer", "decline")
+RECOMMENDATION_ORDER = ("approve", "refer", "decline", "legacy")
 OFFICER_ORDER = ("approve", "decline")
 NONE = "none"
-APPROVE_SIDE = frozenset({"approve", "conditional"})
+APPROVE_SIDE = frozenset({"approve"})
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 BUCKET_MIN = 10
 MAX_BUCKETS = 36  # 최근 6시간. 더 오래된 구간은 `earlier`로만 센다.
@@ -30,15 +31,14 @@ def _ordered(values: Iterable[str | None], order: tuple[str, ...]) -> dict[str, 
     return out
 
 
-def _recommendation(p: dict[str, Any]) -> str | None:
-    a = p.get("assessment")
-    return a.get("recommendation") if isinstance(a, dict) else None
+def _recommendation(p: dict[str, Any]) -> str:
+    return opinion_state(p.get("assessment"))
 
 
 def decision_funnel(docs: list[dict[str, Any]]) -> dict[str, Any]:
     """정책 판정 → 에이전트 권고 → 심사역 결정 분포와 권고·결정 일치율, 정책 예외 승인 비율.
 
-    일치율은 권고가 승인 쪽(approve·conditional)이나 decline이고 심사역이 결정한 건만 센다(refer는 방향이 없다).
+    일치율은 현행 전액 권고가 approve 또는 decline이고 심사역이 결정한 건만 센다.
     정책 예외 승인 비율의 분모는 심사역 승인 건수다.
     """
     policy = _ordered(((p.get("policy") or {}).get("decision") for p in docs), POLICY_ORDER)

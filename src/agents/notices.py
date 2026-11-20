@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from agents.grounding import numbers, ungrounded
 from agents.runtime import AgentSpec
 from agents.underwriting import AgentRunner, _Session
+from shared.opinions import published_opinion
 from shared.pseudonymize import has_token
 
 CONSENT_NOTICE_AGENT = "consent-notice-agent"
@@ -218,7 +219,7 @@ def write_notice(facts: Mapping[str, Any], *, runner: AgentRunner | None, model:
 def grievance_facts(application: Mapping[str, Any], decision: Mapping[str, Any]) -> dict[str, Any]:
     """판단 기록(정책 사유, counterfactual)과 심사역 결정만 쓴다. 차주가 쓴 이의 내용은 넣지 않는다."""
     policy = application.get("policy") or {}
-    assessment = application.get("assessment") or {}
+    assessment = published_opinion(application.get("assessment"), application.get("requested_amount_krw")) or {}
     officer = application.get("officer_decision") or {}
     facts: dict[str, Any] = {
         "original_decision": DECISION_LABELS.get(officer.get("decision", ""), "결정 없음"),

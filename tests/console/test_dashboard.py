@@ -16,13 +16,13 @@ def states(steps):
 def test_home_summary_counts_groups_and_recommendations():
     rows = [{"status": s, "recommendation": r} for s, r in [
         ("awaiting_officer", "approve"), ("escalated", "refer"), ("approved", None), ("conditionally_approved", "weird"),
-        ("declined", "decline"), ("withdrawn", "conditional"), ("received", None), ("assessed", "approve")]]
+        ("declined", "decline"), ("withdrawn", "legacy"), ("received", None), ("assessed", "approve")]]
     s = dashboard.home_summary(rows)
     assert (s["total"], s["awaiting"], s["escalated"], s["in_progress"], s["approved"], s["declined"]) == (8, 2, 1, 2, 2, 1)
     assert s["approval_rate"] == 2 / 3
     assert [n for _, _, n in s["groups"]] == [2, 2, 1, 1, 2]
-    assert s["recommendations"] == [("승인", 2, "green"), ("승인 권고(조건 제안)", 1, "blue"), ("심사역 회부", 1, "purple"),
-                                    ("거절", 1, "red"), ("권고 없음", 3, "neutral")]
+    assert s["recommendations"] == [("전액 승인 권고", 2, "green"), ("판단 보류", 1, "purple"), ("전액 승인 비권고", 1, "red"),
+                                    ("과거 의견", 1, "neutral"), ("의견 없음", 3, "neutral")]
     assert s["donut"]["total"] == 8 and len(s["rec_bars"]["bars"]) == 5
 
 
@@ -336,7 +336,7 @@ def test_ops_insights_funnel_latency_cost_reasons_flags_throughput():
     assert [r["label"] for r in u["funnel"]] == ["정책 판정", "에이전트 권고", "심사역 결정"]
     assert [(p["part"], p["color"]) for p in u["funnel"][0]["parts"]] == [
         ("적격", "green"), ("심사역 회부", "amber"), ("판정 없음", "neutral")]
-    assert [(p["part"], p["color"]) for p in u["funnel"][1]["parts"]] == [("승인", "green"), ("odd", "grey")]
+    assert [(p["part"], p["color"]) for p in u["funnel"][1]["parts"]] == [("전액 승인 권고", "green"), ("odd", "grey")]
     assert [p["part"] for p in u["funnel"][2]["parts"]] == ["승인", "미결정"]
     group = u["step_latency"]["groups"][0]
     assert group["label"] == "신용 평가" and [b["parts"][0]["value"] for b in group["bars"]] == [2.3, 12.0]

@@ -24,7 +24,7 @@ def doc(run_id, i, *, arch="healthy", rec="approve", minutes=4):
                    "usage": [{"model": "gpt-5.4-mini", "input_tokens": 1000, "output_tokens": 100, "calls": 1}]}],
         "timeline": [{"status": "awaiting_officer", "at": f"2026-11-02T01:{minutes:02d}:00+00:00"}],
         "flags": [], "policy": {"decision": "eligible", "reason_codes": []},
-        "assessment": {"recommendation": rec}, "officer_decision": None,
+        "assessment": {"schema_version": "2", "review": {"passed": True}, "recommendation": rec}, "officer_decision": None,
     }
 
 

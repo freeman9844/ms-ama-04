@@ -154,6 +154,7 @@ APPLICATION = {
         ],
     },
     "assessment": {
+        "schema_version": "2", "recommendation": "refer", "review": {"passed": True},
         "summary": "매출은 안정적이나 상환 여력이 기준에 못 미친다.",
         "counterfactuals": [
             {"metric_id": "M:dscr", "current": 1.1, "target": 1.3, "explanation": "DSCR이 1.3 이상이면 승인 가능"}
@@ -204,3 +205,8 @@ def test_write_grievance_reply_agent_and_template():
     up = grievance_facts(APPLICATION, uphold())
     up_reply = write_grievance_reply(up, runner=None, model="m")
     assert "유지" in up_reply.body and "DSCR이 1.3 이상이면 승인 가능" in up_reply.body
+
+
+def test_legacy_improvements_are_not_used_for_new_customer_reply():
+    record = {"assessment": {"counterfactuals": [{"explanation": "300만 원 제안", "current": 3, "target": 5}]}}
+    assert not grievance_facts(record, {"outcome": "uphold", "reason": "재확인"})["improvements"]

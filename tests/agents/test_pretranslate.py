@@ -53,19 +53,21 @@ class FakeRaw:
 def test_extract_follows_allowlist_and_skips_non_korean():
     doc = {"application_id": "a1", "assessment": {"summary": "매출 안정", "claims": [{"text": "정산 지연"}, {"text": "OK"}],
            "secret": "비허용 경로"}}
+    assert extract("applications", doc) == []
+    doc["assessment"].update(schema_version="2", review={"passed": True}, recommendation="refer")
     assert extract("applications", doc) == ["매출 안정", "정산 지연"]
 
 
 def test_extract_dedupes_exact_strings_in_first_seen_order():
-    doc = {"assessment": {"summary": "같은 문구", "claims": [{"text": "다른 문구"}, {"text": "같은 문구"}, {"text": "같은 문구 "}],
-                          "review": {"issues": ["다른 문구"]}}}
+    doc = {"assessment": {"schema_version": "2", "recommendation": "refer", "summary": "같은 문구", "claims": [{"text": "다른 문구"}, {"text": "같은 문구"}, {"text": "같은 문구 "}],
+                          "review": {"passed": True, "issues": ["다른 문구"]}}}
     assert extract("applications", doc) == ["같은 문구", "다른 문구", "같은 문구 "]
 
 
 def test_extract_handles_nested_lists_and_missing_or_mistyped_nodes():
     doc = {"assessment_run": {"rounds": [{"grounding_issues": ["근거 부족"], "review_issues": ["검토 지적"]}, {}, "x"]},
            "assessment": {"claims": None, "review": "문자열", "summary": 3}, "officer_decision": None}
-    assert extract("applications", doc) == ["근거 부족", "검토 지적"]
+    assert extract("applications", doc) == []
 
 
 def test_extract_reads_contact_records_in_alerts():

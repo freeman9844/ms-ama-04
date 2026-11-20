@@ -20,7 +20,7 @@ def p(*, policy="eligible", rec="approve", officer=None, override=False, codes=(
     return {
         "status": status, "received_at": received.isoformat() if received else None, "submitted_at": None,
         "policy": {"decision": policy, "reason_codes": list(codes)} if policy else None,
-        "assessment": {"recommendation": rec} if rec else None,
+        "assessment": {"schema_version": "2", "review": {"passed": True}, "recommendation": rec} if rec else None,
         "officer_decision": officer, "policy_override": override, "sla_escalated": escalated,
         "flags": list(flags), "steps": list(steps), "timeline": timeline,
     }
@@ -34,12 +34,19 @@ def test_funnel_distributions_keep_pipeline_order_and_count_missing():
 
 
 def test_funnel_agreement_skips_refer_and_undecided():
-    docs = [p(rec="approve", officer="approve"), p(rec="conditional", officer="approve"),
+    docs = [p(rec="approve", officer="approve"), p(rec="legacy", officer="approve"),
             p(rec="approve", officer="decline"), p(rec="decline", officer="decline"),
             p(rec="refer", officer="approve"), p(rec="approve")]
     a = decision_funnel(docs)["agreement"]
-    assert (a["compared"], a["agreed"]) == (4, 3) and a["rate"] == pytest.approx(0.75)
+    assert (a["compared"], a["agreed"]) == (3, 2) and a["rate"] == pytest.approx(2 / 3)
     assert decision_funnel([p(rec="refer", officer="approve")])["agreement"]["rate"] is None
+
+
+def test_archived_ops_projection_without_review_metadata_is_not_a_full_request_vote():
+    old = p(officer="approve") | {"assessment": {"recommendation": "approve"}}
+    funnel = decision_funnel([old])
+    assert funnel["recommendation"] == {"legacy": 1}
+    assert funnel["agreement"]["compared"] == 0
 
 
 def test_funnel_override_rate_is_share_of_officer_approvals():

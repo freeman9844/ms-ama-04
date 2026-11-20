@@ -46,6 +46,7 @@ def mt():
 
 
 def active_sources(deps):
+    deps.store.docs["app-20261103-p01"]["assessment"]["summary"] = "이 신청 건의 정산 내역을 검토했습니다."
     deps.raw = FakeRaw()
     deps.raw.blobs[("consent-m-1", "flow.json")] = []
     deps.privacy.get_consent = lambda cid: {"id": cid, "status": "granted"} if cid in {"c-1", "m-1"} else None

@@ -74,9 +74,47 @@ def test_detail_has_timeline_stepper_and_charts(client):
     html = page(client, "/applications/app-20261103-p01")
     assert '<ol class="stepper"' in html and html.count('class="step step-') >= 7
     assert 'class="chart columns"' in html and 'class="chart marker-bar"' in html
-    for text in ("타임라인", "정책 판정", "에이전트 평가", "주장과 근거", "제안 구조", "개선 조건(반사실)", "심사역 결정", "결정 보내기"):
+    assert "제안 구조" not in html
+    for text in ("타임라인", "정책 판정", "에이전트 평가", "주장과 근거", "개선 조건(반사실)", "심사역 결정", "결정 보내기"):
         assert text in html, text
     assert "<details" in html and 'class="timeline"' in html
+
+
+@pytest.mark.parametrize("version,passed,rec,ko,en", [
+    ("2", True, "approve", "전액 승인 권고", "Recommend full approval"),
+    ("2", True, "refer", "판단 보류", "Defer judgment"),
+    ("2", True, "decline", "전액 승인 비권고", "Do not recommend full approval"),
+    (None, True, "approve", "과거 의견", "Historical opinion"),
+    ("1", True, "conditional", "과거 의견", "Historical opinion"),
+    ("2", False, "approve", "의견 없음", "No opinion"),
+])
+def test_full_request_detail_and_list(version, passed, rec, ko, en):
+    deps = build_deps()
+    doc = deps.store.docs["app-20261103-p01"]
+    a = doc["assessment"]
+    a.pop("proposed_structure", None)
+    if version is not None:
+        a["schema_version"] = version
+    else:
+        a.pop("schema_version", None)
+    a.update(recommendation=rec, review={"passed": passed, "rounds": 1})
+    a["summary"] = "검토 근거" if version == "2" and passed else "300만 원 감액은 권고하지 않습니다"
+    doc["assessment_run"]["rounds"][0]["grounding_issues"] = ["300만 원 제안"]
+    client = TestClient(create_app(deps))
+    for lang, label in (("ko", ko), ("en", en)):
+        for path in ("/applications/app-20261103-p01", "/applications/rows", "/"):
+            html = page(client, f"{path}?lang={lang}")
+            assert label in html
+            assert "300만 원 감액" not in html and "300만 원 제안" not in html
+    assert doc["assessment_run"]["rounds"][0]["grounding_issues"] == ["300만 원 제안"]
+
+
+def test_failed_assessment_does_not_display_last_rejected_draft():
+    deps = build_deps()
+    doc = deps.store.docs["app-20261103-p09"]
+    doc["error"] = {"stage": "assess_credit", "message": "review rejected: 311만 원 제안"}
+    html = page(TestClient(create_app(deps)), "/applications/app-20261103-p09")
+    assert "의견 없음" in html and "311만 원" not in html
 
 
 def test_detail_tabs_and_assessment_panels(client):
@@ -91,7 +129,7 @@ def test_detail_tabs_and_assessment_panels(client):
     assert "한도 산정" in html and "상환 여력" in html and "지출 구성" in html and "남는 돈" in html
     assert "<title>순현금흐름 " in html and "순현금흐름(매출−지출)" in html
     assert "<title>2026-10 거래처·물류 " in html and "<title>2026-10 인건비 " in html
-    assert 'class="claim-mark ok"' in html and 'class="claim-mark missing"' in html
+    assert 'class="claim-mark ok"' in html and 'class="claim-mark missing"' not in html
     for text in ("권고의 의미", "근거 확인 주장", "반성 루프", "분석 에이전트 도구 호출", "모델 사용", "gpt-5.6-sol"):
         assert text in html, text
     assert 'class="claims-table"' in html and 'aria-label="주장 근거 출처 구성"' in html
@@ -115,9 +153,9 @@ def test_detail_shows_officer_checks(client):
     assert "에이전트 확인 사항" in html and "검토자 검증 1/1" in html and "선정산 계약서를 확인한다." in html
 
 
-def test_detail_officer_checks_legacy_notice(client):
+def test_preview_detail_has_next_checks(client):
     html = page(client, "/applications/app-20261103-p01")
-    assert "2026-11-10 이전 심사분은 확인 사항이 없습니다" in html
+    assert "정산 명세와 계좌 입금을 대조하세요." in html
 
 
 def test_detail_old_doc_shows_no_settlement():
@@ -187,7 +225,7 @@ def test_detail_shows_suspension_penalty(demo_cases):
 def test_detail_tabs_show_notices_when_empty(client):
     html = page(client, "/applications/app-20261103-p06")
     assert 'data-default-tab="tab-summary"' in html
-    for text in ("정책 판정 결과가 아직 없습니다.", "에이전트 평가가 아직 없습니다.", "에이전트 주장이 참조한 거래가 없습니다."):
+    for text in ("정책 판정 결과가 아직 없습니다.", "의견 없음", "에이전트 주장이 참조한 거래가 없습니다."):
         assert text in html, text
 
 

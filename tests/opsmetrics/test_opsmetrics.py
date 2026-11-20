@@ -27,7 +27,7 @@ def doc(i=1, *, minutes=5, reached=True, submitted=True, arch="healthy", seg=Non
         "segment": seg or {"industry": "카페", "region": "서울", "business_age_band": "3년+"},
         "steps": steps if steps is not None else [], "timeline": timeline, "flags": [],
         "policy": {"decision": decision, "reason_codes": ["R104"], "max_amount_krw": 1} if decision else None,
-        "assessment": {"recommendation": rec, "narrative": "원문"} if rec else None,
+        "assessment": {"schema_version": "2", "review": {"passed": True}, "recommendation": rec, "narrative": "원문"} if rec else None,
         "officer_decision": {"decision": officer} if officer else None,
         "assembly": {"secret": "x"},
     }
@@ -37,13 +37,21 @@ def step(name, outcome="ok", usage=None, agent=True):
     return {"step": name, "outcome": outcome, "agent": agent, "usage": usage or [], "duration_ms": 1}
 
 
+def test_past_opinion_is_not_a_full_request_approval():
+    raw = doc(officer="approve")
+    raw["assessment"] = {"recommendation": "approve", "summary": "300만 원 제안"}
+    projected = project(raw)
+    assert projected["assessment"] == {"recommendation": "legacy"}
+    assert fairness([projected])["axes"]["industry"]["values"]["카페"]["assessed"] == 0
+
+
 def test_project_keeps_only_allowed_fields():
     p = project(doc(officer="approve"))
     assert set(p) == {"application_id", "applicant_id", "status", "submitted_at", "received_at", "source", "run_id",
                       "segment", "steps", "timeline", "flags", "policy", "assessment", "officer_decision",
                       "policy_override", "requested_amount_krw", "sla_escalated"}
     assert p["policy"] == {"decision": "eligible", "reason_codes": ["R104"]}
-    assert p["assessment"] == {"recommendation": "approve"} and p["officer_decision"] == "approve"
+    assert p["assessment"] == {"schema_version": "2", "review": {"passed": True}, "recommendation": "approve"} and p["officer_decision"] == "approve"
     assert (p["policy_override"], p["requested_amount_krw"], p["sla_escalated"]) == (False, None, False)
 
 
@@ -157,7 +165,7 @@ def test_recommendation_breakdown_includes_refer():
     recs = ["approve", "conditional", "refer", "refer", "decline"]
     values = fairness([project(doc(i, rec=r)) for i, r in enumerate(recs, 1)])["axes"]["industry"]["values"]
     cafe = values["카페"]
-    assert cafe["recommendations"] == {"approve": 1, "conditional": 1, "refer": 2, "decline": 1}
+    assert cafe["recommendations"] == {"approve": 1, "refer": 2, "decline": 1}
     assert sum(cafe["recommendations"].values()) == cafe["assessed"]
 
 

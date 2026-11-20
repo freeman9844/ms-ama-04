@@ -25,7 +25,6 @@ MONTHLY_KEYS = ("month", "revenue", "operating_out", "debt_service", "owner_draw
 SETTLEMENT_KEYS = ("available", "pg_reconciliation_ratio", "pg_top_platform_share", "pg_take_rate_trend_pp",
                    "pg_cash_conversion_days", "pg_offset_rate_trend_pp", "pg_advance_share",
                    "pg_advance_suspected_count", "unmatched_count", "settlement_count", "period")
-STRUCTURE_KEYS = ("amount_krw", "tenor_months", "schedule", "reduced_payment_months", "rationale")
 # 추천 질문·오류 문구는 화면에 낼 때 번역한다(템플릿 `_()`, app의 `_chat_error`). TRACE_NOTES는 모델 입력이라 번역하지 않는다.
 CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?",
                     "마켓 반품률·취소율과 정산 예정금을 계좌 입금과 비교하면 무엇을 확인해야 하나요?")
@@ -155,13 +154,11 @@ def _officer_checks(view: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _opinion(view: Mapping[str, Any]) -> dict[str, Any] | None:
     assessment = view.get("assessment")
     if not isinstance(assessment, Mapping):
-        return None
-    structure = assessment.get("proposed_structure") or {}
+        return {"state": "legacy"} if view.get("opinion_state") == "legacy" else None
     return {
         "recommendation": assessment.get("recommendation"),
         "summary": assessment.get("summary"),
         "review_passed": (assessment.get("review") or {}).get("passed"),
-        "proposed_structure": {k: structure.get(k) for k in STRUCTURE_KEYS} if structure else None,
         "claims": [{"text": c["text"], "evidence": dict(c["evidence"])} for c in view.get("claims") or ()],
         "counterfactuals": [{k: c.get(k) for k in ("explanation", "current", "target")}
                             for c in assessment.get("counterfactuals") or ()],

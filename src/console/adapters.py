@@ -17,6 +17,7 @@ from typing import Any
 from console.app import ConsoleDeps
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
 from opsmetrics.projection import project
+from shared.opinions import opinion_state
 
 APPLICATIONS = "applications"
 LOANS = "loans"
@@ -28,14 +29,23 @@ TRANSLATIONS = "translations"
 PSEUDONYM_SECRET = "pseudonym-key"
 # 홈 신청 목록은 배포 smoke(ID smoke-*)와 부하 측정·장애 주입(source load·fault) 신청을 뺀다.
 # source가 없거나 null인 문서(심사역·고객 신청, 예전 문서)는 남긴다.
+_OPINION = ('IIF(IS_OBJECT(c.assessment), {"schema_version": c.assessment.schema_version, '
+            '"review": {"passed": c.assessment.review.passed = true AND NOT IS_DEFINED(c.assessment.proposed_structure)}, '
+            '"recommendation": c.assessment.recommendation}, null) AS opinion')
 LIST_QUERY = (
     "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, c.source, "
-    "c.assessment.recommendation AS recommendation FROM c "
+    f"{_OPINION} FROM c "
     "WHERE NOT STARTSWITH(c.id, 'smoke-') AND (NOT IS_STRING(c.source) OR c.source NOT IN ('load', 'fault')) "
     "ORDER BY c.updated_at DESC"
 )
 # 홈 통계는 모든 신청(테스트 포함)을 집계한다. 상태·권고만 읽는다.
-STATUS_QUERY = "SELECT c.status, c.assessment.recommendation AS recommendation FROM c"
+STATUS_QUERY = f"SELECT c.status, {_OPINION} FROM c"
+
+
+def _opinion_row(row: dict[str, Any]) -> dict[str, Any]:
+    row = dict(row)
+    row["recommendation"] = opinion_state(row.pop("opinion", None))
+    return row
 
 
 class CosmosApplications:
@@ -46,10 +56,10 @@ class CosmosApplications:
         items = self._container.query_items(
             query=LIST_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
         )
-        return list(items)
+        return [_opinion_row(row) for row in items]
 
     def list_status_rows(self) -> list[dict[str, Any]]:
-        return list(self._container.query_items(query=STATUS_QUERY, enable_cross_partition_query=True))
+        return [_opinion_row(row) for row in self._container.query_items(query=STATUS_QUERY, enable_cross_partition_query=True)]
 
     def get(self, application_id: str) -> dict[str, Any] | None:
         try:

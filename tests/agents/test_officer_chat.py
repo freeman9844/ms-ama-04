@@ -104,6 +104,59 @@ def test_ask_survives_delete_failure():
     assert OfficerChat(runner, "gpt-6-luna").ask({}, [], "질문").answer == "답입니다"
 
 
+@pytest.mark.parametrize("lang,text,amount", [
+    ("ko", "300만 원 감액은 권고하지 않습니다.", "300만"),
+    ("en", "Instead, offer KRW 3,000,000.", "3,000,000"),
+    ("en", "A smaller loan of 3 million won would be safer.", "3 million"),
+    ("ko", "350만 원이면 적절합니다.", "350만"),
+    ("en", "KRW 3,500,000 would work.", "3,500,000"),
+    ("ko", "한도인 300만 원이면 충분합니다.", "300만"),
+    ("ko", "정책 한도 300만 원을 대안으로 검토하세요.", "300만"),
+    ("en", "You could approve 3,500,000 instead.", "3,500,000"),
+    ("en", "The policy limit is KRW 3,000,000. That is the amount I would offer.", "3,000,000"),
+    ("en", "The policy limit is KRW 3,000,000. That would be the prudent loan size.", "3,000,000"),
+    ("ko", "정책 한도는 300만 원입니다. 그 수준이면 진행해도 좋겠습니다.", "300만"),
+])
+def test_alternative_amount_never_reaches_answer_or_followup(lang, text, amount):
+    runner = FakeRunner(result=_run(text))
+    snapshot = {"application": {"requested_amount_krw": 5_000_000}, "policy": {"max_amount_krw": 3_000_000},
+                "agent_opinion": {"recommendation": "refer"}}
+    answer = OfficerChat(runner, "m").ask(snapshot, [{"role": "assistant", "text": text}], "Why?", lang)
+    assert amount not in answer.answer
+    assert ("full request" if lang == "en" else "전액") in answer.answer
+    assert amount not in str(runner.calls[0][1]["history"])
+    assert runner.deleted == ["conv-1"]
+
+
+@pytest.mark.parametrize("text", [
+    "신청액은 500만 원이고 정책 한도는 300만 원입니다. 월평균 입금은 700만 원입니다.",
+    "The request is KRW 5,000,000; the policy limit is KRW 3,000,000.",
+])
+def test_factual_money_is_not_a_counteroffer(text):
+    snapshot = {"application": {"requested_amount_krw": 5_000_000}, "policy": {"max_amount_krw": 3_000_000},
+                "cashflow": {"features": {"avg_monthly_inflow_krw": 7_000_000}}}
+    runner = FakeRunner(result=_run(text))
+    assert OfficerChat(runner, "m").ask(snapshot, [], "?").answer == text
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_rejected_chat_answer_uses_grounded_r108_check(lang):
+    snapshot = {"application": {"requested_amount_krw": 5_000_000},
+                "policy": {"decision": "refer", "reason_codes": [{"code": "R108"}]},
+                "agent_opinion": {"recommendation": "refer"}}
+    runner = FakeRunner(result=_run("삼백만 원 정도가 적당합니다."))
+    answer = OfficerChat(runner, "m").ask(snapshot, [], "?", lang).answer
+    assert "삼백만" not in answer and "R108" in answer
+    assert ("unmatched settlements" if lang == "en" else "미대사 정산") in answer
+
+
+@pytest.mark.parametrize("opinion,expected", [(None, "no current reviewed opinion"), ({"state": "legacy"}, "historical opinion")])
+def test_missing_review_cannot_be_substituted_with_model_opinion(opinion, expected):
+    runner = FakeRunner(result=_run("Recommend full approval."))
+    answer = OfficerChat(runner, "m").ask({"agent_opinion": opinion}, [], "What is the recommendation?", "en")
+    assert expected in answer.answer
+
+
 def test_gateway_routes_officer_chat_connection():
     seen = []
 

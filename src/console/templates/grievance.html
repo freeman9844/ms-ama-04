@@ -26,9 +26,12 @@
   <tbody>{% for c in r.policy.reason_codes %}<tr><td>{{ c.code }}</td><td>{{ c.message|mt }}</td><td>{{ c.observed }}</td><td>{{ c.threshold }}</td></tr>{% endfor %}</tbody>
 </table>
 {% endif %}
-{% if r.assessment and r.assessment.counterfactuals %}
+{% set opinion = r.assessment|published_opinion %}
+{% if r.assessment and r.assessment|opinion_state == "legacy" %}
+<p>{{ _("과거 의견 — 신청액 전액에 대한 권고가 아닙니다.") }}</p>
+{% elif opinion and opinion.counterfactuals %}
 <h3>{{ _("개선 조건(반사실)") }}</h3>
-<ul>{% for cf in r.assessment.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation|mt }}</li>{% endfor %}</ul>
+<ul>{% for cf in opinion.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation|mt }}</li>{% endfor %}</ul>
 {% endif %}
 </section>
 <section>
@@ -38,7 +41,9 @@
 {% if dd.conditions %}<ul>{% for c in dd.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
 <p class="note">{{ _("재심사 결과는 기록만 남깁니다. 신청 문서(원 판단 기록)는 바꾸지 않습니다.") }}</p>
 {% endif %}
-{% if g.reply %}
+{% if g|archived_reply %}
+<p>{{ _("과거 심사 의견을 참조한 회신은 감사 기록에 보관합니다.") }}</p>
+{% elif g.reply %}
 <h3>{{ _("회신") }} <small>{{ _("에이전트 초안") if g.reply.source == "agent" else _("템플릿") }}</small></h3>
 <p><strong>{{ g.reply.title|mt }}</strong></p>
 <p class="notice">{{ g.reply.body|mt_ref }}</p>

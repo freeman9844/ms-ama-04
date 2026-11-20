@@ -69,7 +69,7 @@ def make_doc(status: str = "awaiting_officer", **overrides) -> dict:
         },
         "assessment": {
             "application_id": "app-1",
-            "recommendation": "approve",
+            "schema_version": "2", "recommendation": "decline",
             "summary": mask("빈스카페(대표 김대표)는 계절성이 있다"),
             "claims": [
                 {"text": mask("김대표 개인이체가 월 100만원이다"), "metric_ids": ["M:dscr", "M:unknown"],
@@ -77,8 +77,6 @@ def make_doc(status: str = "awaiting_officer", **overrides) -> dict:
                 {"text": "DSCR 1.8로 정책 기준을 넘는다", "metric_ids": ["S:2026-09:index", "P:R101:threshold"],
                  "txn_ids": []},
             ],
-            "proposed_structure": {"amount_krw": 20_000_000, "tenor_months": 12, "schedule": "level",
-                                   "reduced_payment_months": [], "rationale": "한도 내"},
             "counterfactuals": [],
             "review": {"passed": True, "rounds": 1, "issues": []},
             "models": {"analyst": "gpt-5.4", "reviewer": "gpt-5.4-mini"},

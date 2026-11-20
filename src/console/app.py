@@ -99,6 +99,7 @@ from journey.models import (
 )
 from agents.data_assembly import build_pseudonymizer
 from journey.validation import REREVIEW_ERRORS, validate_officer_decision, validate_rereview_decision
+from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
@@ -260,6 +261,9 @@ def _templates() -> Environment:
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
     env.filters["seller_initial"] = lambda s: str(translate.data(seller_name(s)) or s)[:1]
     env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
+    env.filters["opinion_state"] = opinion_state
+    env.filters["archived_reply"] = archived_reply
+    env.filters["published_opinion"] = published_opinion
     env.filters["policy_label"] = lambda s: i18n.gettext(POLICY_DECISIONS[s][0]) if s in POLICY_DECISIONS else s or "-"
     for name, labels in (LABEL_FILTERS | MONITORING_FILTERS).items():
         env.filters[name] = lambda s, labels=labels: i18n.label(labels, s)
@@ -491,7 +495,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
         return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"], translation_scope("applications", doc)),
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
-                      op=opinion_panel(view), in_progress=in_progress, state=state,
+                      op=opinion_panel(view, doc.get("assessment_run")), in_progress=in_progress, state=state,
                       consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
                       **ctx)
 

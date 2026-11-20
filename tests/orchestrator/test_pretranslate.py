@@ -86,7 +86,8 @@ def make_deps(translator, raw=None, store=None):
 
 
 def app_doc(**assessment):
-    return {"id": APP, "application_id": APP, "consent": {"consent_id": "c1"}, "assessment": assessment}
+    return {"id": APP, "application_id": APP, "consent": {"consent_id": "c1"},
+            "assessment": {"schema_version": "2", "recommendation": "refer", "review": {"passed": True}, **assessment}}
 
 
 def test_translates_masked_text_once_and_stores_by_owner():

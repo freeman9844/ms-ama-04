@@ -7,10 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from opsmetrics.projection import archetype_of
+from shared.opinions import CURRENT, opinion_state
 
 AXES = ("industry", "region", "business_age_band")
 POLICY_EXPLAINED = frozenset({"business_age_band"})
-RECOMMENDATIONS = ("approve", "conditional", "refer", "decline")
 DEFAULT_GAP_PP = 20.0
 GAP_ENV = "FAIRNESS_GAP_PP"
 
@@ -32,17 +32,16 @@ def gap_pp_from_env(env: Mapping[str, str] = os.environ) -> float:
     return value
 
 def _rates(group: list[dict[str, Any]]) -> dict[str, Any]:
-    assessed = [p for p in group if p.get("assessment")]
+    recs = [rec for p in group if (rec := opinion_state(p.get("assessment"))) in CURRENT]
     policed = [p for p in group if p.get("policy")]
     decided = [p for p in group if p.get("officer_decision")]
-    recs = [p["assessment"].get("recommendation") for p in assessed]
     return {
         "n": len(group),
-        "assessed": len(assessed),
-        "approve_rate": recs.count("approve") / len(assessed) if assessed else None,
+        "assessed": len(recs),
+        "approve_rate": recs.count("approve") / len(recs) if recs else None,
         "eligible_rate": sum(p["policy"].get("decision") == "eligible" for p in policed) / len(policed)
         if policed else None,
-        "recommendations": {r: recs.count(r) for r in RECOMMENDATIONS},
+        "recommendations": {r: recs.count(r) for r in CURRENT},
         "officer_approve_rate": sum(p["officer_decision"] != "decline" for p in decided) / len(decided)
         if decided else None,
     }
@@ -72,8 +71,9 @@ def fairness(docs: list[dict[str, Any]], gap_pp: float = DEFAULT_GAP_PP, min_sam
             values[value] = r
         controlled = {}
         for arch in sorted({a for p in docs if (a := archetype_of(p.get("applicant_id")))}):
-            sub = {v: {**_rates(g), "insufficient": len([p for p in g if p.get("assessment")]) < 2}
-                   for v, g in _by([p for p in docs if archetype_of(p.get("applicant_id")) == arch], axis).items()}
+            sub = {v: _rates(g) for v, g in _by([p for p in docs if archetype_of(p.get("applicant_id")) == arch], axis).items()}
+            for rates in sub.values():
+                rates["insufficient"] = rates["assessed"] < 2
             controlled[arch] = _gap(sub)
         gap = _gap(values)
         explained = axis in POLICY_EXPLAINED

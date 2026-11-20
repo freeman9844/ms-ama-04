@@ -13,15 +13,11 @@ from console.dashboard import POLICY_DECISIONS, RECOMMENDATION_LABELS
 from console.i18n import _
 
 RECOMMENDATION_MEANINGS = {
-    "approve": "정책 판정과 현금흐름 근거가 모두 대출을 지지합니다. 제안 구조대로 승인할 것을 권합니다.",
-    "conditional": "승인할 만하지만 제안 구조(금액·기간·감액 월)를 조건으로 두길 권합니다. "
-                   "콘솔 결정에는 조건부 승인이 없으므로 승인 금액과 사유로 반영합니다.",
-    "refer": "근거가 엇갈려 에이전트가 판단을 미뤘습니다. 근거 거래와 지표를 직접 확인해 주세요.",
-    "decline": "정책 판정이나 현금흐름 근거가 대출을 지지하지 않습니다.",
+    "approve": "현재 근거는 신청액 전액 승인을 지지합니다. 최종 결정은 심사역이 합니다.",
+    "refer": "자료가 부족하거나 상충합니다. 근거를 확인한 뒤 신청액 전액을 재심사하세요.",
+    "decline": "현재 정책 또는 확인된 근거가 신청액 전액 승인을 지지하지 않습니다.",
 }
-# 정책 판정별로 같은 방향인 권고. 정책 회부는 어떤 권고든 심사역 판단이 필요하다.
-ALIGNED = {"eligible": {"approve", "conditional"}, "refer": {"approve", "conditional", "refer", "decline"},
-           "ineligible": {"decline", "refer"}}
+ALIGNED = {"eligible": {"approve"}, "refer": {"refer"}, "ineligible": {"decline"}}
 METRIC_LABELS = {
     "dscr": "DSCR", "cash_buffer_days": "현금 완충일수", "revenue_volatility": "매출 변동성",
     "tax_bank_match_ratio": "세금·계좌 일치율", "business_age_months": "업력(개월)",
@@ -48,10 +44,7 @@ SOURCES = (("M", "현금흐름 지표", "blue"), ("S", "월별 흐름", "teal"),
 TOOL_LABELS = {"get_metrics": "지표 조회", "get_monthly_series": "월별 흐름 조회",
                "get_settlement_summary": "정산 원장 대사 조회",
                "query_transactions": "거래 조회", "code_interpreter": "코드 계산"}
-SCHEDULE_LABELS = {"level": "균등 상환", "seasonal": "계절 감액 상환"}
-INDEX_CHART = {"width": 480, "height": 220}
 ISSUES_CHART = {"width": 480, "height": 200}
-LOW_INDEX = 0.8  # 감액 월이 없어도 평균의 80% 미만인 달은 주의 색으로 보인다.
 
 
 def _num_text(v: float) -> str:
@@ -88,19 +81,25 @@ def _source(metric_id: str) -> str:
     return head if head in ("M", "S", "P") else "M"
 
 
-def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str, Any]:
+def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any], requested: Any) -> dict[str, Any]:
     rec = assessment.get("recommendation") or ""
     decision = policy.get("decision")
     decision_label, decision_tone = POLICY_DECISIONS.get(decision, (decision or "판정 없음", "neutral"))
     aligned = rec in ALIGNED.get(decision, set())
-    if not decision:
+    limit = policy.get("max_amount_krw")
+    if decision != "ineligible" and charts.is_num(requested) and charts.is_num(limit) and requested > limit:
+        aligned = rec == "decline"
+        relation = _("신청액이 정책 한도를 초과하므로 전액 승인이 불가능합니다.")
+    elif not decision:
         relation = _("정책 판정이 없어 권고만 참고합니다.")
     elif aligned:
         relation = _("정책 판정과 에이전트 권고가 같은 방향입니다.")
+    elif decision == "eligible":
+        relation = _("정책상 적격은 전액 승인을 뜻하지 않습니다. 권고의 근거와 확인 사항을 살펴보세요.")
     else:
         relation = _("정책 판정과 에이전트 권고가 엇갈립니다. 근거 표와 근거 거래를 먼저 확인하세요.")
     return {
-        "label": i18n.label(RECOMMENDATION_LABELS, rec, rec or "권고 없음"),
+        "label": i18n.label(RECOMMENDATION_LABELS, rec, "의견 없음"),
         "tone": RECOMMENDATION_TONES.get(rec, "neutral"),
         "meaning": _(RECOMMENDATION_MEANINGS[rec]) if rec in RECOMMENDATION_MEANINGS else "",
         "policy": _(decision_label), "policy_tone": decision_tone,
@@ -131,56 +130,6 @@ def _evidence_mix(counts: Mapping[str, int]) -> dict[str, Any] | None:
         return None
     return {"donut": charts.donut(segments),
             "legend": [(label, color, _("%(n)s건", n=v)) for label, v, color in segments if v]}
-
-
-def _season(monthly: Sequence[Mapping[str, Any]], reduced: Sequence[int]) -> dict[str, Any] | None:
-    revenue = [m.get("revenue") for m in monthly]
-    nums = [v for v in revenue if charts.is_num(v)]
-    mean = sum(nums) / len(nums) if nums else 0
-    if mean <= 0:
-        return None
-    groups = []
-    for m, rev in zip(monthly, revenue, strict=True):
-        month = str(m.get("month") or "")
-        idx = round(rev / mean, 2) if charts.is_num(rev) else None
-        cal = int(month[5:7]) if len(month) == 7 and month[5:7].isdigit() else None
-        is_reduced = cal in reduced
-        color = "amber" if is_reduced else ("red" if idx is not None and idx < LOW_INDEX else "blue")
-        tip = _("%(month)s 매출 지수 %(index)s", month=month, index=idx if idx is not None else "-")
-        if is_reduced:
-            tip = _("%(tip)s · 감액 월", tip=tip)
-        groups.append((month[2:] if len(month) == 7 else month, [[("index", idx, color, tip)]]))
-    chart = charts.columns(groups, refs=[(_("평균"), 1.0, "purple")], **INDEX_CHART)
-    used = {bar[0][2] for _label, bars in groups for bar in bars}
-    legend = [(label, color) for label, color in ((_("평소 달"), "blue"),
-                                                  (_("평균의 %(pct)s 미만", pct=f"{LOW_INDEX:.0%}"), "red"),
-                                                  (_("제안된 감액 월"), "amber")) if color in used]
-    return {"chart": chart, "legend": [*legend, (_("평균 = 1.0(선)"), "purple")]}
-
-
-def _structure(assessment: Mapping[str, Any], doc: Mapping[str, Any], policy: Mapping[str, Any],
-               monthly: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
-    st = assessment.get("proposed_structure")
-    if not isinstance(st, Mapping):
-        return None
-    amount, tenor = st.get("amount_krw"), st.get("tenor_months")
-    requested, limit = doc.get("requested_amount_krw"), policy.get("max_amount_krw")
-    reduced = [m for m in st.get("reduced_payment_months") or () if isinstance(m, int)]
-    principal = amount / tenor if charts.is_num(amount) and charts.is_num(tenor) and tenor > 0 else None
-    bars = [(label, round(v / 10_000), color) for label, v, color in
-            ((_("신청액"), requested, "grey"), (_("정책 한도"), limit, "purple"), (_("제안 금액"), amount, "blue"))
-            if charts.is_num(v)]
-    rows = [
-        (_("제안 금액"), charts.won(amount)),
-        (_("신청액 대비"), f"{amount / requested:.0%}" if charts.is_num(amount) and charts.is_num(requested)
-         and requested > 0 else "-"),
-        (_("기간"), _("%(n)s개월", n=tenor) if charts.is_num(tenor) else "-"),
-        (_("상환 방식"), i18n.label(SCHEDULE_LABELS, st.get("schedule"), st.get("schedule") or "-")),
-        (_("감액 월"), ", ".join(_("%(n)s월", n=m) for m in reduced) or _("없음")),
-        (_("월 원금(균등 기준)"), charts.won(round(principal)) if principal is not None else "-"),
-    ]
-    return {"rows": rows, "bars": charts.hbars(bars, width=420, label_w=80) if bars else None,
-            "rationale": st.get("rationale") or "", "season": _season(monthly, reduced)}
 
 
 def _counterfactuals(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -227,9 +176,6 @@ def _round(entry: Mapping[str, Any]) -> dict[str, Any]:
         "tokens": int(analyst.get("total_tokens") or 0) + int(reviewer.get("total_tokens") or 0),
         "grounding": len(grounding), "review": len(review), "reviewer": reviewer_text,
         "outcome": outcome, "tone": tone,
-        "issues": [(_("근거 검사"), i) for i in grounding] + [(_("검토"), i) for i in review]
-        + ([(_("오류"), str(entry["analyst_error"]))] if entry.get("analyst_error") else [])
-        + ([(_("오류"), str(entry["reviewer_error"]))] if entry.get("reviewer_error") else []),
     }
 
 
@@ -286,10 +232,8 @@ OFFICER_CHECK_STATUS = {True: ("ok", "검토 통과"), False: ("failed", "검토
 
 
 def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
-    """확인 사항 패널. 평가서가 있는데 officer_checks 키가 없으면 legacy, 빈 목록이면 empty."""
+    """검토된 현행 의견의 확인 사항(생략과 빈 배열은 모두 확인 사항 없음)."""
     checks = view.get("officer_checks")
-    if checks is None:
-        return {"state": "legacy", "items": [], "verified": 0, "total": 0}
     if not checks:
         return {"state": "empty", "items": [], "verified": 0, "total": 0}
     items = []
@@ -304,19 +248,18 @@ def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
     return {"state": "listed", "items": items, "verified": verified, "total": len(items)}
 
 
-def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
+def opinion_panel(view: Mapping[str, Any], run: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     assessment = view.get("assessment")
     if not assessment:
         return None
     doc = view["doc"]
     policy = view.get("policy") or {}
-    monthly = [m for m in (doc.get("underwriting") or {}).get("monthly") or [] if isinstance(m, Mapping)]
     claims, counts = _claims(view.get("claims") or ())
     review = assessment.get("review") or {}
     usage = _usage(doc, assessment.get("models") or {})
     ok = sum(1 for c in claims if c["ok"])
     return {
-        "recommendation": _recommendation(assessment, policy),
+        "recommendation": _recommendation(assessment, policy, doc.get("requested_amount_krw")),
         "kpi": {
             "grounded": f"{ok}/{len(claims)}", "grounded_tone": "green" if claims and ok == len(claims) else "amber",
             "review": (_("통과") if review.get("passed") else _("미통과")) if review else "-",
@@ -328,9 +271,8 @@ def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
         },
         "claims": claims,
         "mix": _evidence_mix(counts),
-        "structure": _structure(assessment, doc, policy, monthly),
         "counterfactuals": _counterfactuals(assessment.get("counterfactuals") or ()),
-        "loop": _loop(view.get("assessment_run")),
+        "loop": _loop(run),
         "usage": usage,
         "models": assessment.get("models") or {},
         "officer_checks": _officer_checks(view),

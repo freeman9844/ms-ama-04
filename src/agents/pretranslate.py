@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from shared.contracts import ApplicantProfile, Transaction
+from shared.opinions import archived_reply, published_opinion
 from shared.pseudonymize import tokens
 
 SOURCES = ("applications", "loans", "alerts", "grievances")
@@ -26,11 +27,7 @@ ALLOWLIST: dict[str, tuple[str, ...]] = {
         "assessment.summary",  # detail: a.summary
         "assessment.claims[].text",  # detail: 근거 표(c.text)
         "assessment.officer_checks[].text",  # detail: 에이전트 확인 사항(i.text)
-        "assessment.proposed_structure.rationale",  # detail: st.rationale
         "assessment.counterfactuals[].explanation",  # detail: cf.explanation
-        "assessment.review.issues[]",  # detail: a.review.issues
-        "assessment_run.rounds[].grounding_issues[]",  # detail: op.loop.rows[].issues(근거 검사)
-        "assessment_run.rounds[].review_issues[]",  # detail: op.loop.rows[].issues(검토)
         "officer_decision.reason",  # detail: d.officer_decision.reason
     ),
     "loans": (
@@ -62,6 +59,7 @@ ALLOWLIST: dict[str, tuple[str, ...]] = {
     "grievances": (
         "text",  # grievance·borrower: g.text
         "record.officer_decision.reason",  # grievance: od.reason(접수 시점 원결정)
+        "record.assessment.counterfactuals[].explanation",
         "decision.reason",  # grievance: dd.reason
         "reply.title",  # grievance·borrower: g.reply.title
         "reply.body",  # grievance·borrower: g.reply.body
@@ -101,7 +99,15 @@ def _walk(node: Any, parts: Sequence[str]) -> Iterator[str]:
 def extract(source: str, doc: Mapping[str, Any]) -> list[str]:
     """허용 경로의 한국어 문자열을 처음 나온 순서로, 정확히 같은 문자열은 한 번만 돌려준다."""
     found: dict[str, None] = {}
+    hide_reply = source == "grievances" and archived_reply(doc)
+    if source == "applications":
+        doc = {**doc, "assessment": published_opinion(doc.get("assessment"), doc.get("requested_amount_krw"))}
+    elif source == "grievances":
+        record = doc.get("record") or {}
+        doc = {**doc, "record": {**record, "assessment": published_opinion(record.get("assessment"))}}
     for path in ALLOWLIST[source]:
+        if hide_reply and path.startswith("reply."):
+            continue
         for text in _walk(doc, path.split(".")):
             if _has_korean(text):
                 found.setdefault(text, None)

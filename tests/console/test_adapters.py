@@ -47,11 +47,11 @@ class FakeDbAny:
 
 def test_list_recent_queries_projection_across_partitions():
     container = FakeContainer([{"id": "app-1"}])
-    assert CosmosApplications(container).list_recent(50) == [{"id": "app-1"}]
+    assert CosmosApplications(container).list_recent(50) == [{"id": "app-1", "recommendation": "none"}]
     kind, query, params, cross = container.calls[0]
     assert (kind, query, cross) == ("query", LIST_QUERY, True)
     assert params == [{"name": "@limit", "value": 50}]
-    assert "ORDER BY c.updated_at DESC" in query and "c.assessment.recommendation AS recommendation" in query
+    assert "ORDER BY c.updated_at DESC" in query and "c.assessment.recommendation" in query
     assert "c.source" in query
     assert "c.assessment " not in query.replace("c.assessment.recommendation", "")
 
@@ -63,11 +63,11 @@ def test_list_recent_excludes_smoke_load_and_fault_runs():
 
 
 def test_list_status_rows_reads_every_application_with_minimal_projection():
-    container = FakeContainer([{"status": "approved", "recommendation": "approve"}])
-    assert CosmosApplications(container).list_status_rows() == [{"status": "approved", "recommendation": "approve"}]
+    container = FakeContainer([{"status": "approved", "opinion": {"recommendation": "approve"}}])
+    assert CosmosApplications(container).list_status_rows() == [{"status": "approved", "recommendation": "legacy"}]
     kind, query, params, cross = container.calls[0]
     assert (kind, query, params, cross) == ("query", STATUS_QUERY, None, True)
-    assert query == "SELECT c.status, c.assessment.recommendation AS recommendation FROM c"
+    assert "c.assessment.schema_version" in query and "c.assessment.review.passed" in query
 
 
 def test_get_reads_by_application_partition_and_maps_missing_to_none():

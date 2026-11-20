@@ -32,7 +32,7 @@ def projected(i, industry, rec, *, age="3년+", arch="healthy"):
                    "usage": [{"model": "gpt-5.4-mini", "input_tokens": 1000, "output_tokens": 100, "calls": 1}]}],
         "timeline": [{"status": "awaiting_officer", "at": (sub + timedelta(minutes=3)).isoformat()}],
         "flags": [], "policy": {"decision": "eligible", "reason_codes": []},
-        "assessment": {"recommendation": rec}, "officer_decision": None,
+        "assessment": {"schema_version": "2", "review": {"passed": True}, "recommendation": rec}, "officer_decision": None,
     }
 
 

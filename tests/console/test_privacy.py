@@ -432,7 +432,25 @@ def test_english_grievance_page_translates_counterfactual_explanation(env):
     client, deps = _translating(env)
     deps.privacy.grievances[("app-2", "grv-abc123")]["record"]["assessment"]["counterfactuals"] = [
         {"metric_id": "M:dscr", "current": 1.1, "target": 1.25, "explanation": "DSCR가 기준을 넘으면 승인 가능"}]
+    assert "DSCR가 기준을 넘으면 승인 가능" not in _pending(_english(client, "/grievances/app-2/grv-abc123"))
+    deps.privacy.grievances[("app-2", "grv-abc123")]["record"]["assessment"].update(
+        schema_version="2", review={"passed": True}, recommendation="refer")
     assert "DSCR가 기준을 넘으면 승인 가능" in _pending(_english(client, "/grievances/app-2/grv-abc123"))
+
+
+def test_archived_counteroffer_reply_is_not_replayed_or_translated(env):
+    from agents.pretranslate import extract
+
+    client, _, privacy = env
+    g = privacy.grievances[("app-2", "grv-done01")]
+    g["record"]["assessment"]["counterfactuals"] = [{"explanation": "311만 원 제안"}]
+    g["reply"]["body"] = "311만 원 감액은 권고하지 않습니다."
+    for path in ("/grievances/app-2/grv-done01", "/borrower/seller-dailylook-01/grievances"):
+        for lang in ("ko", "en"):
+            response = client.get(f"{path}?lang={lang}", headers=OFFICER)
+            assert response.status_code == 200 and "311만 원" not in response.text
+    assert g["reply"]["body"] not in extract("grievances", g)
+    assert g["reply"]["body"] == "311만 원 감액은 권고하지 않습니다."
 
 
 def test_english_grievance_page_with_unreadable_source_sends_nothing(env, caplog):
