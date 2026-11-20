@@ -9,6 +9,7 @@
 
 import logging
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 from pydantic import ValidationError
@@ -19,6 +20,7 @@ from agents.pretranslate import load_case_raw
 from journey.activities import Deps, update_doc
 from journey.models import GrievanceDecision, GrievanceSubmission
 from journey.validation import validate_rereview_decision
+from shared.opinions import opinion_state, published_opinion
 
 log = logging.getLogger("journey.grievance")
 GRIEVANCES_CONTAINER = "grievances"
@@ -30,6 +32,12 @@ RESOLVED = {"uphold": "resolved_upheld", "rereview": "resolved_rereviewed"}
 
 def _snapshot(application: dict[str, Any]) -> dict[str, Any]:
     policy, assessment = application.get("policy"), application.get("assessment")
+    published = published_opinion(assessment, application.get("requested_amount_krw"))
+    if published is not None:
+        visible = {k: published[k] for k in ("schema_version", "recommendation", "review", "summary", "counterfactuals")
+                   if k in published}
+    else:
+        visible = {"schema_version": "1"} if opinion_state(assessment) == "legacy" else None
     return {
         "status": application.get("status"),
         "policy": (
@@ -37,12 +45,8 @@ def _snapshot(application: dict[str, Any]) -> dict[str, Any]:
             if policy
             else None
         ),
-        "assessment": (
-            {k: assessment[k] for k in ("schema_version", "recommendation", "review", "summary", "counterfactuals")
-             if k in assessment}
-            if assessment
-            else None
-        ),
+        "assessment": visible,
+        "assessment_audit": deepcopy(assessment),
         "officer_decision": application.get("officer_decision"),
     }
 

@@ -138,6 +138,22 @@ def test_submission_records_snapshot_and_publishes_without_text(deps):
     assert deps.store.read("applications", "app-1", "app-1") == {**APPLICATION, "_etag": "1"}
 
 
+def test_invalid_v2_not_laundered_by_snapshot_projection(deps):
+    from agents.notices import grievance_facts
+    from agents.pretranslate import extract
+
+    raw = {**APPLICATION["assessment"], "proposed_structure": None, "summary": "감사 전용",
+           "counterfactuals": [{"metric_id": "M:dscr", "current": 1.1, "target": 1.25, "explanation": "감사 전용"}]}
+    deps.store.upsert("applications", {**APPLICATION, "assessment": raw})
+    submit(deps)
+    doc = grievance(deps)
+    record = doc["record"]
+    assert record["assessment"] is None
+    assert record["assessment_audit"] == raw
+    assert not grievance_facts(record, {"outcome": "uphold", "reason": "확인"})["improvements"]
+    assert "감사 전용" not in extract("grievances", doc)
+
+
 def test_duplicate_submission_keeps_first(deps):
     submit(deps)
     assert submit(deps, text="다른 내용") == "duplicate"
