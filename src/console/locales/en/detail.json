@@ -36,7 +36,7 @@
   "순현금흐름": "Net cash flow",
   "정산 대사": "Settlement reconciliation",
   "마켓플레이스 정산 원장과 계좌 입금 비교": "Marketplace settlement ledger vs. bank deposits",
-  "셀러 매출 대부분은 마켓플레이스 정산으로 들어옵니다. 정산은 이미 확정된 미래 현금이자 이 대출의 상환 재원이라, 실제로 이 계좌에 들어오는지·한 채널에 쏠렸는지·얼마나 늦게 들어오는지·떼이는 몫이 느는지를 봅니다.": "Most seller revenue arrives as marketplace settlements. Settlements are confirmed future cash and the source of repayment for this loan, so we check whether they actually reach this account, whether they depend on one channel, how late they arrive, and whether the deducted share is growing.",
+  "정산 예정액은 실제 입금액이 아닙니다. 반품·상계·선정산 양도분을 확인하고 정산 원장과 계좌 입금을 대조하세요. 채널 집중도와 입금 지연도 함께 확인하세요.": "Expected settlements are not bank deposits. Check returns, offsets and amounts assigned to advance providers, then reconcile the settlement ledger with bank deposits. Check channel concentration and payment delays as well.",
   "지표 읽는 법": "How to read these metrics",
   "플랫폼별 정산 비중": "Settlement share by platform",
   "약 %(n)s일": "about %(n)s days",
