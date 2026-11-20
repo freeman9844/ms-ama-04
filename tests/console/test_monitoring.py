@@ -390,6 +390,14 @@ def test_loan_page_shows_ledger_and_case(setup):
     assert "재조정 상담 요청 pending_officer" in card and "차주 연락 없음" not in page
 
 
+def test_partial_payment_page_shows_paid_and_outstanding(setup):
+    doc = make_loan()
+    doc["repayment"]["schedule"][0].update(status="partial", paid_krw=120_000, balance_krw=1_659_000)
+    client, *_ = setup(loan=doc)
+    page = client.get("/loans/app-1", headers=OFFICER).text
+    assert "부분납" in page and "120,000" in page and "1,659,000" in page
+
+
 def test_alert_card_without_followup_says_alert_alone_does_not_contact(setup, mask):
     client, *_ = setup(alerts=[make_alert(mask)])
     page = client.get("/loans/app-1", headers=OFFICER).text

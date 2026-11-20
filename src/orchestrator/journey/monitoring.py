@@ -41,7 +41,7 @@ from journey.activities import (
     raw_container,
     schedule_lifecycle,
 )
-from journey.holds import held_status, pending_holds
+from journey.holds import HOLD_ORDER, held_status, pending_holds
 from journey.models import (
     CONSENT_TTL_DAYS,
     MONITORING_PURPOSE,
@@ -82,7 +82,7 @@ def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, 
         raise RuntimeError(f"사후 흐름 없음: {mon['consent_id']}")
     txns = _TRANSACTIONS.validate_python(flow)
     history = (loan.get("repayment") or {}).get("plan_history") or []
-    return profile, apply_plan(txns, history), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
+    return profile, apply_plan(txns, history, loan_id=loan["id"]), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
 
 
 def _collect_pg_flow(
@@ -317,10 +317,10 @@ def _run_weeks(deps: Deps, loan_id: str, replay_id: str, first_week: int) -> Non
     try:
         for week in range(first_week, WEEKS + 1):
             entry = process_week(deps, loan_id, replay_id, week)
-            case_id = (entry or {}).get("case_id")
-            if case_id:
+            ids = _week_cases(entry or {})
+            for case_id in ids:
                 run_collections(deps, loan_id, case_id)
-            if _after_week(deps, loan_id, replay_id, week, case_id) != "next":
+            if _after_week(deps, loan_id, replay_id, week, ids[0] if ids else None) != "next":
                 break
     except Exception as e:  # noqa: BLE001 - 큐 재시도는 13주를 처음부터 다시 돌린다(LLM 비용). 실패를 기록하고 콘솔에서 다시 시작한다
         log.exception("인라인 재생 실패: %s %s", loan_id, replay_id)
@@ -334,8 +334,17 @@ def _run_weeks(deps: Deps, loan_id: str, replay_id: str, first_week: int) -> Non
 WRITE_ATTEMPTS = 3  # 동시 수정(etag 불일치) 때 다시 읽고 판단하는 횟수
 
 
+def _week_cases(entry: dict[str, Any]) -> list[str]:
+    return entry.get("case_ids") or ([entry["case_id"]] if entry.get("case_id") else [])
+
+
+def _case_holds(loan: dict[str, Any], cases: list[dict[str, Any] | None]) -> list[str]:
+    pending = {h for case in cases or [None] for h in pending_holds(loan, case)}
+    return [h for h in HOLD_ORDER if h in pending]
+
+
 def _after_week(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: str | None) -> str:
-    """주차 처리(미납이면 추심 제안까지) 뒤 "next"|"paused"|"done"을 정한다. 대기 항목이 있으면 멈춘다.
+    """주차 처리 뒤 next/paused/done 또는 다른 회차의 추심 처리를 기다리는 waiting을 정한다.
 
     지난 주차·지난 재생의 중복 메시지는 processed_week가 이미 앞서 있어 "done"이 된다(다음 주차를 두 번 내지 않는다).
     """
@@ -348,11 +357,15 @@ def _after_week(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: st
             return "paused"
         if mon["status"] != "replaying":
             return "done"
-        case = deps.store.read(ALERTS, case_id, loan_id) if case_id else None
-        holds = pending_holds(loan, case)  # type: ignore[arg-type]
+        ids = _week_cases(mon["weeks"][-1]) or ([case_id] if case_id else [])
+        cases = [deps.store.read(ALERTS, cid, loan_id) for cid in ids]
+        if any(c and c.get("status") == "open" for c in cases):
+            return "waiting"  # Other repayment.updated deliveries for this week have not finished.
+        holds = _case_holds(loan, cases)
         if not holds:
             return "next"
-        mon.update(status=held_status(holds), paused_week=week, pause_case_id=case_id, holds=holds)
+        mon.update(status=held_status(holds), paused_week=week, pause_case_id=ids[0] if ids else None,
+                   pause_case_ids=ids if len(ids) > 1 else [], holds=holds)
         loan["updated_at"] = deps.clock().isoformat()  # type: ignore[index]
         if deps.store.replace(LOANS, loan, loan.get("_etag")):  # type: ignore[union-attr]
             # 대기 항목을 읽은 뒤 멈춤을 쓰기 전에 결정이 끝났으면 결정 쪽은 멈춤을 못 봤다. 여기서 다시 계산한다.
@@ -374,11 +387,8 @@ def _refresh_hold(deps: Deps, loan_id: str) -> None:
             return
         # pause_alert_id: 미납 추심 배포 전에 멈춘 대출 문서의 키
         case_id = mon.get("pause_case_id") or mon.get("pause_alert_id")
-        case = deps.store.read(ALERTS, case_id, loan_id) if case_id else None
-        if case_id and case is None:
-            # 추심 건 항목은 알 수 없지만 대출 단위 항목(고객 응답·플랜 변경)은 계속 본다.
-            log.warning("멈춤 사유 문서가 없어 대출 단위 대기 항목만 봄: %s %s", loan_id, case_id)
-        holds = pending_holds(loan, case)  # type: ignore[arg-type]
+        ids = mon.get("pause_case_ids") or ([case_id] if case_id else [])
+        holds = _case_holds(loan, [deps.store.read(ALERTS, cid, loan_id) for cid in ids])
         status = held_status(holds)
         if status == mon["status"] and holds == mon.get("holds"):
             return
@@ -622,6 +632,24 @@ def _due_reminders(
     return early, regular
 
 
+def _adjust_case(deps: Deps, loan_id: str, case_id: str, balance: int) -> bool:
+    """Keep decided history. Retire an unsent quote before exposing a new balance."""
+    for _ in range(WRITE_ATTEMPTS):
+        doc = deps.store.read(ALERTS, case_id, loan_id)
+        if doc is None:
+            raise RuntimeError(f"추심 건 없음: {case_id}")
+        proposal = doc.get("proposal")
+        unsent = doc["status"] in ("open", "proposal_pending", "superseded", "paid")
+        doc["balance_krw"] = balance
+        if unsent:
+            doc["status"] = "superseded" if balance else "paid"
+            if proposal:
+                proposal["status"] = doc["status"]
+        if deps.store.replace(ALERTS, doc, doc.get("_etag")):
+            return unsent and balance > 0
+    raise RuntimeError(f"추심 잔액 기록 충돌: {case_id}")
+
+
 def _repayment_week(
     deps: Deps,
     loan_id: str,
@@ -639,7 +667,8 @@ def _repayment_week(
         return
     stage1 = (loan["monitoring"].get("escalation") or {}).get("stage1")
     early_from = date.fromisoformat(stage1["on"]) if isinstance(stage1, dict) else None
-    ev = week_events(led["schedule"], visible, lo, hi, early_from=early_from)
+    ev = week_events(led["schedule"], visible, lo, hi, early_from=early_from,
+                     installment_krw=led["installment_krw"], loan_id=loan_id)
     by_key = {item_key(s): s for s in led["schedule"]}
     early, regular = _due_reminders(led["schedule"], ev, lo, early_from)
     if early or regular:
@@ -665,12 +694,30 @@ def _repayment_week(
                 contacts["contacts"].append(sent)
             item.update(reminded_on=sent["on"], reminder_status=sent["status"])
         deps.store.upsert(ALERTS, contacts)  # 대출 문서보다 먼저: 재시도 때 같은 ref면 다시 보내지 않는다
-    for key, txn_id in ev.paid:
-        by_key[key].update(status="paid", txn_id=txn_id)
+    open_cases = list(ev.missed)
+    for key, allocations in ev.allocations.items():
+        item = by_key[key]
+        item.setdefault("allocations", []).extend(allocations)
+        paid = item.get("paid_krw", 0) + sum(a["amount_krw"] for a in allocations)
+        balance = item_amount(item, led["installment_krw"]) - paid
+        item.update(paid_krw=paid, balance_krw=balance, status="partial" if balance else "paid",
+                    txn_id=allocations[-1]["txn_id"])
+        if item.get("case_id") and _adjust_case(deps, loan_id, item["case_id"], balance):
+            open_cases.append(key)
     mon = loan["monitoring"]
-    for key in ev.missed:  # 30일 주기라 한 주에 최대 하나
+    for key in open_cases:
         item, case_id = by_key[key], f"rc-{replay_id}-{key}"
-        item.update(status="missed", case_id=case_id)
+        if item.get("case_id"):
+            # A different ID binds officer decisions (including queued retries) to this quote.
+            case_id += f"-b{item['balance_krw']}"
+        if item["status"] == "scheduled":
+            item.update(status="missed", paid_krw=0, balance_krw=item_amount(item, led["installment_krw"]))
+        item["case_id"] = case_id
+        mon.setdefault("case_ids", []).append(case_id)
+        entry.setdefault("case_ids", []).append(case_id)
+        entry["case_id"] = entry["case_ids"][0]
+        if deps.store.read(ALERTS, case_id, loan_id):
+            continue  # Case was already saved before a failed week commit.
         recent = None
         if mon["alert_ids"]:
             a = deps.store.read(ALERTS, mon["alert_ids"][-1], loan_id)
@@ -698,8 +745,9 @@ def _repayment_week(
                 "week": week,
                 "as_of": item["due_on"],
                 "installment": {"no": item["no"], "due_on": item["due_on"],
-                                "amount_krw": item_amount(item, led["installment_krw"])},
-                "missed_count": sum(s["status"] == "missed" for s in led["schedule"]),
+                                "amount_krw": item["balance_krw"]},
+                "balance_krw": item["balance_krw"],
+                "missed_count": sum(s["status"] in ("partial", "missed") for s in led["schedule"]),
                 "recent_alert": recent,
                 "status": "open",
                 "created_at": deps.clock().isoformat(),
@@ -709,8 +757,6 @@ def _repayment_week(
                 "event_error": None,
             },
         )
-        mon.setdefault("case_ids", []).append(case_id)
-        entry["case_id"] = case_id
     # 주차 기록은 회차 번호로 남긴다(옛 주차 기록과 같은 형태).
     entry["repayment"] = {
         "reminders": [by_key[k]["no"] for k in ev.reminders],
@@ -735,7 +781,8 @@ def _publish_case(deps: Deps, loan_id: str, case_id: str) -> bool:
         return False
     if case.get("collections") is not None or case.get("event_published"):
         return True
-    message = RepaymentUpdated(type=TOPIC_REPAYMENT, loan_id=loan_id, case_id=case_id).model_dump(mode="json")
+    message = RepaymentUpdated(type=TOPIC_REPAYMENT, loan_id=loan_id, case_id=case_id,
+                               balance_krw=case.get("balance_krw", case["installment"]["amount_krw"])).model_dump(mode="json")
     try:
         deps.events.publish(TOPIC_REPAYMENT, message, f"{TOPIC_REPAYMENT}:{case_id}", session_id=loan_id)  # type: ignore[union-attr]
     except Exception as e:  # noqa: BLE001 - 추심 건은 남고 발행 실패를 기록한다. 주차 핸들러가 직접 잇는다
@@ -766,12 +813,11 @@ def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:
     last = entry or _week_entry(deps, msg.loan_id, msg.replay_id, msg.week)
     if last is None:
         return entry
-    case_id = last.get("case_id")
-    if case_id and _publish_case(deps, msg.loan_id, case_id):
-        return entry  # repayment.updated → run_collections 뒤 handle_repayment_updated가 잇는다
-    if case_id:
-        run_collections(deps, msg.loan_id, case_id)  # 발행 실패: 여기서 추심을 돌리고 잇는다
-    _continue(deps, msg.loan_id, msg.replay_id, msg.week, case_id)
+    ids = _week_cases(last)
+    for case_id in ids:
+        if not _publish_case(deps, msg.loan_id, case_id):
+            run_collections(deps, msg.loan_id, case_id)
+    _continue(deps, msg.loan_id, msg.replay_id, msg.week, ids[0] if ids else None)
     return entry
 
 
@@ -793,6 +839,8 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
     loan = deps.store.read(LOANS, loan_id, loan_id)
     if doc is None or loan is None or doc.get("kind") != "repayment_case" or doc.get("collections") is not None:
         return None
+    if doc.get("status") in ("paid", "superseded"):
+        return None
     contacts = _contacts_doc(deps, loan_id, doc["replay_id"])["contacts"]
     _, _, mask = _mask_and_flow(deps, loan)
     case, now = RepaymentCase.from_doc(doc), deps.clock()
@@ -810,7 +858,8 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
     }
     doc["status"] = "proposal_pending"
     # 재시도 때 collections가 있으면 다시 제안하지 않는다(에이전트를 두 번 부르지 않는다).
-    deps.store.upsert(ALERTS, doc)
+    if not deps.store.replace(ALERTS, doc, doc.get("_etag")):
+        raise RuntimeError(f"추심 제안 기록 충돌: {case_id}")
     return doc["collections"]
 
 
@@ -1017,6 +1066,14 @@ def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
             if proposal.get("contact") is not None:
                 _append_contact(deps, msg.loan_id, doc["replay_id"], proposal["contact"])  # type: ignore[index]
             _refresh_hold(deps, msg.loan_id)
+            return False
+        loan = deps.store.read(LOANS, msg.loan_id, msg.loan_id) or {}
+        ledger = loan.get("repayment") or {}
+        item = next((s for s in ledger.get("schedule", ()) if s.get("case_id") == msg.case_id), None)
+        if not item or (loan.get("monitoring") or {}).get("replay_id") != doc["replay_id"]:
+            return False
+        balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
+        if item["status"] == "paid" or not balance or balance != proposal["evidence"]["amount_krw"]:
             return False
         settled = settle_proposal(
             doc["proposal"],  # type: ignore[index]

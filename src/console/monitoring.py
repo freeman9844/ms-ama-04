@@ -45,7 +45,7 @@ TRIGGER_LABELS = {
     "cost_surge": "공제 증가",
     "due_shortfall": "상환일 잔고 부족",
 }
-REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "missed": "미납"}
+REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "partial": "부분납", "missed": "미납"}
 # 재생을 멈춘 대기 항목(2026-11-11). 이 순서대로 멈춤 배너에 보인다(journey.holds.HOLD_ORDER와 같은 순서).
 HOLD_LABELS = {
     "collections_proposal": "추심 승인 대기",
@@ -70,6 +70,8 @@ SCRIPT_LABELS = {k: v["purpose"] for k, v in SCRIPTS.items()} | {
 CONTACT_STATUS_LABELS = {"sent": "발송", "deferred": "보류", "skipped": "건너뜀"}
 CONTACT_REASON_LABELS = {"contact_hours": "연락 시간 밖", "weekly_limit": "7일 7회 초과", "no_options": "고를 옵션 없음"}
 PROPOSAL_LABELS = {
+    "paid": "완납으로 종료",
+    "superseded": "잔액 변경으로 종료",
     "pending_officer": "심사역 승인 대기",
     "approved": "승인",
     "modified": "수정 후 승인",

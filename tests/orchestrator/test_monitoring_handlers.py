@@ -1073,6 +1073,68 @@ def test_approve_sends_exact_text_and_awaits_resume(mock_app):
     assert (mon["status"], mon["holds"]) == ("awaiting_resume", [])
 
 
+@pytest.mark.parametrize("balance", [0, 17])
+def test_next_week_payment_invalidates_prior_unsent_proposal(mock_app, balance):
+    deps, rid, original = missed_without_agents(mock_app)
+    doc = loan(deps)
+    mon, led = doc["monitoring"], doc["repayment"]
+    # Older/imported replay with an outstanding proposal from a previous week.
+    mon.update(status="replaying", holds=[])
+    deps.store.upsert(LOANS, doc)
+    container = f"consent-{mon['consent_id']}"
+    flow = deps.raw.get_json(container, "flow.json")
+    flow.append({**flow[-1], "txn_id": "late", "booked_on": "2026-12-09", "description": LENDER_DEBIT,
+                 "txn_type_code": "AUTO_DEBIT", "amount_krw": balance - led["installment_krw"]})
+    deps.raw.put_json(container, "flow.json", flow)
+    entry = process_week(deps, LOAN, rid, 6)
+    row = loan(deps)["repayment"]["schedule"][0]
+    assert row["balance_krw"] == balance and row["paid_krw"] == led["installment_krw"] - balance
+    assert not decide_collections(deps, original["id"]) and not officer_contacts(deps, rid)
+    assert deps.store.read(ALERTS, original["id"], LOAN)["proposal"]["status"] != "pending_officer"
+    if balance:
+        assert row["status"] == "partial" and entry["case_ids"] == [row["case_id"]]
+        monitoring_module.run_collections(deps, LOAN, row["case_id"])
+        case = deps.store.read(ALERTS, row["case_id"], LOAN)
+        assert case["proposal"]["evidence"]["amount_krw"] == 17
+    else:
+        assert row["status"] == "paid" and row["case_id"] == original["id"]
+
+
+def test_all_same_week_cases_publish_and_block_resume_until_both_decided(mock_app):
+    outbox = Outbox()
+    deps = missing_first_due(make_deps(mock_app, events=outbox))
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    doc = loan(deps)
+    doc["repayment"]["schedule"][1]["due_on"] = str(FIRST_DUE)
+    doc["repayment"]["installment_krw"] = 500_000
+    container = f"consent-{doc['monitoring']['consent_id']}"
+    flow = deps.raw.get_json(container, "flow.json")
+    flow.append({**flow[-1], "txn_id": "one-won", "booked_on": str(FIRST_DUE), "loan_id": LOAN,
+                 "description": LENDER_DEBIT, "txn_type_code": "AUTO_DEBIT", "amount_krw": -1})
+    deps.raw.put_json(container, "flow.json", flow)
+    deps.store.upsert(LOANS, doc)
+    pump(deps, outbox)
+    ids = [json.loads(body)["case_id"] for body in outbox.bodies(TOPIC_REPAYMENT)]
+    assert ids == [f"rc-{rid}-i1", f"rc-{rid}-i2"]
+    assert [json.loads(body)["balance_krw"] for body in outbox.bodies(TOPIC_REPAYMENT)] == [499_999, 500_000]
+    assert loan(deps)["monitoring"]["weeks"][-1]["case_ids"] == ids
+    assert decide_collections(deps, ids[0])
+    assert loan(deps)["monitoring"]["status"] == "paused"
+    assert decide_collections(deps, ids[1])
+    assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+@pytest.mark.parametrize("balance", [0, 7])
+def test_approval_rechecks_ledger_if_pending_quote_lags_payment(mock_app, balance):
+    deps, rid, case = missed_without_agents(mock_app)
+    doc = loan(deps)
+    doc["repayment"]["schedule"][0].update(status="partial" if balance else "paid", balance_krw=balance)
+    deps.store.upsert(LOANS, doc)
+    assert not decide_collections(deps, case["id"])
+    assert not officer_contacts(deps, rid)
+
+
 def test_duplicate_collections_decision_sends_once(mock_app):
     deps, replay_id, case = missed_without_agents(mock_app)
     assert decide_collections(deps, case["case_id"]) is True

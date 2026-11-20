@@ -202,7 +202,7 @@
   <thead><tr><th>{{ _("플랫폼") }}</th><th>{{ _("입점일") }}</th><th>{{ _("평점") }}</th><th>{{ _("리뷰 수") }}</th><th>{{ _("90일 주문일") }}</th><th>{{ _("반품률") }}</th><th>{{ _("취소율") }}</th><th>{{ _("등급") }}</th><th>{{ _("정산 예정금") }}</th><th>{{ _("선정산 양도") }}</th></tr></thead>
   <tbody>{% for r in mk.platforms %}<tr><td>{{ r.platform }}</td><td>{{ r.opened_on }}</td><td>{{ r.rating }}</td><td>{{ r.review_count }}</td><td>{{ r.orders_90d }}</td><td>{{ r.return_rate }}</td><td>{{ r.cancel_rate }}</td><td>{{ r.grade }}</td><td>{{ r.pending|krw }}</td><td>{{ r.assigned|krw }}</td></tr>{% endfor %}</tbody>
 </table>
-<p>{{ _("정산 예정금 합 %(total)s − 선정산 양도 %(assigned)s = 담보 가능 %(net)s", total=mk.pending.total|krw, assigned=mk.pending.assigned|krw, net=mk.pending.net|krw) }}</p>
+<p>{{ _("정산 예정금 합 %(total)s − 선정산 양도 %(assigned)s = 순정산 예정금 %(net)s. 예정액은 실제 계좌 입금액이 아닙니다. 입금 여부는 정산 원장과 계좌 거래를 대조해 확인합니다.", total=mk.pending.total|krw, assigned=mk.pending.assigned|krw, net=mk.pending.net|krw) }}</p>
 <h4>{{ _("제재 이력") }}</h4>
 {% if mk.penalties %}
 <ul>{% for x in mk.penalties %}<li>{{ x.occurred_on }} · {{ x.platform }} · {{ x.kind }}</li>{% endfor %}</ul>

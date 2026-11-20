@@ -179,6 +179,7 @@ class RepaymentUpdated(BaseModel):
     type: Literal["repayment.updated"]
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
     case_id: str = Field(min_length=1, max_length=128)
+    balance_krw: int | None = Field(default=None, ge=0)
 
 
 class RestructureDecision(BaseModel):

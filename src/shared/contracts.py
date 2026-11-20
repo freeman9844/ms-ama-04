@@ -4,7 +4,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 SchemaV1 = Literal["1"]
 NonNegFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -59,11 +59,19 @@ class Transaction(Contract):
 
     schema_version: SchemaV1 = "1"
     txn_id: str = Field(min_length=1)
+    loan_id: str | None = None  # Legacy synthetic post-loan feeds are already loan-scoped.
     booked_on: date
     amount_krw: int
     balance_after_krw: int
     description: str
     txn_type_code: TxnTypeCode
+
+    @model_serializer(mode="wrap")
+    def _omit_unattributed_loan(self, serialize):
+        data = serialize(self)
+        if self.loan_id is None:
+            data.pop("loan_id", None)  # Preserve the wire format of existing account histories.
+        return data
 
     @model_validator(mode="after")
     def _nonzero(self) -> "Transaction":

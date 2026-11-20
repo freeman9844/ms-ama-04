@@ -1,4 +1,5 @@
 from datetime import date
+from functools import partial
 
 from agents.repayment import (
     EARLY_REMINDER_DAYS,
@@ -8,12 +9,13 @@ from agents.repayment import (
     item_amount,
     item_key,
     reminder_on,
-    week_events,
+    week_events as repayment_events,
 )
 from shared.contracts import Transaction
 from shared.repayment import LENDER_DEBIT
 
 START = date(2026, 11, 2)
+week_events = partial(repayment_events, installment_krw=287_000, loan_id="loan-a")
 
 
 def _debit(on, desc=LENDER_DEBIT, amount=-287_000, txn_id="t1"):
@@ -45,7 +47,7 @@ def test_week_events_reminder_paid_missed():
     sched = build_schedule(START, 91, 287_000)["schedule"]
     assert week_events(sched, [], date(2026, 11, 23), date(2026, 11, 29)) == RepaymentWeek(("i1",), (), ())
     paid = week_events(sched, [_debit(date(2026, 12, 2))], date(2026, 11, 30), date(2026, 12, 6))
-    assert paid == RepaymentWeek((), (("i1", "t1"),), ())
+    assert (paid.paid, paid.missed) == ((("i1", "t1"),), ())
     others = [_debit(date(2026, 12, 1)), _debit(date(2026, 12, 2), desc="다른 상환"),
               _debit(date(2026, 12, 2), amount=287_000)]
     assert week_events(sched, others, date(2026, 11, 30), date(2026, 12, 6)) == RepaymentWeek((), (), ("i1",))
@@ -65,7 +67,7 @@ def test_week_events_returns_item_keys_for_split_parts():
          "amount_krw": 585_001},
     ]
     got = week_events(sched, [_debit(date(2026, 12, 2), amount=-585_000)], date(2026, 11, 30), date(2026, 12, 6))
-    assert got == RepaymentWeek((), (("i2p1", "t1"),), ("i2p2",))
+    assert (got.paid, got.missed) == ((("i2p1", "t1"),), ("i2p2",))
 
 
 def test_week_events_same_day_items_need_separate_debits():
@@ -74,7 +76,34 @@ def test_week_events_same_day_items_need_separate_debits():
         {"no": 3, "due_on": "2026-12-02", "status": "scheduled", "reminded_on": "x"},
     ]
     got = week_events(sched, [_debit(date(2026, 12, 2))], date(2026, 11, 30), date(2026, 12, 6))
-    assert got == RepaymentWeek((), (("i2p1", "t1"),), ("i3",))
+    assert (got.paid, got.missed) == ((("i2p1", "t1"),), ("i3",))
+
+
+def test_one_won_of_500k_is_partial_and_only_confirmed_loan_debits_count():
+    due = date(2026, 12, 2)
+    row = {"no": 1, "due_on": str(due), "status": "scheduled"}
+    wrong_loan = _debit(due, txn_id="other").model_copy(update={"loan_id": "loan-b"})
+    debit = _debit(due, amount=-1)
+    ev = week_events([row], [wrong_loan, debit, debit], due, due, installment_krw=500_000)
+    assert ev.paid == () and ev.missed == ("i1",)
+    assert ev.allocations == {"i1": [{"txn_id": "t1", "booked_on": str(due), "amount_krw": 1}]}
+
+
+def test_late_multiple_debits_clear_oldest_first_and_never_prepay():
+    day = date(2026, 12, 10)
+    legacy = {"no": 1, "due_on": "2026-11-01", "status": "paid", "txn_id": "legacy"}
+    oldest = {"no": 2, "due_on": "2026-12-01", "status": "partial", "paid_krw": 1,
+              "allocations": [{"txn_id": "first", "booked_on": "2026-12-01", "amount_krw": 1}]}
+    second = {"no": 3, "due_on": str(day), "status": "scheduled"}
+    future = {"no": 4, "due_on": "2026-12-11", "status": "scheduled"}
+    earlier = _debit(date(2026, 12, 9), amount=-250_000, txn_id="z")
+    later = _debit(day, amount=-800_000, txn_id="a")
+    replayed_on = date(2026, 12, 8)
+    txns = [later, earlier, earlier, _debit(replayed_on, txn_id="legacy"), _debit(replayed_on, txn_id="first")]
+    ev = week_events([future, second, oldest, legacy], txns, date(2026, 12, 7), day, installment_krw=500_000)
+    assert ev.paid == (("i2", "a"), ("i3", "a"))
+    assert {k: [(a["txn_id"], a["amount_krw"]) for a in v] for k, v in ev.allocations.items()} == {
+        "i2": [("z", 250_000), ("a", 249_999)], "i3": [("a", 500_000)]}
 
 
 def test_early_reminders_only_after_stage_one():

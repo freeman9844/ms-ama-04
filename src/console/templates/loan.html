@@ -54,7 +54,9 @@
 <blockquote>{{ p.text|mt_ref }}</blockquote>
 </div>
 </div>
-{% if p.status != "pending_officer" %}
+{% if p.status in ("paid", "superseded") %}
+<p>{{ p.status|proposal_label }}</p>
+{% elif p.status != "pending_officer" %}
 <h4>{{ _("심사역 결정") }}</h4>
 <p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason|mt }}{% endif %}</p>
 {% if p.contact %}<p>{{ _("발송 결과") }}: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
@@ -170,7 +172,7 @@
   <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
   <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
-  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% if w.case_id %} · <a href="#{{ w.case_id }}">{{ _("미납") }}</a>{% endif %}</td>
+  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% for cid in w.case_ids or ([w.case_id] if w.case_id else []) %} · <a href="#{{ cid }}">{{ _("미납") }}</a>{% endfor %}</td>
 </tr>
 {% endfor %}
   </tbody>
@@ -195,17 +197,20 @@
 {% if l.repayment %}
 <section class="card">
 <h2>{{ _("상환 원장") }}</h2>
-<p class="note">{{ _("상환일 당일 <code>에이엠에이렌딩 대출상환</code> 출금이 있으면 납부로 봅니다. 안내는 상환일 3일 전에 자동 발송하고, 높음 경보로 잔고 부족 예상 알림이 나간 뒤에는 5일 전에도 추가 안내를 보냅니다. 자동 안내는 시뮬레이션 날짜 10시 기준으로 공정 추심 규칙(연락 시간·7일 7회)을 검사하고, 걸리면 보류합니다. 미납이면 추심 건이 생겨 추심 에이전트가 연락 문구를 제안하고, 심사역 승인을 받아야 보냅니다.") }}</p>
+<p class="note">{{ _("확인된 대출상환 출금은 출금일에 이미 도래한 회차 중 가장 오래된 잔액부터 갚습니다. 초과분은 미래 회차에 쓰지 않습니다. 추심 제안은 남은 잔액을 기준으로 하며 심사역 승인 뒤에만 발송합니다.") }}</p>
+<p class="note">{{ _("상환일 3일 전에 자동 안내하고, 잔고 부족 예상 알림 뒤에는 5일 전에도 안내합니다. 자동 안내는 시뮬레이션 날짜 10시 기준으로 연락 시간과 7일 7회 한도를 검사하고, 걸리면 보류합니다.") }}</p>
 <table>
-  <thead><tr><th>{{ _("회차") }}</th><th>{{ _("상환일") }}</th><th>{{ _("금액") }}</th><th>{{ _("상태") }}</th><th>{{ _("5일 전 안내") }}</th><th>{{ _("안내일") }}</th><th>{{ _("출금 거래") }}</th><th>{{ _("추심 건") }}</th></tr></thead>
+  <thead><tr><th>{{ _("회차") }}</th><th>{{ _("상환일") }}</th><th>{{ _("금액") }}</th><th>{{ _("납부액") }}</th><th>{{ _("상환 잔액") }}</th><th>{{ _("상태") }}</th><th>{{ _("5일 전 안내") }}</th><th>{{ _("안내일") }}</th><th>{{ _("출금 거래") }}</th><th>{{ _("추심 건") }}</th></tr></thead>
   <tbody>
 {% for s in l.repayment.schedule %}
 <tr>
   <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>({{ _("원래 %(date)s", date=s.from_due_on) }})</small>{% endif %}</td><td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
+  {% set amount = s.amount_krw or l.repayment.installment_krw %}{% set paid = s.paid_krw|default(amount if s.status == "paid" else 0) %}
+  <td>{{ paid|krw }}</td><td>{{ s.balance_krw|default(amount - paid)|krw }}</td>
   <td class="r-{{ s.status }}">{{ s.status|repayment_label }}</td>
   <td>{{ s.early_reminded_on or "-" }}{% if s.early_reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
   <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
-  <td>{{ s.txn_id or "-" }}</td>
+  <td>{{ s.allocations|map(attribute="txn_id")|join(", ") if s.allocations else s.txn_id or "-" }}</td>
   <td>{% if s.case_id %}<a href="#{{ s.case_id }}">{{ s.case_id }}</a>{% else %}-{% endif %}</td>
 </tr>
 {% endfor %}
@@ -348,7 +353,7 @@
 
 {% for c in v.cases %}{% set inst = c.installment %}
 <section id="{{ c.case_id }}" class="card alert-card">
-<h2>{{ _("%(no)s회차 미납", no=inst.no) }} · {{ inst.due_on }} · {{ inst.amount_krw|krw }} <small>{{ _("누적 미납 %(n)s회", n=c.missed_count) }} · {{ c.status }}</small></h2>
+<h2>{{ _("%(no)s회차 미납", no=inst.no) }} · {{ inst.due_on }} · {{ _("상환 잔액") }} {{ c.balance_krw|default(inst.amount_krw)|krw }} <small>{{ _("누적 미납 %(n)s회", n=c.missed_count) }} · {{ c.status }}</small></h2>
 {% if ui.case_steps[c.case_id] %}{{ ch.stepper(ui.case_steps[c.case_id], _("미납 추심 단계"), compact=true) }}{% endif %}
 {% if c.recent_alert %}<p>{{ _("최근 경보") }}: <a href="#{{ c.recent_alert.alert_id }}">{{ _("%(n)s주차", n=c.recent_alert.week) }} {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary|mt }}</p>
 {% else %}<p class="note">{{ _("이번 재생에 앞선 경보 없음.") }}</p>{% endif %}

@@ -126,6 +126,13 @@ def test_apply_plan_misses_when_balance_is_short():
     assert out[-1].balance_after_krw == 2_300_000
 
 
+def test_plan_move_does_not_remove_other_loans_debit():
+    foreign = TXNS[1].model_copy(update={"loan_id": "loan-b", "txn_id": "foreign"})
+    out = apply_plan([*TXNS[:2], foreign, *TXNS[2:]], [_move()], loan_id="loan-a")
+    assert [t.txn_id for t in out] == ["t0", "foreign", "t2", "t3", "c1-i2", "t4"]
+    assert next(t for t in out if t.txn_id == "c1-i2").loan_id == "loan-a"
+
+
 def test_apply_plan_applies_changes_in_order():
     split = {"change_id": "c2", "applied_from": "2026-12-03",
              "before": [{"key": "i2", "due_on": "2026-12-07", "amount_krw": 1_000_000}],

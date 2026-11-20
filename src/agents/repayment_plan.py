@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from agents.ledger_monitor import LedgerBaseline
-from agents.repayment import item_amount, item_key
+from agents.repayment import item_amount, item_key, repayment_debit
 from shared.contracts import PgFlow, Transaction
 from shared.krcalendar import add_business_days, next_business_day, previous_business_day
 from shared.repayment import LENDER_DEBIT
@@ -118,11 +118,7 @@ def apply_change(schedule: Sequence[Mapping[str, Any]], change: Mapping[str, Any
     return sorted(out, key=lambda s: (s["due_on"], s["no"], s.get("part") or 0))
 
 
-def _is_debit(t: Transaction) -> bool:
-    return t.description == LENDER_DEBIT and t.amount_krw < 0
-
-
-def _apply_one(txns: list[Transaction], change: Mapping[str, Any]) -> list[Transaction]:
+def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str | None) -> list[Transaction]:
     start = date.fromisoformat(change["applied_from"])
     head = [t for t in txns if t.booked_on < start]
     tail = [t for t in txns if t.booked_on >= start]
@@ -133,11 +129,10 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any]) -> list[Trans
     else:
         balance = 0
     before_days = {date.fromisoformat(b["due_on"]) for b in change.get("before") or ()}
-    removed = [t for t in tail if t.booked_on in before_days and _is_debit(t)]
-    removed_ids = {t.txn_id for t in removed}
-    kept = [t for t in tail if t.txn_id not in removed_ids]
+    removed = [t for t in tail if t.booked_on in before_days and repayment_debit(t, loan_id)]
+    kept = [t for t in tail if not (t.booked_on in before_days and repayment_debit(t, loan_id))]
     code = next((t.txn_type_code for t in removed), None) or next(
-        (t.txn_type_code for t in txns if _is_debit(t)), _DEFAULT_DEBIT_CODE
+        (t.txn_type_code for t in txns if repayment_debit(t, loan_id)), _DEFAULT_DEBIT_CODE
     )
     by_day: dict[date, list[Transaction]] = {}
     for t in kept:
@@ -158,13 +153,15 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any]) -> list[Trans
                 continue
             balance -= amount
             out.append(Transaction(txn_id=f"{change['change_id']}-{a['key']}", booked_on=day, amount_krw=-amount,
-                                   balance_after_krw=balance, description=LENDER_DEBIT, txn_type_code=code))
+                                   balance_after_krw=balance, description=LENDER_DEBIT, txn_type_code=code,
+                                   loan_id=loan_id))
     return out
 
 
-def apply_plan(txns: Sequence[Transaction], history: Sequence[Mapping[str, Any]]) -> list[Transaction]:
+def apply_plan(txns: Sequence[Transaction], history: Sequence[Mapping[str, Any]], *,
+               loan_id: str | None = None) -> list[Transaction]:
     """승인된 일정 변경을 차례로 흐름에 덧씌운다. history가 비면 원래 거래 그대로."""
     out = list(txns)
     for change in history:
-        out = _apply_one(out, change)
+        out = _apply_one(out, change, loan_id)
     return out

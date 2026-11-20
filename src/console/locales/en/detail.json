@@ -316,7 +316,7 @@
   "%(rule)s 대체됨(%(code)s)": "%(rule)s substituted (%(code)s)",
   "조건 충족, %(rule)s로 미적용": "Conditions met, not applied due to %(rule)s",
   "조건 미충족": "Conditions not met",
-  "정산 예정금 합 %(total)s − 선정산 양도 %(assigned)s = 담보 가능 %(net)s": "Pending settlements %(total)s − assigned to advance %(assigned)s = available %(net)s",
+  "정산 예정금 합 %(total)s − 선정산 양도 %(assigned)s = 순정산 예정금 %(net)s. 예정액은 실제 계좌 입금액이 아닙니다. 입금 여부는 정산 원장과 계좌 거래를 대조해 확인합니다.": "Expected settlements %(total)s − assigned advances %(assigned)s = net expected settlements %(net)s. An expected settlement is not a bank deposit. Compare the settlement ledger with account transactions to confirm receipt.",
   "제재 이력": "Penalty history",
   "제재 이력이 없습니다.": "No penalties."
 }
