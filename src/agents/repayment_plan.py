@@ -128,9 +128,11 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str 
         balance = txns[0].balance_after_krw - txns[0].amount_krw
     else:
         balance = 0
-    before_days = {date.fromisoformat(b["due_on"]) for b in change.get("before") or ()}
-    removed = [t for t in tail if t.booked_on in before_days and repayment_debit(t, loan_id)]
-    kept = [t for t in tail if not (t.booked_on in before_days and repayment_debit(t, loan_id))]
+    replaced = {(b["key"], date.fromisoformat(b["due_on"])) for b in change.get("before") or ()}
+    removed, kept = [], []
+    for t in tail:
+        target = (t.scheduled_item_key, t.booked_on) in replaced and repayment_debit(t, loan_id)
+        (removed if target else kept).append(t)
     code = next((t.txn_type_code for t in removed), None) or next(
         (t.txn_type_code for t in txns if repayment_debit(t, loan_id)), _DEFAULT_DEBIT_CODE
     )
@@ -154,7 +156,7 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str 
             balance -= amount
             out.append(Transaction(txn_id=f"{change['change_id']}-{a['key']}", booked_on=day, amount_krw=-amount,
                                    balance_after_krw=balance, description=LENDER_DEBIT, txn_type_code=code,
-                                   loan_id=loan_id))
+                                   loan_id=loan_id, scheduled_item_key=a["key"]))
     return out
 
 

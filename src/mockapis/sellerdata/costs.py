@@ -24,6 +24,7 @@ class Event:
     description: str
     code: TxnTypeCode
     category: TxnCategory
+    scheduled_item_key: str | None = None
 
 
 @dataclass(frozen=True)

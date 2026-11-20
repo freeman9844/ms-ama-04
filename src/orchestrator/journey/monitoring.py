@@ -23,7 +23,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from agents.collections import CollectionsContext, RepaymentCase, act, build_proposal, remind, settle_proposal
+from agents.collections import CollectionsContext, RepaymentCase, act, build_proposal, fair_check, remind, settle_proposal
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
 from agents.escalation import TEMPLATES, auto_contact, next_stage, plan_link, sim_now, stage_message
@@ -632,6 +632,10 @@ def _due_reminders(
     return early, regular
 
 
+def _recorded(contacts: list[dict[str, Any]], contact: dict[str, Any]) -> bool:
+    return any(c.get("ref") == contact["ref"] and c.get("by") == contact["by"] for c in contacts)
+
+
 def _adjust_case(deps: Deps, loan_id: str, case_id: str, balance: int) -> bool:
     """Keep decided history. Retire an unsent quote before exposing a new balance."""
     for _ in range(WRITE_ATTEMPTS):
@@ -639,12 +643,18 @@ def _adjust_case(deps: Deps, loan_id: str, case_id: str, balance: int) -> bool:
         if doc is None:
             raise RuntimeError(f"추심 건 없음: {case_id}")
         proposal = doc.get("proposal")
-        unsent = doc["status"] in ("open", "proposal_pending", "superseded", "paid")
+        if contact := (proposal or {}).get("contact"):
+            if not _recorded(_contacts_doc(deps, loan_id, doc["replay_id"])["contacts"], contact):
+                proposal.update(contact=None, delivery_blocked="stale_quote")
+        unsent = (doc["status"] in ("open", "proposal_pending", "superseded", "paid")
+                  or bool((proposal or {}).get("delivery_blocked")))
         doc["balance_krw"] = balance
         if unsent:
-            doc["status"] = "superseded" if balance else "paid"
-            if proposal:
-                proposal["status"] = doc["status"]
+            status = "superseded" if balance else "paid"
+            if doc["status"] != "restructure_pending":
+                doc["status"] = status
+            if proposal and proposal["status"] in ("pending_officer", "superseded", "paid"):
+                proposal["status"] = status
         if deps.store.replace(ALERTS, doc, doc.get("_etag")):
             return unsent and balance > 0
     raise RuntimeError(f"추심 잔액 기록 충돌: {case_id}")
@@ -705,8 +715,14 @@ def _repayment_week(
         if item.get("case_id") and _adjust_case(deps, loan_id, item["case_id"], balance):
             open_cases.append(key)
     mon = loan["monitoring"]
+    missed_keys = set(ev.missed) | {item_key(s) for s in led["schedule"]
+                                    if s.get("case_id") or s["status"] in ("partial", "missed")
+                                    or any(a["booked_on"] > s["due_on"] for a in s.get("allocations", ()))}
     for key in open_cases:
         item, case_id = by_key[key], f"rc-{replay_id}-{key}"
+        contact_on = hi.isoformat() if item.get("case_id") else max(
+            [item["due_on"], *(a["booked_on"] for a in item.get("allocations", ()))]
+        )
         if item.get("case_id"):
             # A different ID binds officer decisions (including queued retries) to this quote.
             case_id += f"-b{item['balance_krw']}"
@@ -743,11 +759,11 @@ def _repayment_week(
                 "loan_id": loan_id,
                 "replay_id": replay_id,
                 "week": week,
-                "as_of": item["due_on"],
+                "as_of": contact_on,
                 "installment": {"no": item["no"], "due_on": item["due_on"],
                                 "amount_krw": item["balance_krw"]},
                 "balance_krw": item["balance_krw"],
-                "missed_count": sum(s["status"] in ("partial", "missed") for s in led["schedule"]),
+                "missed_count": sum(by_key[k]["due_on"] <= contact_on for k in missed_keys),
                 "recent_alert": recent,
                 "status": "open",
                 "created_at": deps.clock().isoformat(),
@@ -1049,6 +1065,24 @@ def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
     return True
 
 
+def _contact_day_if_current(deps: Deps, case: dict[str, Any]) -> date | None:
+    loan = deps.store.read(LOANS, case["loan_id"], case["loan_id"]) or {}
+    mon = loan.get("monitoring") or {}
+    if mon.get("replay_id") != case["replay_id"]:
+        return None
+    ledger = loan.get("repayment") or {}
+    item = next((s for s in ledger.get("schedule", ()) if s.get("case_id") == case["case_id"]), None)
+    if not item or item["status"] == "paid":
+        return None
+    balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
+    quoted = case["proposal"]["evidence"]["amount_krw"]
+    if not (balance > 0 and balance == quoted == case.get("balance_krw", balance)):
+        return None
+    if mon["processed_week"] > case["week"]:
+        return week_window(date.fromisoformat(mon["flow_start"]), mon["processed_week"])[1]
+    return date.fromisoformat(case.get("as_of") or item["due_on"])
+
+
 def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
     """추심 제안 승인·수정·반려. 추심 건 문서(제안·상태·재조정 요청)를 먼저 쓰고 연락을 기록한 뒤 대기 항목을 갱신한다.
 
@@ -1064,16 +1098,11 @@ def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
         if proposal.get("status") != "pending_officer":
             log.warning("이미 결정된 추심 제안: %s", msg.case_id)
             if proposal.get("contact") is not None:
-                _append_contact(deps, msg.loan_id, doc["replay_id"], proposal["contact"])  # type: ignore[index]
+                _append_contact(deps, msg.loan_id, msg.case_id)
             _refresh_hold(deps, msg.loan_id)
             return False
-        loan = deps.store.read(LOANS, msg.loan_id, msg.loan_id) or {}
-        ledger = loan.get("repayment") or {}
-        item = next((s for s in ledger.get("schedule", ()) if s.get("case_id") == msg.case_id), None)
-        if not item or (loan.get("monitoring") or {}).get("replay_id") != doc["replay_id"]:
-            return False
-        balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
-        if item["status"] == "paid" or not balance or balance != proposal["evidence"]["amount_krw"]:
+        on = _contact_day_if_current(deps, doc)
+        if on is None:
             return False
         settled = settle_proposal(
             doc["proposal"],  # type: ignore[index]
@@ -1084,7 +1113,7 @@ def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
             contacts=_contacts_doc(deps, msg.loan_id, doc["replay_id"])["contacts"],  # type: ignore[index]
             now=deps.clock(),
             officer_id=msg.officer_id,
-            case=RepaymentCase.from_doc(doc),  # type: ignore[arg-type]
+            case=RepaymentCase.from_doc({**doc, "as_of": on.isoformat()}),
         )
         if settled.errors:
             log.warning("추심 결정 반영 불가: %s %s", msg.case_id, settled.errors)
@@ -1103,23 +1132,44 @@ def _decide_collections(deps: Deps, msg: CollectionsDecision) -> bool:
     else:
         raise RuntimeError(f"동시 수정이 이어져 추심 결정을 기록하지 못함: {msg.case_id}")
     if settled.contact is not None:
-        _append_contact(deps, msg.loan_id, doc["replay_id"], settled.contact)
+        _append_contact(deps, msg.loan_id, msg.case_id)
     _refresh_hold(deps, msg.loan_id)
     return True
 
 
-def _append_contact(deps: Deps, loan_id: str, replay_id: str, contact: dict[str, Any]) -> None:
+def _append_contact(deps: Deps, loan_id: str, case_id: str) -> None:
     for _ in range(WRITE_ATTEMPTS):
-        doc = deps.store.read(ALERTS, f"contacts-{replay_id}", loan_id)
-        if doc is None:
-            deps.store.upsert(
-                ALERTS, {"id": f"contacts-{replay_id}", "loan_id": loan_id, "replay_id": replay_id, "contacts": [contact]}
-            )
+        case = deps.store.read(ALERTS, case_id, loan_id)
+        if not case or not (contact := case["proposal"].get("contact")):
             return
-        if any(c.get("ref") == contact["ref"] and c.get("by") == contact["by"] for c in doc["contacts"]):
+        doc = _contacts_doc(deps, loan_id, case["replay_id"])
+        if _recorded(doc["contacts"], contact):
             return
+        on = _contact_day_if_current(deps, case)
+        if on is None:
+            case["proposal"].update(contact=None, delivery_blocked="stale_quote")
+            if case["status"] in ("contacted", "deferred"):
+                case["status"] = "superseded"
+            if deps.store.replace(ALERTS, case, case.get("_etag")):
+                return
+            continue
+        if contact["status"] == "sent":
+            now = deps.clock()
+            reason = fair_check(doc["contacts"], on, now)
+            updated = {**contact, "on": on.isoformat(), "at": now.isoformat()}
+            if reason:
+                updated.update(status="deferred", reason=reason)
+                if case["status"] == "contacted":
+                    case["status"] = "deferred"
+            if updated != contact:
+                contact = case["proposal"]["contact"] = updated
+                if not deps.store.replace(ALERTS, case, case.get("_etag")):
+                    continue
         doc["contacts"].append(contact)
+        if not doc.get("_etag"):
+            deps.store.upsert(ALERTS, doc)
+            return
         if deps.store.replace(ALERTS, doc, doc.get("_etag")):
             return
     # 기록 없이 성공으로 끝내지 않는다: 예외로 큐가 다시 보내게 하고, 재전달 때 제안에 남긴 연락으로 다시 기록한다.
-    raise RuntimeError(f"동시 수정이 이어져 연락 기록을 남기지 못함: {loan_id} {contact['ref']}")
+    raise RuntimeError(f"동시 수정이 이어져 연락 기록을 남기지 못함: {loan_id} {case_id}")

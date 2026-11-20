@@ -93,7 +93,8 @@ class PostLoanFlow:
 
 
 def _installments(dues: list[date], installment_krw: int) -> list[Event]:
-    return [Event(d, -installment_krw, LENDER_DEBIT, "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT) for d in dues]
+    return [Event(d, -installment_krw, LENDER_DEBIT, "AUTO_DEBIT", TxnCategory.LOAN_REPAYMENT,
+                  scheduled_item_key=f"i{no}") for no, d in enumerate(dues, 1)]
 
 
 def _disbursement(case: SyntheticCase, start: date, loan: "LoanTerms | None") -> list[Event]:
@@ -243,7 +244,7 @@ def generate_postloan(
         txn_id = f"{prefix}{len(transactions):05d}"
         transactions.append(
             Transaction(txn_id=txn_id, booked_on=e.booked_on, amount_krw=e.amount_krw, balance_after_krw=balance,
-                        description=e.description, txn_type_code=e.code)
+                        description=e.description, txn_type_code=e.code, scheduled_item_key=e.scheduled_item_key)
         )
         labels[txn_id] = e.category
     for t, nxt in zip(transactions, [*transactions[1:], None]):

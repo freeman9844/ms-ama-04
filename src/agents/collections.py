@@ -155,6 +155,11 @@ class RepaymentCase:
     amount_krw: int
     missed_count: int
     recent_alert: dict[str, Any] | None
+    as_of: date | None = None
+
+    @property
+    def contact_on(self) -> date:
+        return self.as_of or self.due_on
 
     @classmethod
     def from_doc(cls, doc: Mapping[str, Any]) -> "RepaymentCase":
@@ -167,6 +172,7 @@ class RepaymentCase:
             amount_krw=inst["amount_krw"],
             missed_count=doc["missed_count"],
             recent_alert=doc.get("recent_alert"),
+            as_of=date.fromisoformat(doc.get("as_of") or inst["due_on"]),
         )
 
 
@@ -274,9 +280,10 @@ class CollectionsContext:
         }
 
     def get_contact_history(self, _: dict[str, Any]) -> dict[str, Any]:
-        since = self.case.due_on - timedelta(days=6)
-        recent = [c for c in self.contacts if since <= date.fromisoformat(c["on"]) <= self.case.due_on]
-        sent = _sent_in_window(self.contacts, self.case.due_on)
+        on = self.case.contact_on
+        since = on - timedelta(days=6)
+        recent = [c for c in self.contacts if since <= date.fromisoformat(c["on"]) <= on]
+        sent = _sent_in_window(self.contacts, on)
         return {
             "recent": [{k: c.get(k) for k in ("on", "script_id", "status", "reason")} for c in recent[-10:]],
             "remaining_this_week": max(0, MAX_CONTACTS_PER_7_DAYS - sent),
@@ -401,7 +408,7 @@ def build_proposal(
             "summary": mask(str(alert.get("summary") or "")),
             "check_action": mask(str(check_action)) if check_action is not None else None,
         }
-    sent_7d = _sent_in_window(contacts, case.due_on)
+    sent_7d = _sent_in_window(contacts, case.contact_on)
     local = now.astimezone(KST)
     in_hours = _in_contact_hours(now)
     hours = f"{CONTACT_HOURS[0]:02d}:00~{CONTACT_HOURS[1]:02d}:00"
@@ -430,6 +437,7 @@ def build_proposal(
         "evidence": {
             "installment_no": case.installment_no,
             "due_on": case.due_on.isoformat(),
+            "contact_on": case.contact_on.isoformat(),
             "amount_krw": case.amount_krw,
             "missed_count": case.missed_count,
             "recent_alert": recent,
@@ -485,7 +493,7 @@ def settle_proposal(
     issues = message_issues(send_text)
     if issues:
         return Settled(unchanged, None, None, issues)
-    contact = remind(case.case_id, contacts, case.due_on, now, script_id=str(proposal.get("script_id")), by="officer",
+    contact = remind(case.case_id, contacts, case.contact_on, now, script_id=str(proposal.get("script_id")), by="officer",
                      text=send_text)
     contact["officer_id"] = officer_id
     restructure = None

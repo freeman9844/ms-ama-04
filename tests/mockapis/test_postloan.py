@@ -226,6 +226,8 @@ def test_installment_and_disbursement_follow_terms(cafe):
     flow = generate_postloan(cafe, FlowScenario.STABLE, AS_OF, 7, loan=TERMS)
     paid = [t for t in flow.transactions if t.description == LENDER_DEBIT]
     assert paid and all(t.amount_krw == -TERMS.installment_krw for t in paid)
+    dues = due_dates(flow.start, POSTLOAN_DAYS)
+    assert [t.model_dump().get("scheduled_item_key") for t in paid] == [f"i{dues.index(t.booked_on) + 1}" for t in paid]
     (credit,) = [t for t in flow.transactions if t.description == LENDER_CREDIT]
     assert credit.booked_on == AS_OF and credit.amount_krw == TERMS.amount_krw
     assert credit.description.startswith(LENDER)

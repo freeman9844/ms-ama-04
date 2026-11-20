@@ -975,6 +975,60 @@ def test_contact_write_conflicts_raise_so_redelivery_repairs(mock_app, monkeypat
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
 
 
+def test_undelivered_approval_rechecks_contact_limit_on_retry(mock_app, monkeypatch):
+    deps, rid, case = missed_without_agents(mock_app)
+    fail_once(monkeypatch, "_append_contact")
+    with pytest.raises(RuntimeError, match="503"):
+        decide_collections(deps, case["id"])
+    history = deps.store.read(ALERTS, f"contacts-{rid}", LOAN)
+    history["contacts"].extend({"on": str(FIRST_DUE), "status": "sent", "by": "reminder", "ref": str(i)}
+                               for i in range(7))
+    deps.store.upsert(ALERTS, history)
+    assert not decide_collections(deps, case["id"])
+    contact, = officer_contacts(deps, rid)
+    assert (contact["status"], contact["reason"]) == ("deferred", "weekly_limit")
+    assert deps.store.read(ALERTS, case["id"], LOAN)["proposal"]["contact"] == contact
+
+
+def test_undelivered_approval_uses_current_replay_day_if_replay_advanced(mock_app, monkeypatch):
+    deps, rid, case = missed_without_agents(mock_app)
+    fail_once(monkeypatch, "_append_contact")
+    with pytest.raises(RuntimeError, match="503"):
+        decide_collections(deps, case["id"])
+    doc = loan(deps)
+    doc["monitoring"]["processed_week"] += 1
+    deps.store.upsert(LOANS, doc)
+    history = deps.store.read(ALERTS, f"contacts-{rid}", LOAN)
+    history["contacts"].extend({"on": "2026-12-10", "status": "sent", "by": "reminder", "ref": str(i)}
+                               for i in range(7))
+    deps.store.upsert(ALERTS, history)
+    assert not decide_collections(deps, case["id"])
+    contact, = officer_contacts(deps, rid)
+    assert (contact["status"], contact["reason"], contact["on"]) == ("deferred", "weekly_limit", "2026-12-13")
+    assert deps.store.read(ALERTS, case["id"], LOAN)["installment"]["due_on"] == str(FIRST_DUE)
+
+
+@pytest.mark.parametrize("balance", [0, 17])
+@pytest.mark.parametrize("delivered", [False, True])
+def test_recovery_after_payment_preserves_only_already_delivered_contact(mock_app, monkeypatch, balance, delivered):
+    deps, rid, case = missed_without_agents(mock_app)
+    if delivered:
+        assert decide_collections(deps, case["id"])
+    else:
+        fail_once(monkeypatch, "_append_contact")
+        with pytest.raises(RuntimeError, match="503"):
+            decide_collections(deps, case["id"])
+    history = officer_contacts(deps, rid)
+    doc = loan(deps)
+    doc["repayment"]["schedule"][0].update(status="partial" if balance else "paid", balance_krw=balance)
+    deps.store.upsert(LOANS, doc)
+    assert not decide_collections(deps, case["id"])
+    assert officer_contacts(deps, rid) == history
+    proposal = deps.store.read(ALERTS, case["id"], LOAN)["proposal"]
+    if not delivered:
+        assert not proposal.get("contact") and proposal["status"] == "approved"
+
+
 def test_redelivered_restructure_decision_repairs_hold(mock_app, monkeypatch):
     deps, _ = paused_inline(mock_app)
     case_id = loan(deps)["monitoring"]["pause_case_id"]
@@ -1074,8 +1128,13 @@ def test_approve_sends_exact_text_and_awaits_resume(mock_app):
 
 
 @pytest.mark.parametrize("balance", [0, 17])
-def test_next_week_payment_invalidates_prior_unsent_proposal(mock_app, balance):
+@pytest.mark.parametrize("approval_interrupted", [False, True])
+def test_next_week_payment_invalidates_prior_unsent_proposal(mock_app, monkeypatch, balance, approval_interrupted):
     deps, rid, original = missed_without_agents(mock_app)
+    if approval_interrupted:
+        fail_once(monkeypatch, "_append_contact")
+        with pytest.raises(RuntimeError, match="503"):
+            decide_collections(deps, original["id"])
     doc = loan(deps)
     mon, led = doc["monitoring"], doc["repayment"]
     # Older/imported replay with an outstanding proposal from a previous week.
@@ -1091,11 +1150,26 @@ def test_next_week_payment_invalidates_prior_unsent_proposal(mock_app, balance):
     assert row["balance_krw"] == balance and row["paid_krw"] == led["installment_krw"] - balance
     assert not decide_collections(deps, original["id"]) and not officer_contacts(deps, rid)
     assert deps.store.read(ALERTS, original["id"], LOAN)["proposal"]["status"] != "pending_officer"
+    if approval_interrupted:
+        previous = deps.store.read(ALERTS, original["id"], LOAN)["proposal"]
+        assert previous["status"] == "approved" and previous["contact"] is None
     if balance:
         assert row["status"] == "partial" and entry["case_ids"] == [row["case_id"]]
+        history = deps.store.read(ALERTS, f"contacts-{rid}", LOAN)
+        history["contacts"].extend({"on": "2026-12-10", "status": "sent", "by": "reminder", "ref": str(i)}
+                                   for i in range(6))
+        deps.store.upsert(ALERTS, history)
         monitoring_module.run_collections(deps, LOAN, row["case_id"])
         case = deps.store.read(ALERTS, row["case_id"], LOAN)
-        assert case["proposal"]["evidence"]["amount_krw"] == 17
+        evidence = case["proposal"]["evidence"]
+        assert evidence["amount_krw"] == 17 and evidence["missed_count"] == 1
+        assert evidence["due_on"] == str(FIRST_DUE) and evidence["contacts_7d"] == 6
+        assert evidence["contact_on"] == "2026-12-13"
+        history["contacts"].append({"on": "2026-12-12", "status": "sent", "by": "reminder", "ref": "7"})
+        deps.store.upsert(ALERTS, history)
+        assert decide_collections(deps, case["id"])
+        contact, = officer_contacts(deps, rid)
+        assert (contact["status"], contact["reason"], contact["on"]) == ("deferred", "weekly_limit", "2026-12-13")
     else:
         assert row["status"] == "paid" and row["case_id"] == original["id"]
 
@@ -1117,12 +1191,27 @@ def test_all_same_week_cases_publish_and_block_resume_until_both_decided(mock_ap
     pump(deps, outbox)
     ids = [json.loads(body)["case_id"] for body in outbox.bodies(TOPIC_REPAYMENT)]
     assert ids == [f"rc-{rid}-i1", f"rc-{rid}-i2"]
+    assert [deps.store.read(ALERTS, cid, LOAN)["missed_count"] for cid in ids] == [2, 2]
     assert [json.loads(body)["balance_krw"] for body in outbox.bodies(TOPIC_REPAYMENT)] == [499_999, 500_000]
     assert loan(deps)["monitoring"]["weeks"][-1]["case_ids"] == ids
     assert decide_collections(deps, ids[0])
     assert loan(deps)["monitoring"]["status"] == "paused"
     assert decide_collections(deps, ids[1])
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+def test_cured_installment_still_counts_when_next_installment_is_missed(mock_app):
+    outbox = Outbox()
+    deps = missing_first_due(make_deps(mock_app, events=outbox))
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    pump(deps, outbox)
+    assert decide_collections(deps, f"rc-{rid}-i1")
+    replay(deps, action="resume", replay_id=rid)
+    pump(deps, outbox)
+    rows = loan(deps)["repayment"]["schedule"]
+    assert rows[0]["status"] == "paid" and rows[1]["status"] == "missed"
+    assert deps.store.read(ALERTS, rows[1]["case_id"], LOAN)["missed_count"] == 2
 
 
 @pytest.mark.parametrize("balance", [0, 7])

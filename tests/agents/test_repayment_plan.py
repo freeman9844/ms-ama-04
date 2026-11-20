@@ -30,7 +30,8 @@ def _txn(txn_id, on, amount, balance, desc="입금", code="TRANSFER_IN"):
 
 TXNS = (
     _txn("t0", date(2026, 11, 30), 2_000_000, 2_000_000),
-    _txn("t1", date(2026, 12, 2), -1_000_000, 1_000_000, LENDER_DEBIT, "AUTO_DEBIT"),
+    _txn("t1", date(2026, 12, 2), -1_000_000, 1_000_000, LENDER_DEBIT, "AUTO_DEBIT").model_copy(
+        update={"scheduled_item_key": "i2"}),
     _txn("t2", date(2026, 12, 3), 500_000, 1_500_000),
     _txn("t3", date(2026, 12, 7), -300_000, 1_200_000, "임차료", "TRANSFER_OUT"),
     _txn("t4", date(2026, 12, 9), 100_000, 1_300_000),
@@ -131,6 +132,15 @@ def test_plan_move_does_not_remove_other_loans_debit():
     out = apply_plan([*TXNS[:2], foreign, *TXNS[2:]], [_move()], loan_id="loan-a")
     assert [t.txn_id for t in out] == ["t0", "foreign", "t2", "t3", "c1-i2", "t4"]
     assert next(t for t in out if t.txn_id == "c1-i2").loan_id == "loan-a"
+
+
+def test_move_preserves_same_day_same_amount_catchup_and_unreplaced_installment():
+    planned = TXNS[1]
+    catchup = planned.model_copy(update={"txn_id": "catchup", "scheduled_item_key": None})
+    separate = planned.model_copy(update={"txn_id": "separate", "scheduled_item_key": "i3"})
+    txns = [TXNS[0].model_copy(update={"balance_after_krw": 5_000_000}), catchup, planned, separate, *TXNS[2:]]
+    out = apply_plan(txns, [_move()])
+    assert [t.txn_id for t in out] == ["t0", "catchup", "separate", "t2", "t3", "c1-i2", "t4"]
 
 
 def test_apply_plan_applies_changes_in_order():

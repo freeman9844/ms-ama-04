@@ -60,6 +60,7 @@ class Transaction(Contract):
     schema_version: SchemaV1 = "1"
     txn_id: str = Field(min_length=1)
     loan_id: str | None = None  # Legacy synthetic post-loan feeds are already loan-scoped.
+    scheduled_item_key: str | None = None  # Only synthetic scheduled debits are replaceable by a plan.
     booked_on: date
     amount_krw: int
     balance_after_krw: int
@@ -67,10 +68,12 @@ class Transaction(Contract):
     txn_type_code: TxnTypeCode
 
     @model_serializer(mode="wrap")
-    def _omit_unattributed_loan(self, serialize):
+    def _omit_absent_repayment_metadata(self, serialize):
         data = serialize(self)
         if self.loan_id is None:
             data.pop("loan_id", None)  # Preserve the wire format of existing account histories.
+        if self.scheduled_item_key is None:
+            data.pop("scheduled_item_key", None)
         return data
 
     @model_validator(mode="after")
