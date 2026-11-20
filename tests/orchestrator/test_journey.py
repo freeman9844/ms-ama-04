@@ -33,7 +33,7 @@ ELIGIBLE = {"application_id": "app-1", "decision": "eligible", "max_amount_krw":
 INELIGIBLE = {"application_id": "app-1", "decision": "ineligible", "max_amount_krw": 0, "rate_band": None}
 APPROVE = {"decision": "approve", "officer_id": "officer-1", "amount_krw": 20_000_000}
 DECLINE = {"decision": "decline", "officer_id": "officer-1", "reason": "정책 부적격"}
-ASSESSMENT = {"application_id": "app-1", "recommendation": "approve", "review": {"passed": True, "rounds": 1}}
+ASSESSMENT = {"schema_version": "2", "application_id": "app-1", "recommendation": "approve", "review": {"passed": True, "rounds": 1}}
 ASSESSED = {"assessment": ASSESSMENT, "flags": [], "record": {"rounds": [{"round": 1}]}}
 
 

@@ -1,6 +1,6 @@
 # 에이전트
 
-10개 Foundry 프롬프트 에이전트가 신청·사후 단계와 심사역 콘솔에서 자율 판단한다. 흐름 자체는 Durable 오케스트레이터가 결정론적으로 관리하고(아래 [아키텍처](architecture.md) 참고), 에이전트는 설명·구조 제안·분류·안내문만 만든다. 신용 규칙과 최종 결정은 LLM 밖에 있다.
+10개 Foundry 프롬프트 에이전트가 신청·사후 단계와 심사역 콘솔에서 자율 판단한다. 흐름 자체는 Durable 오케스트레이터가 결정론적으로 관리하고(아래 [아키텍처](architecture.md) 참고), 에이전트는 심사 의견·설명·분류·안내문을 만든다. 신용 규칙과 최종 결정은 LLM 밖에 있다.
 
 > **합성 데이터 기준.** 모델 선택 근거 수치는 `eval/reports/job-eval-9imbutm/report.md`에서 인용한다. 같은 시드에서도 LLM 응답 변동이 있다.
 
@@ -11,7 +11,7 @@
 | `data-assembly` | 데이터 수집 | L3 | `gpt-5.6-luna` | `fetch_source` | 없음(읽기) | 안전망 수집 + `agent_fallback` 플래그 | `src/agents/data_assembly.py` |
 | `txn-classifier` | 거래 분류 | L2 | `gpt-5.6-luna`(폴백), `decision-1`(주) | 없음(구조화 출력) | 없음 | 규칙 분류만으로 심사 계속 | `src/agents/txn_classify.py`, `src/agents/classify.py` |
 | `underwriting-analyst` | 신용 평가 | L2 | `gpt-5.6-sol` | `get_metrics`, `get_monthly_series`, `get_settlement_summary`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 → 1회 재시도 후 신청 `failed` | `src/agents/underwriting.py` |
-| `underwriting-reviewer` | 신용 평가 | L2 | `gpt-5.6-luna` | 없음 | 없음 | 3라운드 초과 시 "검토 미통과" | `src/agents/underwriting.py` |
+| `underwriting-reviewer` | 신용 평가 | L2 | `gpt-5.6-luna` | 없음 | 없음 | 검토 미통과 시 의견 없음 | `src/agents/underwriting.py` |
 | `early-warning-investigator` | 사후 조기경보 | L4 | `gpt-5.6-luna` | `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `get_settlement_ledger`, `query_transactions`, `raise_alert` | 경보(`raise_alert`). 높음 경보의 단계별 자동 안내는 LLM 밖 결정적 정책(`src/agents/escalation.py`) | 탐지기 단독 medium 경보(fail-safe) | `src/agents/early_warning.py` |
 | `collections-agent` | 사후 추심 | L3(제안만, 발송은 심사역 승인) | `gpt-5.6-luna` | `get_case`, `get_contact_history`, `list_scripts`, `propose` | 제안만(`propose`). 발송·재조정 요청은 심사역 승인 뒤 | 최근 경보 high면 `hardship_offer`, 아니면 `missed_payment` 폴백 제안(재조정 상담 없음). 폴백 제안도 심사역 승인 필요 | `src/agents/collections.py` |
 | `consent-notice-agent` | 동의 안내 | L4 | `gpt-5.6-luna` | 없음 | 없음 | 템플릿 문안 대체 | `src/agents/notices.py` |
@@ -47,15 +47,15 @@
 
 ## 심사(분석가·검토자)
 
-- **목적:** 정책 판정을 근거로 분석가가 설명·대출 구조·반사실을 만들고, 검토자가 근거(grounding)를 검증한다(신용 평가 단계, L2). **결정 권한 없음** — 최종은 심사역.
+- **목적:** 분석가는 “현재 근거로 신청액 전액을 승인할 수 있는가?”에 답하고 검토자는 그 근거를 검증한다. v2 권고는 `approve`(전액 승인 권고), `refer`(판단 보류), `decline`(전액 승인 비권고) 중 하나다. 대체 금액·기간·상환 구조를 제안하지 않는다. **최종 결정은 심사역이 한다.**
 - **분석가 도구 allowlist(`src/agents/underwriting.py`):** `get_metrics`, `get_monthly_series`, `get_settlement_summary`(정산 원장 대사 요약, 집계만), `query_transactions`(가명 거래, 최대 `MAX_TXNS=20`), 그리고 Foundry 내장 `code_interpreter`. 쓰기 도구 없음.
 - **검토자:** 도구 없음. 주장별 근거 충족을 예/아니오로 판정한다. 주장이 월별 계절 지수(`S:YYYY-MM:index`)를 하나라도 인용하면 입력에 전체 월별 지수와 기준(`seasonal_index`, 1.0 = 관측 기간 월평균)을 함께 넣어 "최저·낮다" 같은 비교를 판정할 수 있게 한다(2026-11-12, 최근 16건 중 추가 라운드 10건의 9건이 이 비교 주장 반려였다).
-- **반성 패턴:** 결정적 grounding 검사(`check_grounding` + `src/agents/grounding.py`의 숫자 대조, 허용 오차 2%) → 통과 시 검토자 → 지적 사항을 다음 라운드 입력으로, 최대 `MAX_ROUNDS=3`회. 3회 초과 시 `review_not_passed`로 심사역에게 넘긴다.
-- **에이전트 요약(2026-11-10, 2026-11-09에서 확장):** `summary`는 심사역이 먼저 읽는 해설로 6~8문장, 상환 여력 → 위험 요인 → 정산 건전성 → 정책 판정과의 관계 → 제안 구조 → 결과를 바꿀 조건 순서다(2026-11-09은 5~7문장·정산 건전성 없이 5단계, 그 전은 세 문장 이내). 정산 건전성은 정산금 입금·현금화 일수·상계율·선정산 추정 중 두드러진 점을 쓰고, 정산 자료가 없으면 "정산 자료 없음" 한 문장으로 끝낸다. 요약 속 숫자도 `check_grounding`이 근거 카탈로그 값·제안 금액·주장에 인용한 거래 금액과 대조한다. 바뀐 지시는 새로 평가하는 신청부터 적용된다.
-- **확인 사항(officer_checks, 2026-11-10):** 정산 자료가 있으면 분석가가 심사역이 확인할 사항을 0~3개(`MAX_OFFICER_CHECKS=3`) 낸다. 각 항목은 '무엇을 확인·요청할지 + 이유' 한 문장(`OfficerCheck.text`, 1~200자)과 근거 ID 1개 이상(`metric_ids`)으로 이뤄지고, 근거 중 하나는 정산·셀러 계열이어야 한다(`OFFICER_CHECK_PREFIXES`: `M:pg_`·`M:mkt_`로 시작하거나 `P:R107:`·`P:R108:`·`P:R003:`·`P:R109:`·`P:R110:`·`P:S001:`·`P:S002:`로 시작, `check_grounding`. 2026-11-17에 셀러 접두사를 더했다 — [마켓 셀러 지표](#마켓-셀러-지표)). 승인·거절·금리·한도는 지시하지 않고 `lag_days`·`fee_rate`·`offset_rate` 숫자는 인용하지 않으며 "선정산" 같은 일반 명사만 쓴다. 정산 자료도 마켓 자료도 없는데 확인 사항이 있으면 grounding 실패다(정산 자료가 없어도 마켓 자료가 있으면 셀러 근거로 쓸 수 있다). 검토자는 `check_verdicts`로 `check_index`마다 근거 충족 여부를 판정하고, 판정은 `CreditAssessment.officer_checks[i].supported`에 담긴다(`src/agents/underwriting.py`). 최종 라운드 초안이 grounding에서 막혀 검토를 받지 못하면 그 라운드의 확인 사항은 `supported=None`으로 남는다(이전 라운드 판정을 이어받지 않는다). 계약 검증(`OfficerCheck` 생성)에 실패해 버려지는 확인 사항이 있어도 남은 항목의 `supported`는 원래 `check_index`의 판정이다(인덱스가 밀리지 않는다).
+- **반성 패턴:** 결정적 정책·수치 검사(`check_grounding`, 숫자 허용 오차 2%) → 독립 검토 → 지적 사항을 다음 초안에 반영하며 최대 3라운드 진행한다. 통과한 초안만 의견서가 된다.
+- **요약:** `summary`는 6~8문장 안에서 현금흐름·정산·셀러 신호가 전액 권고를 뒷받침하거나 약화하는 이유를 설명한다. 남은 불확실성과 확인할 자료를 밝힌다. 신청액·정책 한도·입금액은 근거로 인용할 수 있지만 어느 필드에서도 새 대출 금액을 제안하지 않는다.
+- **확인 사항:** `officer_checks`는 정산·[셀러 지표](#마켓-셀러-지표)와 연결된 확인 대상과 목적을 0~3개 적는다. 각 항목은 1~200자 문장과 근거 ID를 포함한다. 어느 자료도 없으면 빈 배열이다. 검토자는 모든 항목의 근거를 확인한다.
 - **참고 지표(watch, 2026-11-17):** 정책 판정에 쓰지 않는 지표 중 값이 0보다 크고 하한 미만인 것을 `get_metrics`의 `watch`(`[{metric_id, observed}]`)로 알린다. 지금은 세금·계좌 일치율 하나다(`WATCH_METRICS`, `src/agents/features.py`, 하한 0.7 — 정책 v3에서 R101을 지운 뒤 분석가가 이 지표를 언급하지 않아 평가의 세무 불일치 탐지가 0%로 떨어졌다). 분석가는 watch 항목을 claim 하나에 인용해 참고 위험으로 적고 summary (2)에도 언급하되 정책 결과·권고는 바꾸지 않고 기준값 숫자는 쓰지 않는다. claim이 watch 지표를 인용하면 검토자 입력에도 `watch`가 붙는다. 콘솔 신호등의 watch 기준(`SIGNAL_RULES`)도 같은 상수를 쓴다.
-- **가드레일:** 모델로 가는 모든 문자열은 가명처리. Code Interpreter 컨테이너는 실행마다 즉시 삭제(`delete_container`). 근거 목록에 없는 숫자(직접 계산 포함) 사용 금지. 정책이 ineligible이면 추천은 decline/refer만. 제안 구조의 기간은 상품 기간 3~6개월(`check_grounding`의 구조 검사, `shared.contracts`의 `MIN_TENOR_MONTHS`·`MAX_TENOR_MONTHS`, 2026-11-08 1~12개월에서 축소). 권고 `conditional`은 남아 있지만 심사역 결정에는 조건부 승인이 없으므로 콘솔은 "승인 권고(조건 제안)"로 표시한다.
-- **알려진 한계:** 평가에서 1라운드 근거 통과율이 모델에 민감하다. 평가 활동은 예외를 올리지 않는다(1라운드 실패면 평가 없음, 이후 실패면 직전 초안을 미통과로). 평가가 없으면 오케스트레이터가 한 번 더 돌리고, 그래도 없으면 `assessment_unavailable` 플래그와 함께 신청을 `failed`로 끝낸다. 심사역은 에이전트 평가를 근거로 결정하므로 평가 없는 건을 심사역 대기로 넘기지 않는다(2026-11-07).
+- **가드레일:** 모델 입력은 가명처리하고 Code Interpreter 컨테이너는 실행마다 삭제한다. 부적격 또는 신청액이 정책 한도를 초과하면 `decline`만 가능하다. 그 밖의 정책 회부는 `refer`만 가능하다. 한도 이내(동액 포함) 적격이라도 근거가 부족하면 보류하고 확인된 반대 근거가 있으면 비권고할 수 있다. 저장된 v1의 조건과 금액은 재해석하거나 덮어쓰지 않는다.
+- **실패 처리:** 모델 오류·근거 부족 등으로 검토를 통과하지 못하면 실행 기록만 남기고 `assessment`는 비워 둔다. 오케스트레이터는 기존 절차대로 한 번 더 시도하고, 여전히 의견이 없으면 `assessment_unavailable`과 함께 신청을 `failed`로 끝낸다.
 - **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 3장(검토자 `gpt-5.4-mini` 고정) — 분석가 `gpt-5.4`는 1라운드 근거 통과 100.0%·검토 통과 87.5%·건당 $0.0631, `gpt-5.4-mini`는 62.5%·62.5%·$0.0199. 품질 차이 때문에 분석가는 `gpt-5.4`, 검토자는 `gpt-5.4-mini`로 두었다.
 - **모델 변경(2026-11-06):** 분석가를 `gpt-6.1-sol`(GlobalStandard 150K TPM, 단가 입력 $2·출력 $10/1M 토큰으로 `gpt-5.4`의 $2.5·$15보다 낮음)로 바꿨다(`ANALYST_MODEL`). 검토자는 그대로 `gpt-5.4-mini`(2026-11-08 `gpt-5.6-luna`로 변경). 평가 Job의 full 구성(`EVAL_FULL_MODEL`)은 `gpt-5.6-sol`이다. 변경 뒤 라이브 점검은 [배포 기록](runbook/deploy-history.md)에 있다.
 - **모델 재변경(2026-11-07):** `gpt-6.1-sol`은 게이트웨이 연결(Agent Service → APIM, chat completions)에서 함수 도구와 추론을 함께 쓰면 400("Function tools with reasoning_effort are not supported … in /v1/chat/completions")으로 거부한다. `reasoning.effort=none`은 이 모델이 지원하지 않는다(low·medium·high만). 그 사이 들어온 신청 2건은 평가 없이 심사역 대기로 넘어갔다. 분석가를 게이트웨이에서 함수 도구가 동작하는 `gpt-5.6-sol`(입력 $4·출력 $20/1M 토큰, 배포 150K TPM, 평가 Job과 공유)로 옮겼다. 이제 분석가와 평가 full 구성이 같은 모델이다. `gpt-6.1-sol` 배포(50K)는 보유만 한다.

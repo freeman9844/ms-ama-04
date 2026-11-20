@@ -96,6 +96,9 @@ def test_fake_run_writes_all_suites_and_cleans_up(tmp_path):
     assert set(summary["suites"]) == {"classify", "underwriting", "early_warning", "safety"}
     assert not summary["partial"] and summary["errors"] == []
     assert summary["suites"]["safety"]["pii"]["calls_with_pii"] == 0
+    credit = summary["suites"]["underwriting"]["cases"]
+    assert {r["recommendation"] for r in credit} <= {"approve", "refer", "decline"}
+    assert all(r["agrees_policy"] for r in credit)
     assert summary["cleanup"]["deleted"] > 0 and summary["cleanup"]["failed"] == 0
     decision = summary["suites"]["classify"]["configs"]["decision-1+gpt-5.6-luna"]
     assert decision["unpriced_calls"] > 0 and decision["threshold_curve"]
@@ -230,6 +233,7 @@ def test_tax_and_settlement_rates_use_assessed_rows_only(monkeypatch):
         {**base, "case": cases[0].case_id, "status": "ok", "tax_detected": True,
          "settlement_gap_detected": True, "settlement_check_detected": True},
         {**base, "case": cases[1].case_id, "status": "unavailable", "recommendation": None, "agrees_policy": None,
+         "flags": ["assessment_unavailable", "review_not_passed"],
          "review_passed": False, "tax_detected": False, "settlement_gap_detected": False,
          "settlement_check_detected": False},
     ])
@@ -237,6 +241,8 @@ def test_tax_and_settlement_rates_use_assessed_rows_only(monkeypatch):
     out = underwriting.run(cases, ["m"], reviewer_model="r", meter=Meter(load_prices(), 5.0), runner=None,
                            pseudonym_key=b"k" * 32)
     config = out["configs"]["m"]
+    assert config["review_pass_rate"] == 0.5
+    assert "review_not_passed" in [f["type"] for f in out["failures"]]
     assert (config["tax_mismatch_detection_rate"], config["settlement_gap_detection_rate"],
             config["settlement_check_rate"]) == (1.0, 1.0, 1.0)
 

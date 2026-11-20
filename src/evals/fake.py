@@ -21,7 +21,7 @@ _KEYWORDS: tuple[tuple[str, str], ...] = (
     ("요금", "other_operating"), ("방역", "other_operating"),
     ("식", "supplier"), ("대금", "supplier"), ("물품", "supplier"), ("구입", "supplier"),
 )
-_DRAFT = {"eligible": "approve", "refer": "conditional", "ineligible": "decline"}
+_DRAFT = {"eligible": "approve", "refer": "refer", "ineligible": "decline"}
 _EW_SIGNAL_KIND = {
     "sales_slump": "inflow_drop",
     "settlement_hold": "settlement_hold",
@@ -113,16 +113,13 @@ class FakeAzure:
         if "M:pg_reconciliation_ratio" in metrics and any(
                 r["code"] == "R108" for r in results[0]["policy"]["reason_codes"]):
             claims.append({"text": "정산금 계좌 입금 비율이 기준에 못 미친다.", "metric_ids": ["M:pg_reconciliation_ratio"], "txn_ids": []})
-        rec = _DRAFT[decision]
-        lend = rec in ("approve", "conditional")
+        rec = "decline" if metrics["M:requested_amount_krw"] > metrics["P:max_amount_krw"] else _DRAFT[decision]
         officer_checks = [{"text": "정산금 계좌 미입금 원인과 선정산 계약 여부를 확인한다.",
                            "metric_ids": ["M:pg_reconciliation_ratio"]}] if "M:pg_reconciliation_ratio" in metrics else []
         return {
             "recommendation": rec,
             "summary": "정책 판정과 현금흐름 지표를 근거로 작성한 초안이다.",
             "claims": claims,
-            "proposed_structure": {"amount_krw": 1_700_000 if lend else 0, "tenor_months": 6, "schedule": "level",
-                                   "reduced_payment_months": [], "rationale": "가짜 모드 기본 구조"},
             "counterfactuals": [],
             "officer_checks": officer_checks,
         }

@@ -221,9 +221,6 @@ def _assessment(**kw):
         recommendation=Recommendation.APPROVE,
         summary="현금흐름이 안정적이다.",
         claims=(Claim(text="DSCR 3.80", metric_ids=("M:dscr",)),),
-        proposed_structure=ProposedStructure(
-            amount_krw=20_000_000, tenor_months=12, schedule="seasonal", reduced_payment_months=(1, 2), rationale="비수기 감액"
-        ),
         counterfactuals=(),
         review=ReviewOutcome(passed=True, rounds=1),
         models={"analyst": "gpt-5.4", "reviewer": "gpt-5.4-mini"},
@@ -234,7 +231,7 @@ def _assessment(**kw):
 
 def test_credit_assessment_round_trip():
     a = _assessment()
-    assert a.schema_version == "1"
+    assert a.schema_version == "2"
     assert CreditAssessment.model_validate_json(a.model_dump_json()) == a
 
 
@@ -255,10 +252,26 @@ def test_structure_schedule_consistency():
         ProposedStructure(amount_krw=1, tenor_months=12, schedule="seasonal", reduced_payment_months=(13,), rationale="r")
 
 
-def test_approval_needs_structure_and_failed_review_needs_issues():
+def test_v2_rejects_legacy_amount_and_conditional_recommendation():
     with pytest.raises(ValidationError):
         _assessment(proposed_structure=None)
-    assert _assessment(recommendation=Recommendation.DECLINE, proposed_structure=None).proposed_structure is None
+    with pytest.raises(ValidationError):
+        _assessment(recommendation="conditional")
+
+
+def test_stored_conditional_assessment_round_trips_without_reinterpretation():
+    from shared.contracts import stored_credit_assessment
+
+    raw = _assessment().model_dump(mode="json") | {
+        "schema_version": "1", "recommendation": "conditional",
+        "proposed_structure": {"amount_krw": 20_000_000, "tenor_months": 12, "schedule": "seasonal",
+                               "reduced_payment_months": [1, 2], "rationale": "비수기 감액"},
+    }
+    assert stored_credit_assessment.validate_python(raw).model_dump(mode="json") == raw
+    assert stored_credit_assessment.validate_python(_assessment().model_dump()) == _assessment()
+
+
+def test_failed_review_needs_issues():
     with pytest.raises(ValidationError):
         _assessment(review=ReviewOutcome(passed=False, rounds=3))
     with pytest.raises(ValidationError):

@@ -374,9 +374,6 @@ ANALYST_DRAFT = {
     "recommendation": "approve",
     "summary": "상환 여력이 충분하다.",
     "claims": [{"text": "DSCR은 4.106다.", "metric_ids": ["M:dscr"], "txn_ids": []}],
-    "proposed_structure": {
-        "amount_krw": 3_300_000, "tenor_months": 6, "schedule": "level", "reduced_payment_months": [], "rationale": "한도 안",
-    },
     "counterfactuals": [],
     "officer_checks": [],
 }
@@ -478,6 +475,7 @@ def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps, mo
     monkeypatch.setattr(activities, "UnderwritingContext", spy)
     result = assess_credit(with_deps(deps, agents=runner), payload)
     a = result["assessment"]
+    assert a["schema_version"] == "2" and "proposed_structure" not in a
     assert (a["recommendation"], a["review"]["passed"], a["models"]["analyst"]) == ("approve", True, "gpt-5.6-sol")
     assert result["flags"] == [] and result["record"]["rounds"][0]["grounding_issues"] == []
     assert seen["settlement"] == payload["underwriting"]["pg_ledger"]

@@ -4,10 +4,10 @@ from dataclasses import replace
 from datetime import date
 
 import pytest
+from pydantic import ValidationError
 
 from agents.data_assembly import build_pseudonymizer
 from agents.features import compute_underwriting
-from agents.grounding import close
 from agents.runtime import AgentError, AgentRun
 from agents.underwriting import (
     ANALYST_AGENT,
@@ -16,7 +16,6 @@ from agents.underwriting import (
     ANALYST_TOOLS,
     FLAG_ASSESSMENT_UNAVAILABLE,
     FLAG_REVIEW_NOT_PASSED,
-    MAX_OFFICER_CHECKS,
     MAX_ROUNDS,
     REVIEWER_AGENT,
     REVIEWER_INSTRUCTIONS,
@@ -24,7 +23,6 @@ from agents.underwriting import (
     AnalystDraft,
     UnderwritingContext,
     _reviewer_input,
-    _to_assessment,
     analyst_spec,
     assess,
     check_grounding,
@@ -33,7 +31,7 @@ from agents.underwriting import (
 from mockapis.demo import build_demo_cases
 from policy.engine import evaluate
 from policy.rules import DEFAULT_RULES_PATH, load_rules
-from shared.contracts import CreditAssessment, Recommendation, ReviewOutcome
+from shared.contracts import CreditAssessment, Recommendation
 from shared.pseudonymize import find_pii
 
 AS_OF = date(2026, 11, 2)
@@ -47,13 +45,6 @@ GOOD = {
         {"text": "DSCR은 4.074로 정책 하한을 크게 웃돈다.", "metric_ids": ["M:dscr"], "txn_ids": []},
         {"text": "현금 완충일수는 23.3일이다.", "metric_ids": ["M:cash_buffer_days"], "txn_ids": []},
     ],
-    "proposed_structure": {
-        "amount_krw": 3_300_000,
-        "tenor_months": 6,
-        "schedule": "level",
-        "reduced_payment_months": [],
-        "rationale": "요청 금액이 정책 한도 안이다.",
-    },
     "counterfactuals": [
         {"metric_id": "M:dscr", "current": 4.074, "target": 1.0, "explanation": "DSCR이 1.0 아래면 거절 사유가 된다."}
     ],
@@ -393,19 +384,17 @@ def test_rejected_or_missing_check_verdict_triggers_revision(cases):
     assert result.assessment.review.passed and result.assessment.officer_checks[0].supported is True
 
 
-def test_unsupported_check_is_shown_not_hidden_after_max_rounds(cases):
+def test_unsupported_check_prevents_publication_after_max_rounds(cases):
     bad = SUPPORTED | {"check_verdicts": [{"check_index": 0, "supported": False, "reason": "과장"}]}
     result = run_assess(context(cases), FakeRunner([WITH_CHECK] * 3, [bad] * 3))
-    assert not result.assessment.review.passed and result.assessment.officer_checks[0].supported is False
+    assert result.assessment is None
+    assert "과장" in str(result.record["rounds"][-1]["review_issues"])
 
 
-def test_officer_checks_capped_when_final_draft_still_has_too_many(cases):
-    """3라운드 내내 officer_checks가 4개(상한 초과)라 매 라운드 grounding에서 막혀 검토자가 한 번도 안 돈다.
-    그래도 마지막 초안이 review_not_passed로 심사역에게 넘어갈 때 officer_checks는 MAX_OFFICER_CHECKS로 잘려야 한다."""
+def test_invalid_checks_are_not_published_unreviewed(cases):
     too_many = GOOD | {"officer_checks": [CHECK] * 4}
     result = run_assess(context(cases), FakeRunner([too_many] * MAX_ROUNDS))
-    assert not result.assessment.review.passed
-    assert len(result.assessment.officer_checks) == MAX_OFFICER_CHECKS
+    assert result.assessment is None and FLAG_REVIEW_NOT_PASSED in result.flags
 
 
 def test_check_verdicts_come_from_review_of_final_draft(cases):
@@ -414,14 +403,7 @@ def test_check_verdicts_come_from_review_of_final_draft(cases):
                                          {"claim_index": 1, "supported": True, "reason": "x"}]}
     result = assess(context(cases), runner=FakeRunner([WITH_CHECK, ungrounded], [claim_bad]),
                     analyst_model="a", reviewer_model="r", max_rounds=2)
-    assert result.assessment.officer_checks[0].supported is None
-
-
-def test_dropped_check_does_not_shift_verdicts(cases):
-    checks = [{"text": "확인", "metric_ids": ["bad id"]}, CHECK]  # 0번은 EvidenceId 패턴 위반으로 버려진다
-    a = _to_assessment(draft(officer_checks=checks), context(cases),
-                       ReviewOutcome(passed=True, rounds=1), {}, {0: False, 1: True})
-    assert [(c.text, c.supported) for c in a.officer_checks] == [(CHECK["text"], True)]
+    assert result.assessment is None
 
 
 ALL_TOOLS = [
@@ -508,15 +490,9 @@ def test_ungrounded_summary_numbers_are_reported(cases):
     assert len(issues) == 1 and "4.5" in issues[0] and "1,234만" in issues[0]
 
 
-def test_summary_numbers_may_come_from_catalog_or_proposed_amount(cases):
+def test_summary_can_state_factual_amounts(cases):
     ctx = context(cases)
-    dscr = ctx.catalog["M:dscr"]
-    structure = {**GOOD["proposed_structure"], "amount_krw": 2_100_000}
-    assert not any(close(2_100_000, float(v)) for v in ctx.catalog.values())
-    d = draft(
-        summary=f"DSCR은 {dscr}로 정책 하한을 웃돈다. 2,100,000원을 6개월 균등 상환으로 제안한다.",
-        proposed_structure=structure,
-    )
+    d = draft(summary="신청액은 330만 원으로 정책 한도와 같다. 신청 전액 승인을 권고한다.")
     assert check_grounding(d, ctx) == []
 
 
@@ -528,25 +504,59 @@ def test_counterfactual_must_use_catalog_values(cases):
     assert any("M:nope" in i for i in check_grounding(unknown, ctx))
 
 
-def test_recommendation_must_respect_policy(cases):
-    thin = context(cases, "seller-knitroom-04")
-    issues = check_grounding(draft(), thin)
-    assert any("ineligible" in i for i in issues)
-    over = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 4_000_000})
-    assert any("한도" in i for i in check_grounding(over, context(cases)))
+@pytest.mark.parametrize("decision, cap, allowed", [
+    ("eligible", AMOUNT, {"approve", "refer", "decline"}),
+    ("refer", AMOUNT, {"refer"}),
+    ("eligible", AMOUNT - 1, {"decline"}),
+    ("refer", AMOUNT - 1, {"decline"}),
+    ("ineligible", 0, {"decline"}),
+])
+def test_full_request_policy_bounds(cases, decision, cap, allowed):
+    ctx = context(cases)
+    ctx = replace(ctx, policy={**ctx.policy, "decision": decision, "max_amount_krw": cap})
+    for rec in ("approve", "refer", "decline"):
+        issues = check_grounding(draft(recommendation=rec), ctx)
+        assert bool(issues) == (rec not in allowed), (rec, issues)
 
 
-@pytest.mark.parametrize("tenor", [2, 7, 12])
-def test_structure_tenor_must_be_3_to_6_months(cases, tenor):
-    off = draft(proposed_structure={**GOOD["proposed_structure"], "tenor_months": tenor})
-    assert any("3~6" in i for i in check_grounding(off, context(cases)))
+def test_unrecognized_policy_never_publishes_an_opinion(cases):
+    ctx = context(cases)
+    ctx = replace(ctx, policy={**ctx.policy, "decision": "unknown"})
+    assert run_assess(ctx, FakeRunner([GOOD] * MAX_ROUNDS, [SUPPORTED])).assessment is None
 
 
-def test_structure_shape_issues(cases):
-    missing = draft(proposed_structure={**GOOD["proposed_structure"], "amount_krw": 0})
-    assert any("proposed_structure" in i for i in check_grounding(missing, context(cases)))
-    seasonal = draft(proposed_structure={**GOOD["proposed_structure"], "schedule": "seasonal"})
-    assert any("reduced_payment_months" in i for i in check_grounding(seasonal, context(cases)))
+@pytest.mark.parametrize("changes", [
+    {"recommendation": "conditional"},
+    {"proposed_structure": None},
+])
+def test_generation_rejects_retired_contract_fields(changes):
+    with pytest.raises(ValidationError):
+        draft(**changes)
+
+
+@pytest.mark.parametrize("changes, field", [
+    ({"summary": "0원 제안"}, "summary"),
+    ({"summary": "Recommend lending up to the policy limit instead."}, "summary"),
+    ({"summary": "제안 금액은 0원이다."}, "summary"),
+    ({"summary": "Recommend a six-month repayment schedule instead."}, "summary"),
+    ({"summary": "6개월 균등 상환을 제안한다."}, "summary"),
+    ({"summary": "The suggested loan amount is ₩3,300,000."}, "summary"),
+    ({"claims": [{"text": "330만원으로 감액을 권고한다.", "metric_ids": ["P:max_amount_krw"], "txn_ids": []}]}, "claims[0]"),
+    ({"officer_checks": [{**CHECK, "text": "Offer KRW 0 instead."}]}, "officer_checks[0]"),
+    ({"counterfactuals": [{**GOOD["counterfactuals"][0], "explanation": "Recommend a loan of 3 million won."}]},
+     "counterfactuals[0]"),
+    ({"counterfactuals": [{"metric_id": "M:requested_amount_krw", "current": AMOUNT, "target": 2000000,
+                           "explanation": "Reapply on this basis."}]}, "counterfactuals[0]"),
+])
+def test_alternative_amounts_cannot_hide_in_grounded_text(cases, changes, field):
+    assert any(i.startswith(field) for i in check_grounding(draft(**changes), context(cases)))
+
+
+def test_reviewer_sees_full_request_and_counterfactual_text(cases):
+    payload = json.loads(_reviewer_input(context(cases), draft()).split("\n", 1)[1])
+    assert payload["requested_amount_krw"] == AMOUNT
+    assert payload["counterfactuals"][0]["explanation"] == GOOD["counterfactuals"][0]["explanation"]
+    assert "proposed_structure" not in payload
 
 
 def test_happy_path_passes_in_one_round_and_cleans_up(cases):
@@ -556,7 +566,7 @@ def test_happy_path_passes_in_one_round_and_cleans_up(cases):
     a = r.assessment
     assert a.recommendation is Recommendation.APPROVE
     assert (a.review.passed, a.review.rounds, a.review.issues) == (True, 1, ())
-    assert a.proposed_structure.amount_krw == AMOUNT
+    assert a.schema_version == "2" and "proposed_structure" not in a.model_dump()
     assert a.models == {"analyst": "gpt-5.4", "reviewer": "gpt-5.4-mini"}
     assert r.flags == []
     assert runner.names() == [ANALYST_AGENT, REVIEWER_AGENT]
@@ -575,6 +585,13 @@ def test_ungrounded_draft_is_revised_with_feedback(cases):
     second_input = runner.calls[1][1]
     assert "4.5" in second_input and "claims[0]" in second_input
     assert (r.assessment.review.passed, r.assessment.review.rounds) == (True, 2)
+
+
+def test_invalid_publication_contract_does_not_silently_truncate_reviewed_text(cases):
+    bad = copy.deepcopy(GOOD)
+    bad["claims"][0]["text"] = "가" * 401
+    r = run_assess(context(cases), FakeRunner([bad, GOOD], [SUPPORTED, SUPPORTED]))
+    assert r.assessment.review.rounds == 2 and r.assessment.claims[0].text == GOOD["claims"][0]["text"]
 
 
 def test_reviewer_rejection_triggers_revision(cases):
@@ -598,8 +615,16 @@ def test_missing_verdict_is_not_a_pass(cases):
     partial = SUPPORTED | {"verdicts": [SUPPORTED["verdicts"][0]]}
     runner = FakeRunner([GOOD] * MAX_ROUNDS, [partial] * MAX_ROUNDS)
     r = run_assess(context(cases), runner)
-    assert r.assessment.review.passed is False
-    assert any("claims[1]" in i for i in r.assessment.review.issues)
+    assert r.assessment is None
+    assert any("claims[1]" in i for i in r.record["rounds"][-1]["review_issues"])
+
+
+def test_conflicting_verdicts_do_not_publish_rejected_claim(cases):
+    duplicate = SUPPORTED | {"verdicts": [
+        {"claim_index": 0, "supported": False, "reason": "감액 제안"}, *SUPPORTED["verdicts"],
+    ]}
+    r = run_assess(context(cases), FakeRunner([GOOD] * MAX_ROUNDS, [duplicate] * MAX_ROUNDS))
+    assert r.assessment is None
 
 
 def test_reflection_stops_after_max_rounds(cases):
@@ -608,9 +633,9 @@ def test_reflection_stops_after_max_rounds(cases):
     runner = FakeRunner([bad] * 5, [SUPPORTED] * 5)
     r = run_assess(context(cases), runner)
     assert runner.names() == [ANALYST_AGENT] * MAX_ROUNDS
-    a = r.assessment
-    assert (a.review.passed, a.review.rounds) == (False, MAX_ROUNDS)
-    assert a.review.issues and FLAG_REVIEW_NOT_PASSED in r.flags
+    assert r.assessment is None and len(r.record["rounds"]) == MAX_ROUNDS
+    assert FLAG_REVIEW_NOT_PASSED in r.flags
+    assert r.record.get("error")  # journey reports a generic reason, not the rejected text
     assert runner.deleted == ["cntr_1", "cntr_2", "cntr_3"]
 
 
@@ -630,14 +655,13 @@ def test_unexpected_exception_is_contained(cases):
     assert (r.assessment, r.flags) == (None, [FLAG_ASSESSMENT_UNAVAILABLE])
 
 
-def test_analyst_failure_after_first_round_keeps_previous_draft(cases):
+def test_analyst_failure_after_first_round_does_not_publish_previous_draft(cases):
     bad = copy.deepcopy(GOOD)
     bad["claims"][0]["text"] = "DSCR은 4.5다."
     runner = FakeRunner([bad, AgentError("timeout", "conv_x")])
     r = run_assess(context(cases), runner)
-    a = r.assessment
-    assert a.claims[0].text == "DSCR은 4.5다."
-    assert (a.review.passed, a.review.rounds) == (False, 2)
+    assert r.assessment is None
+    assert len(r.record["rounds"]) == 2
     assert FLAG_REVIEW_NOT_PASSED in r.flags
 
 
@@ -645,18 +669,17 @@ def test_reviewer_failure_is_not_a_pass(cases):
     runner = FakeRunner([GOOD], [AgentError("HTTP 429", "conv_r")])
     r = run_assess(context(cases), runner)
     assert runner.names() == [ANALYST_AGENT, REVIEWER_AGENT]
-    assert r.assessment.review.passed is False
-    assert any("검토" in i for i in r.assessment.review.issues)
+    assert r.assessment is None
+    assert "HTTP 429" in r.record["rounds"][-1]["reviewer_error"]
     assert FLAG_REVIEW_NOT_PASSED in r.flags
 
 
-def test_invalid_final_structure_is_downgraded_to_refer(cases):
-    bad = copy.deepcopy(GOOD)
-    bad["proposed_structure"]["amount_krw"] = 0
-    runner = FakeRunner([bad] * MAX_ROUNDS, [SUPPORTED] * MAX_ROUNDS)
-    a = run_assess(context(cases), runner).assessment
-    assert (a.recommendation, a.proposed_structure) == (Recommendation.REFER, None)
-    assert a.review.passed is False
+def test_hard_policy_failure_precedes_evidence_referral_on_retry(cases):
+    ctx = context(cases)
+    ctx = replace(ctx, policy={**ctx.policy, "decision": "refer", "max_amount_krw": AMOUNT - 1})
+    runner = FakeRunner([GOOD | {"recommendation": "refer"}, GOOD | {"recommendation": "decline"}], [SUPPORTED])
+    a = run_assess(ctx, runner).assessment
+    assert a.recommendation == "decline" and a.review.rounds == 2
 
 
 def test_draft_without_claims_is_unavailable(cases):

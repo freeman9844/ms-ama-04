@@ -4,7 +4,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_serializer, model_validator
 
 SchemaV1 = Literal["1"]
 NonNegFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -273,7 +273,6 @@ class PolicyDecision(Contract):
 
 class Recommendation(StrEnum):
     APPROVE = "approve"
-    CONDITIONAL = "conditional"
     DECLINE = "decline"
     REFER = "refer"
 
@@ -339,25 +338,38 @@ class ReviewOutcome(Contract):
         return self
 
 
-class CreditAssessment(Contract):
-    """Underwriting 에이전트 산출물(참고용 추천). 판정은 Policy Engine과 심사역이 한다."""
-
-    schema_version: SchemaV1 = "1"
+class _Assessment(Contract):
     application_id: str = Field(min_length=1)
-    recommendation: Recommendation
     summary: str = Field(min_length=1)
     claims: tuple[Claim, ...] = Field(min_length=1)
-    proposed_structure: ProposedStructure | None
     counterfactuals: tuple[Counterfactual, ...] = ()
     officer_checks: tuple[OfficerCheck, ...] = Field(default=(), max_length=3)
     review: ReviewOutcome
     models: dict[str, str]
 
+
+class CreditAssessment(_Assessment):
+    """신규 의견은 신청액 전액만 평가한다. 최종 결정권은 심사역에게 있다."""
+
+    schema_version: Literal["2"] = "2"
+    recommendation: Recommendation
+
+
+class LegacyCreditAssessment(_Assessment):
+    """과거 감사 자료 읽기 전용. 기존 금액과 조건을 전액 권고로 해석하지 않는다."""
+
+    schema_version: SchemaV1 = "1"
+    recommendation: Literal["approve", "conditional", "refer", "decline"]
+    proposed_structure: ProposedStructure | None
+
     @model_validator(mode="after")
-    def _structure(self) -> "CreditAssessment":
-        if self.recommendation in (Recommendation.APPROVE, Recommendation.CONDITIONAL) and not self.proposed_structure:
+    def _structure(self) -> "LegacyCreditAssessment":
+        if self.recommendation in ("approve", "conditional") and not self.proposed_structure:
             raise ValueError("승인·조건부 추천에는 제안 구조가 필요하다")
         return self
+
+
+stored_credit_assessment = TypeAdapter(CreditAssessment | LegacyCreditAssessment)
 
 
 class AlertSeverity(StrEnum):
