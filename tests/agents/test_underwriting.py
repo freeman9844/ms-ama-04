@@ -496,14 +496,26 @@ def test_summary_can_state_factual_amounts(cases):
     assert check_grounding(d, ctx) == []
 
 
-def test_assessing_the_exact_requested_amount_is_not_an_alternative_offer(cases):
+@pytest.mark.parametrize("text", [
+    "신청액 500만 원을 승인할 근거가 부족하다.",
+    "신청액 전액인 500만 원을 승인할 근거가 부족하다.",
+])
+def test_assessing_the_exact_requested_amount_is_not_an_alternative_offer(cases, text):
     ctx = context(cases)
     ctx = replace(ctx, features={**ctx.features, "requested_amount_krw": 5_000_000},
                   policy={**ctx.policy, "max_amount_krw": 5_000_000})
-    text = "신청액 500만 원을 승인할 근거가 부족하다."
     assert check_grounding(draft(summary=text, recommendation="refer"), ctx) == []
     assert check_grounding(draft(summary=f"{text} 따라서 0원을 제안한다.", recommendation="refer"), ctx)
     assert check_grounding(draft(summary="신청액 0원을 승인할 근거가 있다."), ctx)
+
+
+def test_full_request_reference_does_not_authorize_proposing_the_policy_cap(cases):
+    ctx = context(cases)
+    ctx = replace(ctx, features={**ctx.features, "requested_amount_krw": 5_000_000},
+                  policy={**ctx.policy, "max_amount_krw": 3_000_000})
+    text = "신청액 500만 원을 승인하는 대신 대출액을 300만 원으로 낮출 것을 권고한다."
+    issues = check_grounding(draft(summary=text, recommendation="decline"), ctx)
+    assert any(i.startswith("summary:") and "제안" in i for i in issues)
 
 
 def test_counterfactual_must_use_catalog_values(cases):

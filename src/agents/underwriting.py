@@ -445,7 +445,7 @@ class UnderwritingContext:
 # The independent reviewer also checks implicit proposals in context.
 _NUMBER = r"\d[\d,]*(?:\.\d+)?"
 _REQUEST_APPROVAL = re.compile(
-    rf"(?:신청|요청)\s*(?:금액|액|전액)(?:인)?\s*[:：]?\s*"
+    rf"(?:신청|요청)\s*(?:(?:금액|액)(?:\s*전액)?|전액)(?:인)?\s*[:：]?\s*"
     rf"(?P<number>{_NUMBER})\s*(?P<unit>억|천만|백만|만|천)?\s*원(?=\s*(?:을|를)?\s*승인)"
 )
 _KRW_UNITS = {None: 1, "천": 1000, "만": 10000, "백만": 1000000, "천만": 10000000, "억": 100000000}
@@ -453,6 +453,8 @@ _MONEY = rf"(?:(?:[₩$]|KRW|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:억|천만|백만|�
 _PROPOSAL = re.compile(
     rf"{_MONEY}\s*(?:으로|로|만|까지|을|를|의)?\s*(?:감액|승인|대출\s*(?:제안|권고)|제안|권고|추천)"
     rf"|(?:제안|추천|권고|대안|승인)\s*(?:금액|액)?(?:은|는)?\s*[:：]?\s*{_MONEY}"
+    rf"|(?:대출|신청|승인)\s*(?:금액|액|금)(?:을|를)?\s*{_MONEY}\s*(?:으로|로)\s*"
+    r"(?:낮출|줄일|감액할|조정할|축소할)\s*(?:것|방안)(?:을|를)?\s*(?:권고|추천|제안)"
     r"|(?:균등|계절|분할|거치)\s*상환(?:을|으로)?\s*(?:제안|추천|권고)"
     rf"|\b(?:recommend|suggest|propose|offer|lend|approve|cap|limit|reduce)\w*\s+"
     rf"(?:(?:lending|a|an|loan|amount|of|at|to|up|the|only|instead|for)\s+)*(?:{_MONEY}|policy\s+(?:cap|limit))"
