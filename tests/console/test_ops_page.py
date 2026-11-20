@@ -127,8 +127,9 @@ def test_ops_page_offers_recent_first_and_reads_recent_scope():
 
 def test_ops_page_renders_insight_panels():
     docs = skewed()
-    docs[0].update(officer_decision="approve", policy_override=True, status="approved")  # project() 결과 모양
-    docs[1].update(officer_decision="decline", status="declined")
+    docs[0].update(officer_decision="approve", requested_amount_krw=5_000_000, approved_amount_krw=5_000_000,
+                   policy_override=True, status="approved")
+    docs[1].update(officer_decision="decline", requested_amount_krw=5_000_000, status="declined")
     docs[5]["policy"] = {"decision": "refer", "reason_codes": [{"code": "R101", "message": "매출 대사율 미달"}]}
     docs[6].update(flags=["agent_fallback"], status="escalated", sla_escalated=True)
     for d in docs:

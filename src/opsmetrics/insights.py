@@ -16,7 +16,6 @@ POLICY_ORDER = ("eligible", "refer", "ineligible")
 RECOMMENDATION_ORDER = ("approve", "refer", "decline", "legacy")
 OFFICER_ORDER = ("approve", "decline")
 NONE = "none"
-APPROVE_SIDE = frozenset({"approve"})
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 BUCKET_MIN = 10
 MAX_BUCKETS = 36  # 최근 6시간. 더 오래된 구간은 `earlier`로만 센다.
@@ -47,10 +46,15 @@ def decision_funnel(docs: list[dict[str, Any]]) -> dict[str, Any]:
     compared = agreed = 0
     for p in docs:
         rec, dec = _recommendation(p), p.get("officer_decision")
-        if dec not in ("approve", "decline") or rec not in APPROVE_SIDE | {"decline"}:
+        if dec not in ("approve", "decline") or rec not in ("approve", "decline"):
+            continue
+        requested, approved_amount = p.get("requested_amount_krw"), p.get("approved_amount_krw")
+        if type(requested) is not int or requested <= 0:
+            continue
+        if dec == "approve" and (type(approved_amount) is not int or approved_amount <= 0):
             continue
         compared += 1
-        agreed += (rec in APPROVE_SIDE) == (dec == "approve")
+        agreed += (rec == "approve") == (dec == "approve" and approved_amount == requested)
     approved = sum(p.get("officer_decision") == "approve" for p in docs)
     overrides = sum(bool(p.get("policy_override")) and p.get("officer_decision") == "approve" for p in docs)
     return {

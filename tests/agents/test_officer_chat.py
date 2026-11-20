@@ -197,3 +197,48 @@ def test_model_cannot_relabel_numbers_or_invent_currency(lang, false_fact):
                 "officer_decision": None}
     reply = OfficerChat(FakeRunner(result=_run(false_fact)), "m").ask(snapshot, [], "?", lang)
     assert false_fact not in reply.answer
+
+
+@pytest.mark.parametrize("language,claim,check", [
+    ("en", "The settlement appears twice in the bank ledger.", "Match the two bank entries to the settlement statement."),
+    ("ko", "정산금이 계좌 장부에 두 번 나타납니다.", "두 입금 거래를 정산 명세와 대조하세요."),
+])
+def test_selected_reviewed_text_explains_transaction_and_next_check(language, claim, check):
+    opinion = {"recommendation": "refer", "review_passed": True,
+               "claims": [{"text": claim, "txn_ids": ["txn-42"], "evidence": {}}],
+               "officer_checks": [{"text": check, "supported": True, "evidence": {"M:pg_reconciliation_ratio": 0.81}}]}
+    keys = "agent_opinion.claims.0\nagent_opinion.officer_checks.0"
+    answer = OfficerChat(FakeRunner(result=_run(keys)), "m").ask({"agent_opinion": opinion}, [], "Why?", language)
+    assert all(part in answer.answer for part in (claim, "txn-42", check, "0.81"))
+
+
+def test_factual_money_questions_and_context_reach_selector_unmodified():
+    question = "Which month had KRW 7,000,000 in revenue?"
+    history = [{"role": "user", "text": question}, {"role": "assistant", "text": "Revenue [2026-09]: KRW 7,000,000"}]
+    snapshot = {"cashflow": {"monthly": [{"month": "2026-09", "revenue": 7_000_000}]}}
+    runner = FakeRunner(result=_run("cashflow.monthly.0.revenue"))
+    chat = OfficerChat(runner, "m")
+    answer = chat.ask(snapshot, [], question, "en")
+    assert runner.calls[0][1]["question"] == question
+    assert "2026-09" in answer.answer and "KRW 7,000,000" in answer.answer
+    chat.ask(snapshot, history, "What about the following month?", "en")
+    assert runner.calls[1][1]["history"] == history
+
+
+@pytest.mark.parametrize("text", ["KRW 3,500,000 would work.", "I recommend approving the full request.",
+                                  "300만 원이면 적절합니다.", "전액 승인을 권고합니다."])
+def test_reviewed_evidence_never_supplies_a_second_vote_or_an_amount(text):
+    opinion = {"recommendation": "decline", "review_passed": True,
+               "claims": [{"text": text, "evidence": {"M:dscr": 0.8}}]}
+    answer = OfficerChat(FakeRunner(result=_run("agent_opinion.claims.0")), "m").ask({"agent_opinion": opinion}, [], "?")
+    assert text not in answer.answer
+    assert "0.8" in answer.answer
+
+
+@pytest.mark.parametrize("language,want", [("en", "existing debt service"), ("ko", "기존 상환액")])
+def test_capacity_question_explains_the_selected_shortfall_month(language, want):
+    cf = {"monthly": [{"month": "2026-09", "revenue": 70, "operating_out": 60, "debt_service": 12}],
+          "capacity": {"short_months": ["2026-09"], "new_installment_krw": 5}}
+    runner = FakeRunner(result=_run("cashflow.capacity.short_months"))
+    answer = OfficerChat(runner, "m").ask({"cashflow": cf}, [], "Why?", language)
+    assert "2026-09" in answer.answer and want in answer.answer

@@ -5,7 +5,7 @@
 """
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any
@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agents.features import ANNUAL_RATE
+from agents.officer_facts import reviewed_detail
 from policy.engine import LIMIT_UNIT_KRW, explain
 from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
 from shared.contracts import CashFlowFeatures
@@ -159,7 +160,8 @@ def _opinion(view: Mapping[str, Any]) -> dict[str, Any] | None:
         "recommendation": assessment.get("recommendation"),
         "summary": assessment.get("summary"),
         "review_passed": (assessment.get("review") or {}).get("passed"),
-        "claims": [{"text": c["text"], "evidence": dict(c["evidence"])} for c in view.get("claims") or ()],
+        "claims": [{"text": c["text"], "evidence": dict(c["evidence"]),
+                    **({"txn_ids": c["txn_ids"]} if c.get("txn_ids") else {})} for c in view.get("claims") or ()],
         "counterfactuals": [{k: c.get(k) for k in ("explanation", "current", "target")}
                             for c in assessment.get("counterfactuals") or ()],
         "officer_checks": _officer_checks(view),
@@ -184,7 +186,7 @@ def _fit(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
-def build_snapshot(view: Mapping[str, Any]) -> dict[str, Any]:
+def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | None] | None = None) -> dict[str, Any]:
     doc = view["doc"]
     uw = doc.get("underwriting") or {}
     features = uw.get("features") or {}
@@ -212,6 +214,13 @@ def build_snapshot(view: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(officer, Mapping) else None,
         "truncated": False,
     }
+    opinion = snapshot.get("agent_opinion") or {}
+    for row in [*opinion.get("claims", ()), *opinion.get("officer_checks", ())]:
+        original = row.get("text") or ""
+        if not reviewed_detail(original, doc.get("requested_amount_krw")):
+            row["text"] = ""
+        elif translate and (translated := translate(original)) and reviewed_detail(translated, doc.get("requested_amount_krw")):
+            row["text"] = translated
     return _fit(snapshot)
 
 

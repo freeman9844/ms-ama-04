@@ -12,9 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from agents.officer_facts import evidence_menu
+from agents.officer_facts import counteroffer, evidence_menu
 from agents.runtime import AgentError, AgentSpec
-from shared.amount_advice import has_proposal
 from shared.opinions import CURRENT
 
 OFFICER_AGENT = "officer-assistant"
@@ -77,25 +76,6 @@ class ChatAnswer:
     output_tokens: int
 
 
-_REDUCTION = re.compile(
-    r"감액|대체\s*금액|대안(?:\s*금액|으로)|일부만\s*승인|한도(?:만큼|까지)\s*(?:대출|승인)|"
-    r"(?:금액|대출|신청액|한도).{0,35}(?:낮추|줄이|축소)|"
-    r"\b(?:counteroffer|smaller (?:amount|loan)|lower (?:amount|loan)|reduced (?:amount|loan)|"
-    r"partial approval|reduce (?:it|the (?:loan|amount|request))|(?:would|could|should) (?:offer|lend)|"
-    r"(?:offer|lend|approve|suggest|recommend)\s+\d+|"
-    r"lend (?:up to |at )?the (?:policy )?(?:limit|cap))\b",
-    re.I,
-)
-_MONEY = re.compile(
-    r"(?:(?P<prefix>₩|\$|KRW|USD)\s*)?(?P<n>\d[\d,]*(?:\.\d+)?)\s*"
-    r"(?P<scale>천만|백만|억|만|천|million|thousand|[mk](?![a-z]))?\s*(?P<currency>원|won\b|KRW\b|dollars?\b)?",
-    re.I,
-)
-_WRITTEN_AMOUNT = re.compile(r"[영일이삼사오육칠팔구십백천만억]+\s*원|"
-                             r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million)"
-                             r"(?:[- ]\w+){0,4}\s+(?:won|dollars?)\b", re.I)
-
-
 def _full_request_answer(snapshot: Mapping[str, Any], language: str) -> str:
     opinion = snapshot.get("agent_opinion") or {}
     rec = opinion.get("recommendation")
@@ -139,16 +119,11 @@ class OfficerChat:
             history = [{**turn, "text": mask(str(turn.get("text", "")))} for turn in history]
         requested = (snapshot.get("application") or {}).get("requested_amount_krw")
 
-        def unsafe(text: str) -> bool:
-            return (bool(_REDUCTION.search(text) or _WRITTEN_AMOUNT.search(_MONEY.sub("", text)))
-                    or has_proposal(text, requested)
-                    or any(m["prefix"] or m["currency"] or m["scale"] or "," in m["n"] for m in _MONEY.finditer(text)))
-
         if ((snapshot.get("agent_opinion") or {}).get("recommendation") not in CURRENT
                 and re.search(r"권고|추천|의견|recommend|opinion", question, re.I)):
             return ChatAnswer(_full_request_answer(snapshot, language), 0, 0)
-        history = [turn for turn in history if not unsafe(str(turn.get("text", "")))]
-        if unsafe(question):
+        history = [turn for turn in history if not counteroffer(str(turn.get("text", "")), requested)]
+        if counteroffer(question, requested):
             question = ("Explain the reviewed opinion on the full request and the next checks."
                         if language == "en" else "신청액 전액에 대한 검토 의견과 다음 확인 사항을 설명하세요.")
         payload = json.dumps({"snapshot": snapshot, "history": list(history), "question": question,

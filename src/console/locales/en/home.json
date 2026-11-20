@@ -115,7 +115,7 @@
   "부적격·거절": "Ineligible / declined",
   "분석 에이전트": "Analyst agent",
   "분포": "Distribution",
-  "비교 %(compared)s건 중 일치 %(agreed)s건(보류·과거 의견 제외)": "%(agreed)s of %(compared)s compared agree (excluding deferred and historical opinions)",
+  "전액 승인 여부 기준: 비교 %(compared)s건 중 일치 %(agreed)s건(보류·과거 의견·금액 미상 제외)": "%(agreed)s of %(compared)s agree on approval of the full amount (excluding deferrals, historical opinions and unknown amounts)",
   "비용": "Cost",
   "사유 코드 설명": "Reason code descriptions",
   "사유 코드가 붙은 신청 수입니다. 주황은 심사역 회부 기준, 빨강은 거절 기준입니다.": "Number of applications with each reason code. Orange codes refer to an officer; red codes decline.",

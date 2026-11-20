@@ -45,7 +45,7 @@
 <div class="grid-4">
   {{ ch.kpi(_("심사역 대기 중"), _("%(n)s건", n=s.sla.awaiting), _("SLA 초과 상태 포함"), "amber" if s.sla.awaiting else "neutral") }}
   {{ ch.kpi(_("SLA 초과(누적)"), _("%(n)s건", n=s.sla.escalated), _("결정 기한을 넘긴 적이 있는 신청"), "red" if s.sla.escalated else "green") }}
-  {{ ch.kpi(_("권고·결정 일치율"), s.funnel.agreement.rate|pct, _("비교 %(compared)s건 중 일치 %(agreed)s건(보류·과거 의견 제외)", compared=s.funnel.agreement.compared, agreed=s.funnel.agreement.agreed) if s.funnel.agreement.compared else _("비교 가능한 현행 권고와 결정이 없습니다"), "blue") }}
+  {{ ch.kpi(_("권고·결정 일치율"), s.funnel.agreement.rate|pct, _("전액 승인 여부 기준: 비교 %(compared)s건 중 일치 %(agreed)s건(보류·과거 의견·금액 미상 제외)", compared=s.funnel.agreement.compared, agreed=s.funnel.agreement.agreed) if s.funnel.agreement.compared else _("비교 가능한 현행 권고와 결정이 없습니다"), "blue") }}
   {{ ch.kpi(_("정책 예외 승인"), _("%(n)s건", n=s.funnel.overrides.count), _("심사역 승인 %(n)s건 중 %(rate)s", n=s.funnel.overrides.approved, rate=s.funnel.overrides.rate|pct) if s.funnel.overrides.approved else _("심사역 승인 없음"), "purple" if s.funnel.overrides.count else "neutral") }}
 </div>
 

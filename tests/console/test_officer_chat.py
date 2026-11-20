@@ -44,6 +44,7 @@ def test_snapshot_keeps_whitelisted_sections(make_doc, key):
     assert opinion["claims"][1] == {"text": "DSCR 1.8로 정책 기준을 넘는다",
                                     "evidence": {"S:2026-09:index": 1.0, "P:R101:threshold": 1.25}}
     assert "proposed_structure" not in opinion
+    assert opinion["claims"][0]["txn_ids"] == make_doc()["assessment"]["claims"][0]["txn_ids"]
     assert snap["officer_decision"] is None and snap["truncated"] is False
 
 
@@ -54,6 +55,14 @@ def test_snapshot_capacity_matches_detail_panel(make_doc, key):
     assert capacity == {"new_installment_krw": 9_500_000, "months": 1, "short_months": ["2026-09"],
                         "assumed_annual_rate": ANNUAL_RATE}
     assert len(capacity["short_months"]) == assessment_panels(view)["capacity"]["short_months"]
+
+
+def test_snapshot_can_use_existing_english_text_for_reviewed_check(make_doc, key):
+    doc = make_doc()
+    doc["assessment"]["officer_checks"] = [{"text": "계좌 거래와 대조하세요.", "metric_ids": ["M:dscr"]}]
+    snap = build_snapshot(detail_view(doc, None, key, restore=False),
+                          translate=lambda text: {"계좌 거래와 대조하세요.": "Compare against the bank ledger."}.get(text))
+    assert snap["agent_opinion"]["officer_checks"][0]["text"] == "Compare against the bank ledger."
 
 
 def test_snapshot_settlement_subset(make_doc, key):

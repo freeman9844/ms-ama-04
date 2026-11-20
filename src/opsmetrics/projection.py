@@ -38,6 +38,7 @@ def project(doc: dict[str, Any]) -> dict[str, Any]:
         "assessment": ({"schema_version": "2", "recommendation": rec, "review": {"passed": True}}
                        if rec in CURRENT else {"recommendation": "legacy"} if rec == "legacy" else None),
         "officer_decision": officer.get("decision") if isinstance(officer, dict) else None,
+        "approved_amount_krw": officer.get("amount_krw") if isinstance(officer, dict) else None,
         "policy_override": isinstance(officer, dict) and officer.get("policy_override") is True,
         "requested_amount_krw": doc.get("requested_amount_krw"),
         "sla_escalated": isinstance(doc.get("sla"), dict) and doc["sla"].get("escalated") is True,

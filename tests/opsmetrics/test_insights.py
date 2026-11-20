@@ -10,6 +10,7 @@ from opsmetrics.insights import (
     step_latency,
     throughput,
 )
+from opsmetrics.projection import project
 
 T0 = datetime(2026, 11, 4, 1, 0, tzinfo=UTC)
 
@@ -22,6 +23,7 @@ def p(*, policy="eligible", rec="approve", officer=None, override=False, codes=(
         "policy": {"decision": policy, "reason_codes": list(codes)} if policy else None,
         "assessment": {"schema_version": "2", "review": {"passed": True}, "recommendation": rec} if rec else None,
         "officer_decision": officer, "policy_override": override, "sla_escalated": escalated,
+        "requested_amount_krw": 500, "approved_amount_krw": 500 if officer == "approve" else None,
         "flags": list(flags), "steps": list(steps), "timeline": timeline,
     }
 
@@ -47,6 +49,17 @@ def test_archived_ops_projection_without_review_metadata_is_not_a_full_request_v
     funnel = decision_funnel([old])
     assert funnel["recommendation"] == {"legacy": 1}
     assert funnel["agreement"]["compared"] == 0
+
+
+@pytest.mark.parametrize("rec,requested,approved,compared,agreed", [
+    ("approve", 500, 300, 1, 0), ("decline", 500, 300, 1, 1), ("approve", 500, 500, 1, 1),
+    ("approve", None, 300, 0, 0), ("approve", 500, None, 0, 0),
+])
+def test_projected_agreement_compares_actual_full_amount(rec, requested, approved, compared, agreed):
+    snapshot = project({"assessment": p(rec=rec)["assessment"], "requested_amount_krw": requested,
+                        "officer_decision": {"decision": "approve", "amount_krw": approved}})
+    agreement = decision_funnel([snapshot])["agreement"]
+    assert (agreement["compared"], agreement["agreed"]) == (compared, agreed)
 
 
 def test_funnel_override_rate_is_share_of_officer_approvals():

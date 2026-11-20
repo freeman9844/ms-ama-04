@@ -77,7 +77,7 @@ from console.ops import (
 from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console import translate
-from console.translate import MachineTranslation, PageTexts, data_label, mt_filters, page_scope, validate_texts
+from console.translate import MachineTranslation, PageTexts, catalog, data_label, mt_filters, page_scope, validate_texts
 from console.views import DECIDABLE, RawStore, detail_view, load_raw
 from journey.models import (
     CONSENT_PURPOSE,
@@ -670,12 +670,21 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return _chat_error("invalid_question")
         # 스냅샷은 원천 없이(raw=None) 저장된 가명 텍스트로만 만든다. 원천은 심사역이 쓴 질문·대화를 그 건의
         # 가명처리기로 가리는 데만 쓴다. 원천을 읽다 오류가 나면 엔티티 없이 가린 문장을 보내지 않고 실패로 답한다.
-        snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False))
         raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
         if not readable:
             return _chat_error("failed")
         masker = (build_pseudonymizer(deps.pseudonym_key, raw.profile, raw.transactions) if raw is not None
                   else Pseudonymizer(deps.pseudonym_key))
+        translate = None
+        if i18n.current() == "en":
+            stored = await run_in_threadpool(stored_translations, application_id)
+            page = PageTexts(masker, stored, allow_pending=False)
+
+            def translate(text: str) -> str | None:
+                translated = catalog(text) or page.stored_en(text)
+                return masker.mask(translated) if translated else None
+
+        snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
         started = time.monotonic()
         result, answer = "ok", None
         try:

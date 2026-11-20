@@ -49,7 +49,7 @@ def test_project_keeps_only_allowed_fields():
     p = project(doc(officer="approve"))
     assert set(p) == {"application_id", "applicant_id", "status", "submitted_at", "received_at", "source", "run_id",
                       "segment", "steps", "timeline", "flags", "policy", "assessment", "officer_decision",
-                      "policy_override", "requested_amount_krw", "sla_escalated"}
+                      "policy_override", "requested_amount_krw", "approved_amount_krw", "sla_escalated"}
     assert p["policy"] == {"decision": "eligible", "reason_codes": ["R104"]}
     assert p["assessment"] == {"schema_version": "2", "review": {"passed": True}, "recommendation": "approve"} and p["officer_decision"] == "approve"
     assert (p["policy_override"], p["requested_amount_krw"], p["sla_escalated"]) == (False, None, False)
