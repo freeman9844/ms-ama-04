@@ -20,7 +20,7 @@ from shared.pseudonymize import tokens
 from shared.pseudonymize import tokens
 from shared.segments import AGE_BANDS, SELLER_INDUSTRIES
 from shared.sellers import DEMO_SELLERS, LOAD_BUSINESS_NAMES
-from tests.console.conftest import KEY, PROFILE
+from tests.console.conftest import KEY, PROFILE, FakeRaw
 from tests.console.test_i18n import CUSTOMER_PAGES, EN_PAGES, HANGUL
 
 EN = i18n.CATALOGS["en"]
@@ -40,8 +40,29 @@ class FakeTranslator:
 @pytest.fixture
 def mt():
     deps = fixtures.build_deps()
+    active_sources(deps)
     deps.translator = FakeTranslator()
     return TestClient(create_app(deps), follow_redirects=False), deps
+
+
+def active_sources(deps):
+    deps.raw = FakeRaw()
+    deps.raw.blobs[("consent-m-1", "flow.json")] = []
+    deps.privacy.get_consent = lambda cid: {"id": cid, "status": "granted"} if cid in {"c-1", "m-1"} else None
+    for doc in deps.store.docs.values():
+        doc["consent"] = {"consent_id": "c-1"}
+    for loan in deps.monitoring.loans.values():
+        loan["underwriting_consent_id"] = "c-1"
+        if loan.get("monitoring"):
+            loan["monitoring"]["consent_id"] = "m-1"
+
+
+def browser_request(client, selector=lambda t: True):
+    page = client.get(DETAIL, headers=EN_HEADERS).text
+    grant = json.loads(re.search(r'<script type="application/json" class="mt-grant">(.*?)</script>', page).group(1))
+    texts = sorted({t for t in _pending(page) if selector(t)})
+    assert texts
+    return {"texts": texts, "scope": grant["scope"], "tickets": [grant["tickets"][t] for t in texts]}
 
 
 def _token(deps):
@@ -175,25 +196,24 @@ def test_english_page_loads_mt_script_with_csrf(mt):
 def test_translate_endpoint_fills_cache_for_next_render(mt, caplog):
     client, deps = mt
     page = "/applications/app-20261103-p01"
-    pending = re.findall(r'<span class="mt" data-mt="([^"]*)">', client.get(page, headers={"Cookie": "lang=en"}).text)
-    assert pending
-    texts = sorted({t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&#34;", '"')
-                    .replace("&#39;", "'") for t in pending})
+    payload = browser_request(client)
+    texts = payload["texts"]
     with caplog.at_level(logging.INFO, logger="console.translate"):
-        r = _post(client, deps, {"texts": [*texts, "식품", "OK"]})
+        r = _post(client, deps, payload)
     assert r.status_code == 200
-    assert r.json()["translations"] == [*(f"EN({t})" for t in texts), "Food", "OK"]
+    assert r.json()["translations"] == [f"EN({t})" for t in texts]
     assert deps.translator.calls == [texts]  # 카탈로그·한글 없는 문구는 보내지 않는다
     assert "result=ok" in caplog.text and texts[0] not in caplog.text
     again = client.get(page, headers={"Cookie": "lang=en"}).text
     assert 'data-mt="' not in again and 'class="mt mt-done"' in again
-    _post(client, deps, {"texts": texts})
+    _post(client, deps, payload)
     assert len(deps.translator.calls) == 1
 
 
 def test_translate_endpoint_masks_pii_before_model(mt):
     client, deps = mt
-    r = _post(client, deps, {"texts": ["연락처 010-1234-5678 확인"]})
+    deps.store.docs["app-20261103-p01"]["assessment"]["summary"] = "연락처 010-1234-5678 확인"
+    r = _post(client, deps, browser_request(client, lambda t: "[[PHONE_" in t))
     assert r.status_code == 200 and "010-1234-5678" not in json.dumps(deps.translator.calls, ensure_ascii=False)
     assert "[[PHONE_" in r.json()["translations"][0]
 
@@ -207,7 +227,8 @@ def test_translate_endpoint_blanks_token_loss(mt):
 
     deps.translator = Lossy()
     client2 = TestClient(create_app(deps), follow_redirects=False)
-    r = _post(client2, deps, {"texts": ["연락처 010-1234-5678 확인"]})
+    deps.store.docs["app-20261103-p01"]["assessment"]["summary"] = "연락처 010-1234-5678 확인"
+    r = _post(client2, deps, browser_request(client2, lambda t: "[[PHONE_" in t))
     assert r.status_code == 200 and r.json()["translations"] == [""]
 
 
@@ -223,9 +244,10 @@ def test_translate_endpoint_guards(mt):
 @pytest.mark.parametrize(("error", "status"), [(GatewayThrottled("rate_limited", "c"), 429), (AgentError("x"), 502)])
 def test_translate_endpoint_errors(error, status):
     deps = fixtures.build_deps()
+    active_sources(deps)
     deps.translator = FakeTranslator(error)
     client = TestClient(create_app(deps))
-    assert _post(client, deps, {"texts": ["새 문장"]}).status_code == status
+    assert _post(client, deps, browser_request(client)).status_code == status
 
 
 def test_translate_endpoint_disabled_without_translator():
@@ -241,6 +263,33 @@ DETAIL = "/applications/app-20261103-p01"
 
 def _pending(text):
     return [html.unescape(t) for t in re.findall(r'data-mt="([^"]*)"', text)]
+
+
+def test_unsigned_post_cannot_translate_free_text(mt):
+    client, deps = mt
+    r = _post(client, deps, {"texts": ["삭제 뒤의 자유 문구"]})
+    assert r.status_code == 403 and not deps.translator.calls
+
+
+@pytest.mark.parametrize("change", ["revoked", "raw_missing", "unknown_consent"])
+def test_queued_browser_translation_rechecks_deleted_case(mt, change):
+    client, deps = mt
+    payload = browser_request(client)
+    if change == "raw_missing":
+        deps.raw.blobs.clear()
+    else:
+        deps.privacy.get_consent = lambda _: {"status": "revoked"} if change == "revoked" else None
+    assert "data-mt=" not in client.get(DETAIL, headers=EN_HEADERS).text
+    r = _post(client, deps, payload)
+    assert r.status_code == 200 and r.json()["translations"] == [""] * len(payload["texts"]) and not deps.translator.calls
+
+
+def test_browser_ticket_cannot_authorize_different_text_or_scope(mt):
+    client, deps = mt
+    payload = browser_request(client)
+    assert _post(client, deps, payload | {"texts": ["다른 신청 문구"] * len(payload["texts"])}).status_code == 403
+    assert _post(client, deps, payload | {"scope": [["other", "profile.json"]]}).status_code == 403
+    assert deps.translator.calls == []
 
 
 def test_english_detail_uses_stored_translation_without_browser_call(mt):
@@ -289,6 +338,8 @@ def _case_client(make_doc, raw, key, role, stored=None):
 
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key,
                        translator=FakeTranslator(), translations=fixtures.InMemoryTranslations(stored))
+    deps.privacy = fixtures.EmptyPrivacy()
+    deps.privacy.get_consent = lambda cid: {"status": "granted"}
     return TestClient(create_app(deps)), deps, {**EN_HEADERS, **principal(role)}
 
 

@@ -23,6 +23,14 @@ azd 환경에 이전 `AI_ACCOUNT_NAME`이 남아 있어, `ops window/pause/resum
 - Service Bus가 없는 동안 오케스트레이터는 인라인 모드로 동작합니다(이벤트 발행 생략, `servicebus_disabled` 기록).
 - 실측: pause 5.8분·resume 4.7분(P2), pause 6.0분·resume 4.5분(P4b) — `docs/runbook/deploy-history.md`의 "운영 명령" 표와 "실제 배포 기록(P4b…)" 표.
 
+## 구버전 합성 상환 흐름 복구
+
+재생 실패 사유가 `ambiguous_scheduled_debit`이면 기존 대출에서 재생을 새로 시작하지 않는다. 회차 키가 없는 자동이체와 별도 지연 납부를 날짜·금액만으로 구분할 수 없다. 기존 대출·재생 ID를 보관하고 스케줄, 충당액·잔액, 변경 이력과 연락 기록을 읽기 전용으로 확인한다. 거래 삭제, 회차 키 소급 부여, 실패 주차 강제 완료를 하지 않는다.
+
+데모를 이어갈 때는 같은 합성 업체로 **별도의 신규 합성 신청·대출**을 만들고 새 모니터링 동의와 재생 ID를 사용한다. 자동이체에 `scheduled_item_key`가 있는 새 흐름으로 13주를 재생한다. 출금 거래별 원금액과 실제 충당액이 일치하는지, 같은 연락이 중복되지 않는지, 실패한 원본 대출과 흐름이 그대로인지 대조한다. 이것은 실대출 마이그레이션이나 예전 약정의 복원이 아니다.
+
+로컬 재현: `python -m pytest -q tests/orchestrator/test_monitoring_handlers.py -k stored_legacy_plan` (Mock API·메모리 저장소, Azure 호출 없음).
+
 ## smoke
 
 `python -m ops smoke`는 VNet 안 smoke Job을 실행하고(`src/ops/smoke_checks.py`의 `build_checks`), 이어서 운영자 PC에서 콘솔 관문을 확인합니다. Job의 점검 항목은 다음 순서입니다.

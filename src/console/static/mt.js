@@ -67,6 +67,14 @@
       pending.get(text).push(node);
     });
     if (!pending.size) return;
+    const scripts = root.querySelectorAll("script.mt-grant");
+    if (scripts.length !== 1) return;
+    let grant;
+    try {
+      grant = JSON.parse(scripts[0].textContent);
+    } catch {
+      return;
+    }
     document.querySelectorAll("[data-mt-note]").forEach((n) => { n.hidden = false; });
     for (const batch of chunks([...pending.keys()])) {
       try {
@@ -74,7 +82,7 @@
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-          body: JSON.stringify({ texts: batch }),
+          body: JSON.stringify({ texts: batch, scope: grant.scope, tickets: batch.map(t => grant.tickets[t]) }),
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !Array.isArray(body.translations)) continue;

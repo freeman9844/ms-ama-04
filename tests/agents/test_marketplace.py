@@ -36,6 +36,14 @@ def test_rates_are_pooled_over_platforms():
     assert summary["mkt_return_rate_90d"] == 0.0075 and summary["mkt_cancel_rate_90d"] == 0.005
 
 
+def test_missing_platform_is_not_counted_as_a_zero_rated_or_zero_return_seller():
+    a = _platform(review_count=100, rating=4.0, gross_90d_krw=1_000_000, return_90d_krw=200_000)
+    b = _platform(platform="쿠팡", review_count=300, rating=5.0, gross_90d_krw=3_000_000, return_90d_krw=0)
+    full, partial = (store_summary(s, AS_OF) for s in (_store(a, b), _store(a)))
+    assert (full["mkt_return_rate_90d"], full["mkt_rating"]) == (.05, 4.75)
+    assert (partial["mkt_return_rate_90d"], partial["mkt_rating"]) == (.2, 4.0)
+
+
 def test_zero_gross_rates_are_none():
     summary = store_summary(_store(_platform(gross_90d_krw=0, cancel_90d_krw=0, return_90d_krw=0)), AS_OF)
     assert summary["available"] is True

@@ -1725,7 +1725,7 @@ def test_approval_blocks_ambiguous_legacy_flow_without_changing_schedule(mock_ap
     assert led["schedule"] == before["repayment"]["schedule"]
 
 
-def test_stored_legacy_plan_fails_replay_before_publishing_a_doubled_cashflow(mock_app):
+def test_stored_legacy_plan_fails_replay_before_publishing_a_doubled_cashflow(mock_app, monkeypatch):
     outbox = Outbox()
     deps = make_deps(mock_app, events=outbox)
     approved_loan(deps)
@@ -1748,6 +1748,31 @@ def test_stored_legacy_plan_fails_replay_before_publishing_a_doubled_cashflow(mo
     assert mon["status"] == "failed" and mon["error"] == "ambiguous_scheduled_debit"
     assert mon["weeks"] == [] and loan(deps)["repayment"] == led and not contacts(deps, rid)
     assert len(outbox.bodies(TOPIC_FLOW)) == 1
+
+    old_id = LOAN
+    stopped = loan(deps)
+    monkeypatch.setitem(globals(), "LOAN", "recovery-synthetic-loan")
+    approved_loan(deps)
+    new_rid = replay(deps)["replay_id"]
+    assert new_rid != rid
+    pump(deps, outbox)
+    resume_until_done(deps, new_rid, lambda: pump(deps, outbox))
+    recovered = loan(deps)
+    mon = recovered["monitoring"]
+    assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
+    regenerated = deps.raw.get_json(f"consent-{mon['consent_id']}", "flow.json")
+    debits = {t["txn_id"]: -t["amount_krw"] for t in regenerated if t["description"] == LENDER_DEBIT}
+    assert debits and all(t.get("scheduled_item_key") for t in regenerated if t["txn_id"] in debits)
+    posted = {}
+    for row in recovered["repayment"]["schedule"]:
+        for allocation in row.get("allocations", ()):
+            txn = allocation["txn_id"]
+            posted[txn] = posted.get(txn, 0) + allocation["amount_krw"]
+    assert posted == debits
+    notices = contacts(deps, new_rid)
+    assert len({(n["by"], n["ref"]) for n in notices}) == len(notices)
+    assert deps.store.read(LOANS, old_id, old_id) == stopped
+    assert deps.raw.get_json(container, "flow.json") == flow
 
 
 def test_plan_choice_then_approval_changes_schedule_and_replay(mock_app):

@@ -465,6 +465,7 @@ def _borrower_env(env, raw):
     raw.blobs[("consent-c-2", "profile.json")] = other.model_dump(mode="json")
     raw.blobs[("consent-c-2", "transactions.json")] = []
     deps.store.docs["app-2"]["consent"]["consent_id"] = "c-2"
+    deps.privacy.consents["c-2"] = consent("c-2", "app-2")
     grievance = deps.privacy.grievances[("app-2", "grv-abc123")]
     grievance["text"] = "다른상점 박다른 그리고 김대표 문의"
     return client, deps
@@ -507,6 +508,21 @@ def test_english_borrower_page_with_one_unreadable_source_sends_nothing(env, raw
     assert en.status_code == 200 and "data-mt=" not in en.text and "문의" in en.text
     deps.raw = real
     assert _pending(_english(client, "/borrower/seller-dailylook-01/grievances"))
+
+
+def test_deleted_mixed_page_uses_only_the_grievances_own_stored_match(env, raw):
+    from agents.pretranslate import translation_id
+
+    client, deps = _borrower_env(env, raw)
+    deps.raw.blobs.pop(("consent-c-2", "profile.json"))
+    g = deps.privacy.grievances[("app-2", "grv-abc123")]
+    g["text"] = "다시 확인해 주세요"
+    key = translation_id(g["text"])
+    deps.translations.items["app-1"] = {key: "Other owner's translation"}
+    deps.translations.items["app-2"] = {key: "Please check again"}
+    en = _english(client, "/borrower/seller-dailylook-01/grievances")
+    assert "Please check again" in en.text and "Other owner's translation" not in en.text
+    assert not _pending(en)
 
 
 def test_uphold_decision_is_sent_with_principal(env):

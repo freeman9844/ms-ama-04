@@ -117,6 +117,26 @@ def raw_container(consent_id: str) -> str:
     return f"consent-{consent_id}"
 
 
+RawScope = tuple[tuple[str, str], ...]
+
+
+def translation_scope(source: str, doc: Mapping[str, Any]) -> RawScope:
+    if source == "applications":
+        cid = (doc.get("consent") or {}).get("consent_id")
+        return ((cid, "profile.json"), (cid, "transactions.json")) if cid else ()
+    underwriting, monitoring = doc.get("underwriting_consent_id"), (doc.get("monitoring") or {}).get("consent_id")
+    return ((underwriting, "profile.json"), (monitoring, "flow.json")) if underwriting and monitoring else ()
+
+
+def active_scope(scope: RawScope, consent: Callable[[str], Mapping[str, Any] | None]) -> bool:
+    # delete_consent_data marks the registry record before attempting Blob deletion.
+    for cid in dict.fromkeys(cid for cid, _ in scope):
+        record = consent(cid)
+        if not record or record.get("status") != "granted" or record.get("deletion_proof_id") or record.get("deletion_complete"):
+            return False
+    return bool(scope)
+
+
 def _validated(profile: Any, txns: Any) -> tuple[ApplicantProfile, list[Transaction]] | None:
     if profile is None or txns is None:
         return None

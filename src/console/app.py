@@ -15,7 +15,7 @@ import secrets
 import threading
 import time
 from functools import partial
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +33,7 @@ from agents.collections import message_issues
 from console import i18n
 from console.i18n import _
 from agents.monitoring import WEEKS
+from agents.pretranslate import RawScope, active_scope, raw_container, translation_scope
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
@@ -341,10 +342,10 @@ def _issue_text(issue: str) -> str:
     return _(issue)
 
 
-def _token_script(token_map: dict[str, str]) -> str:
+def _token_script(token_map: dict[str, Any], css: str = "mt-tokens") -> str:
     """영문 화면의 토큰 지도. 브라우저가 번역 결과의 토큰을 같은 화면에서 평문으로 보이던 값으로 되돌린다."""
     body = json.dumps(token_map, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f'<script type="application/json" class="mt-tokens">{body}</script>'
+    return f'<script type="application/json" class="{css}">{body}</script>'
 
 
 def create_app(deps: ConsoleDeps) -> FastAPI:
@@ -380,42 +381,47 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
         if i18n.current() == i18n.DEFAULT:
             return HTMLResponse(draw(), status_code=status_code)
-        page = texts or PageTexts(Pseudonymizer(deps.pseudonym_key))
+        page = texts or PageTexts(Pseudonymizer(deps.pseudonym_key), allow_pending=False)
         with page_scope(page):
             html = draw()
         token_map = page.token_map()
-        if token_map:
-            script = _token_script(token_map)
+        script = _token_script(token_map) if token_map else ""
+        if page.requested and user and page.scope:
+            tickets = {t: translate.mt_ticket(deps.pseudonym_key, user.user_id, page.scope, t) for t in page.requested}
+            script += _token_script({"scope": page.scope, "tickets": tickets}, "mt-grant")
+        if script:
             at = html.rfind("</body>")
             html = html + script if at < 0 else html[:at] + script + html[at:]
         return HTMLResponse(html, status_code=status_code)
 
-    def stored_translations(owners: Iterable[str]) -> dict[str, str]:
-        """저장된 영문 번역(id → en). 읽기 실패는 그 owner만 번역 대기로 되돌린다. 예외 본문은 남기지 않는다."""
-        stored: dict[str, str] = {}
-        if deps.translations is None:
-            return stored
-        for owner in dict.fromkeys(owners):
-            try:
-                stored.update(deps.translations.for_owner(owner))
-            except Exception:  # noqa: BLE001
-                mt_log.warning("stored translations unavailable owner=%s", owner)
-        return stored
+    def stored_translations(owner: str) -> dict[str, str]:
+        try:
+            return deps.translations.for_owner(owner) if deps.translations else {}
+        except Exception:  # noqa: BLE001
+            mt_log.warning("stored translations unavailable owner=%s", owner)
+            return {}
 
-    def page_texts(raw: Any, *owners: str, readable: bool = True) -> PageTexts | None:
-        """영문 화면의 문구 처리기. raw(프로필·거래)가 없으면 패턴 마스킹만 한다. 한국어 화면은 None.
+    def mt_active(scope: RawScope, *, check_raw: bool = False) -> bool:
+        try:
+            if check_raw and not all(deps.raw.get_json(raw_container(cid), blob) is not None for cid, blob in scope):
+                return False
+            return bool(deps.privacy and active_scope(scope, deps.privacy.get_consent))
+        except Exception as e:  # noqa: BLE001
+            mt_log.warning("translation scope unavailable error=%s", type(e).__name__)
+            return False
 
-        readable=False(원천 읽기 오류)면 새 번역 대기를 내지 않는다. 엔티티 없이 마스킹한 문구를 모델에 보내지 않기 위해서다.
-        """
+    def page_texts(raw: Any, owner: str, scope: RawScope) -> PageTexts | None:
         if i18n.current() == i18n.DEFAULT:
             return None
-        stored = stored_translations(owners)
+        stored = stored_translations(owner)
         if raw is None:
-            return PageTexts(Pseudonymizer(deps.pseudonym_key), stored, readable)
-        return PageTexts.for_case(deps.pseudonym_key, raw.profile, raw.transactions, stored)
+            return PageTexts(Pseudonymizer(deps.pseudonym_key), stored, allow_pending=False)
+        page = PageTexts.for_case(deps.pseudonym_key, raw.profile, raw.transactions, stored)
+        page.scope, page.allow_pending = scope, mt_active(scope)
+        return page
 
     def read_raw(load: Callable[[], Any], owner: str) -> tuple[Any, bool]:
-        """원천을 새로 읽는 화면(이의·차주)용. 읽기 오류는 500 대신 (None, False)로 돌려준다. 예외 종류만 남긴다."""
+        """원천 읽기 오류는 (None, False)로 돌려준다. 예외 종류만 기록한다."""
         try:
             return load(), True
         except Exception as e:  # noqa: BLE001
@@ -478,11 +484,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def detail(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
         state = state_tag(doc)
         ctx.setdefault("decision_pending", decision_pending(doc["application_id"], state))
-        raw = load_raw(deps.raw, doc) if doc.get("consent") else None
+        raw = (read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])[0] if i18n.current() != i18n.DEFAULT
+               else load_raw(deps.raw, doc))
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"]),
+        return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"], translation_scope("applications", doc)),
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
                       op=opinion_panel(view), in_progress=in_progress, state=state,
                       consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
@@ -696,11 +703,15 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if machine is None:
             return JSONResponse({"error": "disabled"}, status_code=503)
         try:
-            texts = validate_texts(await _json_body(request))
+            body = await _json_body(request)
+            texts = validate_texts(body)
         except _BadBody:
             texts = None
         if texts is None:
             return JSONResponse({"error": "bad_request"}, status_code=400)
+        scope = translate.verified_scope(deps.pseudonym_key, user.user_id, body, texts)
+        if not scope:
+            raise HTTPException(403, "invalid translation grant")
         # 정상 클라이언트는 이미 마스킹한 문구를 보낸다(재마스킹은 변화 없음). 원문이 오면 모델에 가기 전에 가린다.
         mask = Pseudonymizer(deps.pseudonym_key).mask
         texts = [mask(t) for t in texts]
@@ -708,7 +719,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         result, out, tokens = "ok", None, (0, 0)
         try:
             with i18n.use("en"):
-                out, *tokens = await run_in_threadpool(machine.translate, texts)
+                out, *tokens = await run_in_threadpool(machine.translate_authorized, texts, partial(mt_active, scope, check_raw=True))
         except GatewayThrottled:
             result = "throttled"
         except GatewayBlocked:
@@ -751,11 +762,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         alerts = loan_alerts(loan) if alerts is None else alerts
         if request is not None:
             ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
-        raw = load_monitoring_raw(deps.raw, loan)
+        raw = (read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])[0] if i18n.current() != i18n.DEFAULT
+               else load_monitoring_raw(deps.raw, loan))
         contacts = monitoring_store().get_contacts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else None
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore, contacts=contacts)
         blocked = replay_in_progress(mon, deps.clock())
-        return render("loan.html", user, status_code, texts=page_texts(raw, loan["id"]), v=view, ui=loan_summary(view),
+        return render("loan.html", user, status_code, texts=page_texts(raw, loan["id"], translation_scope("loans", loan)), v=view, ui=loan_summary(view),
                       replay_blocked=blocked,
                       replay_held=replay_held(mon), weeks_left=WEEKS - (mon.get("paused_week") or 0), **ctx)
 
@@ -930,7 +942,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             doc = deps.store.get(application_id)
             if doc is not None and doc.get("applicant_id") == applicant_id:
                 applications.append(doc)
-        loans = borrower_loans(applicant_id, applications) if page in {"plans", "notices"} else []
+        loans = borrower_loans(applicant_id, applications) if page in {"plans", "notices"} or (
+            page == "consents" and i18n.current() != i18n.DEFAULT) else []
+        grievances = store.grievances_for_applicant(applicant_id)
         rows = [
             {"application_id": doc["application_id"], "received_on": str(doc.get("submitted_at") or "")[:10],
              "amount_krw": doc.get("requested_amount_krw"), "tenor": doc.get("requested_tenor_months"),
@@ -939,10 +953,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             for doc in sorted(applications, key=lambda d: str(d.get("submitted_at") or ""), reverse=True)
         ]
         return render(
-            BORROWER_PAGES[page], user, status_code, texts=borrower_texts(applications, loans),
+            BORROWER_PAGES[page], user, status_code, texts=borrower_texts(applications, loans, consents, grievances, page),
             applicant_id=applicant_id, consents=consents, rows=rows,
-            applications=applications, grievances=store.grievances_for_applicant(applicant_id),
-            plans=borrower_plans(loans), **ctx,
+            applications=applications, grievances=grievances,
+            plans=borrower_plans(loans) if page in {"plans", "notices"} else [], **ctx,
         )
 
     def borrower_loans(applicant_id: str, applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -962,23 +976,35 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             plans.append(borrower_plan(loan, contacts, today))
         return plans
 
-    def borrower_texts(applications: list[dict[str, Any]], loans: list[dict[str, Any]]) -> PageTexts | None:
+    def borrower_texts(applications, loans, consents, grievances, menu) -> PageTexts | None:
         """고객 콘솔 화면은 여러 신청이 섞이므로 신청·대출 원천의 엔티티를 합쳐 가명처리한다."""
         if i18n.current() == i18n.DEFAULT:
             return None
-        cases, readable = [], True
+        cases, refs, readable = [], [], True
         for doc in applications:
-            raw, ok = read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"]) if doc.get("consent") else (None, True)
-            readable &= ok
+            raw, _ = read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])
+            readable &= raw is not None
+            refs.extend(translation_scope("applications", doc))
             if raw is not None:
                 cases.append((raw.profile, raw.transactions))
         for loan in loans:
-            raw, ok = read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])
-            readable &= ok
+            raw, _ = read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])
+            readable &= raw is not None
+            refs.extend(translation_scope("loans", loan))
             if raw is not None:
                 cases.append((raw.profile, raw.transactions))
-        stored = stored_translations(doc["application_id"] for doc in applications)
-        return PageTexts.merged(deps.pseudonym_key, cases, stored, allow_pending=readable)
+        owners = {d["application_id"] for d in applications}
+        if menu == "grievances":
+            readable &= all(g.get("application_id") in owners for g in grievances)
+        if menu == "consents":
+            known = {cid for cid, _ in refs}
+            readable &= all(c.get("consent_id") in known for c in consents if c.get("notices"))
+        scope = tuple(dict.fromkeys(refs))
+        allowed = readable and mt_active(scope)
+        page = PageTexts.merged(deps.pseudonym_key, cases, allow_pending=allowed)
+        page.owner_translations = {owner: stored_translations(owner) for owner in sorted(owners)}
+        page.scope = scope
+        return page
 
     @app.get("/borrower", response_class=HTMLResponse)
     def borrower_index(request: Request) -> HTMLResponse:
@@ -1132,11 +1158,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if i18n.current() == i18n.DEFAULT:
             return None
         owner = doc["application_id"]
-        application, readable = read_raw(lambda: deps.store.get(owner), owner)
-        raw = None
-        if application and readable:
-            raw, readable = read_raw(lambda: load_raw(deps.raw, application), owner)
-        return page_texts(raw, owner, readable=readable)
+        application, _ = read_raw(lambda: deps.store.get(owner), owner)
+        raw = read_raw(lambda: load_raw(deps.raw, application), owner)[0] if application else None
+        return page_texts(raw, owner, translation_scope("applications", application or {}))
 
     @app.get("/grievances/{application_id}/{grievance_id}", response_class=HTMLResponse)
     def grievance(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:

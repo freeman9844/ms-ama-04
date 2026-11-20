@@ -10,15 +10,17 @@
 import contextlib
 import contextvars
 import hashlib
+import hmac
+import json
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 from markupsafe import Markup
 
 from agents.data_assembly import case_entities
-from agents.pretranslate import BATCH_CHARS, BATCH_ITEMS, batches, tokens_kept, translation_id  # noqa: F401 - 배치 상수 재수출
+from agents.pretranslate import BATCH_CHARS, BATCH_ITEMS, RawScope, batches, tokens_kept, translation_id  # noqa: F401 - 배치 상수 재수출
 from console import i18n
 from shared.pseudonymize import Pseudonymizer, tokens
 
@@ -89,6 +91,18 @@ class MachineTranslation:
         """키는 가명처리한 문구(번역 에이전트에 보낸 것과 같다)."""
         return self.cache.get(masked)
 
+    def translate_authorized(self, texts: Sequence[str], allowed: Callable[[], bool]) -> tuple[list[str], int, int]:
+        translations, inputs, outputs = [], 0, 0
+        for batch in batches(texts):
+            if not allowed():
+                translations.extend([""] * len(batch))
+                continue
+            values, used_in, used_out = self.translate(batch)
+            translations.extend(values)
+            inputs += used_in
+            outputs += used_out
+        return translations, inputs, outputs
+
     def translate(self, texts: Sequence[str]) -> tuple[list[str], int, int]:
         """가명처리한 문구 순서대로 영문. 카탈로그·캐시에 없는 한국어만 에이전트로 보낸다. (번역, 입력 토큰, 출력 토큰).
 
@@ -135,9 +149,12 @@ class PageTexts:
     def __init__(self, masker: Pseudonymizer, stored: Mapping[str, str] | None = None, allow_pending: bool = True) -> None:
         self._masker = masker
         self._stored = stored or {}
+        self.owner_translations: dict[str, dict[str, str]] = {}
         self._tokens: dict[str, str] = {}
         # False면 원천을 못 읽은 화면: 저장 번역·카탈로그만 쓰고 새 번역 대기(data-mt)는 내지 않는다.
         self.allow_pending = allow_pending
+        self.scope: RawScope = ()
+        self.requested: set[str] = set()
 
     @classmethod
     def for_case(cls, key: bytes, profile: Any, transactions: Sequence[Any], stored: Mapping[str, str] | None = None):
@@ -166,15 +183,17 @@ class PageTexts:
             en = en.replace(token, catalog(value) or value)
         return en
 
-    def stored_en(self, text: str) -> str | None:
+    def stored_en(self, text: str, owner: str | None = None) -> str | None:
         masked = self.masked(text)
-        en = self._stored.get(translation_id(masked))
+        store = self._stored if owner is None else self.owner_translations.get(owner, {})
+        en = store.get(translation_id(masked))
         if not en or not tokens_kept(masked, en):
             return None
         return self.show(text, en)
 
     def pending(self, text: str) -> str:
         masked = self.masked(text)
+        self.requested.add(masked)
         self._tokens.update(self._fresh(text, masked))
         return masked
 
@@ -198,16 +217,16 @@ def page_scope(page: PageTexts) -> Iterator[None]:
         _page.reset(token)
 
 
-def _cached_en(text: str, page: PageTexts, translator: MachineTranslation | None) -> str | None:
+def _cached_en(text: str, page: PageTexts, translator: MachineTranslation | None, owner: str | None) -> str | None:
     """저장 번역 → 이 프로세스의 기계 번역 캐시(키는 마스킹 문구) 순."""
-    stored = page.stored_en(text)
+    stored = page.stored_en(text, owner)
     if stored:
         return stored
-    cached = translator.lookup(page.masked(text)) if translator else None
+    cached = translator.lookup(page.masked(text)) if translator and page.allow_pending else None
     return page.show(text, cached) if cached else None
 
 
-def _mark(text: str, mode: str, translator: MachineTranslation | None, key: bytes) -> Markup | str:
+def _mark(text: str, mode: str, translator: MachineTranslation | None, key: bytes, owner: str | None) -> Markup | str:
     if i18n.current() == i18n.DEFAULT or not has_korean(text):
         return text
     fixed = catalog(text)
@@ -216,7 +235,7 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
         if fixed:
             return Markup('{}<span class="mt-ref">{}</span>').format(text, fixed)
         page = current_page() or PageTexts(Pseudonymizer(key))
-        cached = _cached_en(text, page, translator)
+        cached = _cached_en(text, page, translator, owner)
         if cached:
             return Markup('{}<span class="mt-ref mt-done">{}</span>').format(text, cached)
         if translator and page.allow_pending:
@@ -225,7 +244,7 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
     if fixed:
         return fixed
     page = current_page() or PageTexts(Pseudonymizer(key))
-    cached = _cached_en(text, page, translator)
+    cached = _cached_en(text, page, translator, owner)
     if cached:
         return Markup('<span class="mt mt-done" title="{}">{}</span>').format(i18n.gettext("기계 번역 · 원문: %(t)s", t=text), cached)
     if translator is None or not page.allow_pending:
@@ -235,8 +254,28 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
 
 def mt_filters(translator: MachineTranslation | None, key: bytes) -> dict[str, Any]:
     return {
-        "mt": lambda text: _mark(text, "inline", translator, key) if isinstance(text, str) else text,
-        "mt_ref": lambda text: _mark(text, "ref", translator, key) if isinstance(text, str) else text,
+        "mt": lambda text, owner=None: _mark(text, "inline", translator, key, owner) if isinstance(text, str) else text,
+        "mt_ref": lambda text, owner=None: _mark(text, "ref", translator, key, owner) if isinstance(text, str) else text,
         "dt": data,
         "dl": data_label,
     }
+
+
+def mt_ticket(key: bytes, user_id: str, scope: RawScope, masked: str) -> str:
+    message = json.dumps(["console-mt-v1", user_id, scope, masked], separators=(",", ":"))
+    return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
+
+
+def verified_scope(key: bytes, user_id: str, body: dict[str, Any], texts: list[str]) -> RawScope:
+    scope, tickets = body.get("scope"), body.get("tickets")
+    if not isinstance(scope, list) or not isinstance(tickets, list) or len(tickets) != len(texts):
+        return ()
+    if not all(isinstance(pair, list) and len(pair) == 2 and all(isinstance(s, str) for s in pair) for pair in scope):
+        return ()
+    refs = tuple((cid, name) for cid, name in scope)
+    for text, ticket in zip(texts, tickets, strict=True):
+        if not isinstance(ticket, str) or not ticket.isascii() or not hmac.compare_digest(
+            mt_ticket(key, user_id, refs, text), ticket
+        ):
+            return ()
+    return refs

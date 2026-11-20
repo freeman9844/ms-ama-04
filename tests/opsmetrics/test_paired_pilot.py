@@ -39,3 +39,20 @@ def test_missing_marketplace_is_unexposed_and_pg_tax_cannot_affect_either_arm(se
     assert not row["bank_marketplace"]["marketplace_available"]
     assert row["bank"] == row["bank_marketplace"]
     assert row["limit_delta_krw"] == 0 and not row["decision_changed"]
+
+
+def test_console_cohort_separates_policy_changes_from_new_review_reasons():
+    from opsmetrics.paired_pilot import compare
+
+    cases = build_demo_cases(date(2026, 11, 20))
+    expected = {
+        "seller-bakery-20": (("eligible", 5_000_000, set()), ("eligible", 5_000_000, set())),
+        "seller-knitroom-04": (("ineligible", 0, {"R001", "R104", "R107"}), ("refer", 5_000_000, {"S001", "R107"})),
+        "seller-petfood-07": (("eligible", 5_000_000, set()), ("ineligible", 0, {"R003"})),
+        "seller-ceramic-08": (("refer", 5_000_000, {"R107"}), ("refer", 5_000_000, {"R107", "R109"})),
+    }
+    report = compare({k: cases[k] for k in expected}, console_cohort=True)
+    for row in report["pairs"]:
+        a, b = row["bank"], row["bank_marketplace"]
+        assert tuple((arm["decision"], arm["limit_krw"], set(arm["reason_codes"])) for arm in (a, b)) == expected[row["case_id"]]
+    assert report["decision_changed_pairs"] == 2 and report["reasons_only_pairs"] == 1

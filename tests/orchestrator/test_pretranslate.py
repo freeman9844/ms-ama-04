@@ -43,7 +43,7 @@ class MemoryStore:
 
     def read(self, container, item_id, partition_key):
         doc = self.docs.get((container, item_id))
-        owner = doc and (doc.get("owner_id") or doc.get("application_id") or doc.get("loan_id"))
+        owner = doc and (doc.get("owner_id") or doc.get("application_id") or doc.get("loan_id") or doc.get("consent_id"))
         return deepcopy(doc) if doc and owner == partition_key else None
 
 
@@ -72,9 +72,15 @@ class FakeTranslator:
 
 
 def make_deps(translator, raw=None, store=None):
-    raw = raw or MemoryRaw({("consent-c1", "profile.json"): PROFILE, ("consent-c1", "transactions.json"): [TXN]})
+    raw = raw or MemoryRaw({(f"consent-{cid}", name): data for cid in ("c1", "c2") for name, data in
+                           (("profile.json", PROFILE), ("transactions.json", [TXN]))})
+    store = store or MemoryStore()
+    store.upsert("applications", app_doc())
+    store.upsert("applications", {"id": "app-2", "application_id": "app-2", "consent": {"consent_id": "c2"}})
+    for cid in ("c1", "c2", "u1", "m1"):
+        store.upsert("consents", {"id": cid, "consent_id": cid, "status": "granted"})
     return Deps(
-        store=store or MemoryStore(), raw=raw, mock=None, policy=None, events=None,
+        store=store, raw=raw, mock=None, policy=None, events=None,
         pseudonym_key=KEY, clock=lambda: NOW, translator=translator, translate_model="gpt-test",
     )
 
@@ -104,7 +110,7 @@ def test_dropped_token_is_not_stored():
     deps = make_deps(FakeTranslator(drop_tokens=True))
     report = handle_changes(deps, "applications", [app_doc(summary="가나상회 매출 안정")])
     assert report["rejected"] == 1 and report["translated"] == 0
-    assert deps.store.docs == {}
+    assert not any(c == TRANSLATIONS for c, _ in deps.store.docs)
 
 
 def test_empty_translation_is_rejected():
@@ -112,7 +118,7 @@ def test_empty_translation_is_rejected():
     translator.translate = lambda texts: TranslationResult([""] * len(texts), 1, 1)
     deps = make_deps(translator)
     assert handle_changes(deps, "applications", [app_doc(summary="매출 안정")])["rejected"] == 1
-    assert deps.store.docs == {}
+    assert not any(c == TRANSLATIONS for c, _ in deps.store.docs)
 
 
 def test_throttled_batch_is_skipped_and_others_continue():
@@ -120,30 +126,47 @@ def test_throttled_batch_is_skipped_and_others_continue():
     claims = [{"text": f"주장 {i}"} for i in range(BATCH_ITEMS + 1)]
     report = handle_changes(deps, "applications", [app_doc(claims=claims)])
     assert report["failed"] == BATCH_ITEMS and report["translated"] == 1
-    assert len(deps.translator.calls) == 2 and len(deps.store.docs) == 1
+    assert len(deps.translator.calls) == 2 and sum(c == TRANSLATIONS for c, _ in deps.store.docs) == 1
 
 
 def test_raw_error_skips_owner_without_calling_model():
     deps = make_deps(FakeTranslator(), raw=MemoryRaw(error=OSError("blob down")))
     report = handle_changes(deps, "applications", [app_doc(summary="가나상회 매출", claims=[{"text": "가나상회 매출"}, {"text": "다른"}])])
     assert report["failed"] == 2 and report["translated"] == 0
-    assert deps.translator.calls == [] and deps.store.docs == {}
+    assert deps.translator.calls == [] and not any(c == TRANSLATIONS for c, _ in deps.store.docs)
 
 
-def test_missing_raw_uses_pattern_masking():
+def test_missing_raw_never_sends_free_text():
     deps = make_deps(FakeTranslator(), raw=MemoryRaw())
     report = handle_changes(deps, "applications", [app_doc(summary="가나상회 대표 010-1234-5678")])
-    sent = deps.translator.calls[0][0]
-    assert "가나상회" in sent and "010-1234-5678" not in sent and "[[PHONE_" in sent and "[[BIZNAME_" not in sent
-    assert report["translated"] == 1
+    assert deps.translator.calls == [] and report["translated"] == 0
+
+
+@pytest.mark.parametrize("status", ["expired", "revoked"])
+def test_stale_feed_event_after_deletion_skips_even_if_source_blobs_remain(status):
+    deps = make_deps(FakeTranslator())
+    deps.store.upsert("consents", {"id": "c1", "consent_id": "c1", "status": status, "deletion_proof_id": "c1"})
+    report = handle_changes(deps, "applications", [app_doc(summary="가나상회 매출")])
+    assert not deps.translator.calls and not report["translated"]
+
+
+def test_stale_alert_from_deleted_replay_does_not_block_current_replay():
+    raw = MemoryRaw({("consent-u1", "profile.json"): PROFILE, ("consent-m1", "flow.json"): [TXN]})
+    deps = make_deps(FakeTranslator(), raw)
+    deps.store.upsert("loans", {"id": APP, "loan_id": APP, "underwriting_consent_id": "u1",
+                                "monitoring": {"replay_id": "current", "consent_id": "m1"}})
+    alerts = [{"loan_id": APP, "replay_id": "deleted", "summary": "옛 경보"},
+              {"loan_id": APP, "replay_id": "current", "summary": "현재 경보"}]
+    handle_changes(deps, "alerts", alerts)
+    assert deps.translator.calls == [["현재 경보"]]
 
 
 def test_alert_uses_monitoring_raw_owner_is_loan():
     raw = MemoryRaw({("consent-u1", "profile.json"): PROFILE, ("consent-m1", "flow.json"): [TXN]})
     store = MemoryStore()
-    store.upsert("loans", {"id": "L1", "loan_id": "L1", "underwriting_consent_id": "u1", "monitoring": {"consent_id": "m1"}})
+    store.upsert("loans", {"id": "L1", "loan_id": "L1", "underwriting_consent_id": "u1", "monitoring": {"consent_id": "m1", "replay_id": "r1"}})
     deps = make_deps(FakeTranslator(), raw=raw, store=store)
-    alert = {"id": "a1", "loan_id": "L1", "summary": "가나상회 입금 감소", "signals": [{"text": "입금 감소"}]}
+    alert = {"id": "a1", "loan_id": "L1", "replay_id": "r1", "summary": "가나상회 입금 감소", "signals": [{"text": "입금 감소"}]}
     report = handle_changes(deps, "alerts", [alert])
     assert report["owners"] == 1 and report["translated"] == 2
     sent = deps.translator.calls[0]

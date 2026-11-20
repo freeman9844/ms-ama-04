@@ -20,8 +20,8 @@
 {% for g in grievances %}
 <article class="grievance">
   <h3>{{ g.application_id }} <span class="status g-{{ g.status }}">{{ g.status|grievance_status }}</span> <small>{{ g.grievance_id }} · {{ g.submitted_at }}</small></h3>
-  <p class="quote">{{ g.text|mt_ref }}</p>
-  {% if g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title|mt }}</summary><p class="notice">{{ g.reply.body|mt_ref }}</p></details>{% endif %}
+  <p class="quote">{{ g.text|mt_ref(g.application_id) }}</p>
+  {% if g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title|mt(g.application_id) }}</summary><p class="notice">{{ g.reply.body|mt_ref(g.application_id) }}</p></details>{% endif %}
 </article>
 {% endfor %}
 </section>

@@ -10,7 +10,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from agents.data_assembly import case_entities
-from agents.pretranslate import batches, extract, load_case_raw, owner_of, tokens_kept, translation_doc, translation_id
+from agents.pretranslate import (
+    active_scope, batches, extract, load_case_raw, owner_of, tokens_kept, translation_doc, translation_id, translation_scope,
+)
 from journey.activities import Deps
 from shared.pseudonymize import Pseudonymizer
 
@@ -28,19 +30,37 @@ def _by_owner(source: str, docs: Sequence[Mapping[str, Any]]) -> dict[str, list[
     return grouped
 
 
-def _masker(deps: Deps, source: str, doc: Mapping[str, Any]) -> Pseudonymizer:
-    # 원천이 없으면(None, 동의 삭제) 패턴 마스킹만 쓰고, 읽기 오류는 그대로 올려 그 owner를 건너뛴다.
-    case = load_case_raw(source, doc, deps.raw, lambda container, ident: deps.store.read(container, ident, ident))
-    profile, transactions = case if case else (None, ())
-    return Pseudonymizer(deps.pseudonym_key, case_entities(profile, transactions))
-
-
 def _owner(deps: Deps, source: str, owner: str, docs: Sequence[Mapping[str, Any]], report: dict[str, int], chars: list[int]) -> None:
-    extracted = list(dict.fromkeys(text for doc in docs for text in extract(source, doc)))
+    entries = [(doc, extract(source, doc)) for doc in docs]
+    extracted = list(dict.fromkeys(text for _, texts in entries for text in texts))
     if not extracted:
         return
     try:
-        masker = _masker(deps, source, docs[0])
+        def read(container: str, ident: str):
+            return deps.store.read(container, ident, ident)
+
+        parent = "applications" if source in ("applications", "grievances") else "loans"
+        current = read(parent, owner)
+        scope = translation_scope(parent, current or {})
+        if source == parent:
+            entries = [(d, texts) for d, texts in entries if translation_scope(parent, d) == scope]
+        if source == "alerts":
+            replay = ((current or {}).get("monitoring") or {}).get("replay_id")
+            entries = [(d, texts) for d, texts in entries if replay and d.get("replay_id") == replay]
+        eligible = list(dict.fromkeys(text for _, texts in entries for text in texts))
+        stale = len(extracted) - len(eligible)
+        report["texts"] += stale
+        report["skipped"] += stale
+        extracted = eligible
+        if not extracted:
+            return
+        case = (load_case_raw(parent, current, deps.raw, read)
+                if current and active_scope(scope, lambda cid: read("consents", cid)) else None)
+        if case is None:
+            report["texts"] += len(extracted)
+            report["skipped"] += len(extracted)
+            return
+        masker = Pseudonymizer(deps.pseudonym_key, case_entities(*case))
     except Exception as e:  # noqa: BLE001 - 원천을 못 읽으면 평문 전송 대신 건너뛴다
         # 검증 오류 메시지에 원천 값(상호·대표자·적요)이 들어가므로 종류만 남긴다.
         log.error(
@@ -66,6 +86,9 @@ def _owner(deps: Deps, source: str, owner: str, docs: Sequence[Mapping[str, Any]
         else:
             pending.append(text)
     for batch in batches(pending):
+        if not active_scope(scope, lambda cid: read("consents", cid)):
+            report["skipped"] += len(batch)
+            continue
         _translate_batch(deps, source, owner, batch, report)
 
 

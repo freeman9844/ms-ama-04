@@ -14,6 +14,20 @@ def _codes(decision):
     return [r.code for r in decision.reason_codes]
 
 
+@pytest.mark.parametrize("field,code,values,expected", [
+    ("mkt_days_since_suspension", "R003", (89, 90, 91), (True, False, False)),
+    ("mkt_return_rate_90d", "R109", (.1499, .15, .1501), (False, False, True)),
+    ("mkt_rating", "R110", (3.99, 4, 4.01), (True, False, False)),
+    ("pg_reconciliation_ratio", "R108", (.8999, .9, .9001), (True, False, False)),
+])
+def test_seller_risk_boundaries_and_missing_are_distinct(make_features, rules, field, code, values, expected):
+    for value, hit in zip(values, expected, strict=True):
+        d = evaluate(make_features(**{field: value}, mkt_pending_settlement_krw=5_000_000), rules)
+        assert (code in _codes(d)) == hit
+    checks = explain(make_features(**{field: None}), rules).checks
+    assert next(c for c in checks if c.code == code).result == "not_applied"
+
+
 @pytest.mark.parametrize("name", ["v1.yaml", "v2.yaml", "v3.yaml", "v4.yaml"])
 @pytest.mark.parametrize("kw", [{}, {"business_age_months": 11}, {"months_of_history": 5}, {"dscr": 0.99}])
 def test_explain_matches_evaluate_across_versions(make_features, name, kw):

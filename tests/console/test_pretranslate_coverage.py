@@ -2,7 +2,7 @@
 
 문서를 실제 사전 번역 경로(handle_changes)로 번역해 저장한 뒤 영문 화면을 그려, 브라우저 번역을 기다리는
 data-mt 문구가 남지 않아야 한다. 두 벌로 본다.
-- 미리보기 픽스처의 모든 문서(원천 Blob 없음, 패턴 마스킹만).
+- 미리보기 픽스처의 모든 문서(유효 동의·원천 Blob을 추가).
 - 합성 사례: 픽스처에 없는 이의·연락 기록·추심 제안·플랜 변경 결정과 원천 Blob(상호·대표자 이름)이 있는 신청·대출.
 """
 
@@ -89,6 +89,9 @@ class FakeTranslator:
 def _pretranslate(deps, documents, raw):
     """문서를 소스별로 handle_changes에 넣는다. (저장소, 소스별 보고)."""
     store = FixtureStore({d["id"]: d for d in documents["applications"]}, {d["id"]: d for d in documents["loans"]})
+    ids = {d["consent"]["consent_id"] for d in documents["applications"]}
+    ids.update(d["monitoring"]["consent_id"] for d in documents["loans"] if d.get("monitoring"))
+    store.docs["consents"] = {cid: deps.privacy.get_consent(cid) for cid in ids}
     pre = Deps(
         store=store, raw=raw, mock=None, policy=None, events=None, pseudonym_key=deps.pseudonym_key,
         clock=lambda: datetime(2026, 11, 15, 10, 0, tzinfo=KST), translator=FakeTranslator(),
@@ -134,7 +137,10 @@ def _preview_documents(deps):
 
 @pytest.fixture(scope="module")
 def preview_world():
+    from tests.console.test_translate import active_sources
+
     deps = fixtures.build_deps()
+    active_sources(deps)
     documents = _preview_documents(deps)
     store, _, _ = _pretranslate(deps, documents, deps.raw)
     assert all(owner_of(s, d) for s, docs in documents.items() for d in docs)
@@ -181,6 +187,9 @@ class SyntheticPrivacy(fixtures.EmptyPrivacy):
 
     def consents_for_application(self, application_id):
         return [c for c in self.consents if c["application_id"] == application_id]
+
+    def get_consent(self, consent_id):
+        return next((c for c in self.consents if c["id"] == consent_id), None)
 
     def list_grievances(self, limit):
         return self.grievances[:limit]
@@ -317,7 +326,7 @@ def _synthetic_world():
     deps.monitoring.loans[APP] = loan
     deps.monitoring.alerts.extend(alerts)
     deps.monitoring.get_contacts = lambda loan_id, replay_id: contacts if (loan_id, replay_id) == (APP, REPLAY) else None
-    deps.privacy = SyntheticPrivacy(_consents(), grievances)
+    deps.privacy = SyntheticPrivacy(_consents() + [_consents()[0] | {"id": "m-syn", "consent_id": "m-syn", "notices": []}], grievances)
     deps.raw = MemoryRaw(BLOBS)
     documents = {"applications": [application], "loans": [loan], "alerts": [*alerts, contacts],
                  "grievances": grievances}
@@ -357,7 +366,7 @@ def test_synthetic_pages_wait_for_browser_translation_without_stored_ones(synthe
 
 @pytest.mark.parametrize("page", [f"/applications/{APP}", f"/loans/{APP}", f"/borrower/{APPLICANT}/notices"])
 def test_entity_masking_must_agree_between_trigger_and_console(synthetic_world, page):
-    # 트리거가 원천을 못 읽은 것처럼(패턴 마스킹만) 번역하면 상호·대표자 이름 문구는 키가 달라 대기로 남는다.
+    # 트리거의 원천이 없으면 번역하지 않는다. 유효한 원천을 읽은 화면에서만 즉시 번역할 수 있다.
     deps, documents, _ = synthetic_world
     store, _, _ = _pretranslate(deps, documents, MemoryRaw({}))
     left = _left(deps, _render(deps, _items(store), page))

@@ -312,7 +312,7 @@ def borrower_plan(loan: Mapping[str, Any], contacts: Mapping[str, Any] | None, t
     offer, change = led.get("offer"), led.get("plan_change")
     notices = sorted(
         (
-            {"on": c.get("on") or "", "script_id": c.get("script_id"), "text": c.get("text"),
+            {"loan_id": loan["id"], "on": c.get("on") or "", "script_id": c.get("script_id"), "text": c.get("text"),
              "status": c.get("status"), "reason": c.get("reason")}
             for c in (contacts or {}).get("contacts") or ()
             if c.get("by") in BORROWER_NOTICE_BY and c.get("status") == "sent" and c.get("on") and c["on"] <= today

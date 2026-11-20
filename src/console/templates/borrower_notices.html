@@ -9,7 +9,7 @@
 <table>
   <thead><tr><th>{{ _("날짜") }}</th><th>{{ _("안내") }}</th><th>{{ _("상태") }}</th></tr></thead>
   <tbody>{% for n in notices|sort(attribute="on") %}
-<tr><td>{{ n.on }}</td><td>{{ n.text|mt_ref if n.text else n.script_id|script_label }}</td>
+<tr><td>{{ n.on }}</td><td>{{ n.text|mt_ref(n.loan_id) if n.text else n.script_id|script_label }}</td>
 <td>{{ n.status|contact_status_label }}{% if n.reason %} · {{ n.reason|contact_reason_label }}{% endif %}</td></tr>
 {% endfor %}</tbody>
 </table>

@@ -10,7 +10,7 @@
   <p>{% for s in c.scopes %}<span class="chip">{{ s|scope_label }}</span>{% endfor %} · {{ _("만료 %(date)s", date=c.expires_at) }}{% if c.ended_at %} · {{ _("종료 %(date)s", date=c.ended_at) }}{% endif %}</p>
   {% if c.deletion_proof_id %}<p><a href="/borrower/{{ applicant_id|path }}/consents/{{ c.deletion_proof_id|path }}/proof">{{ _("삭제 증명 보기") }}</a></p>{% endif %}
   {% for n in c.notices or [] %}
-  <details><summary>{{ n.kind|notice_label }}: {{ n.title|mt }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body|mt_ref }}</p></details>
+  <details><summary>{{ n.kind|notice_label }}: {{ n.title|mt(c.application_id) }} <small>{{ n.at }}</small></summary><p class="notice">{{ n.body|mt_ref(c.application_id) }}</p></details>
   {% endfor %}
   {% if c.status == "granted" %}
   <form method="post" action="/borrower/{{ applicant_id|path }}/consents/{{ c.consent_id|path }}/revoke" class="inline">
