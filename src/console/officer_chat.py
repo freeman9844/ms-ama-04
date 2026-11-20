@@ -27,7 +27,8 @@ SETTLEMENT_KEYS = ("available", "pg_reconciliation_ratio", "pg_top_platform_shar
                    "pg_advance_suspected_count", "unmatched_count", "settlement_count", "period")
 STRUCTURE_KEYS = ("amount_krw", "tenor_months", "schedule", "reduced_payment_months", "rationale")
 # 추천 질문·오류 문구는 화면에 낼 때 번역한다(템플릿 `_()`, app의 `_chat_error`). TRACE_NOTES는 모델 입력이라 번역하지 않는다.
-CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?")
+CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?",
+                    "마켓 반품률·취소율과 정산 예정금을 계좌 입금과 비교하면 무엇을 확인해야 하나요?")
 TRACE_NOTES = {
     "unknown_version": "적용 규정 버전을 콘솔에서 찾을 수 없어 계산 과정을 만들지 않았습니다.",
     "invalid_features": "저장된 특성 값이 불완전해 계산 과정을 만들지 않았습니다.",

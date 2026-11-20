@@ -168,7 +168,7 @@
   "이의제기가 없습니다. 고객 콘솔에서 제출할 수 있습니다.": "No grievances. Customers can submit one from the customer console.",
   "접수일": "Received on",
   "플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 상환 플랜 메뉴에 표시됩니다.": "Plan (%(label)s) selected. The result appears in the Repayment plan menu once an officer confirms.",
-  "신청 사업자(셀러)를 고르면 그 사업자 기준으로 대출 신청·신청 현황·상환 플랜·받은 안내·동의 관리·이의제기 메뉴가 열립니다. 데모라 로그인한 사용자가 사업자를 직접 고릅니다.": "Choose the applicant business (seller). Apply, Application status, Repayment plans, Notices, Consents and Appeals then open for that business. In this demo the signed-in user picks the business.",
+  "사업자를 선택하면 해당 사업자의 대출 신청 페이지로 이동합니다.": "Select a business to open its loan application form.",
   "사업자 선택": "Select business",
   "데이터 심사": "Data review"
 }

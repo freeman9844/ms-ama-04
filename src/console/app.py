@@ -955,10 +955,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def borrower_plans(loans: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """대출별 셀프 플랜 제안과 받은 안내."""
         plans = []
+        today = deps.clock().astimezone(KST).date().isoformat()
         for loan in loans:
             replay_id = (loan.get("monitoring") or {}).get("replay_id")
             contacts = deps.monitoring.get_contacts(loan["id"], replay_id) if replay_id else None
-            plans.append(borrower_plan(loan, contacts))
+            plans.append(borrower_plan(loan, contacts, today))
         return plans
 
     def borrower_texts(applications: list[dict[str, Any]], loans: list[dict[str, Any]]) -> PageTexts | None:

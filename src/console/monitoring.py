@@ -304,7 +304,7 @@ def _pending(request: Mapping[str, Any] | None) -> bool:
     return bool(request) and request.get("status") == "pending_officer"
 
 
-def borrower_plan(loan: Mapping[str, Any], contacts: Mapping[str, Any] | None) -> dict[str, Any]:
+def borrower_plan(loan: Mapping[str, Any], contacts: Mapping[str, Any] | None, today: str) -> dict[str, Any]:
     """차주 화면의 대출별 셀프 플랜 제안·플랜 변경 결과·받은 안내(2026-11-11)."""
     led = loan.get("repayment") or {}
     offer, change = led.get("offer"), led.get("plan_change")
@@ -313,7 +313,7 @@ def borrower_plan(loan: Mapping[str, Any], contacts: Mapping[str, Any] | None) -
             {"on": c.get("on") or "", "script_id": c.get("script_id"), "text": c.get("text"),
              "status": c.get("status"), "reason": c.get("reason")}
             for c in (contacts or {}).get("contacts") or ()
-            if c.get("by") in BORROWER_NOTICE_BY
+            if c.get("by") in BORROWER_NOTICE_BY and c.get("status") == "sent" and c.get("on") and c["on"] <= today
         ),
         key=lambda n: n["on"],
     )

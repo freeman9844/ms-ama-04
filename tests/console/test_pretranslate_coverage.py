@@ -307,6 +307,7 @@ def _consents():
 
 def _synthetic_world():
     deps = fixtures.build_deps()
+    deps.clock = lambda: datetime(2027, 2, 1, 10, tzinfo=KST)
     mask = Pseudonymizer(deps.pseudonym_key, case_entities(
         ApplicantProfile.model_validate(PROFILE), [Transaction.model_validate(t) for t in FLOW])).mask
     application = _application(deps.store.docs["app-20261103-p01"], mask)

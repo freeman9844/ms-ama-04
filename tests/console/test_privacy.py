@@ -2,6 +2,7 @@
 import base64
 import json
 import re
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -177,7 +178,11 @@ def test_officer_sidebar_links_customer_console_and_grievances(env):
 def test_borrower_index_lists_demo_applicants(env):
     client, _, _ = env
     page = client.get("/borrower", headers=CUSTOMER).text
-    assert 'href="/borrower/seller-dailylook-01"' in page and 'href="/borrower/seller-candle-05"' in page
+    for seller in ("seller-dailylook-01", "seller-candle-05"):
+        url = f"/apply?applicant_id={seller}"
+        assert f'href="{url}"' in page
+        form = client.get(url, headers=CUSTOMER)
+        assert form.status_code == 200 and f'name="applicant_id" value="{seller}"' in form.text
     assert '<li class="n-status active"><a href="/borrower">사업자 선택</a>' in page
     english = client.get("/borrower", headers={**CUSTOMER, "Cookie": "lang=en"}).text
     assert "<h1>Select business</h1>" in english and "Customer choice" not in english
@@ -230,7 +235,7 @@ def test_status_page_without_applications_has_no_hero(env):
 def test_borrower_index_shows_seller_cards_with_initial_avatar(env):
     client, _, _ = env
     page = client.get("/borrower", headers=CUSTOMER).text
-    assert '<ul class="seller-grid">' in page and 'class="seller-card" href="/borrower/seller-dailylook-01"' in page
+    assert '<ul class="seller-grid">' in page and 'class="seller-card" href="/apply?applicant_id=seller-dailylook-01"' in page
     assert re.search(r'<span class="avatar av-\d" aria-hidden="true">성</span>', page)
 
 
@@ -594,7 +599,8 @@ def plan_env(make_doc, raw, key):
         queue = FakeQueue()
         deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=queue, pseudonym_key=key,
                            privacy=FakePrivacy([consent("c-1", "app-1")], [], []),
-                           monitoring=FakeMonitoring([loan], [], contacts))
+                           monitoring=FakeMonitoring([loan], [], contacts),
+                           clock=lambda: datetime.fromisoformat("2026-09-30T15:00:00+00:00"))
         return TestClient(create_app(deps), follow_redirects=False), queue
 
     return build
@@ -693,7 +699,9 @@ def test_borrower_sees_received_notices(plan_env):
          "status": "sent", "reason": None, "by": "reminder"},
         {"ref": "rp-1-s1", "on": "2026-09-10", "at": NOW.isoformat(), "script_id": "balance_warning",
          "status": "sent", "reason": None, "by": "early_warning", "text": "잔고 부족 예상 안내 문구입니다."},
-        {"ref": "rp-1-i3", "on": "2026-11-25", "at": NOW.isoformat(), "script_id": "early_reminder",
+        {"on": "2026-10-02", "status": "sent", "by": "reminder", "script_id": "payment_reminder"},
+        {"on": "2026-09-29", "status": "skipped", "by": "reminder", "script_id": "payment_reminder"},
+        {"ref": "rp-1-i3", "on": "2026-09-30", "at": NOW.isoformat(), "script_id": "early_reminder",
          "status": "deferred", "reason": "weekly_limit", "by": "early_reminder", "text": "5일 전 추가 안내 문구입니다."},
         {"ref": "rc-rp-1-i1", "on": "2026-10-01", "at": NOW.isoformat(), "script_id": "missed_payment",
          "status": "sent", "reason": None, "by": "officer", "text": "심사역이 승인한 안내 문구입니다.",
@@ -704,10 +712,10 @@ def test_borrower_sees_received_notices(plan_env):
     start = page.index('id="notices"')
     section = page[start:page.index("</section>", start)]
     assert '<li class="n-notices active">' in page
-    for s in ("2026-09-10", "잔고 부족 예상 안내 문구입니다.", "2026-11-25", "5일 전 추가 안내 문구입니다.",
-              "보류", "2026-10-01", "심사역이 승인한 안내 문구입니다.", "발송"):
+    for s in ("2026-09-10", "잔고 부족 예상 안내 문구입니다.", "2026-10-01", "심사역이 승인한 안내 문구입니다.", "발송"):
         assert s in section, s
-    assert section.index("2026-09-10") < section.index("2026-10-01") < section.index("2026-11-25")
+    for hidden in ("2026-10-02", "2026-09-29", "2026-09-30"):
+        assert hidden not in section
     # 3일 전 기본 안내는 문구가 기록되지 않아 스크립트 라벨로 보인다.
     assert "2026-09-28" in section and "상환일 안내" in section
     assert section.index("2026-09-10") < section.index("2026-09-28") < section.index("2026-10-01")

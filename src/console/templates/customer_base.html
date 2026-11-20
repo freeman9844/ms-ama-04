@@ -32,7 +32,6 @@
   </div>
 </aside>
 <div class="content">
-{% if demo %}<p class="demo-banner" role="note">{{ _("데모 환경입니다. 실제 대출이 실행되지 않으며 데이터는 모두 가상입니다.") }}</p>{% endif %}
 {% if mt_on %}<p class="mt-note" data-mt-note hidden>{{ _("점선 밑줄 문구는 기계 번역입니다. 마우스를 올리면 원문이 보입니다. 원문이 기준입니다.") }}</p>{% endif %}
 <main>
 {% block main %}{% endblock %}
