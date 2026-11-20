@@ -67,7 +67,9 @@ def test_full_flow_returns_valid_contracts(client):
 
 def test_labels_not_exposed(client):
     r = client.get("/mydata/transactions", headers=_auth(_consent(client)["token"]))
-    assert all(set(t) == set(Transaction.model_fields) for t in r.json())
+    # Account histories keep the original public fields, without post-loan attribution or labels.
+    public = {"schema_version", "txn_id", "booked_on", "amount_krw", "balance_after_krw", "description", "txn_type_code"}
+    assert all(set(t) == public for t in r.json())
     assert "label" not in r.text and "category" not in r.text
 
 
