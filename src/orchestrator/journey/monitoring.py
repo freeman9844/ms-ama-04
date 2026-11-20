@@ -31,7 +31,7 @@ from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
 from agents.repayment import build_schedule, early_reminder_on, item_amount, item_key, reminder_on, week_events
-from agents.repayment_plan import apply_change, apply_plan, main_platform, payout_days, plan_options
+from agents.repayment_plan import AmbiguousScheduledDebit, apply_change, apply_plan, main_platform, payout_days, plan_options
 from journey.activities import (
     _TRANSACTIONS,
     ENDED_CONSENT,
@@ -71,16 +71,19 @@ class OutOfOrder(RuntimeError):
     """앞 주차가 처리되지 않았다. 메시지를 되돌려 재시도하게 한다."""
 
 
+def _stored_flow(deps: Deps, consent_id: str) -> list[Transaction]:
+    flow = deps.raw.get_json(raw_container(consent_id), "flow.json")
+    if flow is None:
+        raise RuntimeError(f"사후 흐름 없음: {consent_id}")
+    return _TRANSACTIONS.validate_python(flow)
+
+
 def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, list[Transaction], Any]:
     """심사 프로필, 승인된 상환 플랜 변경(plan_history)을 덧씌운 사후 흐름, 가명화기(원본 흐름으로 만든다)."""
-    mon = loan["monitoring"]
     profile = ApplicantProfile.model_validate(
         deps.raw.get_json(raw_container(loan["underwriting_consent_id"]), "profile.json")
     )
-    flow = deps.raw.get_json(raw_container(mon["consent_id"]), "flow.json")
-    if flow is None:
-        raise RuntimeError(f"사후 흐름 없음: {mon['consent_id']}")
-    txns = _TRANSACTIONS.validate_python(flow)
+    txns = _stored_flow(deps, loan["monitoring"]["consent_id"])
     history = (loan.get("repayment") or {}).get("plan_history") or []
     return profile, apply_plan(txns, history, loan_id=loan["id"]), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
 
@@ -418,7 +421,14 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     if week != mon["processed_week"] + 1:
         raise OutOfOrder(f"{loan_id} {week}주차 앞 주차 미처리({mon['processed_week']})")
 
-    profile, txns, mask = _mask_and_flow(deps, loan)
+    try:
+        profile, txns, mask = _mask_and_flow(deps, loan)
+    except AmbiguousScheduledDebit as exc:
+        mon.update(status="failed", error=str(exc))
+        loan["updated_at"] = deps.clock().isoformat()
+        if not deps.store.replace(LOANS, loan, loan.get("_etag")):
+            raise RuntimeError(f"재생 중단 기록 충돌: {replay_id}") from exc
+        return None
     start = date.fromisoformat(mon["flow_start"])
     lo, hi = week_window(start, week)
     visible = [t for t in txns if t.booked_on <= hi]
@@ -568,7 +578,7 @@ def _escalate(
     if sent is None:
         sent = auto_contact(ref, script_id, text, contacts["contacts"], hi)
         contacts["contacts"].append(sent)
-        deps.store.upsert(ALERTS, contacts)  # 대출 문서보다 먼저: 재시도 때 같은 ref면 다시 보내지 않는다
+        _save_contacts(deps, contacts)
     escalation[f"stage{stage}"] = {
         "alert_id": alert_id, "on": hi.isoformat(), "status": sent["status"], "reason": sent["reason"],
     }
@@ -703,7 +713,7 @@ def _repayment_week(
                 sent = remind(ref, contacts["contacts"], on, sim_now(on))
                 contacts["contacts"].append(sent)
             item.update(reminded_on=sent["on"], reminder_status=sent["status"])
-        deps.store.upsert(ALERTS, contacts)  # 대출 문서보다 먼저: 재시도 때 같은 ref면 다시 보내지 않는다
+        _save_contacts(deps, contacts)
     open_cases = list(ev.missed)
     for key, allocations in ev.allocations.items():
         item = by_key[key]
@@ -849,6 +859,11 @@ def _contacts_doc(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any]:
     return deps.store.read(ALERTS, cid, loan_id) or {"id": cid, "loan_id": loan_id, "replay_id": replay_id, "contacts": []}
 
 
+def _save_contacts(deps: Deps, contacts: dict[str, Any]) -> None:
+    if not deps.store.replace_batch(ALERTS, contacts["loan_id"], [contacts]):
+        raise RuntimeError(f"연락 기록 충돌: {contacts['id']}")
+
+
 def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | None:
     """추심 에이전트 제안을 심사역 승인용 제안서로 저장한다. 아무것도 보내지 않는다(발송은 심사역 결정 뒤)."""
     doc = deps.store.read(ALERTS, case_id, loan_id)
@@ -988,7 +1003,11 @@ def _decide_plan(deps: Deps, msg: PlanDecision) -> bool:
         log.warning("플랜 변경 반려 사유 없음: %s", msg.change_id)
         return False
 
+    blocked = False
+
     def decide(loan: dict[str, Any]) -> bool | None:
+        nonlocal blocked
+        blocked = False
         led = loan.get("repayment") or {}
         change = led.get("plan_change")
         if not change or change.get("change_id") != msg.change_id:
@@ -1008,8 +1027,7 @@ def _decide_plan(deps: Deps, msg: PlanDecision) -> bool:
                    for s in gone) or any(date.fromisoformat(i["due_on"]) < applied_from for i in change["items"]):
                 log.warning("공개됐거나 판정된 회차라 플랜 변경을 반영할 수 없음: %s", msg.change_id)
                 return False
-            led["schedule"] = apply_change(led["schedule"], change)
-            led.setdefault("plan_history", []).append({
+            entry = {
                 "change_id": change["change_id"],
                 "option": change["option"],
                 "applied_from": applied_from.isoformat(),
@@ -1019,14 +1037,26 @@ def _decide_plan(deps: Deps, msg: PlanDecision) -> bool:
                           for i in change["items"]],
                 "officer_id": msg.officer_id,
                 "decided_at": now,
-            })
+            }
+            history = [*(led.get("plan_history") or ()), entry]
+            try:
+                apply_plan(_stored_flow(deps, mon["consent_id"]), history, loan_id=msg.loan_id)
+            except AmbiguousScheduledDebit as exc:
+                blocked = True
+                if change.get("validation_error") == str(exc):
+                    return False
+                change["validation_error"] = str(exc)
+                return True  # Persist the reason, not the schedule change.
+            led["schedule"] = apply_change(led["schedule"], change)
+            led["plan_history"] = history
+        change.pop("validation_error", None)
         change.update(
             status="approved" if msg.decision == "approve" else "declined",
             officer_id=msg.officer_id, decided_at=now, reason=reason,
         )
         return True
 
-    return _decide_on_loan(deps, msg.loan_id, decide)
+    return _decide_on_loan(deps, msg.loan_id, decide) and not blocked
 
 
 def _expire_offer(deps: Deps, msg: OfferExpire) -> bool:
@@ -1078,7 +1108,7 @@ def _contact_day_if_current(deps: Deps, case: dict[str, Any]) -> date | None:
     quoted = case["proposal"]["evidence"]["amount_krw"]
     if not (balance > 0 and balance == quoted == case.get("balance_krw", balance)):
         return None
-    if mon["processed_week"] > case["week"]:
+    if mon["processed_week"] >= case["week"]:
         return week_window(date.fromisoformat(mon["flow_start"]), mon["processed_week"])[1]
     return date.fromisoformat(case.get("as_of") or item["due_on"])
 
@@ -1161,15 +1191,11 @@ def _append_contact(deps: Deps, loan_id: str, case_id: str) -> None:
                 updated.update(status="deferred", reason=reason)
                 if case["status"] == "contacted":
                     case["status"] = "deferred"
-            if updated != contact:
-                contact = case["proposal"]["contact"] = updated
-                if not deps.store.replace(ALERTS, case, case.get("_etag")):
-                    continue
+            contact = case["proposal"]["contact"] = updated
         doc["contacts"].append(contact)
-        if not doc.get("_etag"):
-            deps.store.upsert(ALERTS, doc)
-            return
-        if deps.store.replace(ALERTS, doc, doc.get("_etag")):
+        # _adjust_case also replaces the case before saving the loan balance. Whichever
+        # commits first wins; a changed quote or contact history aborts both batch writes.
+        if deps.store.replace_batch(ALERTS, loan_id, [case, doc]):
             return
     # 기록 없이 성공으로 끝내지 않는다: 예외로 큐가 다시 보내게 하고, 재전달 때 제안에 남긴 연락으로 다시 기록한다.
     raise RuntimeError(f"동시 수정이 이어져 연락 기록을 남기지 못함: {loan_id} {case_id}")

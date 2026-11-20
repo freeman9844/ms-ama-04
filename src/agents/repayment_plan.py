@@ -118,6 +118,10 @@ def apply_change(schedule: Sequence[Mapping[str, Any]], change: Mapping[str, Any
     return sorted(out, key=lambda s: (s["due_on"], s["no"], s.get("part") or 0))
 
 
+class AmbiguousScheduledDebit(ValueError):
+    """A plan cannot safely distinguish a scheduled debit from a catch-up payment."""
+
+
 def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str | None) -> list[Transaction]:
     start = date.fromisoformat(change["applied_from"])
     head = [t for t in txns if t.booked_on < start]
@@ -130,9 +134,21 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str 
         balance = 0
     replaced = {(b["key"], date.fromisoformat(b["due_on"])) for b in change.get("before") or ()}
     removed, kept = [], []
+    identified: set[tuple[str, date]] = set()
+    unmarked_days: set[date] = set()
     for t in tail:
-        target = (t.scheduled_item_key, t.booked_on) in replaced and repayment_debit(t, loan_id)
-        (removed if target else kept).append(t)
+        if repayment_debit(t, loan_id):
+            if t.scheduled_item_key is None:
+                unmarked_days.add(t.booked_on)
+            elif (identity := (t.scheduled_item_key, t.booked_on)) in replaced:
+                if identity in identified:
+                    raise AmbiguousScheduledDebit("ambiguous_scheduled_debit")
+                identified.add(identity)
+                removed.append(t)
+                continue
+        kept.append(t)
+    if any(day in unmarked_days for _, day in replaced - identified):
+        raise AmbiguousScheduledDebit("ambiguous_scheduled_debit")
     code = next((t.txn_type_code for t in removed), None) or next(
         (t.txn_type_code for t in txns if repayment_debit(t, loan_id)), _DEFAULT_DEBIT_CODE
     )

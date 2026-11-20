@@ -245,6 +245,7 @@
 {% if v.plan_change %}{% set pc = v.plan_change %}
 <section id="plan-change" class="card">
 <h2>{{ _("플랜 변경 요청") }} <small>{{ pc.option|plan_option_label }} · {{ pc.status|plan_change_label }}</small></h2>
+{% if pc.validation_error == "ambiguous_scheduled_debit" %}<p class="error">{{ _("예정 출금과 추가 상환을 구분할 수 없어 승인하지 않았습니다. 기존 일정은 그대로입니다. 요청을 반려하거나 회차 식별자가 있는 흐름으로 다시 재생하세요.") }}</p>{% endif %}
 <p class="note">{{ _("고객이 %(at)s에 고른 플랜입니다. 승인하면 아래처럼 상환 일정이 바뀌고, 이미 공개된 주차의 거래·판정은 바뀌지 않습니다.", at=pc.requested_at) }}</p>
 <table>
   <thead><tr><th>{{ _("지금") }}</th><th>{{ _("바뀐 뒤") }}</th></tr></thead>

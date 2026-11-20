@@ -52,6 +52,10 @@ class DocumentStore(Protocol):
         """etag가 같을 때만 교체한다. 다른 쓰기가 끼어들었으면 False."""
         ...
 
+    def replace_batch(self, container: str, partition_key: str, documents: list[dict[str, Any]]) -> bool:
+        """One transaction: replace each observed ETag or create if absent. Never partially commit."""
+        ...
+
 
 class RawStore(Protocol):
     def put_json(self, container: str, name: str, value: Any) -> None: ...

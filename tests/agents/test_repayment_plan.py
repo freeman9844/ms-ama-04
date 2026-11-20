@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from agents.ledger_monitor import LedgerBaseline
 from agents.repayment import item_key
 from agents.repayment_plan import (
@@ -141,6 +143,13 @@ def test_move_preserves_same_day_same_amount_catchup_and_unreplaced_installment(
     txns = [TXNS[0].model_copy(update={"balance_after_krw": 5_000_000}), catchup, planned, separate, *TXNS[2:]]
     out = apply_plan(txns, [_move()])
     assert [t.txn_id for t in out] == ["t0", "catchup", "separate", "t2", "t3", "c1-i2", "t4"]
+
+
+def test_legacy_history_never_renders_unmarked_and_replacement_debit_together():
+    legacy = [t.model_copy(update={"scheduled_item_key": None}) for t in TXNS]
+    assert apply_plan(legacy, []) == legacy
+    with pytest.raises(ValueError, match="ambiguous_scheduled_debit"):
+        apply_plan(legacy, [_move()])
 
 
 def test_apply_plan_applies_changes_in_order():

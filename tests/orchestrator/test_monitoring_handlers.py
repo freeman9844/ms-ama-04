@@ -69,6 +69,16 @@ class MemoryStore:
         self.upsert(container, document)
         return True
 
+    def replace_batch(self, container, partition_key, documents):
+        assert all(d["loan_id"] == partition_key for d in documents)
+        for doc in documents:
+            current = self.read(container, doc["id"], partition_key)
+            if (current or {}).get("_etag") != doc.get("_etag"):
+                return False
+        for doc in documents:
+            self.upsert(container, doc)
+        return True
+
 
 class MemoryQueue:
     def __init__(self):
@@ -963,16 +973,108 @@ def test_redelivered_collections_decision_repairs_state_after_failure(mock_app, 
 
 def test_contact_write_conflicts_raise_so_redelivery_repairs(mock_app, monkeypatch):
     deps, replay_id, case = missed_without_agents(mock_app)
-    real = deps.store.replace
-    monkeypatch.setattr(deps.store, "replace",
-                        lambda c, d, etag: False if d["id"].startswith("contacts-") else real(c, d, etag))
+    real = deps.store.replace_batch
+    monkeypatch.setattr(deps.store, "replace_batch", lambda *args: False)
     with pytest.raises(RuntimeError):
         decide_collections(deps, case["case_id"])
-    monkeypatch.setattr(deps.store, "replace", real)
+    monkeypatch.setattr(deps.store, "replace_batch", real)
     assert officer_contacts(deps, replay_id) == []
     assert decide_collections(deps, case["case_id"]) is False
     assert len(officer_contacts(deps, replay_id)) == 1
     assert loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
+def test_payoff_wins_between_validation_and_contact_commit(mock_app, monkeypatch):
+    deps, rid, case = missed_without_agents(mock_app)
+    store = deps.store
+    races = []
+
+    def pay_before_contact(docs):
+        if races or not any(d["id"] == f"contacts-{rid}" for d in docs):
+            return
+        races.append(True)
+        monitoring_module._adjust_case(deps, LOAN, case["id"], 0)
+        doc = loan(deps)
+        doc["repayment"]["schedule"][0].update(status="paid", balance_krw=0)
+        store.upsert(LOANS, doc)
+
+    replace_one, replace_batch = store.replace, store.replace_batch
+
+    def single(c, d, tag):
+        pay_before_contact([d])
+        return replace_one(c, d, tag)
+
+    def batch(c, pk, docs):
+        pay_before_contact(docs)
+        return replace_batch(c, pk, docs)
+
+    monkeypatch.setattr(store, "replace", single)
+    monkeypatch.setattr(store, "replace_batch", batch)
+    assert decide_collections(deps, case["id"])
+    assert races and not officer_contacts(deps, rid)
+    assert not decide_collections(deps, case["id"]) and not officer_contacts(deps, rid)
+
+
+def test_reminder_retry_preserves_concurrent_officer_contact(mock_app, monkeypatch):
+    deps = make_deps(mock_app, events=Outbox())
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    for week in range(1, 4):
+        process_week(deps, LOAN, rid, week)
+    real = monitoring_module.remind
+    officer = {"ref": "rc-earlier", "by": "officer", "on": "2026-11-28", "status": "sent"}
+
+    def interleaved(*args, **kwargs):
+        monkeypatch.setattr(monitoring_module, "remind", real)
+        history = monitoring_module._contacts_doc(deps, LOAN, rid)
+        history["contacts"].append(officer)
+        deps.store.upsert(ALERTS, history)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(monitoring_module, "remind", interleaved)
+    with pytest.raises(RuntimeError, match="연락 기록 충돌"):
+        process_week(deps, LOAN, rid, 4)
+    process_week(deps, LOAN, rid, 4)
+    assert officer_contacts(deps, rid) == [officer]
+    assert len(contacts(deps, rid)) == 2
+
+
+def test_delivery_wins_before_payoff_cas_and_preserves_delivery_receipt(mock_app, monkeypatch):
+    deps, rid, case = missed_without_agents(mock_app)
+    fail_once(monkeypatch, "_append_contact")
+    with pytest.raises(RuntimeError, match="503"):
+        decide_collections(deps, case["id"])
+    store = deps.store
+    replace_one = store.replace
+
+    def deliver_before_invalidation(container, doc, etag):
+        if doc["id"] == case["id"] and doc.get("balance_krw") == 0:
+            monkeypatch.setattr(store, "replace", replace_one)
+            assert not decide_collections(deps, case["id"])
+        return replace_one(container, doc, etag)
+
+    monkeypatch.setattr(store, "replace", deliver_before_invalidation)
+    assert not monitoring_module._adjust_case(deps, LOAN, case["id"], 0)
+    contact, = officer_contacts(deps, rid)
+    stored = store.read(ALERTS, case["id"], LOAN)
+    assert stored["balance_krw"] == 0 and stored["proposal"]["contact"] == contact
+    assert not decide_collections(deps, case["id"]) and officer_contacts(deps, rid) == [contact]
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_approval_counts_contacts_through_processed_end_of_origin_week(mock_app, monkeypatch, recover):
+    deps, rid, case = missed_without_agents(mock_app)
+    if recover:
+        fail_once(monkeypatch, "_append_contact")
+        with pytest.raises(RuntimeError, match="503"):
+            decide_collections(deps, case["id"])
+    log = deps.store.read(ALERTS, f"contacts-{rid}", LOAN)
+    log["contacts"].extend({"on": "2026-12-05", "status": "sent", "by": "reminder", "ref": str(i)}
+                           for i in range(7))
+    deps.store.upsert(ALERTS, log)
+    decide_collections(deps, case["id"])
+    sent, = officer_contacts(deps, rid)
+    assert (sent["on"], sent["status"], sent["reason"]) == ("2026-12-06", "deferred", "weekly_limit")
 
 
 def test_undelivered_approval_rechecks_contact_limit_on_retry(mock_app, monkeypatch):
@@ -1605,6 +1707,47 @@ def test_deferred_stage_two_opens_no_offer(mock_app):
     assert doc["repayment"].get("offer") is None
     assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
     assert len(by_kind(deps, replay_id, "early_warning")) == 2  # deferred도 쓴 것으로 보고 다시 보내지 않는다
+
+
+def test_approval_blocks_ambiguous_legacy_flow_without_changing_schedule(mock_app):
+    deps, _ = high_replay(mock_app)
+    assert choose(deps, "move")
+    before = loan(deps)
+    container = f"consent-{before['monitoring']['consent_id']}"
+    flow = deps.raw.get_json(container, "flow.json")
+    for t in flow:
+        t.pop("scheduled_item_key", None)
+    deps.raw.put_json(container, "flow.json", flow)
+    assert not decide_plan(deps)
+    led = loan(deps)["repayment"]
+    assert led["plan_change"]["validation_error"] == "ambiguous_scheduled_debit"
+    assert led["plan_change"]["status"] == "pending_officer" and not led.get("plan_history")
+    assert led["schedule"] == before["repayment"]["schedule"]
+
+
+def test_stored_legacy_plan_fails_replay_before_publishing_a_doubled_cashflow(mock_app):
+    outbox = Outbox()
+    deps = make_deps(mock_app, events=outbox)
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    before = loan(deps)
+    led = before["repayment"]
+    row = led["schedule"][0]
+    original = {"key": "i1", "due_on": row["due_on"], "amount_krw": led["installment_krw"]}
+    row["due_on"] = "2026-12-09"
+    led["plan_history"] = [{"change_id": "legacy", "applied_from": str(AS_OF), "before": [original],
+                            "after": [{**original, "due_on": row["due_on"]}]}]
+    deps.store.upsert(LOANS, before)
+    container = f"consent-{before['monitoring']['consent_id']}"
+    flow = deps.raw.get_json(container, "flow.json")
+    for t in flow:
+        t.pop("scheduled_item_key", None)
+    deps.raw.put_json(container, "flow.json", flow)
+    pump(deps, outbox)
+    mon = loan(deps)["monitoring"]
+    assert mon["status"] == "failed" and mon["error"] == "ambiguous_scheduled_debit"
+    assert mon["weeks"] == [] and loan(deps)["repayment"] == led and not contacts(deps, rid)
+    assert len(outbox.bodies(TOPIC_FLOW)) == 1
 
 
 def test_plan_choice_then_approval_changes_schedule_and_replay(mock_app):

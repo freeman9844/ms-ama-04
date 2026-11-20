@@ -28,6 +28,7 @@
   "납부": "Paid",
   "미납": "Missed",
   "부분납": "Partially paid",
+  "예정 출금과 추가 상환을 구분할 수 없어 승인하지 않았습니다. 기존 일정은 그대로입니다. 요청을 반려하거나 회차 식별자가 있는 흐름으로 다시 재생하세요.": "The plan was not approved because scheduled debits cannot be distinguished from additional repayments. The schedule is unchanged. Decline the request or start a new replay with installment identifiers.",
   "납부액": "Amount paid",
   "상환 잔액": "Outstanding balance",
   "완납으로 종료": "Closed: paid in full",

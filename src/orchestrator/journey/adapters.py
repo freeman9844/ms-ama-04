@@ -155,6 +155,22 @@ class CosmosStore:
             return False
         return True
 
+    def replace_batch(self, container: str, partition_key: str, documents: list[dict[str, Any]]) -> bool:
+        from azure.cosmos.exceptions import CosmosBatchOperationError
+
+        operations = [
+            ("replace", (d["id"], d), {"if_match_etag": d["_etag"]}) if d.get("_etag") else ("create", (d,))
+            for d in documents
+        ]
+        try:
+            self._db.get_container_client(container).execute_item_batch(
+                batch_operations=operations, partition_key=partition_key)
+        except CosmosBatchOperationError as exc:
+            if exc.status_code in (404, 409, 412):
+                return False
+            raise
+        return True
+
 
 class BlobRawStore:
     def __init__(self, account_url: str, credential: Any) -> None:
