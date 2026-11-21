@@ -227,7 +227,9 @@ def test_factual_money_questions_and_context_reach_selector_unmodified():
 
 @pytest.mark.parametrize("lang,text", [
     ("en", "Match the KRW 7,000,000 deposit to the settlement statement."),
+    ("en", "Compare the deposit of KRW 7,000,000 with the settlement statement."),
     ("ko", "700만 원 입금을 정산 명세와 대조하세요."),
+    ("ko", "입금액 700만 원을 정산 명세와 대조하세요."),
 ])
 def test_reviewed_deposit_check_keeps_action_without_recommending_a_loan(lang, text):
     item = {"text": text, "supported": True, "evidence": {"M:pg_reconciliation_ratio": .81}}
@@ -249,6 +251,8 @@ def test_recorded_loan_size_question_survives_followup():
 
 
 @pytest.mark.parametrize("text", ["KRW 3,500,000 would work.", "I recommend approving the full request.",
+                                  "Compare the deposit of KRW 7,000,000 with the statement; lend KRW 3,000,000.",
+                                  "입금액 700만 원을 정산 명세와 대조하고 300만 원으로 감액하세요.",
                                   "300만 원이면 적절합니다.", "전액 승인을 권고합니다."])
 def test_reviewed_evidence_never_supplies_a_second_vote_or_an_amount(text):
     opinion = {"recommendation": "decline", "review_passed": True,

@@ -17,9 +17,12 @@ _MONEY = re.compile(r"(?:[₩$]|\b(?:krw|usd)\b|\d[\d,.]*\s*(?:[억만천백]*\s
 _IMPLICIT = re.compile(r"(?:이면|라면|수준이면).{0,16}(?:적절|충분|진행|적당)|정도가\s*적당|"
                        r"\b(?:would work|would (?:be|make) (?:a |the )?(?:prudent|safer|suitable)|"
                        r"(?:suitable|prudent|recommended|appropriate) loan size)\b", re.I)
+_EN_AMOUNT = r"(?:KRW|₩)\s*\d[\d,]*"
+_KO_AMOUNT = r"\d[\d,]*\s*(?:억|천만|백만|만|천)?\s*원"
 _DEPOSIT_CHECK = re.compile(
-    r"(?:match|compare|reconcile|verify|check)\s+(?:the\s+)?(?:KRW|₩)\s*\d[\d,]*\s+deposit\b|"
-    r"\d[\d,]*\s*(?:억|천만|백만|만|천)?\s*원(?:의|짜리)?\s*입금(?=[^.!?;\n]{0,40}(?:대조|확인))", re.I)
+    rf"\b(?:match|compare|reconcile|verify|check)\s+(?:the\s+)?(?:{_EN_AMOUNT}\s+deposit\b|deposit of\s+{_EN_AMOUNT}\b)|"
+    rf"(?:{_KO_AMOUNT}(?:의|짜리)?\s*입금|입금액\s*{_KO_AMOUNT})"
+    r"(?=[^.!?;\n]{0,40}(?:대조|확인))", re.I)
 _VERDICT = re.compile(r"승인|거절|비권고|판단\s*보류|감액|조건부|"
                       r"\b(?:approv\w*|declin\w*|reject\w*|refer the request|defer judgment|"
                       r"(?:wise|unwise|safe) to proceed|go ahead with the loan)\b", re.I)

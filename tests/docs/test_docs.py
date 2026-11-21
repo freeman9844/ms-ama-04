@@ -107,6 +107,13 @@ def test_readme_links_every_hub_doc():
     linked = {(ROOT / t).resolve() for t in links(readme)}
     expected = {p.resolve() for p in hub_docs() if p.parent != ROOT and p.parent.name != "adr"}
     expected.add((ROOT / "docs" / "adr" / "README.md").resolve())
+    # 발표 자료의 내부 링크는 검사하지만 README에서 직접 연결할 필요는 없다.
+    expected.difference_update(ROOT / rel for rel in (
+        "docs/deck/capstone.script.md",
+        "docs/demo/demo-script.md",
+        "docs/demo/fallback.md",
+        "docs/demo/rehearsal.md",
+    ))
     assert sorted(_id(p) for p in expected - linked) == []
 
 
