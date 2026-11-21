@@ -6,6 +6,8 @@ from typing import Any
 
 from shared.amount_advice import has_proposal
 
+SETTLEMENT_RATE = "cashflow.settlement.pg_reconciliation_ratio"
+
 _OFFER = re.compile(
     r"감액|대체\s*금액|대안(?:\s*금액|으로)|일부만\s*승인|한도(?:만큼|까지)\s*(?:대출|승인)|"
     r"(?:금액|대출|신청액|한도).{0,35}(?:낮추|줄이|축소)|"
@@ -83,6 +85,12 @@ def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
 
     walk("policy", "Policy" if en else "정책", policy)
     walk("cashflow", "Cash flow" if en else "현금흐름", cf)
+    settlement = cf.get("settlement") or {}
+    ratio = settlement.get("pg_reconciliation_ratio") if settlement.get("available") is True else None
+    percent = f"{ratio * 100:g}%" if type(ratio) in (int, float) and 0 <= ratio <= 1 else missing
+    facts[SETTLEMENT_RATE] = f"{'Settlement reconciliation rate' if en else '정산 대사율'}: {percent}"
+    if "cashflow.features.pg_reconciliation_ratio" in facts:
+        facts["cashflow.features.pg_reconciliation_ratio"] = facts[SETTLEMENT_RATE]
     capacity = cf.get("capacity") or {}
     if "short_months" in capacity:
         rows = {r.get("month"): r for r in cf.get("monthly") or ()}
