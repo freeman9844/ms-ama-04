@@ -16,6 +16,20 @@ The old behavior effectively answered “did a debit happen?” and used that an
 
 For the one-won case the regression test now has three things to distinguish: the installment is partial, one won has been paid, and only the balance can go to collections review. With two overdue installments the order matters too. A late payment must reduce the older debt before it can count toward the newer one.
 
+## Where did the last KRW 50,001 go?
+
+Here's the more revealing regression case. Each installment is KRW 500,000. One won was already booked against the oldest unpaid installment. A debit of KRW 250,000 arrives on December 9, followed by KRW 800,000 on December 10, when the next installment falls due. The installment after that isn't due until December 11.
+
+| After processing | Oldest installment: still owed | December 10 installment | What the ledger applied |
+| --- | ---: | --- | --- |
+| The original one won | 499,999 | Not yet due | 1 to the oldest |
+| December 9 debit | 249,999 | Not yet due | 250,000 to the oldest |
+| December 10 debit | 0 | Paid in full | 249,999 to the oldest; 500,000 to the next |
+
+That leaves `800,000 − 249,999 − 500,000 = 50,001` won from the last debit **not allocated to these installments**. The test makes no claim about refunding it or holding it as a credit. What it establishes is narrower: tomorrow's installment must not turn green today.
+
+The test also supplies the later debit first and the earlier debit twice. Sorting by booking date protects the allocation order; tracking the transaction already applied prevents a duplicated input from becoming new money. The final balances alone are a weak assertion here. I also want to know **which debit paid which installment, and how much of it was used**.
+
 ## What if someone is already preparing the notice?
 
 Getting the arithmetic right wasn't enough. An officer could open a collection proposal, the borrower could finish paying, and the officer could then act on the stale proposal. Checking the balance when the page opens leaves that gap intact.
