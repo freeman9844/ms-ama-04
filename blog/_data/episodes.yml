@@ -70,3 +70,11 @@
   days: "2026-11-19"
   title_en: "Checking a settlement amount is not checking its availability"
   title_ko: "정산 예정금의 수치 검증과 상환재원 해석을 분리하다"
+- ref: day-19
+  days: "2026-11-20"
+  title_en: "One won is a payment, not a paid installment"
+  title_ko: "1원이 출금됐다고 50만 원 회차가 끝난 건 아니다"
+- ref: day-20
+  days: "2026-11-21"
+  title_en: "Who puts 80.2% in the answer?"
+  title_ko: "답변에 80.2%를 쓰는 일은 누구의 몫일까"

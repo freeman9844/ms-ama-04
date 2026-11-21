@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="{{ page.lang | default: site.lang | escape }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  {% seo %}
+  {% feed_meta %}
+  <link rel="stylesheet" href="{{ '/assets/main.css' | relative_url }}">
+</head>
+<body>
+  <a class="skip" href="#content">{% if page.lang == 'ko' %}본문으로{% else %}Skip to content{% endif %}</a>
+  <header class="mast"><div class="frame bar">
+    <a class="brand" href="{{ '/' | relative_url }}"><span aria-hidden="true">&gt;_</span> {{ site.title | escape }}</a>
+    <nav aria-label="{% if page.lang == 'ko' %}글 목록{% else %}Archives{% endif %}">
+      <a lang="en" href="{{ '/en/' | relative_url }}">English</a>
+      <a lang="ko" href="{{ '/ko/' | relative_url }}">한국어</a>
+    </nav>
+  </div></header>
+  <main class="frame" id="content">{{ content }}</main>
+  <footer class="frame foot">{{ site.title | escape }} · <a href="{{ '/feed.xml' | relative_url }}">RSS</a></footer>
+</body>
+</html>

@@ -6,7 +6,7 @@ permalink: /en/
 ---
 {%- assign listed = 0 -%}
 <ul class="post-list">
-{%- for ep in site.data.episodes -%}
+{%- for ep in site.data.episodes reversed -%}
   {%- assign entry = nil -%}
   {%- for p in site.posts -%}
     {%- if p.ref == ep.ref and p.lang == "en" -%}

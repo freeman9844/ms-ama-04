@@ -1,9 +1,53 @@
 ---
 ---
 
-@import "minima";
+$bg: #14181c;
+$panel: #1c2329;
+$ink: #e4eaef;
+$muted: #adbac4;
+$accent: #72e1cc;
+$edge: #39454e;
+$mono: ui-monospace, Consolas, monospace;
 
-.lang-switch {
-  font-size: 0.9em;
-  margin-bottom: 0.5em;
+* { box-sizing: border-box; }
+body { margin: 0; background: $bg; color: $ink; font: 1.05rem/1.75 system-ui, sans-serif; overflow-wrap: break-word; }
+.frame { width: calc(100% - 2.5rem); max-width: 54rem; margin-inline: auto; }
+.mast { background: $panel; border-top: 3px solid $accent; border-bottom: 1px solid $edge; }
+.bar, nav { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.bar { padding: .85rem 0; justify-content: space-between; }
+.brand { font: bold 1.05rem $mono; text-decoration: none; color: $ink; }
+.brand span, .eyebrow { color: $accent; }
+a { color: $accent; text-underline-offset: .2em; }
+a:hover { color: white; }
+a:focus-visible { outline: 2px solid $accent; outline-offset: 3px; }
+.skip { position: absolute; left: 1rem; top: -5rem; background: $panel; padding: .5rem; }
+.skip:focus { top: .3rem; }
+main { padding: 2.4rem 0 3rem; }
+h1, h2, h3 { line-height: 1.32; }
+h1 { font-size: clamp(1.95rem, 5vw, 3rem); margin: .45em 0; letter-spacing: -.03em; }
+h2 { margin-top: 2rem; }
+.eyebrow, .stamp, .post-meta, .foot { font: .88rem/1.6 $mono; }
+.eyebrow { letter-spacing: .1em; text-transform: uppercase; }
+.stamp, .post-meta, .foot, .lang-switch { color: $muted; }
+.timeline, .post-list { list-style: none; margin: 0; padding: 0; }
+.timeline li, .post-list li { border-top: 1px solid $edge; padding: 1.05rem 0; display: grid; grid-template-columns: minmax(9.5rem, 1fr) 3fr; gap: .25rem 1.25rem; }
+.post-list h3, .post-list p { margin: 0; }
+.post-list p { grid-column: 2; color: $muted; }
+.post.h-entry { max-width: 46rem; margin: auto; }
+.post-header { border-bottom: 1px solid $edge; padding-bottom: 1rem; }
+.post-content { margin-top: 2rem; }
+code, pre { font-family: $mono; background: $panel; }
+code { color: #9fe8de; padding: .1em .25em; }
+pre { padding: 1rem; border: 1px solid $edge; overflow-x: auto; }
+pre code { padding: 0; }
+blockquote { margin-inline: 0; padding-left: 1rem; border-left: 3px solid $accent; color: $muted; }
+table { display: block; overflow-x: auto; border-collapse: collapse; }
+th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid $edge; }
+th { background: $panel; }
+img { max-width: 100%; height: auto; }
+.foot { border-top: 1px solid $edge; padding: 1rem 0 2rem; }
+@media (max-width: 38rem) {
+  .timeline li, .post-list li { grid-template-columns: 1fr; }
+  .post-list p { grid-column: 1; }
+  main { padding-top: 1.5rem; }
 }
