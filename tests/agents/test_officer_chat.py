@@ -225,6 +225,29 @@ def test_factual_money_questions_and_context_reach_selector_unmodified():
     assert runner.calls[1][1]["history"] == history
 
 
+@pytest.mark.parametrize("lang,text", [
+    ("en", "Match the KRW 7,000,000 deposit to the settlement statement."),
+    ("ko", "700만 원 입금을 정산 명세와 대조하세요."),
+])
+def test_reviewed_deposit_check_keeps_action_without_recommending_a_loan(lang, text):
+    item = {"text": text, "supported": True, "evidence": {"M:pg_reconciliation_ratio": .81}}
+    opinion = {"recommendation": "refer", "review_passed": True, "officer_checks": [item]}
+    answer = OfficerChat(FakeRunner(result=_run("agent_opinion.officer_checks.0")), "m").ask(
+        {"agent_opinion": opinion}, [], "?", lang)
+    assert text in answer.answer
+
+
+def test_recorded_loan_size_question_survives_followup():
+    q = "What loan size was recorded in KRW?"
+    history = [{"role": "user", "text": q}]
+    runner = FakeRunner(result=_run("application.requested_amount_krw"))
+    chat = OfficerChat(runner, "m")
+    chat.ask({}, [], q, "en")
+    chat.ask({}, history, "Which record?", "en")
+    assert runner.calls[0][1]["question"] == q
+    assert runner.calls[1][1]["history"] == history
+
+
 @pytest.mark.parametrize("text", ["KRW 3,500,000 would work.", "I recommend approving the full request.",
                                   "300만 원이면 적절합니다.", "전액 승인을 권고합니다."])
 def test_reviewed_evidence_never_supplies_a_second_vote_or_an_amount(text):

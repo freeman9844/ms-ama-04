@@ -15,7 +15,11 @@ _OFFER = re.compile(
 _MONEY = re.compile(r"(?:[₩$]|\b(?:krw|usd)\b|\d[\d,.]*\s*(?:[억만천백]*\s*원|million|thousand|[mk]\b)|"
                     r"\d{1,3}(?:,\d{3})+|\d{5,}|[일이삼사오육칠팔구십백천만억]+\s*원|\b(?:won|dollars?)\b)", re.I)
 _IMPLICIT = re.compile(r"(?:이면|라면|수준이면).{0,16}(?:적절|충분|진행|적당)|정도가\s*적당|"
-                       r"\b(?:would work|would (?:be|make) (?:a |the )?(?:prudent|safer|suitable)|loan size)\b", re.I)
+                       r"\b(?:would work|would (?:be|make) (?:a |the )?(?:prudent|safer|suitable)|"
+                       r"(?:suitable|prudent|recommended|appropriate) loan size)\b", re.I)
+_DEPOSIT_CHECK = re.compile(
+    r"(?:match|compare|reconcile|verify|check)\s+(?:the\s+)?(?:KRW|₩)\s*\d[\d,]*\s+deposit\b|"
+    r"\d[\d,]*\s*(?:억|천만|백만|만|천)?\s*원(?:의|짜리)?\s*입금(?=[^.!?;\n]{0,40}(?:대조|확인))", re.I)
 _VERDICT = re.compile(r"승인|거절|비권고|판단\s*보류|감액|조건부|"
                       r"\b(?:approv\w*|declin\w*|reject\w*|refer the request|defer judgment|"
                       r"(?:wise|unwise|safe) to proceed|go ahead with the loan)\b", re.I)
@@ -28,7 +32,8 @@ def counteroffer(text: str, requested: int | None) -> bool:
 
 
 def reviewed_detail(text: str, requested: int | None) -> bool:
-    return bool(text.strip() and not (_VERDICT.search(text) or _MONEY.search(text) or counteroffer(text, requested)))
+    return bool(text.strip() and not (_VERDICT.search(text) or counteroffer(text, requested)
+                                      or _MONEY.search(_DEPOSIT_CHECK.sub("", text))))
 
 
 def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
