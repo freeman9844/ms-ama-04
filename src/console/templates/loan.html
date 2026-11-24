@@ -14,7 +14,7 @@
 {% macro restructure_block(doc_id, rs, decidable) -%}
 <h3>{{ _("재조정 상담 요청") }} <small>{{ rs.status }}</small></h3>
 <p>{{ rs.category }} · {{ rs.note|mt }}</p>
-{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason|mt }}</p>{% endif %}
+{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason if usd else rs.reason|mt_ref }}</p>{% endif %}
 {% if decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 끝나면 재조정 결정을 내릴 수 있습니다.") }}</small></p>
 {% elif decidable and user.can_decide %}
@@ -59,7 +59,7 @@
 <p>{{ p.status|proposal_label }}</p>
 {% elif p.status != "pending_officer" %}
 <h4>{{ _("심사역 결정") }}</h4>
-<p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason|mt }}{% endif %}</p>
+<p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason if usd else p.decision_reason|mt_ref }}{% endif %}</p>
 {% if p.contact %}<p>{{ _("발송 결과") }}: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
 <blockquote>{{ (p.sent_text or p.contact.text)|mt_ref }}</blockquote>{% endif %}
 {% elif decidable and user.can_decide and replay_blocked %}
@@ -267,7 +267,7 @@
     <td>{% for a in pc.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_cents|usd_cents if usd else a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
   </tr></tbody>
 </table>
-{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason|mt }}{% endif %}</p>
+{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason if usd else pc.reason|mt_ref }}{% endif %}</p>
 {% elif v.plan_decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 멈추면 결정할 수 있습니다.") }}</small></p>
 {% elif v.plan_decidable and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}

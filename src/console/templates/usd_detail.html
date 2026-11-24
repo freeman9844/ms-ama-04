@@ -2,6 +2,9 @@
 {% import "_seller.html" as sl %}
 {% set d = v.doc %}
 {% set usd = true %}
+{% macro reason_value(field, value) -%}
+{% if (field or "").endswith("_cents") %}{{ (value|int if value is float and value.is_integer() else value)|usd_cents }}{% else %}{{ value }}{% endif %}
+{%- endmacro %}
 {% block head %}{% if watch_url %}<meta http-equiv="refresh" content="3;url={{ watch_url }}">{% elif in_progress %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
 {% block main %}
 <h1>{{ sl.applicant(d.applicant_id, user.can_restore, true) }}</h1>
@@ -16,8 +19,8 @@
 {% if v.policy %}<section class="card"><h2>{{ _("정책 판정") }} · {{ v.policy.rules_version }}</h2>
 <p>{{ _("금리 구간") }}: {{ v.policy.rate_band or "—" }}</p>
 {% for r in v.policy.reason_codes %}<p>{{ r.code }} · {{ r.message }}
-{% if r.observed is number %} · {{ _("관측값") }} {{ r.observed|usd_cents if (r.field or "").endswith("_cents") else r.observed }}{% endif %}
-{% if r.threshold is number %} · {{ _("기준") }} {{ r.threshold|usd_cents if (r.field or "").endswith("_cents") else r.threshold }}{% endif %}</p>{% endfor %}
+{% if r.observed is number %} · {{ _("관측값") }} {{ reason_value(r.field, r.observed) }}{% endif %}
+{% if r.threshold is number %} · {{ _("기준") }} {{ reason_value(r.field, r.threshold) }}{% endif %}</p>{% endfor %}
 </section>{% endif %}
 <section class="card"><h2>{{ _("월별 매출과 지출") }} (USD)</h2>
 {% set months = (d.underwriting or {}).monthly or [] %}

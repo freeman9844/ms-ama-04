@@ -255,3 +255,55 @@ def test_archive_officer_reason_remains_visible_beside_reference_translation():
     doc["officer_decision"]["reason"] = "승인"
     page = TestClient(create_app(deps)).get("/applications/" + doc["id"]).text
     assert '승인<span class="mt-ref">' in page
+
+
+def test_policy_reason_displays_whole_cents_without_rounding_other_values():
+    from policy.engine import RuleCheck
+
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["policy"]["reason_codes"] = [
+        RuleCheck("R900", "Limit below product minimum", "engine", "max_amount_cents", "lt",
+                  0.0, 10000.0, "hit").reason().model_dump(),
+        RuleCheck("R107", "Check ratio", "refer", "pg_top_platform_share", "gt",
+                  .95, .85, "hit").reason().model_dump(),
+    ]
+    page = TestClient(create_app(deps)).get("/applications/" + doc["id"]).text
+    reasons = re.findall(r"<p>(R\d+.*?)</p>", page, re.S)
+    assert "$0.00 USD" in reasons[0] and "$100.00 USD" in reasons[0]
+    assert "0.95" in reasons[1] and "0.85" in reasons[1] and "$" not in reasons[1]
+
+
+@pytest.mark.parametrize("usd", [True, False], ids=["usd", "legacy"])
+def test_servicing_decisions_keep_the_original_officer_reason(usd):
+    from tests.console.test_monitoring import BASELINE, ROW
+
+    deps = fixtures.build_deps()
+    amount = "amount_cents" if usd else "amount_krw"
+    src = dict(status="approved", officer_id="officer", decided_at="2026-10-01", reason="승인")
+    baseline = {"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12} if usd else BASELINE
+    week = {"week": 1, "revenue_cents": 404123, "buffer_days": 7} if usd else ROW
+    loan = dict(USD if usd else {}, id="loan", application_id="loan", applicant_id=SELLER, baseline=baseline,
+                monitoring={"status": "completed", "replay_id": "rp", "weeks": [{"week": 1, "row": week}]},
+                repayment={"plan_change": dict(src, option="move", officer_id="plan-officer")}, **{amount: 500000})
+    case = dict(id="rc-1", case_id="rc-1", kind="repayment_case", replay_id="rp", loan_id="loan", week=1,
+                installment={"no": 1, "due_on": "2026-09-30", amount: 10000}, missed_count=1,
+                proposal=dict(src, decision_reason="승인", officer_id="collection-officer"),
+                restructure=dict(src, officer_id="restructure-officer"))
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [case])
+    page = TestClient(create_app(deps)).get("/loans/loan").text
+    for actor in ("plan-officer", "collection-officer", "restructure-officer"):
+        suffix = "</p>" if usd else '<span class="mt-ref">Approved</span>'
+        assert f"{actor} · 2026-10-01 · 승인{suffix}" in page
+
+
+def test_usd_consent_management_available_during_monitoring_outage(monkeypatch):
+    deps = fixtures.build_deps()
+    def unavailable(_):
+        raise OSError("monitoring unavailable")
+    monkeypatch.setattr(deps.monitoring, "get_loan", unavailable)
+    consent = dict(USD, consent_id="consent-bakery", applicant_id=SELLER, application_id="preview-usd-bakery",
+                   purpose="Working capital", status="granted", scopes=["account"], expires_at="2027-01-01")
+    deps.privacy = CosmosPrivacy(QueryContainer([dict(consent, id="consent-bakery")]), None, QueryContainer([]))
+    response = TestClient(create_app(deps), raise_server_exceptions=False).get(f"/borrower/{SELLER}/consents")
+    assert response.status_code == 200 and f"/borrower/{SELLER}/consents/consent-bakery/revoke" in response.text

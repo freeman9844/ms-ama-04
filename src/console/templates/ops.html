@@ -20,7 +20,7 @@
   </div>
 </div>
 {% if not s %}
-{% if not runs %}
+{% if prefix and not runs %}
 <p>{{ _("측정 실행이 없습니다. 운영자 PC에서 <code>python -m ops load</code>(기본 48건=균형 격자 전체)로 합성 신청을 제출하면 여기에 표시됩니다.") }}</p>
 {% endif %}
 <p class="note">{{ _("선택한 범위에 신청이 없습니다.") }}</p>

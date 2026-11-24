@@ -108,9 +108,12 @@ def test_ops_page_selects_run_and_rejects_unknown():
 
 def test_ops_page_without_runs_explains_how_to_load():
     ops = FakeOps({})
-    html = client(ops).get("/ops", headers=AUDITOR_H).text
+    c = client(ops)
+    html = c.get("/legacy/ops", headers=AUDITOR_H).text
     assert "측정 실행이 없습니다" in html and "python -m ops load" in html and "선택한 범위에 신청이 없습니다" in html
-    assert ops.asked == [("recent", 100)]
+    usd = c.get("/ops", headers=AUDITOR_H).text
+    assert "선택한 범위에 신청이 없습니다" in usd and "python -m ops load" not in usd
+    assert ops.asked == [("recent", 100), ("recent", 100)]
 
 
 def test_ops_page_offers_recent_first_and_reads_recent_scope():

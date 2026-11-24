@@ -991,7 +991,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         consents = store.consents_for_applicant(applicant_id, legacy=legacy)
         applications = deps.store.for_applicant(applicant_id, legacy=legacy)
         loans = borrower_loans(applicant_id, applications) if page in {"plans", "notices"} or (
-            page == "consents" and i18n.current() != i18n.SOURCE) else []
+            page == "consents" and legacy and i18n.current() != i18n.SOURCE) else []
         grievances = store.grievances_for_applicant(applicant_id, legacy=legacy)
         rows = [
             {"application_id": doc["application_id"], "received_on": str(doc.get("submitted_at") or "")[:10],
