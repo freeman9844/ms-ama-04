@@ -235,6 +235,59 @@ def test_delete_consent_data_is_idempotent_once_complete(mock_client):
     assert runner.deleted_conversations == ["conv_a"] and len(deps.events.sent) == 2  # granted + revoked
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_cutover_revoke_and_prove_each_portfolio(run_orchestrator, enabled):
+    from functools import partial
+    from unittest.mock import AsyncMock
+
+    from console.app import create_app
+    from consolepreview.fixtures import build_deps
+    from mockapis.demo import FlowStore
+    from shared.contracts import USD_V1
+    from tests.console.test_privacy import FakePrivacy
+    from tests.console.test_usd_views import token
+
+    cases = build_demo_cases(AS_OF)
+    mock_client = TestClient(create_mock_app(cases, SECRET, lambda: NOW, flows=FlowStore(cases, AS_OF)))
+    worker = make_deps(mock_client)
+    ui = build_deps()
+    ui.usd_origination_enabled = enabled
+    ui.privacy = FakePrivacy([], [], [])
+    client = TestClient(create_app(ui))
+    seller = "seller-bakery-20"
+    grants = []
+    for tags in ({}, USD_V1.model_dump()):
+        app_id = "privacy-usd" if tags else "privacy-krw"
+        grant = request_consent(worker, dict(tags, application_id=app_id, applicant_id=seller))
+        cid = grant["consent_id"]
+        result = assemble_data(worker, dict(tags, application_id=app_id,
+                               **{k: grant[k] for k in ("consent_id", "token", "scopes")}))
+        assert result["status"] == "complete"
+        ui.privacy.consents[cid] = worker.store.read("consents", cid, cid)
+        grants.append((cid, grant["token"], "" if tags else "/legacy"))
+
+    for cid, bearer, prefix in grants:
+        path = f"{prefix}/borrower/{seller}/consents"
+        csrf = token(client.get(path).text)
+        assert client.post(f"{path}/{cid}/revoke", data={"csrf": csrf}).status_code == 202
+        queue, msg = ui.queue.sent[-1]
+        durable = AsyncMock()
+        durable.get_status.return_value = None
+        assert queue == "consent-commands"
+        assert asyncio.run(handle_consent_command(durable, json.dumps(msg), worker.store)) == "started"
+        activities = {k: partial(f, worker) for k, f in CONSENT_ACTIVITIES.items()}
+        result, _ = run_orchestrator(consent_lifecycle, durable.start_new.await_args.args[-1], activities)
+        assert result["reason"] == "revoked" and result["status"] == "deleted"
+        proof = worker.store.read(PROOFS_CONTAINER, cid, cid)
+        assert proof["complete"] and proof["manifest"] and all(i["verified"] for i in proof["items"])
+        assert worker.raw.manifest(f"consent-{cid}") is None
+        assert mock_client.get("/mydata/profile", headers={"Authorization": "Bearer " + bearer}).status_code == 401
+        ui.privacy.proofs[cid] = proof
+        assert "transactions.json" in client.get(f"{path}/{cid}/proof").text
+        if prefix:
+            assert worker.raw.manifest("consent-" + grants[1][0])
+
+
 def test_unverified_foundry_deletion_is_recorded_and_raises(mock_client):
     deps = make_deps(mock_client, FoundryRunner(exists=True))
     cid = granted(deps)["consent_id"]

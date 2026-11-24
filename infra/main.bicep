@@ -63,6 +63,9 @@ param consoleAuthEnabled bool = true
 @allowed([ 'CreditOfficer', 'CreditManager', 'Auditor' ])
 param consoleDemoRole string = 'CreditOfficer'
 
+@description('Enable new USD submissions on the console only; existing cases continue in either state.')
+param usdOriginationEnabled bool = false
+
 @description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
 param opsAlertEmail string = ''
 
@@ -126,6 +129,7 @@ module resources 'resources.bicep' = {
     consoleIp: consoleIp
     consoleAuthEnabled: consoleAuthEnabled
     consoleDemoRole: consoleDemoRole
+    usdOriginationEnabled: usdOriginationEnabled
     opsAlertEmail: opsAlertEmail
     aiGatewayRouting: aiGatewayRouting
     appGwCertSecretId: appGwCertSecretId

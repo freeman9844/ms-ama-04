@@ -68,7 +68,7 @@ class FakeContext:
 _ALIASES = {"event": "officer_decision", "withdraw": "consent_withdrawn"}
 
 
-def drive(ctx, orchestrator=None):
+def drive(ctx, orchestrator=None, *, on_wait=None):
     """생성기를 끝까지 돌린다. outcomes: ("timer",) 또는 (이벤트 이름|별칭, payload)."""
     if orchestrator is None:
         from journey.orchestration import journey as orchestrator
@@ -94,7 +94,9 @@ def drive(ctx, orchestrator=None):
                 error = e
         elif isinstance(yielded, FakeAny):
             assert all(not t.cancelled for t in yielded.tasks), "취소된 태스크를 다시 기다림"
-            outcome = ctx.outcomes.pop(0)
+            outcome = on_wait() if on_wait is not None else ctx.outcomes.pop(0)
+            if outcome is None:  # No external event delivered: leave the persisted request waiting.
+                return
             if outcome[0] == "timer":
                 (timer,) = [t for t in yielded.tasks if t.kind == "timer"]
                 ctx.current_utc_datetime = timer.input

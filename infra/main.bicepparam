@@ -22,6 +22,7 @@ param evalImage = readEnvironmentVariable('SERVICE_EVAL_IMAGE_NAME', '')
 param consoleIp = readEnvironmentVariable('CONSOLE_IP', '')
 param consoleAuthEnabled = readEnvironmentVariable('CONSOLE_AUTH_ENABLED', 'true') != 'false'
 param consoleDemoRole = readEnvironmentVariable('CONSOLE_DEMO_ROLE', 'CreditOfficer')
+param usdOriginationEnabled = readEnvironmentVariable('USD_ORIGINATION_ENABLED', 'false') == 'true'
 param opsAlertEmail = readEnvironmentVariable('OPS_ALERT_EMAIL', '')
 param aiGatewayRouting = readEnvironmentVariable('AI_GATEWAY_ROUTING', 'true') == 'true'
 param appGwCertSecretId = readEnvironmentVariable('APPGW_CERT_SECRET_ID', '')

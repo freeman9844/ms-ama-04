@@ -41,8 +41,9 @@ def test_console_runs_in_internal_environment_with_own_identity(closed):
     env = {e["name"] for e in app["properties"]["template"]["containers"][0]["env"]}
     assert env == {"AZURE_CLIENT_ID", "COSMOS_ENDPOINT", "COSMOS_DATABASE", "DATA_BLOB_ENDPOINT",
                    "QUEUE_ENDPOINT", "KEYVAULT_URI",  # 가명 키는 Key Vault에서만 읽습니다.
-                   "AI_PROJECT_ENDPOINT", "AI_GATEWAY", "AI_GATEWAY_URL", "CHAT_MODEL"}
+                   "AI_PROJECT_ENDPOINT", "AI_GATEWAY", "AI_GATEWAY_URL", "CHAT_MODEL", "USD_ORIGINATION_ENABLED"}
     values = {e["name"]: e.get("value") for e in app["properties"]["template"]["containers"][0]["env"]}
+    assert values["USD_ORIGINATION_ENABLED"] == "false"
     assert values["CHAT_MODEL"] == "gpt-6-luna" and values["AI_GATEWAY"] == "apim"
     assert re.fullmatch(r"https://ais-[0-9a-z]+\.services\.ai\.azure\.com/api/projects/[0-9a-z-]+",
                         values["AI_PROJECT_ENDPOINT"])
@@ -162,6 +163,8 @@ def test_console_easy_auth_can_be_switched_off_for_demo(console_app_noauth, expa
 
 def test_console_demo_role_reaches_the_container(expand_azd):
     # README의 CONSOLE_DEMO_ROLE(예: Auditor 데모)이 실제 컨테이너까지 가야 합니다. 안 가면 앱은 CreditOfficer로 동작합니다.
-    demo = expand_azd({"CONSOLE_AUTH_ENABLED": "false", "CONSOLE_DEMO_ROLE": "Auditor", "OPERATOR_IP": "closed"})
+    demo = expand_azd({"CONSOLE_AUTH_ENABLED": "false", "CONSOLE_DEMO_ROLE": "Auditor", "OPERATOR_IP": "closed",
+                       "USD_ORIGINATION_ENABLED": "true"})
     env = {e["name"]: e.get("value") for e in demo.one(CA, "ca-console")["properties"]["template"]["containers"][0]["env"]}
     assert env["CONSOLE_AUTH_MODE"] == "demo" and env["CONSOLE_DEMO_ROLE"] == "Auditor"
+    assert env["USD_ORIGINATION_ENABLED"] == "true"

@@ -25,6 +25,7 @@ param consoleIp string
 param consoleAuthEnabled bool
 @description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
 param consoleDemoRole string
+param usdOriginationEnabled bool = false
 @description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
 param opsAlertEmail string = ''
 @description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다(AI_GATEWAY=apim). false면 직접 호출(롤백).')
@@ -633,6 +634,7 @@ module caConsole 'modules/container-app.bicep' = {
       { name: 'AI_GATEWAY', value: gatewaySettings.AI_GATEWAY }
       { name: 'AI_GATEWAY_URL', value: gatewaySettings.AI_GATEWAY_URL }
       { name: 'CHAT_MODEL', value: 'gpt-6-luna' }
+      { name: 'USD_ORIGINATION_ENABLED', value: usdOriginationEnabled ? 'true' : 'false' }
     ], consoleAuthEnabled ? [] : [
       { name: 'CONSOLE_AUTH_MODE', value: 'demo' }
       { name: 'CONSOLE_DEMO_ROLE', value: consoleDemoRole }

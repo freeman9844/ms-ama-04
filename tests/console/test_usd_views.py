@@ -71,6 +71,35 @@ def token(html):
     return re.search(r'name="csrf" value="([^"]+)"', html)[1]
 
 
+@pytest.mark.parametrize("setting, expected", [(None, 503), ("false", 503), ("yes", 503), ("true", 303)])
+def test_usd_origination_gate(monkeypatch, setting, expected):
+    from console import adapters
+
+    messages = []
+    monkeypatch.setattr(adapters, "_cosmos_database", lambda *a: SimpleNamespace(get_container_client=lambda _: None))
+    monkeypatch.setattr(adapters, "BlobRawStore", lambda *a: None)
+    monkeypatch.setattr(adapters, "_queue_factory", lambda *a: lambda name: SimpleNamespace(
+        send_message=lambda body: messages.append((name, json.loads(body)))))
+    env = dict.fromkeys(adapters.REQUIRED_ENV, "offline")
+    env.update(PSEUDONYM_KEY="k" * 32, CONSOLE_AUTH_MODE="demo")
+    if setting is not None:
+        env["USD_ORIGINATION_ENABLED"] = setting
+    client = TestClient(create_app(adapters.build_deps(env)), follow_redirects=False)
+    for endpoint, page in [("/apply", f"/apply?applicant_id={SELLER}"), ("/applications", "/applications/new")]:
+        form = dict(csrf=token(client.get(page).text), applicant_id=SELLER, requested_tenor_months="6",
+                    consent_account="on", consent_tax="on", consent_pg="on")
+        before = len(messages)
+        for fields in [{"requested_amount_krw": "5000000"},
+                       {"requested_amount_usd": "5000", "requested_amount_krw": "5000000"}]:
+            assert client.post(endpoint, data=form | fields).status_code == 422
+        assert len(messages) == before
+        assert client.post(endpoint, data=form | {"requested_amount_usd": "5000"}).status_code == expected
+    assert len(messages) == (2 if expected == 303 else 0)
+    for name, message in messages:
+        assert name == "applications-start" and message["requested_amount_cents"] == 500000
+        assert "requested_amount_krw" not in message and all(message[k] == v for k, v in USD.items())
+
+
 @pytest.mark.parametrize(("page", "endpoint", "source"), [
     ("/applications/new", "/applications", "console"), (f"/apply?applicant_id={SELLER}", "/apply", "customer")])
 def test_usd_form_to_real_start_consumer(page, endpoint, source):
@@ -95,8 +124,10 @@ def test_usd_form_to_real_start_consumer(page, endpoint, source):
     assert "requested_amount_krw" not in payload
 
 
-def test_usd_officer_detail_to_real_decision_consumer():
+@pytest.mark.parametrize("enabled", [False, True])
+def test_usd_officer_detail_to_real_decision_consumer(enabled):
     deps = fixtures.build_deps()
+    deps.usd_origination_enabled = enabled
     deps.store.docs[DOC["id"]] = DOC
     client = TestClient(create_app(deps))
     html = client.get("/applications/usd-first").text
@@ -111,6 +142,21 @@ def test_usd_officer_detail_to_real_decision_consumer():
     assert queue == "officer-decisions" and asyncio.run(handle_decision(durable, json.dumps(msg)))
     decision, error = validate_officer_decision(durable.raise_event.await_args.args[-1], DOC["policy"], usd=True)
     assert not error and decision.amount_cents == 500001
+
+    old = dict(id="pending-old", application_id="pending-old", applicant_id=SELLER, status="awaiting_officer",
+               requested_amount_krw=5000000, policy=dict(decision="eligible", max_amount_krw=5000000))
+    deps.store.docs[old["id"]] = old
+    html = client.get("/applications/pending-old").text
+    assert "₩5,000,000" in html and 'name="amount_krw"' in html
+    result = client.post("/applications/pending-old/decision", data=dict(csrf=token(html), decision="approve",
+                         amount_krw="4500000", reason="Historical request"))
+    assert result.status_code == 202
+    queue, msg = deps.queue.sent[-1]
+    assert queue == "officer-decisions" and asyncio.run(handle_decision(durable, json.dumps(msg)))
+    payload = durable.raise_event.await_args.args[-1]
+    assert "currency" not in payload and "amount_cents" not in payload
+    decision, error = validate_officer_decision(payload, old["policy"])
+    assert not error and decision.amount_krw == 4500000
 
 
 def test_same_seller_loan_grievance_consent_and_run_scopes():
