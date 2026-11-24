@@ -11,6 +11,8 @@
 ## 결정
 원천 데이터는 지우고, 판단 기록은 원천 없이도 설명 가능한 파생값·근거 ID만 남긴다. 동의마다 `consent_lifecycle` 오케스트레이션이 만료·철회까지 기다렸다가 `delete_consent_data`(결정적·멱등, `src/orchestrator/journey/consent.py`)로 지운다. 순서(deploy-history P5b): 동의를 먼저 `expired`/`revoked`로 표시 → 원천 Blob 컨테이너(삭제 전 파일 목록·sha256 manifest 기록, blob을 하나씩 지운 뒤 컨테이너 삭제, "없음 또는 빈 컨테이너"를 삭제 확인으로 간주) → 목업 동의 레지스트리 revoke → Foundry 대화·컨테이너 삭제. 모든 항목이 검증되어야 `complete`이고, 아니면 증명을 미완료로 남기고 재시도한다(앞 시도에서 확인된 항목은 다시 지우지 않고 원천 컨테이너만 매번 재확인). 증명은 **`deletion_proofs`** 컨테이너(파티션 `/consent_id`, id = 동의 ID)에 저장하고, 보존 항목으로 신청 문서를 남긴다(`retained`의 `application_record` → `applications/<id>`).
 
+삭제 뒤 수집 작업이 원천 Blob을 다시 쓰면 재생은 중단된다. 동의에 복구 대기를 기록하고 이전 증명의 원천 항목을 미확인으로 바꾼 뒤 즉시 삭제한다. 실패하면 `repair_consent_deletions` 타이머가 5분마다 대기 건을 찾아 원천 컨테이너가 없거나 비었는지 다시 확인한다. 원래 manifest와 다른 항목의 증명은 유지하며, 복구 때문에 차주에게 다시 안내하거나 재생을 시작하지 않는다.
+
 ## 검토한 대안
 | 대안 | 장점 | 기각 이유 |
 |---|---|---|

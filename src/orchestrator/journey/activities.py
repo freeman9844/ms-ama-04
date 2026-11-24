@@ -57,6 +57,7 @@ class DocumentStore(Protocol):
     def upsert(self, container: str, document: dict[str, Any]) -> None: ...
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None: ...
     def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]: ...
+    def pending_raw_repairs(self) -> list[str]: ...
     def replace(self, container: str, document: dict[str, Any], etag: str | None) -> bool:
         """etag가 같을 때만 교체한다. 다른 쓰기가 끼어들었으면 False."""
         ...
@@ -279,12 +280,9 @@ def _drop_if_consent_ended(deps: Deps, consent_id: str, container: str) -> None:
     consent = deps.store.read("consents", consent_id, consent_id)
     if consent is None or consent.get("status") not in ENDED_CONSENT:
         return
-    try:
-        outcome = "deleted" if deps.raw.delete_container(container) else "absent"
-    except Exception:  # noqa: BLE001 - 실패도 기록으로 남긴다
-        outcome = "failed"
-    entry = {"kind": "raw_container", "target": container, "outcome": outcome, "at": deps.clock().isoformat()}
-    update_doc(deps.store, "consents", consent_id, consent_id, lambda c: c.setdefault("late_cleanup", []).append(entry))
+    from journey.consent import start_raw_repair
+
+    start_raw_repair(deps, consent_id, container)
     raise ConsentEnded(f"데이터 조립 중 동의가 끝났습니다: {consent_id}")
 
 

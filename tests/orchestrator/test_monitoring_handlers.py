@@ -213,6 +213,9 @@ def mock_app():
 
 
 class RegistrationStore(MemoryStore):
+    def pending_raw_repairs(self):
+        return [i for (c, i), d in self.docs.items() if c == "consents" and d.get("raw_repair_pending")]
+
     def prior_contact_slots(self, borrower, lo, hi):
         ids = {i for (c, i), d in self.docs.items() if c == LOANS and d.get("applicant_id") == borrower}
         return [dict(loan_id=d["loan_id"], **{k: s[k] for k in ("ref", "alert_id", "by", "on") if k in s})
@@ -427,6 +430,102 @@ def test_replay_stops_if_raw_write_follows_deletion_proof(mock_app, monkeypatch,
     assert deps.store.read("consents", cid, cid)["late_cleanup"][-1]["outcome"] == (
         "deleted" if end_before_put else "absent")
     assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+
+
+@pytest.mark.parametrize("filename", ["flow.json", "pg_flow.json"])
+def test_late_raw_cleanup_recovered_by_timer(mock_app, monkeypatch, filename):
+    import function_app
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data, send_consent_notice
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put, delete = deps.raw.put_json, deps.raw.delete_container
+    failures, original = [], {}
+
+    def revoke_then_write(container, name, value):
+        if name == filename:
+            cid = container.removeprefix("consent-")
+            delete_consent_data(deps, dict(consent_id=cid, reason="revoked", trigger="revoke", requested_by="test"))
+            send_consent_notice(deps, dict(consent_id=cid, kind="deletion"))
+            original.update(deps.store.read(PROOFS_CONTAINER, cid, cid))
+            failures.extend(["unavailable", "not_deleted"])
+            monkeypatch.setattr(deps.mock, "revoke", lambda *_: pytest.fail("repeated registry deletion"))
+        put(container, name, value)
+
+    def intermittent(container):
+        if failures:
+            if failures.pop(0) == "unavailable":
+                raise OSError("storage unavailable")
+            return True  # Accepted but the blob is still visible.
+        return delete(container)
+
+    monkeypatch.setattr(deps.raw, "put_json", revoke_then_write)
+    monkeypatch.setattr(deps.raw, "delete_container", intermittent)
+    assert replay(deps) is None
+    cid = original["id"]
+    def proof():
+        return deps.store.read(PROOFS_CONTAINER, cid, cid)
+    def consent():
+        return deps.store.read("consents", cid, cid)
+    assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+    assert not proof()["complete"] and not consent()["deletion_complete"]
+    assert not next(i for i in proof()["items"] if i["kind"] == "raw_container")["verified"]
+    events = list(deps.events.sent)
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    function_app.repair_consent_deletions(None)
+    assert not proof()["complete"] and not consent()["deletion_complete"]
+    assert deps.raw.manifest(f"consent-{cid}")
+    replace_doc = deps.store.replace
+    def interrupt_checkpoint(container, doc, etag):
+        if container == "consents" and doc.get("deletion_complete"):
+            raise OSError("crash after proof checkpoint")
+        return replace_doc(container, doc, etag)
+    with monkeypatch.context() as m:
+        m.setattr(deps.store, "replace", interrupt_checkpoint)
+        with pytest.raises(OSError, match="crash after proof"):
+            function_app.repair_consent_deletions(None)
+    assert proof()["complete"] and not consent()["deletion_complete"]
+    monkeypatch.setattr(deps.raw, "delete_container", lambda *_: pytest.fail("repeated verified deletion"))
+    function_app.repair_consent_deletions(None)
+    assert proof()["complete"] and consent()["deletion_complete"]
+    assert deps.raw.manifest(f"consent-{cid}") is None
+    repaired = proof()
+    function_app.repair_consent_deletions(None)
+    assert proof() == repaired and repaired["manifest"] == original["manifest"]
+    assert [n["kind"] for n in consent()["notices"]] == ["deletion"]
+    assert deps.events.sent == events and loan(deps)["monitoring"]["status"] == "stopped"
+
+
+def test_repair_marker_stops_replay_if_proof_checkpoint_is_unavailable(mock_app, monkeypatch):
+    import function_app
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put, replace_doc = deps.raw.put_json, deps.store.replace
+    def fail_proof(container, doc, etag):
+        if container == PROOFS_CONTAINER:
+            raise OSError("checkpoint unavailable")
+        return replace_doc(container, doc, etag)
+    def revoke_then_write(container, name, value):
+        cid = container.removeprefix("consent-")
+        delete_consent_data(deps, dict(consent_id=cid, reason="revoked", trigger="revoke", requested_by="test"))
+        monkeypatch.setattr(deps.store, "replace", fail_proof)
+        put(container, name, value)
+    monkeypatch.setattr(deps.raw, "put_json", revoke_then_write)
+    assert replay(deps) is None
+    cid = loan(deps)["monitoring"]["consent_id"]
+    assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+    assert not deps.store.read("consents", cid, cid)["deletion_complete"]
+    assert deps.raw.manifest(f"consent-{cid}")
+    monkeypatch.setattr(deps.store, "replace", replace_doc)
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    function_app.repair_consent_deletions(None)
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert deps.store.read("consents", cid, cid)["deletion_complete"]
+    assert not deps.raw.manifest(f"consent-{cid}")
 
 
 def test_invalid_usd_pg_flow_never_exposes_source_values(mock_app, monkeypatch, caplog):

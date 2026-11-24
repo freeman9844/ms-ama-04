@@ -67,6 +67,70 @@ def _revoke_registry(deps: Deps, consent_id: str) -> dict[str, Any]:
         return _item("consent_registry", consent_id, "failed", False, _error(e))
 
 
+def start_raw_repair(deps: Deps, cid: str, container: str) -> None:
+    def mark(doc: dict) -> None:
+        doc["raw_repair_generation"] = doc.get("raw_repair_generation", 0) + 1
+        doc.update(raw_repair_pending=True, deletion_complete=False)
+
+    consent = update_doc(deps.store, "consents", cid, cid, mark)
+    if consent:
+        try:
+            _repair_raw(deps, consent, container)
+        except Exception as exc:  # The sweep owns the persisted repair; do not restart servicing.
+            log.warning("Raw deletion checkpoint deferred: %s (%s)", cid, type(exc).__name__)
+
+
+def _repair_raw(deps: Deps, consent: dict, container: str) -> bool:
+    """The consent marker survives worker loss, including between consent and proof writes."""
+    cid, generation = consent["id"], consent["raw_repair_generation"]
+
+    def invalidate(proof: dict) -> bool | None:
+        if proof.get("raw_repair_generation", 0) >= generation:
+            return False
+        proof["restore_complete"] = proof["complete"] or proof.get("restore_complete", False)
+        proof.update(complete=False, raw_repair_generation=generation)
+        raw = next(i for i in proof["items"] if i["kind"] == "raw_container")
+        raw.update(verified=False, outcome="pending", detail="late_write")
+
+    update_doc(deps.store, PROOFS_CONTAINER, cid, cid, invalidate)
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    if proof and proof.get("raw_repair_generation") != generation:
+        return False
+    raw = next((i for i in (proof or {}).get("items", []) if i["kind"] == "raw_container"), None)
+    needs_verification = not raw or not raw["verified"]
+    if needs_verification:
+        raw = _delete_raw(deps, container)
+    if proof and needs_verification:
+        proof["items"] = [raw if i["kind"] == "raw_container" else i for i in proof["items"]]
+        proof["complete"] = proof["restore_complete"] and all(i["verified"] for i in proof["items"])
+        proof["attempts"] += 1
+        proof["deleted_at"] = deps.clock().isoformat()
+        if not deps.store.replace(PROOFS_CONTAINER, proof, proof["_etag"]):
+            return False
+
+    def finish(doc: dict) -> bool | None:
+        if doc.get("raw_repair_generation") != generation or not doc.get("raw_repair_pending"):
+            return False
+        outcome = raw["outcome"] if raw["verified"] else "failed"
+        history = doc.setdefault("late_cleanup", [])
+        last = history[-1] if history else {}
+        if (last.get("generation"), last.get("outcome")) != (generation, outcome):
+            history.append({"kind": "raw_container", "target": container, "outcome": outcome,
+                            "generation": generation, "at": deps.clock().isoformat()})
+        if proof and raw["verified"]:
+            doc.update(raw_repair_pending=False, deletion_complete=proof["complete"])
+
+    update_doc(deps.store, "consents", cid, cid, finish)
+    return bool(proof and raw["verified"])
+
+
+def sweep_raw_repairs(deps: Deps) -> None:
+    for cid in deps.store.pending_raw_repairs():
+        consent = deps.store.read("consents", cid, cid)
+        if consent and consent.get("raw_repair_pending"):
+            _repair_raw(deps, consent, consent.get("raw_container") or raw_container(cid))
+
+
 def _delete_conversation(deps: Deps, conversation_id: str) -> dict[str, Any]:
     if deps.agents is None:
         return _item("conversation", conversation_id, "failed", False, "agents_disabled")
@@ -122,6 +186,11 @@ def delete_consent_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     """동의로 모은 데이터를 지우고 삭제 증명을 남긴다. 완료된 증명이 있으면 그대로 돌려준다."""
     consent_id = payload["consent_id"]
     existing = deps.store.read(PROOFS_CONTAINER, consent_id, consent_id)
+    current = deps.store.read("consents", consent_id, consent_id)
+    if existing and current and current.get("raw_repair_pending"):
+        if not _repair_raw(deps, current, current.get("raw_container") or raw_container(consent_id)):
+            raise IncompleteDeletion(f"Raw repair pending: {consent_id}")
+        existing = deps.store.read(PROOFS_CONTAINER, consent_id, consent_id)
     if existing and existing.get("complete"):
         return _proof_summary(existing)
     now = deps.clock().isoformat()
@@ -174,12 +243,18 @@ def delete_consent_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     }
     if proof["complete"] and not proof["event_published"]:
         _publish_ended(deps, proof)
-    deps.store.upsert(PROOFS_CONTAINER, proof)
+    if existing:
+        if not deps.store.replace(PROOFS_CONTAINER, proof, existing["_etag"]):
+            raise IncompleteDeletion(f"Deletion proof changed: {consent_id}")
+    else:
+        deps.store.upsert(PROOFS_CONTAINER, proof)
 
     def finish(doc: dict[str, Any]) -> None:
-        doc["deletion_complete"] = proof["complete"]
+        doc["deletion_complete"] = proof["complete"] and not doc.get("raw_repair_pending")
 
-    update_doc(deps.store, "consents", consent_id, consent_id, finish)
+    final = update_doc(deps.store, "consents", consent_id, consent_id, finish)
+    if final and final.get("raw_repair_pending"):
+        raise IncompleteDeletion(f"Raw repair pending: {consent_id}")
     if not proof["complete"]:
         failed = [f"{i['kind']}:{i['target']}" for i in items if not i["verified"]]
         raise IncompleteDeletion(f"삭제 미완료 {consent_id}: {', '.join(failed)}")

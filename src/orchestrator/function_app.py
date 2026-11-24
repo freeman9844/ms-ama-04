@@ -10,7 +10,7 @@ import azure.functions as func
 from agents.pretranslate import SOURCES
 from journey import telemetry
 from journey.activities import ACTIVITIES, Deps
-from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start
+from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start, sweep_raw_repairs
 from journey.consent import consent_lifecycle as lifecycle_steps
 from journey.entry import handle_decision, handle_start
 from journey.grievance import handle_grievance, handle_grievance_decision
@@ -121,6 +121,11 @@ def consent_lifecycle(context: df.DurableOrchestrationContext):
 @app.activity_trigger(input_name="payload")
 def delete_consent_data(payload: dict) -> dict:
     return CONSENT_ACTIVITIES["delete_consent_data"](deps(), payload)
+
+
+@app.timer_trigger(arg_name="timer", schedule="0 */5 * * * *", use_monitor=True)
+def repair_consent_deletions(timer: func.TimerRequest) -> None:
+    sweep_raw_repairs(deps())
 
 
 @app.activity_trigger(input_name="payload")

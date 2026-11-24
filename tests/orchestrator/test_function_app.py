@@ -124,9 +124,11 @@ def test_function_app_registers_triggers(monkeypatch):
 
     functions = {f.get_function_name(): f for f in app.get_functions()}
     assert set(functions) == {
-        *(name for name, _ in QUEUES), ORCHESTRATOR, LIFECYCLE_ORCHESTRATOR, *ACTIVITIES, *CONSENT_ACTIVITIES
+        *(name for name, _ in QUEUES), "repair_consent_deletions", ORCHESTRATOR, LIFECYCLE_ORCHESTRATOR,
+        *ACTIVITIES, *CONSENT_ACTIVITIES
     }
     bindings = {name: {b.type: b for b in f.get_bindings()} for name, f in functions.items()}
+    assert "timerTrigger" in bindings["repair_consent_deletions"]
     assert all("orchestrationTrigger" in bindings[name] for name in (ORCHESTRATOR, LIFECYCLE_ORCHESTRATOR))
     for name in (*ACTIVITIES, *CONSENT_ACTIVITIES):
         assert "activityTrigger" in bindings[name]
