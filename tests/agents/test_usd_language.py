@@ -194,12 +194,14 @@ def test_persisted_usd_collection_activity_loads_the_correct_mask_and_case():
     from journey.monitoring import run_collections
     from mockapis.synth import generate_usd_case
     case = generate_usd_case("seller-bakery-20", date(2026, 11, 24), 120)
-    loan = dict(META, id="loan", underwriting_consent_id="c", monitoring={"consent_id": "m"})
+    loan = dict(META, id="loan", applicant_id=case.profile.applicant_id,
+                underwriting_consent_id="c", monitoring={"consent_id": "m"})
     doc = dict(META, case_id="case", loan_id="loan", kind="repayment_case", replay_id="r",
                installment={"no": 1, "amount_cents": 70001, "due_on": "2026-11-24"}, missed_count=1)
     raw = {"profile.json": case.profile.model_dump(mode="json"), "flow.json": [case.transactions[0].model_dump(mode="json")]}
     stored = {"case": doc, "loan": loan}
-    deps = SimpleNamespace(store=SimpleNamespace(read=lambda _, key, pk: stored.get(key), replace=lambda *_: True),
+    deps = SimpleNamespace(store=SimpleNamespace(read=lambda _, key, pk: stored.get(key), replace=lambda *_: True,
+                                                 prior_contact_slots=lambda borrower, lo, hi: []),
         raw=SimpleNamespace(get_json=lambda _, key: raw[key]), clock=lambda: datetime.now(timezone.utc),
         pseudonym_key=b"x"*32, agents=None, collections_model="c")
     run_collections(deps, "loan", "case")
