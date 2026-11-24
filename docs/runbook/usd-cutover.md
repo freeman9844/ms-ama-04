@@ -172,10 +172,14 @@ and escalate; never unmask the public routes to run this test.
    round: top-level text alone cannot establish the container inventory.
    Retain container IDs from file citations as cleanup targets. A citation
    not accounted for by an interpreter call leaves the inventory pending.
-   On the Service Bus path, check the replay and both grants again immediately
-   before publishing another week. A stop-write failure must retry; redelivery
-   after deletion must not load raw data, stop a replacement replay, or
-   overwrite a completed or failed replay's original result.
+   For automatic continuation and manual resume, check the replay and both
+   grants immediately before publishing the next week. The Cosmos checks and
+   Service Bus send are **not atomic**: a withdrawal or replay replacement
+   after the checks can still leave a message in flight. Enqueue is not
+   authorization. On delivery, the consumer rechecks replay identity and
+   both consents before reading raw data. It ignores a stale replay and
+   conditionally stops a matching active replay whose consent ended. A failed
+   stop write must retry; redelivery must preserve completed or failed results.
    Inspect old `late_cleanup` failures before rollout;
    old missing manifests/cleared markers cannot be
    reconstructed by the timer. Escalate unresolved historical gaps. Check

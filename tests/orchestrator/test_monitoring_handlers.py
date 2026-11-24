@@ -916,6 +916,45 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     assert short < broke
 
 
+@pytest.mark.parametrize("change", ["withdrawal", "replacement", "unchanged"])
+def test_manual_resume_rechecks_after_acceptance_before_publishing(mock_app, monkeypatch, change):
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    pump(deps, outbox)
+    settle_holds(deps)
+    published = len(flows(outbox))
+    resume = monitoring_module.resume_replay
+
+    def interleave(*args):
+        accepted = resume(*args)
+        current = loan(deps)
+        mon = current["monitoring"]
+        assert accepted["from_week"] == 6 and mon["status"] == "replaying"
+        if change == "withdrawal":
+            delete_consent_data(deps, end(mon["consent_id"]))
+        elif change == "replacement":
+            mon.update(replay_id="replacement", processed_week=0)
+            deps.store.upsert(LOANS, current)
+        return accepted
+
+    monkeypatch.setattr(monitoring_module, "resume_replay", interleave)
+    assert replay(deps, action="resume", replay_id=rid)["from_week"] == 6
+    new_weeks = [m[1]["week"] for m in flows(outbox)[published:]]
+    if change == "unchanged":
+        assert new_weeks == [6]
+        assert handle_flow_update(deps, outbox.bodies(TOPIC_FLOW)[-1])["week"] == 6
+    else:
+        assert not new_weeks
+        mon = loan(deps)["monitoring"]
+        assert (mon["replay_id"], mon["status"]) == (
+            (rid, "stopped") if change == "withdrawal" else ("replacement", "replaying"))
+
+
 def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
     outbox = Outbox()
     deps = missing_first_due(make_deps(mock_app, events=outbox, agents=ScriptedAgents()))

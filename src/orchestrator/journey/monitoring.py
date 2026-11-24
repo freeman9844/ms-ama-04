@@ -387,9 +387,9 @@ def stop_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | No
     return {"loan_id": loan_id, "replay_id": replay_id, "status": "stopped"}
 
 
-def _publish_week(deps: Deps, loan_id: str, replay_id: str, week: int, *, continuation: bool = False) -> None:
+def _publish_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> None:
     loan = deps.store.read(LOANS, loan_id, loan_id)
-    if continuation:
+    if week > 1:
         mon = (loan or {}).get("monitoring") or {}
         if (mon.get("replay_id") != replay_id or mon.get("status") != "replaying"
                 or mon.get("processed_week") != week - 1):
@@ -506,7 +506,7 @@ def _refresh_hold(deps: Deps, loan_id: str) -> None:
 
 def _continue(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: str | None) -> None:
     if _after_week(deps, loan_id, replay_id, week, case_id) == "next":
-        _publish_week(deps, loan_id, replay_id, week + 1, continuation=True)
+        _publish_week(deps, loan_id, replay_id, week + 1)
 
 
 def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[str, Any] | None:
