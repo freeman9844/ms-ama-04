@@ -492,7 +492,8 @@ def test_proposal_modify_sends_text_and_hardship_choice(setup, mask):
     assert msg["text"] == "상환일 안내드립니다. 문의는 담당자에게 주세요." and msg["include_hardship"] is False
 
 
-def test_usd_proposal_only_queues_worker_accepted_text(setup, mask):
+@pytest.fixture
+def usd_proposal(setup, mask):
     from shared.contracts import USD_V1
     case = make_proposal_case(mask)
     case.update(USD_V1.model_dump())
@@ -500,7 +501,16 @@ def test_usd_proposal_only_queues_worker_accepted_text(setup, mask):
     case["installment"]["amount_cents"] = 70001
     case["proposal"] = build_proposal(RepaymentCase.from_doc(case), {"script_id": "missed_payment"},
                                       [], NOW, [], str)
-    client, queue, *_ = setup(loan=held_loan("paused"), alerts=[case])
+    loan = held_loan("paused")
+    loan.update(USD_V1.model_dump(), amount_cents=500000)
+    del loan["amount_krw"]
+    del loan["repayment"]["installment_krw"]
+    loan["repayment"]["schedule"][0]["balance_cents"] = 70001
+    return setup(loan=loan, alerts=[case])
+
+
+def test_usd_proposal_only_queues_worker_accepted_text(usd_proposal):
+    client, queue, *_ = usd_proposal
     form = {"csrf": csrf(client), "decision": "modify"}
     balance = "Your balance is $700.01."
     assert f'<option value="{balance}">' in client.get("/loans/app-1", headers=OFFICER).text
@@ -509,6 +519,15 @@ def test_usd_proposal_only_queues_worker_accepted_text(setup, mask):
         assert r.status_code == 422 and balance in r.text and not queue.sent
     assert client.post(PROPOSAL_PATH, data={**form, "text": balance}, headers=OFFICER).status_code == 202
     assert queue.sent[0][1]["text"] == balance
+
+
+@pytest.mark.parametrize("decision", ["approve", "modify"])
+def test_usd_proposal_stale_before_post_requires_refresh(usd_proposal, decision):
+    client, queue, store, _ = usd_proposal
+    form = {"csrf": csrf(client), "decision": decision, "text": "Your balance is $700.01."}
+    store.loans["app-1"]["repayment"]["schedule"][0]["balance_cents"] = 70000
+    response = client.post(PROPOSAL_PATH, data=form, headers=OFFICER)
+    assert response.status_code == 409 and "refresh" in response.text.lower() and not queue.sent
 
 
 @pytest.mark.parametrize("text", ["법적 조치를 진행하겠습니다.", "", "가" * 301, "[[PERSON_1]]님 안내"],

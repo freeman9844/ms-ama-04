@@ -10,6 +10,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from shared.contracts import Transaction
+from shared.product_context import product_of
 from shared.repayment import LENDER_DEBIT, REMINDER_DAYS, due_dates
 
 EARLY_REMINDER_DAYS = 5  # 조기경보 1단계 뒤 상환일 5일 전 추가 안내
@@ -41,6 +42,30 @@ def item_key(item: Mapping[str, Any]) -> str:
 
 def item_amount(item: Mapping[str, Any], installment_krw: int) -> int:
     return item.get("amount_krw") or installment_krw
+
+
+def current_quoted_installment(loan: Mapping[str, Any], case: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    if (loan.get("monitoring") or {}).get("replay_id") != case["replay_id"]:
+        return None
+    ledger = loan.get("repayment") or {}
+    item = next((s for s in ledger.get("schedule", ()) if s.get("case_id") == case["case_id"]), None)
+    if not item or item["status"] == "paid":
+        return None
+    product = product_of(case)
+    if product != product_of(loan):
+        return None
+    if product:
+        balance = item.get("balance_cents")
+        quotes = (case["proposal"]["evidence"].get("amount_cents"), case["installment"].get("amount_cents"),
+                  case.get("balance_cents", balance))
+        if type(balance) is not int or balance <= 0 or any(type(q) is not int or q != balance for q in quotes):
+            return None
+    else:
+        balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
+        quoted = case["proposal"]["evidence"]["amount_krw"]
+        if not (balance > 0 and balance == quoted == case.get("balance_krw", balance)):
+            return None
+    return item
 
 
 def repayment_debit(t: Transaction, loan_id: str | None) -> bool:

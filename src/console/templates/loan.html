@@ -210,9 +210,15 @@
   <tbody>
 {% for s in l.repayment.schedule %}
 <tr>
-  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>({{ _("원래 %(date)s", date=s.from_due_on) }})</small>{% endif %}</td><td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
+  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>({{ _("원래 %(date)s", date=s.from_due_on) }})</small>{% endif %}</td>
+  {% if l.product_version == 'usd-v1' %}
+  <td>{{ s.amount_cents|default(l.repayment.installment_cents)|usd_cents }}</td>
+  <td>{{ s.paid_cents|usd_cents }}</td><td>{{ s.balance_cents|usd_cents }}</td>
+  {% else %}
+  <td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
   {% set amount = s.amount_krw or l.repayment.installment_krw %}{% set paid = s.paid_krw|default(amount if s.status == "paid" else 0) %}
   <td>{{ paid|krw }}</td><td>{{ s.balance_krw|default(amount - paid)|krw }}</td>
+  {% endif %}
   <td class="r-{{ s.status }}">{{ s.status|repayment_label }}</td>
   <td>{{ s.early_reminded_on or "-" }}{% if s.early_reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
   <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>

@@ -32,7 +32,7 @@ from agents.escalation import TEMPLATES, auto_contact, next_stage, plan_link, si
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
-from agents.repayment import build_schedule, early_reminder_on, item_amount, item_key, reminder_on, week_events
+from agents.repayment import build_schedule, current_quoted_installment, early_reminder_on, item_amount, item_key, reminder_on, week_events
 from agents.repayment_plan import AmbiguousScheduledDebit, apply_change, apply_plan, main_platform, payout_days, plan_options
 from journey.activities import (
     _TRANSACTIONS,
@@ -1109,27 +1109,10 @@ def _decide_restructure(deps: Deps, msg: RestructureDecision) -> bool:
 
 def _contact_day_if_current(deps: Deps, case: dict[str, Any]) -> date | None:
     loan = deps.store.read(LOANS, case["loan_id"], case["loan_id"]) or {}
-    mon = loan.get("monitoring") or {}
-    if mon.get("replay_id") != case["replay_id"]:
+    item = current_quoted_installment(loan, case)
+    if item is None:
         return None
-    ledger = loan.get("repayment") or {}
-    item = next((s for s in ledger.get("schedule", ()) if s.get("case_id") == case["case_id"]), None)
-    if not item or item["status"] == "paid":
-        return None
-    product = product_of(case)
-    if product != product_of(loan):
-        return None
-    if product:
-        balance = item.get("balance_cents")
-        quotes = (case["proposal"]["evidence"].get("amount_cents"), case["installment"].get("amount_cents"),
-                  case.get("balance_cents", balance))
-        if type(balance) is not int or balance <= 0 or any(type(q) is not int or q != balance for q in quotes):
-            return None
-    else:
-        balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
-        quoted = case["proposal"]["evidence"]["amount_krw"]
-        if not (balance > 0 and balance == quoted == case.get("balance_krw", balance)):
-            return None
+    mon = loan["monitoring"]
     if mon["processed_week"] >= case["week"]:
         return week_window(date.fromisoformat(mon["flow_start"]), mon["processed_week"])[1]
     return date.fromisoformat(case.get("as_of") or item["due_on"])

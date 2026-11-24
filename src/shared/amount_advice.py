@@ -21,8 +21,13 @@ _USD_FACT = re.compile(
     rf"|(?:the\s+|your\s+)?(?:outstanding\s+|pending\s+)?{_FACT_LABEL}\s*(?::|=|is|was|of)?\s*{_USD_VALUE}"
     rf"|(?:which|what)\s+(?:month|week|day|period)\s+(?:had|included|contained)\s+(?:the\s+)?{_USD_VALUE}\s+{_FACT_LABEL}"
     rf"|{_USD_REQUEST.pattern}(?:\s+in full)?)", re.I)
-_CREDIT_ROLE = re.compile(r"\b(?:offer\w*|lend\w*|disburs\w*|extend credit|approv\w*|instead|"
-                          r"as (?:the )?(?:loan|principal)|suggest\w*|recommend\w*|propos\w*|would work)\b", re.I)
+_REFERENCED_VALUE = r"(?:this|that|the (?:same|preceding|above|previous|cited|verified)) (?:amount|sum|figure|value)"
+_EVIDENCE_SUBJECT = rf"(?:(?:the |its )?(?:{_FACT_LABEL}|loan file|record|evidence)(?: timing| date)?|{_REFERENCED_VALUE})"
+_EVIDENCE_STATE = r"(?:uncertain|unknown|unverified|verified|pending|missing|incomplete|complete|unconfirmed|confirmed|recorded)"
+_EVIDENCE_CLAUSE = re.compile(
+    rf"(?:{_EVIDENCE_SUBJECT} (?:is|was|remains) {_EVIDENCE_STATE}"
+    rf"|(?:is|was) {_EVIDENCE_SUBJECT} {_EVIDENCE_STATE}"
+    rf"|(?:verify|check|confirm) {_EVIDENCE_SUBJECT})", re.I)
 _PROPOSAL = re.compile(
     rf"{_MONEY}\s*(?:으로|로|만|까지|을|를|의)?\s*(?:감액|승인|대출\s*(?:제안|권고)|제안|권고|추천)"
     rf"|(?:제안|추천|권고|대안|승인)\s*(?:금액|액)?(?:은|는)?\s*[:：]?\s*{_MONEY}"
@@ -53,14 +58,12 @@ def has_proposal(text: str, requested: int | None, *, usd: bool = False) -> bool
         for match in _USD_REQUEST.finditer(text):
             if Decimal(match["number"].replace(",", "")) * 100 != requested:
                 return True
-        # Check the role of monetary citations, not the wording of unrelated observations.
-        # A separate clause can still repurpose the cited amount without repeating it.
-        if "$" in text or re.search(_USD_VALUE, text, re.I):
-            for clause in re.split(r"[;!?]|\.(?!\d)", text):
-                if "$" in clause or re.search(_USD_VALUE, clause, re.I):
-                    if not _USD_FACT.fullmatch(clause.strip()):
-                        return True
-                elif _CREDIT_ROLE.search(clause):
+        # A citation (including an anaphoric one) cannot license an arbitrary instruction
+        # in the next clause. Accept only an evidence role or the exact request above.
+        if "$" in text or re.search(_USD_VALUE, text, re.I) or re.search(rf"\b{_REFERENCED_VALUE}\b", text, re.I):
+            for part in re.split(r"[;!?]|\.(?!\d)", text):
+                clause = part.strip()
+                if clause and not (_USD_FACT.fullmatch(clause) or _EVIDENCE_CLAUSE.fullmatch(clause)):
                     return True
         text = _USD_REQUEST.sub("approve the full request", text)
         text = re.sub(r"\bpolicy (?:limit|cap)(?=\s*[:=]?\s*(?:USD|\$))", "policy fact", text, flags=re.I)

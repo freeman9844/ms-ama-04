@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from agents.collections import RepaymentCase, message_issues, proposal_text_issues
+from agents.repayment import current_quoted_installment
 from console import i18n
 from console.i18n import _
 from agents.monitoring import WEEKS
@@ -877,6 +878,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         proposal = case.get("proposal") or {}
         if proposal.get("status") != "pending_officer":
             return loan_page(user, loan, 409, alerts=alerts, error=_("심사역 승인을 기다리는 추심 제안이 없습니다."))
+        if (product_of(case) or product_of(loan)) and current_quoted_installment(loan, case) is None:
+            return loan_page(user, loan, 409, alerts=alerts,
+                             error="This quote is no longer current. Refresh the loan and review the outstanding balance.")
         decision = form.get("decision", "")
         reason = form.get("reason", "").strip()
         text = form.get("text", "").strip() if decision == "modify" else None

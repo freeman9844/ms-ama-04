@@ -42,6 +42,8 @@ def draft(text):
     ("Verify the $700.01 deposit.", True), ("Verify the $700.02 deposit.", False),
     ("Verify the $700.01 deposit. Settlement timing remains uncertain.", True),
     ("Verify the $700.01 deposit. The loan file is incomplete.", True),
+    ("Verify the $700.01 deposit. That amount is unverified.", True),
+    ("Set the loan principal to that amount.", False),
     ("Verify the $700.01 deposit. Settlement takes 99 days.", False),
     ("Verify the KRW 70001 deposit.", False), ("입금을 확인하세요.", False),
     ("Offer $700.01 instead.", False), ("Verify the $2 deposit.", False)])
@@ -350,6 +352,18 @@ def test_requested_dollars_cannot_be_replaced_by_another_cited_amount():
                                   "The principal should be $700.01.", "Verify the $700.01 deposit. Offer that amount.",
                                   "Verify the $700.01 deposit. Disburse that sum."])
 def test_cited_deposit_cannot_be_reassigned_as_principal(text):
+    assert uw.check_grounding(draft(text), context())
+
+
+@pytest.mark.parametrize("clause", ["Set the loan principal to that amount.", "Size the facility accordingly.",
+                                   "The principal equals the preceding figure."])
+def test_usd_evidence_cannot_be_repurposed_in_either_agent(clause):
+    text = f"Verify the $700.01 deposit. {clause}"
+    case = collections.RepaymentCase.from_doc(dict(META, case_id="c", loan_id="l",
+        installment={"no": 1, "amount_cents": 70001, "due_on": "2026-11-24"}, missed_count=1))
+    ctx = collections.CollectionsContext(case, [], datetime.now(timezone.utc), str)
+    assert ctx.propose(dict(script_id="missed_payment", reason=text)).get("error")
+    assert ctx.draft is None
     assert uw.check_grounding(draft(text), context())
 
 
