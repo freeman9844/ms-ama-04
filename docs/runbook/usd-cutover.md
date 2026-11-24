@@ -14,6 +14,71 @@ load tool is not a USD producer or a cutover verifier. A direct queue sender
 bypasses the console: account for **all** publishers and disable unapproved
 jobs/scripts/direct access before calling the gate closed.
 
+## Independent ingress fence (required for staging and rollback)
+
+`infra/modules/appgw.bicep` owns the WAF policy's entire `customRules` list.
+`azd provision`, `ops window open/close` and image deployments can replace a
+hand-added rule **before** the console revision changes. Do not use such a
+rule, a DNS change, a traffic weight or the console flag itself as the fence.
+This procedure requires an independently managed ingress control; this
+repository does **not** provision one.
+
+1. Before authorizing the pilot, have the network owner identify the existing
+   enforcement point (for example, a separately managed reverse proxy), its
+   policy ID/version, owner and rollback procedure. Inventory public listeners,
+   gateway IP/hostnames, revision/label URLs and private callers. Verify every
+   ordinary caller must traverse the control: direct access to the gateway and
+   backend must already be disallowed except via approved paths. A proxy that
+   clients can bypass by using the gateway hostname is **not** a fence. Keep
+   the existing WAF operator IP restriction, backend network restrictions and
+   app authentication unchanged; do not add an Allow rule or broaden an IP range.
+2. On that independent control, activate a **deny** for method `POST` and
+   either exact normalized path `/apply` or `/applications` on every console
+   host. Ignore the query string; cover trailing-slash/normalization aliases
+   that dispatch or redirect to those endpoints. Do not deny a path prefix:
+   status GETs, `/applications/{id}/decision`, servicing and privacy POSTs
+   must still pass their normal controls. Save the policy version and an
+   explicit release-owner-only removal condition (no automatic expiry).
+3. From each ordinary ingress path use credential-free, invalid test forms
+   with redirects disabled; confirm the **edge rule ID** denied both POSTs
+   before forwarding. Check authorized GETs and an existing-case workflow
+   on a disposable copy still reach the app. Record time, path and rule hits.
+   Check reachability and recheck the fence after each provisioning/revision
+   change, not just at the end. An ingress denial proves only the fence.
+4. Reserve a separate, access-controlled private probe runner with an existing
+   authorized session and connectivity to a **specific** console revision.
+   Only the release operator may use it; it must not open an ordinary ingress
+   bypass. Confirm independent queue-write auditing is available for the real
+   `applications-start` queue (including promptly consumed messages).
+   **No independent fence, private probe, or usable write audit: no staging,
+   enablement or rollback provisioning.** Keep any active deny in force,
+   escalate to the incident/release owner, and do not claim writes are closed.
+
+### Prove the application is closed while the edge deny remains in place
+
+After convergence on `false`, inventory the active revisions, traffic and
+labels. Retire or isolate obsolete/enabled revisions; record revision names,
+image digests, effective flag and which targets remain reachable. From the
+private runner pin each reachable revision by its revision-specific FQDN
+(not the load-balanced app URL); verify the target in backend request logs.
+Using an authorized synthetic account, GET `/apply?applicant_id=seller-bakery-20`
+and, as an officer, GET `/applications/new`. Keep the authenticated session
+and fresh CSRF value for each form. POST valid form data to its actual action:
+`applicant_id=seller-bakery-20`, `requested_amount_usd=5000.00`,
+`requested_tenor_months=6`, `csrf`, plus all required borrower consent boxes
+for `/apply`. Disable automatic redirects and retries.
+
+Require **both** app responses to be **503 with the closed-origination form**,
+correlated with those POSTs on that revision. A WAF 403, authentication
+challenge, validation error, generic gateway 503 or inspection of the env
+value does not qualify. Keep other start producers quiesced; record the probe
+interval and verify zero successful `PutMessage` operations for that queue in
+complete data-plane write logs through the end of the interval (allow for
+ingestion delay). An unchanged queue depth is not proof. If a probe is
+accepted, stop, record its ID and reconcile it without resubmission. Missing
+evidence or either failed probe: **keep the deny**, preserve accepted work
+and escalate; never unmask the public routes to run this test.
+
 ## Before any live write
 
 1. Obtain release owner, operations and privacy approval for a named environment,
@@ -24,9 +89,9 @@ jobs/scripts/direct access before calling the gate closed.
    application/loan links, original approved amounts and replay outcome. Record
    active Durable IDs (including human waits), queue/poison/DLQ backlog, leases,
    incomplete proofs and grant IDs in the restricted release log, not raw PII.
-2. **Fence old writers before starting new workers.** Block only new origin
-   POSTs at ingress while replacing old consoles (including stale revision
-   URLs); pause batch/smoke/scheduled jobs and direct publishers. Quiesce
+2. **Fence old writers before starting new workers.** Activate and verify the
+   independent ingress deny above **before the first provisioning or window
+   operation**; pause batch/smoke/scheduled jobs and direct publishers. Quiesce
    trigger intake on every old Function host/slot sharing storage, Service
    Bus or the `lending` hub. Let active invocations settle; stop/deactivate
    the old hosts, spare slots and jobs and prevent restart/scale-out. Record
@@ -59,7 +124,9 @@ jobs/scripts/direct access before calling the gate closed.
    deployment temporarily restarts any host, ensure it cannot claim work until
    the fence/versions have been verified. Do not move old instances to a new
    hub or start a second journey to clear a wait.
-5. Verify **effective** healthy package/image revisions and config on every
+5. With the external deny still active, complete the revision-pinned
+   closed-application and zero-write probes above. Verify **effective**
+   healthy package/image revisions and config on every
    listener/replica; route 100% to the dual reader. Resume only the new
    workers against the original hub, queues and subscriptions. Confirm a saved
    untagged pending journey replays, its queued KRW decision is honored, and a
@@ -87,10 +154,12 @@ jobs/scripts/direct access before calling the gate closed.
 
 ## Enable last, verify once
 
-Only after written go/no-go for writes: restrict pilot ingress to the approved
+Only after the closed probes and written go/no-go for writes: keep the
+independent deny active, restrict pilot ingress to the approved
 operators; `azd env set USD_ORIGINATION_ENABLED true`, then
 `azd provision --no-prompt` in that environment after reviewing its scope.
 Confirm the effective revision value and retire alternate writable revisions.
+Only then may the network owner lift the deny for approved pilot traffic.
 Submit **one** $5,000.00, six-month request per seller. Record each returned
 application ID immediately; on a timeout inspect queue, Durable and stored
 receipt before any retry. No rerun to obtain a preferred AI or human outcome.
@@ -115,10 +184,12 @@ after these checks, with outstanding waits explicitly identified.
 ## Stop / rollback
 
 On mismatch, duplicate, stale writer, privacy failure or unexplained backlog,
-block the two new POSTs immediately at ingress (do not block subpaths for
-existing cases). Set `azd env set USD_ORIGINATION_ENABLED false` and apply the
-reviewed configuration; verify every reachable console revision rejects a
-valid synthetic origin without a queue entry before lifting the ingress fence.
+immediately re-engage the independent deny and verify both edge rule hits
+**before provisioning**. Quiesce direct start publishers. Set
+`azd env set USD_ORIGINATION_ENABLED false` and apply the reviewed config
+while the deny stays active. Repeat the private revision-specific probes and
+queue-write audit above. Only after both app 503s and zero writes are proven
+on all reachable revisions may the owner remove the deny with the flag closed.
 Preserve all accepted USD and KRW records, work queues, proof checkpoints and
 history. Keep both contracts' consumers, APIs, archive, decisions, 13-week
 servicing and repair timer online. If a compromised worker must be isolated,
