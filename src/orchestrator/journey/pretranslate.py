@@ -25,6 +25,8 @@ _COUNTS = ("owners", "texts", "translated", "skipped", "rejected", "failed", "in
 def _by_owner(source: str, docs: Sequence[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
     grouped: dict[str, list[Mapping[str, Any]]] = {}
     for doc in docs:
+        if doc.get("product_version") == "usd-v1":
+            continue
         if owner := owner_of(source, doc):
             grouped.setdefault(owner, []).append(doc)
     return grouped

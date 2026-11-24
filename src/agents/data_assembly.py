@@ -52,6 +52,8 @@ _USD_ADAPTERS = {
 }
 _UNUSUAL = re.compile(r"[\[\]{}<>]|지시|무시|승인|ignore|system|instruction", re.IGNORECASE)
 _PAYROLL = re.compile(r"^급여\s+(\S+)$")
+_EN_PERSON = re.compile(r"^(?:payroll|salary|owner (?:draw|transfer|withdrawal))[:\s-]+(?:to\s+)?(.+)$", re.I)
+_EN_SUPPLIER = re.compile(r"^(.+?) inventory(?: purchase)?$", re.I)
 _OWNER = re.compile(r"^(\S+)\s+개인이체$")
 _NO_RETRY = ("consent_rejected", "invalid_payload")
 
@@ -230,7 +232,7 @@ def _mask(value: Any, p: Pseudonymizer) -> Any:
     return value
 
 
-def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Transaction]) -> dict[str, str]:
+def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Transaction | UsdTransaction]) -> dict[str, str]:
     """상호·대표자·사업자번호와 적요 속 직원·대표자 이름을 가명 대상(값 → 종류)으로 모은다."""
     entities: dict[str, str] = {}
     if profile is not None:
@@ -239,13 +241,17 @@ def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Trans
         entities[profile.business_reg_no] = "BIZNO"
     for t in transactions:
         match = _PAYROLL.match(t.description) or _OWNER.match(t.description)
+        if isinstance(t, UsdTransaction):
+            match = _EN_PERSON.match(t.description) or match
+            if supplier := _EN_SUPPLIER.match(t.description):
+                entities.setdefault(supplier[1], "BIZNAME")
         if match:
             entities.setdefault(match.group(1), "PERSON")
     return entities
 
 
 def build_pseudonymizer(
-    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction]
+    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction | UsdTransaction]
 ) -> Pseudonymizer:
     return Pseudonymizer(key, case_entities(profile, transactions))
 

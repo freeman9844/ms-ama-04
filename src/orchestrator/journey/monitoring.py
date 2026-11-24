@@ -26,6 +26,8 @@ from pydantic import ValidationError
 from agents.collections import CollectionsContext, RepaymentCase, act, build_proposal, fair_check, remind, settle_proposal
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
+from agents.pretranslate import load_case_raw
+from shared.product_context import product_of
 from agents.escalation import TEMPLATES, auto_contact, next_stage, plan_link, sim_now, stage_message
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
@@ -482,11 +484,12 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             industry=loan["industry"],
             triggers=triggers,
             rows=rows,
-            baseline=baseline,
+            baseline=loan["baseline"] if product_of(loan) else baseline,
             transactions=visible,
             categories=cats,
             mask=mask,
-            terms={"amount_krw": loan["amount_krw"], "tenor_months": loan["tenor_months"]},
+            terms=({**product.model_dump(), "amount_cents": loan["amount_cents"], "tenor_months": loan["tenor_months"]}
+                   if (product := product_of(loan)) else {"amount_krw": loan["amount_krw"], "tenor_months": loan["tenor_months"]}),
             candidates=obs.candidates,
             pg_weeks=platform_weeks(pg, start, 1, week),
             ledger_baseline=lb,
@@ -873,7 +876,16 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
     if doc.get("status") in ("paid", "superseded"):
         return None
     contacts = _contacts_doc(deps, loan_id, doc["replay_id"])["contacts"]
-    _, _, mask = _mask_and_flow(deps, loan)
+    product = product_of(loan)
+    if product != product_of(doc):
+        raise ValueError("Collection case does not match loan product")
+    if product:
+        raw = load_case_raw("loans", loan, deps.raw, lambda *_: None)
+        if raw is None:
+            raise ValueError("Missing USD collection sources")
+        mask = build_pseudonymizer(deps.pseudonym_key, *raw).mask
+    else:
+        _, _, mask = _mask_and_flow(deps, loan)
     case, now = RepaymentCase.from_doc(doc), deps.clock()
     ctx = CollectionsContext(case=case, contacts=contacts, now=now, mask=mask)
     result = act(ctx, runner=deps.agents, model=deps.collections_model)

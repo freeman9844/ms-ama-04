@@ -16,6 +16,7 @@ from journey.metering import METER_KEY, TAGS_KEY, failed_record, step_records
 from journey.models import KST, WITHDRAWN_EVENT, StartRequest, Status
 from journey.validation import validate_officer_decision
 from shared.segments import segment_of
+from shared.product_context import product_of
 
 ORCHESTRATOR = "application_journey"
 EVENT_OFFICER_DECISION = "officer_decision"
@@ -237,6 +238,7 @@ def _assess(
                         "consent_id": consent_id,
                         "underwriting": underwriting,
                         "policy": doc["policy"],
+                        **(product.model_dump() if (product := product_of(doc)) else {}),
                     },
                     tags,
                 ),
@@ -254,6 +256,8 @@ def _assess(
             return None
         error = _run_error(result.get("record"))
     doc["flags"].append(FLAG_ASSESSMENT_UNAVAILABLE)
+    if product_of(doc):
+        return f"No reviewed assessment after {ASSESS_ATTEMPTS} attempts."
     return f"에이전트 평가 없음({ASSESS_ATTEMPTS}회 시도): {error or '원인 미상'}"
 
 

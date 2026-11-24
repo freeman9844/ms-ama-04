@@ -11,7 +11,9 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
-from shared.contracts import ApplicantProfile, Transaction
+from shared.contracts import ApplicantProfile, Transaction, UsdTransaction
+from shared.product_context import product_of
+from shared.usd_source import UsdProfile
 from shared.opinions import archived_reply, published_opinion
 from shared.pseudonymize import tokens
 
@@ -143,33 +145,38 @@ def active_scope(scope: RawScope, consent: Callable[[str], Mapping[str, Any] | N
     return bool(scope)
 
 
-def _validated(profile: Any, txns: Any) -> tuple[ApplicantProfile, list[Transaction]] | None:
+CaseRaw = tuple[ApplicantProfile, list[Transaction | UsdTransaction]]
+
+
+def _validated(profile: Any, txns: Any, doc: Mapping[str, Any]) -> CaseRaw | None:
     if profile is None or txns is None:
         return None
+    if product_of(doc):
+        return UsdProfile.model_validate(profile), [UsdTransaction.model_validate(t) for t in txns]
     return ApplicantProfile.model_validate(profile), [Transaction.model_validate(t) for t in txns]
 
 
-def _application_raw(doc: Mapping[str, Any], raw: RawStore) -> tuple[ApplicantProfile, list[Transaction]] | None:
+def _application_raw(doc: Mapping[str, Any], raw: RawStore) -> CaseRaw | None:
     consent_id = (doc.get("consent") or {}).get("consent_id")
     if not consent_id:
         return None
     container = raw_container(consent_id)
-    return _validated(raw.get_json(container, "profile.json"), raw.get_json(container, "transactions.json"))
+    return _validated(raw.get_json(container, "profile.json"), raw.get_json(container, "transactions.json"), doc)
 
 
-def _loan_raw(doc: Mapping[str, Any], raw: RawStore) -> tuple[ApplicantProfile, list[Transaction]] | None:
+def _loan_raw(doc: Mapping[str, Any], raw: RawStore) -> CaseRaw | None:
     # 오케스트레이터 사후 가명처리기와 같은 입력: 심사 동의의 프로필 + 모니터링 동의의 사후 흐름.
     underwriting, monitoring = doc.get("underwriting_consent_id"), (doc.get("monitoring") or {}).get("consent_id")
     if not underwriting or not monitoring:
         return None
     return _validated(
-        raw.get_json(raw_container(underwriting), "profile.json"), raw.get_json(raw_container(monitoring), "flow.json")
+        raw.get_json(raw_container(underwriting), "profile.json"), raw.get_json(raw_container(monitoring), "flow.json"), doc
     )
 
 
 def load_case_raw(
     source: str, doc: Mapping[str, Any], raw: RawStore, read: Callable[[str, str], dict | None]
-) -> tuple[ApplicantProfile, list[Transaction]] | None:
+) -> CaseRaw | None:
     """문서를 가명처리할 원천(프로필, 거래). 원천이 없으면 None, 저장소 예외는 그대로 올린다."""
     if source == "applications":
         return _application_raw(doc, raw)

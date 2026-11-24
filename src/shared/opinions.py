@@ -37,11 +37,13 @@ def published_opinion(assessment: Any, requested: int | None = None) -> dict[str
     result = {k: assessment[k] for k in ("schema_version", "recommendation", "models") if k in assessment}
     result["review"] = {k: assessment["review"][k] for k in ("passed", "rounds") if k in assessment["review"]}
     summary = assessment.get("summary")
-    result["summary"] = summary if isinstance(summary, str) and not has_proposal(summary, requested) else ""
+    usd = assessment.get("product_version") == "usd-v1"
+    result["summary"] = summary if isinstance(summary, str) and not has_proposal(summary, requested, usd=usd) else ""
     for key, field in (("claims", "text"), ("officer_checks", "text"), ("counterfactuals", "explanation")):
         if key in assessment:
             result[key] = [row for row in assessment[key] or () if isinstance(row, Mapping)
-                           and isinstance(row.get(field), str) and not has_proposal(row[field], requested)
+                           and isinstance(row.get(field), str) and not has_proposal(row[field], requested, usd=usd)
                            and not (key == "counterfactuals" and row.get("metric_id") in
-                                    ("M:requested_amount_krw", "P:max_amount_krw", "M:requested_tenor_months"))]
+                                    ("M:requested_amount_krw", "P:max_amount_krw", "M:requested_amount_cents",
+                                     "P:max_amount_cents", "M:requested_tenor_months"))]
     return result

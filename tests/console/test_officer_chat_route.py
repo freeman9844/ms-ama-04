@@ -122,6 +122,13 @@ def test_chat_not_found_and_disabled(make_doc, raw, key):
     assert r.status_code == 503 and r.json() == {"error": "채팅을 쓸 수 없습니다."}
 
 
+def test_usd_chat_disabled_error_is_english_with_korean_locale(raw, key):
+    from shared.contracts import USD_V1
+    doc = dict(USD_V1.model_dump(), id="app-1", application_id="app-1", requested_amount_cents=500000)
+    response = _post(_client(lambda: doc, raw, key, None), key, {"question": "Can I chat?"})
+    assert response.status_code == 503 and response.json()["error"].isascii()
+
+
 @pytest.mark.parametrize("error, status, message", [
     (GatewayThrottled("rate_limited", "c"), 429, "요청이 많습니다. 잠시 후 다시 질문해 주세요."),
     (GatewayBlocked("content_blocked", "c"), 422, "이 질문에는 답할 수 없습니다."),

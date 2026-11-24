@@ -445,8 +445,18 @@ def evaluate_policy(deps: Deps, features: dict[str, Any]) -> dict[str, Any]:
 def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     if deps.agents is None:
         return {"assessment": None, "flags": [FLAG_ASSESSMENT_UNAVAILABLE], "record": {"error": "agents_disabled"}}
-    profile, txns, _ = _load(deps, payload["consent_id"])
     uw = payload["underwriting"]
+    product = _product(uw)
+    if product != _product(uw["features"]) or product != _product(payload["policy"]):
+        raise ValueError("Mismatched assessment evidence")
+    if _product(payload) not in (None, product):
+        raise ValueError("Mismatched assessment request")
+    if product:
+        container = raw_container(payload["consent_id"])
+        profile = UsdProfile.model_validate(deps.raw.get_json(container, "profile.json"))
+        txns = _USD_TRANSACTIONS.validate_python(deps.raw.get_json(container, "transactions.json"))
+    else:
+        profile, txns, _ = _load(deps, payload["consent_id"])
     overrides = uw.get("category_overrides") or {}
     ctx = UnderwritingContext(
         application_id=payload["application_id"],

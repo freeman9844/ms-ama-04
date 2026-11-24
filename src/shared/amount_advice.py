@@ -11,6 +11,8 @@ _REQUEST_APPROVAL = re.compile(
     rf"(?P<number>{_NUMBER})\s*(?P<unit>억|천만|백만|만|천)?\s*원(?=\s*(?:을|를)?\s*승인)"
 )
 _KRW_UNITS = {None: 1, "천": 1000, "만": 10000, "백만": 1000000, "천만": 10000000, "억": 100000000}
+_USD_REQUEST = re.compile(rf"\bapprove\s+(?:the\s+)?(?:full\s+)?requested\s+(?:amount\s+(?:of\s+)?)?"
+                          rf"(?:USD\s*|\$)\s*(?P<number>{_NUMBER})", re.I)
 _MONEY = rf"(?:(?:[₩$]|KRW|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:억|천만|백만|만|천|million|thousand|[mk])?\s*(?:원|won|krw|dollars?))"
 _PROPOSAL = re.compile(
     rf"{_MONEY}\s*(?:으로|로|만|까지|을|를|의)?\s*(?:감액|승인|대출\s*(?:제안|권고)|제안|권고|추천)"
@@ -18,7 +20,9 @@ _PROPOSAL = re.compile(
     rf"|(?:대출|신청|승인)\s*(?:금액|액|금)(?:을|를)?\s*{_MONEY}\s*(?:으로|로)\s*"
     r"(?:낮출|줄일|감액할|조정할|축소할)\s*(?:것|방안)(?:을|를)?\s*(?:권고|추천|제안)"
     r"|(?:균등|계절|분할|거치)\s*상환(?:을|으로)?\s*(?:제안|추천|권고)"
-    rf"|\b(?:recommend|suggest|propose|offer|lend|approve|cap|limit|reduce)\w*\s+"
+    rf"|{_MONEY}\s+(?:(?:loan\s+)?instead|would (?:work|be (?:safer|suitable)))\b"
+    rf"|\b(?:smaller|reduced|alternative|lower)\s+(?:loan|facility|principal|amount)\b"
+    rf"|\b(?:recommend|suggest|propose|offer|lend|approve|cap|limit|reduce|counteroffer)\w*\s+"
     rf"(?:(?:lending|a|an|loan|amount|of|at|to|up|the|only|instead|for)\s+)*(?:{_MONEY}|policy\s+(?:cap|limit))"
     rf"|\b(?:suggested|proposed|recommended)\s+(?:loan\s+)?amount\s*(?:is|of|:)?\s*{_MONEY}"
     r"|\b(?:recommend|suggest|propose|offer)\w*\s+(?:a\s+)?(?:[\w-]+\s+){0,3}repayment\s+(?:term|schedule|plan)"
@@ -27,11 +31,17 @@ _PROPOSAL = re.compile(
 )
 
 
-def has_proposal(text: str, requested: int | None) -> bool:
+def has_proposal(text: str, requested: int | None, *, usd: bool = False) -> bool:
     # Treat a labelled, exact request as "the full request" only in an approval clause.
     # Other offers in the same sentence must still be inspected.
     def full_request(match: re.Match[str]) -> str:
         amount = Decimal(match["number"].replace(",", "")) * _KRW_UNITS[match["unit"]]
         return "신청 전액" if amount == requested else match[0]
 
+    if usd:
+        for match in _USD_REQUEST.finditer(text):
+            if Decimal(match["number"].replace(",", "")) * 100 != requested:
+                return True
+        text = _USD_REQUEST.sub("approve the full request", text)
+        text = re.sub(r"\bpolicy (?:limit|cap)(?=\s*[:=]?\s*(?:USD|\$))", "policy fact", text, flags=re.I)
     return bool(_PROPOSAL.search(_REQUEST_APPROVAL.sub(full_request, text)))

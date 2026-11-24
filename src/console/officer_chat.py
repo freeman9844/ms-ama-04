@@ -16,7 +16,8 @@ from agents.features import ANNUAL_RATE
 from agents.officer_facts import reviewed_detail
 from policy.engine import LIMIT_UNIT_KRW, explain
 from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
-from shared.contracts import CashFlowFeatures
+from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures
+from shared.product_context import product_of
 
 SNAPSHOT_MAX_CHARS = 24_000
 QUESTION_MAX = 500
@@ -54,16 +55,16 @@ def _numeric(source: Any) -> dict[str, Any]:
     return {k: v for k, v in source.items() if _num(v)} if isinstance(source, Mapping) else {}
 
 
-def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any) -> dict[str, Any]:
+def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any, usd: bool = False) -> dict[str, Any]:
     """콘솔 상환 여력 차트(assessment._capacity)와 같은 규칙: 매출−운영비 < 기존 상환 + 이번 대출 월 상환액."""
     new = installment if _num(installment) else 0
     short = []
     for m in monthly:
-        rev, opex, debt = m.get("revenue"), m.get("operating_out"), m.get("debt_service")
+        rev, opex, debt = (m.get(k + ("_cents" if usd else "")) for k in ("revenue", "operating_out", "debt_service"))
         owed = (debt if _num(debt) else 0) + new
         if not (_num(rev) and _num(opex)) or rev - opex < owed:
             short.append(m.get("month"))
-    return {"new_installment_krw": new, "months": len(monthly), "short_months": short,
+    return {("new_installment_cents" if usd else "new_installment_krw"): new, "months": len(monthly), "short_months": short,
             "assumed_annual_rate": ANNUAL_RATE}
 
 
@@ -76,7 +77,7 @@ def _settlement(pg: Any) -> dict[str, Any]:
 def _rules(rules: RuleSet) -> dict[str, Any]:
     return {
         "version": rules.version,
-        "product": rules.product.model_dump() | {"limit_unit_krw": LIMIT_UNIT_KRW},
+        "product": rules.product.model_dump() | ({} if rules.version == "usd-v1" else {"limit_unit_krw": LIMIT_UNIT_KRW}),
         "knockouts": [c.model_dump() for c in rules.knockouts],
         "refers": [c.model_dump() for c in rules.refers],
         "rate_bands": [b.model_dump() for b in rules.rate_bands],
@@ -88,14 +89,15 @@ def _rules(rules: RuleSet) -> dict[str, Any]:
 def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[dict[str, Any] | None, str | None]:
     """저장된 특성으로 판정을 다시 계산한다. 저장된 판정과 다르면 틀린 근거가 되므로 싣지 않는다."""
     try:
-        parsed = CashFlowFeatures.model_validate_json(json.dumps(features))
+        parsed = (UsdCashFlowFeatures if rules.version == "usd-v1" else CashFlowFeatures).model_validate_json(json.dumps(features))
     except (ValidationError, TypeError, ValueError):
         return None, TRACE_NOTES["invalid_features"]
     e = explain(parsed, rules)
     d = e.decision
     stored_codes = {r.get("code") for r in policy.get("reason_codes") or () if isinstance(r, Mapping)}
-    if (d.decision.value, d.max_amount_krw, d.rate_band, {r.code for r in d.reason_codes}) != (
-        policy.get("decision"), policy.get("max_amount_krw"), policy.get("rate_band"), stored_codes
+    limit = "max_amount_cents" if rules.version == "usd-v1" else "max_amount_krw"
+    if (d.decision.value, getattr(d, limit), d.rate_band, {r.code for r in d.reason_codes}) != (
+        policy.get("decision"), policy.get(limit), policy.get("rate_band"), stored_codes
     ):
         return None, TRACE_NOTES["mismatch"]
     band = asdict(e.band)
@@ -119,7 +121,10 @@ def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, An
     if not isinstance(policy, Mapping):
         return None
     version = policy.get("rules_version")
+    limit = "max_amount_cents" if product_of(policy) else "max_amount_krw"
     rules = rules_for_version(version)
+    if rules is not None and (rules.version == "usd-v1") != (limit == "max_amount_cents"):
+        raise ValueError("Policy and ruleset products differ")
     if rules is None:
         trace, note = None, TRACE_NOTES["unknown_version"]
     elif _amended_since(version, received_at):
@@ -129,13 +134,13 @@ def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, An
     return {
         "decision": policy.get("decision"),
         "rules_version": policy.get("rules_version"),
-        "max_amount_krw": policy.get("max_amount_krw"),
+        limit: policy.get(limit),
         "rate_band": policy.get("rate_band"),
         "reason_codes": [{k: r.get(k) for k in ("code", "message", "observed", "threshold")}
                          for r in policy.get("reason_codes") or ()],
         "rules": _rules(rules) if rules else None,
         "trace": trace,
-        "trace_note": note,
+        "trace_note": "The stored evidence could not verify this policy trace." if note and limit == "max_amount_cents" else note,
     }
 
 
@@ -188,16 +193,23 @@ def _fit(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | None] | None = None) -> dict[str, Any]:
     doc = view["doc"]
+    product = product_of(doc)
+    unit = "cents" if product else "krw"
     uw = doc.get("underwriting") or {}
     features = uw.get("features") or {}
-    monthly = [{k: m.get(k) for k in MONTHLY_KEYS} for m in uw.get("monthly") or () if isinstance(m, Mapping)]
+    policy = view.get("policy")
+    if ((features and product_of(features) != product) or (policy and product_of(policy) != product)):
+        raise ValueError("Chat evidence does not match the application product")
+    keys = [k + ("_cents" if product and k != "month" else "") for k in MONTHLY_KEYS]
+    monthly = [{k: m.get(k) for k in keys} for m in uw.get("monthly") or () if isinstance(m, Mapping)]
     signals = uw.get("signals") or {}
     officer = doc.get("officer_decision")
     snapshot = {
         "application": {
+            **(product.model_dump() if product else {}),
             "application_id": doc.get("application_id"),
             "status": doc.get("status"),
-            "requested_amount_krw": doc.get("requested_amount_krw"),
+            f"requested_amount_{unit}": doc.get(f"requested_amount_{unit}"),
             "requested_tenor_months": doc.get("requested_tenor_months"),
             "industry": features.get("industry"),
         },
@@ -205,21 +217,21 @@ def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | 
             "monthly": monthly,
             "features": _numeric(features),
             "signals": _numeric(signals),
-            "capacity": _capacity(monthly, signals.get("new_installment_krw")),
+            "capacity": _capacity(monthly, signals.get(f"new_installment_{unit}"), bool(product)),
             "settlement": _settlement(uw.get("pg_ledger")),
         },
         "policy": _policy(view.get("policy"), features, doc.get("received_at")),
         "agent_opinion": _opinion(view),
-        "officer_decision": {"decision": officer.get("decision"), "amount_krw": officer.get("amount_krw")}
+        "officer_decision": {"decision": officer.get("decision"), f"amount_{unit}": officer.get(f"amount_{unit}")}
         if isinstance(officer, Mapping) else None,
         "truncated": False,
     }
     opinion = snapshot.get("agent_opinion") or {}
     for row in [*opinion.get("claims", ()), *opinion.get("officer_checks", ())]:
         original = row.get("text") or ""
-        if not reviewed_detail(original, doc.get("requested_amount_krw")):
+        if not reviewed_detail(original, doc.get(f"requested_amount_{unit}")):
             row["text"] = ""
-        elif translate and (translated := translate(original)) and reviewed_detail(translated, doc.get("requested_amount_krw")):
+        elif not product and translate and (translated := translate(original)) and reviewed_detail(translated, doc.get("requested_amount_krw")):
             row["text"] = translated
     return _fit(snapshot)
 

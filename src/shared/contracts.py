@@ -433,6 +433,10 @@ class CreditAssessment(_Assessment):
         return self
 
 
+class UsdCreditAssessment(CreditAssessment, UsdProduct):
+    pass
+
+
 class LegacyCreditAssessment(_Assessment):
     """과거 감사 자료 읽기 전용. 기존 금액과 조건을 전액 권고로 해석하지 않는다."""
 
@@ -525,6 +529,10 @@ class EarlyWarningAlert(Contract):
         if len(set(self.secondary_causes)) != len(self.secondary_causes):
             raise ValueError("부원인은 중복될 수 없다")
         return self
+
+
+class UsdEarlyWarningAlert(EarlyWarningAlert, UsdProduct):
+    pass
 
 
 class HardshipCategory(StrEnum):

@@ -116,6 +116,22 @@ def grievance(deps):
     return deps.store.read(GRIEVANCES_CONTAINER, GID, "app-1")
 
 
+def test_usd_rereview_requires_matching_contract_and_preserves_audit_reason(deps):
+    from shared.contracts import USD_V1
+    meta = USD_V1.model_dump()
+    app = {**APPLICATION, **meta, "assessment": None,
+           "policy": {**meta, "decision": "refer", "max_amount_cents": 500000, "reason_codes": []}}
+    deps.store.upsert("applications", app)
+    assert submit(deps, **meta) == "created"
+    decision = dict(outcome="rereview", new_decision="approve", reason="사람이 기록한 판단")
+    assert decide(deps, **decision, amount_krw=400000) == "invalid"
+    assert decide(deps, **decision, **meta, amount_cents=500001) == "rejected"
+    assert decide(deps, **decision, **meta, amount_cents=499999) == "resolved"
+    doc = grievance(deps)
+    assert doc["text"] == TEXT and doc["decision"]["reason"] == decision["reason"]
+    assert "$4,999.99" in doc["reply"]["body"] and doc["reply"]["body"].isascii()
+
+
 def test_submission_records_snapshot_and_publishes_without_text(deps):
     assert submit(deps) == "created"
     doc = grievance(deps)

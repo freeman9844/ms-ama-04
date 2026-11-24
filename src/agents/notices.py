@@ -6,6 +6,7 @@
 """
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -14,6 +15,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from agents.grounding import numbers, ungrounded
+from agents import usd_language
+from shared.money import format_usd
+from shared.product_context import product_of
 from agents.runtime import AgentSpec
 from agents.underwriting import AgentRunner, _Session
 from shared.opinions import published_opinion
@@ -108,6 +112,20 @@ def consent_facts(
     kind: Literal["renewal", "deletion"], consent: Mapping[str, Any], *, proof: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
     """안내문 입력. 동의 ID·차주 ID 같은 식별자는 넣지 않는다(삭제 증명 번호는 차주가 조회에 쓰는 값이라 넣는다)."""
+    if product := product_of(consent):
+        labels = {"account": "bank transactions", "tax": "tax filings", "pg": "payment settlements",
+                  "marketplace": "marketplace performance"}
+        facts = {**product.model_dump(), "kind": kind, "purpose": consent["purpose"],
+                 "scopes": [labels[s] for s in consent["scopes"]]}
+        if kind == "renewal":
+            return {**facts, "expires_on": datetime.fromisoformat(consent["expires_at"]).astimezone(KST).date().isoformat(),
+                    "revoke_path": "Consent management > Revoke consent"}
+        if proof is None:
+            raise ValueError("Deletion notice requires a deletion receipt")
+        return {**facts, "reason": {"revoked": "consent withdrawal", "expired": "consent expiry"}[proof["reason"]],
+                "ended_on": datetime.fromisoformat(proof["deleted_at"]).astimezone(KST).date().isoformat(),
+                "proof_id": proof["id"], "deleted_items": len(proof.get("items", ())),
+                "deleted_files": len(proof.get("manifest", ())), "retained": "decision record"}
     facts: dict[str, Any] = {
         "kind": kind,
         "purpose": consent["purpose"],
@@ -148,6 +166,11 @@ def _missing(body: str, required: list[str]) -> list[str]:
 
 
 def check_notice(facts: Mapping[str, Any], draft: Draft) -> list[str]:
+    if product_of(facts):
+        renewal = facts["kind"] == "renewal"
+        required = ([facts["expires_on"], facts["revoke_path"], *facts["scopes"]] if renewal else
+                    [facts["reason"], facts["proof_id"], facts["retained"]])
+        return _usd_draft_issues(draft, required, facts)
     identifiers: tuple[str, ...] = ()
     if facts["kind"] == "renewal":
         required = [facts["expires_on"], *facts["scopes"], *REVOKE_KEYWORDS]
@@ -161,6 +184,15 @@ def check_notice(facts: Mapping[str, Any], draft: Draft) -> list[str]:
 
 def template_notice(facts: Mapping[str, Any]) -> Draft:
     scopes = ", ".join(facts["scopes"])
+    if product_of(facts):
+        if facts["kind"] == "renewal":
+            return Draft(title="Your data consent is expiring",
+                         body=f"Consent to access {scopes} for {facts['purpose']} ends on {facts['expires_on']} (KST). "
+                              f"Source data will be deleted after expiry. To end access now, select {facts['revoke_path']}.")
+        return Draft(title="Source data deletion complete",
+                     body=f"Following {facts['reason']}, we deleted {facts['deleted_items']} items, including "
+                          f"{facts['deleted_files']} source files, on {facts['ended_on']} (KST). Receipt: {facts['proof_id']}. "
+                          "We retain the decision record (derived metrics and evidence IDs) to explain the decision.")
     if facts["kind"] == "renewal":
         return Draft(
             title="개인신용정보 제공 동의 만료 예정 안내",
@@ -194,6 +226,8 @@ def _draft(
     conversations = {cid: _delete(runner, cid) for cid in session.conversations}
     if run is None:
         fallback = template(facts)
+        if product_of(facts):
+            error = "notice_agent_unavailable"
         return Notice(fallback.title, fallback.body, "template", [], {"error": error, "conversations": conversations})
     record = {**run.record(), "model": model, "conversations": conversations}
     draft: Draft = run.output  # type: ignore[assignment]
@@ -212,13 +246,28 @@ def _delete(runner: AgentRunner, conversation_id: str) -> str:
 
 
 def write_notice(facts: Mapping[str, Any], *, runner: AgentRunner | None, model: str) -> Notice:
-    spec = _spec(CONSENT_NOTICE_AGENT, model, NOTICE_INSTRUCTIONS)
+    spec = _spec(CONSENT_NOTICE_AGENT, model, "Write a plain English notice using only the provided consent facts. "
+                 "Preserve the dates, scopes, revocation path or deletion receipt and retained record. Make no promises."
+                 if product_of(facts) else NOTICE_INSTRUCTIONS)
     return _draft(spec, facts, runner, check_notice, template_notice, model)
 
 
 def grievance_facts(application: Mapping[str, Any], decision: Mapping[str, Any]) -> dict[str, Any]:
     """판단 기록(정책 사유, counterfactual)과 심사역 결정만 쓴다. 차주가 쓴 이의 내용은 넣지 않는다."""
     policy = application.get("policy") or {}
+    if product := product_of(application):
+        if policy and product != product_of(policy):
+            raise ValueError("Grievance policy product mismatch")
+        labels = {"approve": "approved", "conditional": "conditionally approved", "decline": "declined"}
+        facts = {**product.model_dump(), "original_decision": labels.get((application.get("officer_decision") or {}).get("decision"), "not recorded"),
+                 "outcome": {"uphold": "upheld", "rereview": "reviewed again"}[decision["outcome"]],
+                 "officer_reason": decision["reason"],
+                 "reasons": [{k: r.get(k) for k in ("message", "observed", "threshold")} for r in policy.get("reason_codes") or ()]}
+        if decision["outcome"] == "rereview":
+            if decision.get("amount_krw") is not None:
+                raise ValueError("USD review cannot use a KRW decision amount")
+            facts.update(new_decision=labels[decision["new_decision"]], amount_cents=decision.get("amount_cents"))
+        return facts
     assessment = published_opinion(application.get("assessment"), application.get("requested_amount_krw")) or {}
     officer = application.get("officer_decision") or {}
     facts: dict[str, Any] = {
@@ -249,7 +298,25 @@ def _grievance_numbers(facts: Mapping[str, Any]) -> list[float]:
     return [float(v) for v in values if isinstance(v, int | float) and not isinstance(v, bool)]
 
 
+def _usd_draft_issues(draft, required, facts):
+    text = f"{draft.title} {draft.body}".replace(facts.get("proof_id") or "\0", "")
+    values = [facts.get(k, 0) for k in ("deleted_items", "deleted_files")]
+    values.extend(v for r in facts.get("reasons", ()) for k in ("observed", "threshold")
+                  if isinstance(v := r.get(k), (int, float)))
+    errors = usd_language.issues(text, [facts.get("amount_cents")], values)
+    if (has_token(text) or not draft.title.strip() or not draft.body.strip() or
+            re.search(r"\b(?:guarantee\w*|promise\w*|waive\w*|interest rate|fees?)\b", text, re.I) or
+            len(draft.title) > TITLE_MAX or len(draft.body) > BODY_MAX or any(s not in draft.body for s in required)):
+        errors.append("Invalid notice or missing required facts")
+    return errors
+
+
 def check_grievance_reply(facts: Mapping[str, Any], draft: Draft) -> list[str]:
+    if product_of(facts):
+        required = [facts["outcome"], facts.get("new_decision", "")]
+        if facts.get("amount_cents") is not None:
+            required.append(format_usd(facts["amount_cents"]))
+        return _usd_draft_issues(draft, required, facts)
     outcome = next(k for k, v in OUTCOME_LABELS.items() if v == facts["outcome"])
     required = [OUTCOME_KEYWORDS[outcome]]
     if outcome == "rereview":
@@ -261,6 +328,17 @@ def check_grievance_reply(facts: Mapping[str, Any], draft: Draft) -> list[str]:
 
 
 def template_grievance_reply(facts: Mapping[str, Any]) -> Draft:
+    if product_of(facts):
+        body = (f"After reviewing your grievance, the original decision ({facts['original_decision']}) was upheld."
+                if facts["outcome"] == "upheld" else f"Your application was reviewed again. Decision: {facts['new_decision']}.")
+        if facts.get("amount_cents") is not None:
+            body += f" Recorded amount: {format_usd(facts['amount_cents'])}."
+        reasons = [r["message"] for r in facts["reasons"] if isinstance(r.get("message"), str)
+                   and not has_token(r["message"]) and not usd_language.issues(
+                       r["message"], numbers=[v for v in (r["observed"], r["threshold"]) if isinstance(v, (int, float))])]
+        if reasons:
+            body += " Recorded policy reasons: " + "; ".join(reasons) + "."
+        return Draft(title="Grievance review outcome", body=body)
     reasons = "; ".join(r["message"] for r in facts["reasons"]) or "정책 기준"
     # 분석가 설명에는 가명 토큰이 남아 있을 수 있어 그런 설명은 차주 회신에 싣지 않는다.
     tips = " ".join(c["explanation"] for c in facts["improvements"] if not has_token(c["explanation"]))
@@ -291,7 +369,9 @@ def write_grievance_reply(
 
     템플릿 대체 문안은 원래 사유를 쓴다(모델을 거치지 않는다).
     """
-    spec = _spec(GRIEVANCE_AGENT, model, GRIEVANCE_INSTRUCTIONS)
+    spec = _spec(GRIEVANCE_AGENT, model, "Write a plain English reply from the recorded decision only. Include the "
+                 "outcome, new decision and exact USD amount when present. No alternative offers, promises or identifiers."
+                 if product_of(facts) else GRIEVANCE_INSTRUCTIONS)
     model_facts = {k: v for k, v in facts.items() if k != "officer_reason"}
     if mask is not None:
         model_facts["officer_reason"] = mask(facts["officer_reason"])

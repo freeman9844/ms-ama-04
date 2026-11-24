@@ -31,7 +31,7 @@ def _entity_regex(known_entities: Mapping[str, str]) -> re.Pattern[str] | None:
     if not known_entities:
         return None
     values = sorted(known_entities, key=len, reverse=True)
-    return re.compile("|".join(re.escape(v) for v in values))
+    return re.compile("|".join(re.escape(v) for v in values), re.IGNORECASE | re.ASCII)
 
 
 def _sub_outside_tokens(text: str, pattern: re.Pattern[str], repl: Callable[[re.Match[str]], str]) -> str:
@@ -69,6 +69,7 @@ class Pseudonymizer:
             raise ValueError(f"엔티티 종류는 영문 대문자만 쓸 수 있다: {bad}")
         self._key = key
         self._entities = dict(known_entities or {})
+        self._kinds = {v.casefold(): k for v, k in self._entities.items()}
         self._entity_re = _entity_regex(self._entities)
         self._mapping: dict[str, str] = {}
 
@@ -81,7 +82,7 @@ class Pseudonymizer:
     def mask(self, text: str) -> str:
         if self._entity_re is not None:
             text = _sub_outside_tokens(
-                text, self._entity_re, lambda m: self._token(self._entities[m.group(0)], m.group(0))
+                text, self._entity_re, lambda m: self._token(self._kinds[m[0].casefold()], m[0])
             )
         for kind, pattern in _PATTERNS:
             text = _sub_outside_tokens(text, pattern, lambda m, k=kind: self._token(k, m.group(0)))
@@ -102,7 +103,8 @@ def find_pii(text: str, known_entities: Mapping[str, str] | None = None) -> list
     entities = dict(known_entities or {})
     entity_re = _entity_regex(entities)
     if entity_re is not None:
-        found.extend((entities[m.group(0)], m.group(0)) for m in entity_re.finditer(plain))
+        kinds = {v.casefold(): k for v, k in entities.items()}
+        found.extend((kinds[m[0].casefold()], m[0]) for m in entity_re.finditer(plain))
         plain = entity_re.sub(" ", plain)
     # 마스킹과 같은 우선순위로, 앞 패턴에 잡힌 구간은 지워 중복 보고를 막는다.
     for kind, pattern in _PATTERNS:

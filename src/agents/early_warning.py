@@ -18,8 +18,10 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agents.classify import Category
 from agents.grounding import ungrounded
+from agents import usd_language
+from shared.product_context import product_of, validate_usd_evidence
 from agents.ledger_monitor import CAUSE_FIELDS, CauseCandidate, LedgerBaseline, ledger_catalog
-from agents.monitoring import Baseline, cohort, evidence_catalog, week_window
+from agents.monitoring import Baseline, FORECAST_FIELDS, WEEK_FIELDS, cohort, evidence_catalog, week_window
 from agents.runtime import AgentSpec, ToolHandler
 from agents.underwriting import AgentRunner, _fn, _Session
 from shared.contracts import (
@@ -31,6 +33,9 @@ from shared.contracts import (
     RecommendedAction,
     SignalKind,
     Transaction,
+    UsdTransaction,
+    UsdProduct,
+    UsdEarlyWarningAlert,
 )
 
 EW_AGENT = "early-warning-investigator"
@@ -53,6 +58,27 @@ _TRIGGER_TEXT = {
     "cost_surge": ("cost_surge", "W:{week}:deduction_rate", "정산 공제율이 기준선보다 높다"),
     "due_shortfall": ("projected_shortfall", "F:{week}:due_balance", "다음 상환일 출금 직전 예상 잔고가 상환액보다 적다"),
 }
+_USD_TRIGGERS = {
+    "inflow_drop": ("Settlement receipts are below expectations.", "Check recent orders and deposits."),
+    "buffer_drop": ("The cash buffer has decreased.", "Check available funds before the next payment."),
+    "volatility_spike": ("Recent receipts are unusually variable.", "Compare receipts with the settlement schedule."),
+    "new_debt": ("New borrowing or high-cost debt payments were detected.", "Verify the new debt and its payment schedule."),
+    "projected_shortfall": ("The projected cash balance falls below zero.", "Verify pending receipts and upcoming payments."),
+    "sales_slump": ("Recent orders are below expectations.", "Compare orders with the recent sales history."),
+    "settlement_hold": ("A settlement hold may delay receipts.", "Verify payout status with the platform."),
+    "return_spike": ("Returns have increased relative to baseline.", "Check returns and deductions from settlements."),
+    "cost_surge": ("Settlement deductions have increased.", "Review current costs and upcoming deductions."),
+    "due_shortfall": ("Projected funds are below the scheduled payment.", "Check receipts expected before the due date."),
+}
+_CENT_FIELDS = frozenset("revenue expected_revenue operating_out debt_service high_cost_lender loan_proceeds "
+                         "unclassified_in end_balance advance_in order_gross held returns deductions "
+                         "settle_net projected_min_balance due_balance".split())
+
+
+def _usd_field(name):
+    return name + "_cents" if name in _CENT_FIELDS else name
+
+
 # 폴백 경보 문구: 원인값 또는 트리거 이름 → (이유, 확인할 조치). 숫자를 넣지 않는다(grounding 대상 아님).
 _SETTLEMENT_HOLD_TEXT = ("정산 지급이 보류되어 다음 상환일 자금이 부족할 수 있습니다.", "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다.")
 _SALES_SLUMP_TEXT = ("판매대금 입금이 줄어 상환재원이 줄 수 있습니다.", "최근 주문·정산 추이 확인이 필요합니다.")
@@ -217,8 +243,8 @@ class EwContext:
     industry: str
     triggers: Sequence[str]
     rows: Sequence[Mapping[str, Any]]
-    baseline: Baseline
-    transactions: Sequence[Transaction]
+    baseline: Baseline | Mapping[str, Any]
+    transactions: Sequence[Transaction | UsdTransaction]
     categories: Mapping[str, Category]
     mask: Callable[[str], str]
     terms: Mapping[str, Any]
@@ -226,33 +252,55 @@ class EwContext:
     pg_weeks: Sequence[Mapping[str, Any]] | None = None
     ledger_baseline: LedgerBaseline | None = None
     catalog: dict[str, int | float | str] = field(init=False)
-    by_id: dict[str, Transaction] = field(init=False)
+    by_id: dict[str, Transaction | UsdTransaction] = field(init=False)
+    product: UsdProduct | None = field(init=False)
     accepted: EarlyWarningAlert | None = field(default=None, init=False)
     rejected: list[list[str]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
-        self.catalog = {
-            **evidence_catalog(self.rows, self.baseline, self.industry),
-            **ledger_catalog(self.ledger_baseline),
-        }
+        self.product = product_of(self.terms)
+        if any(isinstance(t, UsdTransaction) != bool(self.product) for t in self.transactions):
+            raise ValueError("Alert and transaction products differ")
+        if self.product:
+            if not isinstance(self.baseline, Mapping):
+                raise ValueError("USD alerts require a cent-denominated baseline")
+            validate_usd_evidence((self.rows, self.baseline, self.pg_weeks, self.terms))
+            if any(k in _CENT_FIELDS or k == "released" for row in self.pg_weeks or () for k in row):
+                raise ValueError("USD settlement amounts must be in cents")
+            self.catalog = {}
+            for row in self.rows:
+                if any(k.endswith("_krw") or k in _CENT_FIELDS for k in row):
+                    raise ValueError("USD weekly amounts must be in cents")
+                for group, keys in (("W", WEEK_FIELDS), ("F", FORECAST_FIELDS)):
+                    for key in map(_usd_field, keys):
+                        if row.get(key) is not None:
+                            self.catalog[f"{group}:{row['week']}:{key}"] = row[key]
+            for key in ("avg_weekly_revenue_cents", "revenue_volatility", "cash_buffer_days", "operating_daily_cents", "tax_bank_match_ratio"):
+                if _is_num(v := self.baseline.get(key)):
+                    self.catalog[f"B:{key}"] = v
+        else:
+            self.catalog = {
+                **evidence_catalog(self.rows, self.baseline, self.industry),
+                **ledger_catalog(self.ledger_baseline),
+            }
         self.by_id = {t.txn_id: t for t in self.transactions if t.booked_on <= self.as_of}
 
     @property
     def as_of(self) -> date:
         return week_window(self.start, self.week)[1]
 
-    def txn(self, t: Transaction) -> dict[str, Any]:
+    def txn(self, t: Transaction | UsdTransaction) -> dict[str, Any]:
         return {
             "txn_id": t.txn_id,
             "date": t.booked_on.isoformat(),
-            "amount_krw": t.amount_krw,
+            **({"amount_cents": t.amount_cents} if self.product else {"amount_krw": t.amount_krw}),
             "category": self.categories[t.txn_id].value,
             "description": self.mask(t.description),
         }
 
     def get_weekly_series(self, _: dict[str, Any]) -> dict[str, Any]:
         return {
-            "id_format": "W:{week}:{field}; 전망 필드(projected_min_balance, projected_min_date, shortfall_date, next_due_on, due_balance)는 F:{week}:{field}",
+            "id_format": "W:{week}:{field}; forecasts F:{week}:{field}" if self.product else "W:{week}:{field}; 전망 필드(projected_min_balance, projected_min_date, shortfall_date, next_due_on, due_balance)는 F:{week}:{field}",
             "current_week": self.week,
             "weeks": list(self.rows),
         }
@@ -271,7 +319,7 @@ class EwContext:
 
     def get_settlement_ledger(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.pg_weeks is None:
-            return {"available": False, "weeks": [], "note": "정산 원장 데이터 없음"}
+            return {"available": False, "weeks": [], "note": "No settlement ledger" if self.product else "정산 원장 데이터 없음"}
         try:
             lo = int(args.get("from_week"))
             hi = int(args.get("to_week"))
@@ -302,7 +350,7 @@ class EwContext:
 
     def raise_alert(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.accepted is not None:
-            return {"accepted": False, "issues": ["이미 경보를 올렸다. 더 올릴 수 없다."]}
+            return {"accepted": False, "issues": ["An alert was already accepted." if self.product else "이미 경보를 올렸다. 더 올릴 수 없다."]}
         issues = check_alert(args, self)
         if not issues:
             try:
@@ -310,6 +358,8 @@ class EwContext:
             except ValidationError as e:
                 issues = [f"형식 오류: {err['loc']} {err['msg']}" for err in e.errors()][:5]
         if issues:
+            if self.product:
+                issues = ["Invalid alert: check language, cited values, cause and schema."]
             self.rejected.append(issues)
             return {"accepted": False, "issues": [self.mask(i) for i in issues]}
         return {"accepted": True, "alert_id": self.alert_id}
@@ -354,10 +404,23 @@ def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
         if unknown:
             issues.append(f"signals[{i}]: 알 수 없는 근거 ID {unknown}")
         cited = [float(v) for m in metric_ids if _is_num(v := ctx.catalog.get(m))]
-        cited += [float(ctx.by_id[t].amount_krw) for t in txn_ids if t in ctx.by_id]
-        if bad := ungrounded(str(s.get("text", "")), cited):
+        text = str(s.get("text", ""))
+        if ctx.product:
+            amounts = [ctx.by_id[t].amount_cents for t in txn_ids if t in ctx.by_id]
+            bad = usd_language.issues(text, amounts + [ctx.catalog[k] for k in metric_ids if k.endswith("_cents") and k in ctx.catalog],
+                                      [ctx.catalog[k] for k in metric_ids if not k.endswith("_cents") and _is_num(ctx.catalog.get(k))])
+        else:
+            cited += [float(ctx.by_id[t].amount_krw) for t in txn_ids if t in ctx.by_id]
+            bad = ungrounded(text, cited)
+        if bad:
             issues.append(f"signals[{i}]: 인용 근거와 맞지 않는 수치 {bad}")
     catalog_values = [float(v) for v in ctx.catalog.values() if _is_num(v)]
+    if ctx.product:
+        for text in (args.get("summary", ""), args.get("check_action", "")):
+            issues += usd_language.issues(str(text), [v for k, v in ctx.catalog.items() if k.endswith("_cents")],
+                                          [v for k, v in ctx.catalog.items() if not k.endswith("_cents") and _is_num(v)])
+        issues += _check_cause(args, ctx, signals)
+        return ["Invalid English alert, cause or cited evidence"] if issues else []
     if bad := ungrounded(str(args.get("summary", "")), catalog_values):
         issues.append(f"summary: 근거 카탈로그에 없는 수치 {bad}")
     if bad := ungrounded(str(args.get("check_action") or ""), catalog_values):
@@ -400,6 +463,8 @@ def _check_cause(args: Mapping[str, Any], ctx: EwContext, signals: list[Any]) ->
 
     if primary is not None:
         fields = CAUSE_FIELDS[primary]
+        if ctx.product:
+            fields = list(map(_usd_field, fields))
         pattern = re.compile(r"^W:\d+:(" + "|".join(re.escape(f) for f in fields) + r")$")
         cited = {m for s in signals[:MAX_SIGNALS] if isinstance(s, dict) for m in _ids(s.get("metric_ids"))}
         if not any(pattern.match(m) for m in cited):
@@ -409,7 +474,8 @@ def _check_cause(args: Mapping[str, Any], ctx: EwContext, signals: list[Any]) ->
 
 def build_alert(args: Mapping[str, Any], ctx: EwContext, models: dict[str, str]) -> EarlyWarningAlert:
     primary_raw = str(args.get("primary_cause") or "")
-    return EarlyWarningAlert(
+    return (UsdEarlyWarningAlert if ctx.product else EarlyWarningAlert)(
+        **(ctx.product.model_dump() if ctx.product else {}),
         alert_id=ctx.alert_id,
         loan_id=ctx.loan_id,
         week=ctx.week,
@@ -441,11 +507,18 @@ def fallback_alert(ctx: EwContext, reason: str) -> EarlyWarningAlert:
     signals = []
     for trigger in ctx.triggers:
         kind, metric, text = _TRIGGER_TEXT[trigger]
+        if ctx.product:
+            prefix, name = metric.rsplit(":", 1)
+            metric = prefix + ":" + _usd_field(name)
+            text = _USD_TRIGGERS[trigger][0]
         signals.append({"kind": kind, "text": text, "metric_ids": [metric.format(week=ctx.week)], "txn_ids": []})
     primary = ctx.candidates[0].cause if ctx.candidates else None
     secondary = [c.cause.value for c in ctx.candidates[1:3]]
     key = primary.value if primary else (ctx.triggers[0] if ctx.triggers else "default")
     summary, check_action = FALLBACK_TEXT.get(key, FALLBACK_TEXT["default"])
+    if ctx.product:
+        summary, check_action = _USD_TRIGGERS.get("new_debt" if key == "high_cost_borrowing" else key,
+                                                   ("The detector flagged a change.", "Review the weekly evidence."))
     args = {
         "severity": "medium",
         "summary": summary,
@@ -476,13 +549,24 @@ def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str) -> Ew
         f"대출 {ctx.loan_id} {ctx.week}주차({week_window(ctx.start, ctx.week)[0]}~{ctx.as_of}) 흐름에서 "
         f"탐지기 트리거 {json.dumps(list(ctx.triggers))}가 걸렸다. 조사해서 경보 여부를 결정하라."
     )
-    run, error = session.run(ew_spec(model), text, ctx.handlers())
+    spec = ew_spec(model)
+    if ctx.product:
+        spec = usd_language.native_spec(spec, "Investigate only the supplied trigger evidence. Write in English. "
+                       "Monetary values are USD cents. Cite metric or transaction IDs in each signal. Use a candidate "
+                       "cause and verify its evidence. Recommend verification only, never enforcement or new credit terms.")
+        text = ctx.mask(f"Investigate week {ctx.week}: {', '.join(ctx.triggers)}.")
+    run, error = session.run(spec, text, ctx.handlers())
     alert = ctx.accepted.model_copy(update={"models": {"investigator": model}}) if ctx.accepted else None
     if run is None:
+        if ctx.product:
+            error = "investigator_unavailable"
         record = {"error": error, "rejected": ctx.rejected}
         if alert is None:
             return EwResult(fallback_alert(ctx, "agent_error"), "fallback_alert", error or "", record, session.conversations)
         return EwResult(alert, "alert", error or "", record, session.conversations)
-    record = {**run.record(), "model": model, "rejected": ctx.rejected}
+    record = {**usd_language.run_record(run, ctx.product), "model": model, "rejected": ctx.rejected}
     out: EwOutput = run.output  # type: ignore[assignment]
+    if ctx.product and (ctx.rejected and alert is None or usd_language.issues(out.reason)):
+        return EwResult(alert or fallback_alert(ctx, "invalid_output"), "alert" if alert else "fallback_alert",
+                        "invalid_output", record, session.conversations)
     return EwResult(alert, "alert" if alert else "no_alert", out.reason[:300], record, session.conversations)

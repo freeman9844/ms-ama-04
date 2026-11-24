@@ -18,9 +18,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from agents import usd_language
 from agents.runtime import AgentSpec, ToolHandler
 from agents.underwriting import AgentRunner, _fn, _Session
-from shared.contracts import HardshipCategory
+from shared.contracts import HardshipCategory, UsdProduct
+from shared.money import format_usd
+from shared.product_context import product_of
 from shared.pseudonymize import has_token
 
 COLLECTIONS_AGENT = "collections-agent"
@@ -74,6 +77,14 @@ SCRIPTS: dict[str, dict[str, str]] = {
         "purpose": "담당자 연락 예고",
         "text": "고객님, 대출 관련 확인할 사항이 있어 담당자가 영업시간 중 연락드릴 예정입니다.",
     },
+}
+
+USD_SCRIPTS = {
+    "check_in": {"purpose": "Check-in", "text": "This is AMA Lending checking in. Please reply if you need support."},
+    "payment_reminder": {"purpose": "Payment reminder", "text": "Your next payment is due on {due_on}. Please contact us if you need assistance."},
+    "missed_payment": {"purpose": "Missed payment", "text": "The payment for installment {no}, due {due_on}, did not clear in full. The remaining amount is {amount}. Please contact us to discuss payment options."},
+    "hardship_offer": {"purpose": "Optional hardship consultation", "text": "Installment {no}, due {due_on}, has an outstanding balance of {amount}. You may contact us to discuss scheduling options if you are experiencing difficulty."},
+    "officer_callback": {"purpose": "Officer callback", "text": "A loan officer will contact you during business hours to discuss your account."},
 }
 
 # 미납과 함께 볼 때 재조정 상담 근거가 되는 조기경보 원인(스펙 §7.1).
@@ -152,10 +163,17 @@ class RepaymentCase:
     loan_id: str
     installment_no: int
     due_on: date
-    amount_krw: int
+    amount_krw: int | None
     missed_count: int
     recent_alert: dict[str, Any] | None
     as_of: date | None = None
+    product: UsdProduct | None = None
+    amount_cents: int | None = None
+
+    @property
+    def money_fields(self):
+        return ({**self.product.model_dump(), "amount_cents": self.amount_cents} if self.product else
+                {"amount_krw": self.amount_krw})
 
     @property
     def contact_on(self) -> date:
@@ -164,12 +182,16 @@ class RepaymentCase:
     @classmethod
     def from_doc(cls, doc: Mapping[str, Any]) -> "RepaymentCase":
         inst = doc["installment"]
+        product = product_of(doc)
+        if product and ("amount_krw" in inst or type(inst.get("amount_cents")) is not int):
+            raise ValueError("Invalid USD installment")
         return cls(
             case_id=doc["case_id"],
             loan_id=doc["loan_id"],
             installment_no=inst["no"],
             due_on=date.fromisoformat(inst["due_on"]),
-            amount_krw=inst["amount_krw"],
+            amount_krw=None if product else inst["amount_krw"],
+            product=product, amount_cents=inst["amount_cents"] if product else None,
             missed_count=doc["missed_count"],
             recent_alert=doc.get("recent_alert"),
             as_of=date.fromisoformat(doc.get("as_of") or inst["due_on"]),
@@ -187,7 +209,10 @@ def _sent_in_window(contacts: Sequence[Mapping[str, Any]], on: date) -> int:
 
 
 def _banned_in(text: str) -> list[str]:
-    return [p for p in BANNED_PHRASES if p in text]
+    english = ("legal action", "seize", "seizure", "lawsuit", "sue you", "will sue", "garnish", "prosecution", "your employer",
+               "your family", "foreclosure", "repossession", "raise your interest", "increase your rate",
+               "reduce your limit", "pay immediately", "immediate repayment", "declare default")
+    return [p for p in (*BANNED_PHRASES, *english) if p in " ".join(text.casefold().split())]
 
 
 def fair_check(contacts: Sequence[Mapping[str, Any]], on: date, now: datetime) -> str | None:
@@ -244,8 +269,9 @@ def _krw(amount: int) -> str:
 
 def render_script(script_id: str, case: RepaymentCase) -> str:
     """승인 스크립트에 회차·상환일·금액을 채운 실제 고객 문구."""
-    return SCRIPTS[script_id]["text"].format(
-        no=case.installment_no, due_on=case.due_on.isoformat(), amount=_krw(case.amount_krw)
+    return (USD_SCRIPTS if case.product else SCRIPTS)[script_id]["text"].format(
+        no=case.installment_no, due_on=case.due_on.isoformat(),
+        amount=format_usd(case.amount_cents) if case.product else _krw(case.amount_krw)
     )
 
 
@@ -263,7 +289,8 @@ class CollectionsContext:
         if c.recent_alert:
             # 원인(primary_cause·secondary_causes)은 참고 정보로 전달만 한다. 옛 경보 문서엔 없어 None·[]가 된다.
             recent = {
-                **c.recent_alert,
+                **({k: c.recent_alert[k] for k in ("severity", "signals", "week", "alert_id") if k in c.recent_alert}
+                   if c.product else c.recent_alert),
                 "summary": self.mask(str(c.recent_alert.get("summary") or "")),
                 "primary_cause": c.recent_alert.get("primary_cause"),
                 "secondary_causes": list(c.recent_alert.get("secondary_causes") or []),
@@ -274,7 +301,7 @@ class CollectionsContext:
             "case_id": c.case_id,
             "installment_no": c.installment_no,
             "due_on": c.due_on.isoformat(),
-            "amount_krw": c.amount_krw,
+            **c.money_fields,
             "missed_count": c.missed_count,
             "recent_alert": recent,
         }
@@ -291,7 +318,8 @@ class CollectionsContext:
         }
 
     def list_scripts(self, _: dict[str, Any]) -> dict[str, Any]:
-        return {"scripts": [{"script_id": k, **v} for k, v in SCRIPTS.items()]}
+        scripts = USD_SCRIPTS if self.case.product else SCRIPTS
+        return {"scripts": [{"script_id": k, **v} for k, v in scripts.items()]}
 
     def propose(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.draft is not None:
@@ -303,6 +331,12 @@ class CollectionsContext:
         if category and category not in _HARDSHIP_CATEGORIES:
             return {"error": "invalid_category"}
         hardship = None
+        if self.case.product:
+            texts = [str(args.get("reason") or "")]
+            if category:
+                texts.append(str(args.get("hardship_note") or ""))
+            if any(usd_language.issues(s, [self.case.amount_cents], [self.case.missed_count]) or _banned_in(s) for s in texts):
+                return {"error": "invalid_proposal_language_or_evidence"}
         if category:
             hardship = {"category": category, "note": self.mask(str(args.get("hardship_note") or ""))[:NOTE_MAX]}
         self.draft = {
@@ -336,6 +370,9 @@ def _fallback_draft(case: RepaymentCase) -> dict[str, Any]:
         script_id, reason = "hardship_offer", "최근 조기경보가 높음이라 상환 곤란 상담 안내를 제안합니다(기본 규칙)."
     else:
         script_id, reason = "missed_payment", "미납 회차 안내를 제안합니다(기본 규칙)."
+    if case.product:
+        reason = ("A recent high alert supports offering an optional hardship consultation." if script_id == "hardship_offer"
+                  else "Notify the borrower about the outstanding installment.")
     return {"script_id": script_id, "hardship": None, "reason": reason, "by": "fallback"}
 
 
@@ -351,19 +388,27 @@ def act(ctx: CollectionsContext, *, runner: AgentRunner | None, model: str) -> C
         return _fallback(ctx, "agents_disabled")
     session = _Session(runner)
     text = ctx.mask(f"미납 건 {ctx.case.case_id}({ctx.case.installment_no}회차)를 처리하라.")
-    run, error = session.run(collections_spec(model), text, ctx.handlers())
+    spec = collections_spec(model)
+    if ctx.case.product:
+        spec = usd_language.native_spec(spec, "Review the missed installment and contacts. Propose only an approved script "
+                       "using propose. Never send a message. Explain grounds in English; monetary evidence is USD cents. "
+                       "Default to missed_payment. Suggest hardship consultation only for repeated missed payments or "
+                       "qualifying recent causes (sales_slump, settlement_hold, return_spike, high_cost_borrowing). "
+                       "Never set new repayment terms. Only an officer may approve a message or request.")
+        text = ctx.mask(f"Review missed installment {ctx.case.installment_no}.")
+    run, error = session.run(spec, text, ctx.handlers())
     if run is None:
-        result = _fallback(ctx, error or "agent_error")
+        result = _fallback(ctx, "agent_error" if ctx.case.product else error or "agent_error")
         result.conversations = session.conversations
         return result
     out: CollectionsOutput = run.output  # type: ignore[assignment]
-    record = {**run.record(), "model": model, "reported": out.decision}
+    record = {**usd_language.run_record(run, ctx.case.product), "model": model, "reported": out.decision}
     if ctx.draft is None:
         # 에이전트가 제안하지 않아도 심사역 승인 단계는 거친다(폴백 제안).
         ctx.draft = _fallback_draft(ctx.case)
         record["draft_fallback"] = "no_proposal"
     # 제안은 항상 있다(없으면 위에서 폴백). 모델이 보고한 decision은 record에만 남긴다.
-    return CollectionsResult("proposed", out.reason[:300], ctx.draft, record, session.conversations)
+    return CollectionsResult("proposed", ctx.draft["reason"] if ctx.case.product else out.reason[:300], ctx.draft, record, session.conversations)
 
 
 def _check(check_id: str, ok: bool, detail: str) -> dict[str, Any]:
@@ -427,7 +472,15 @@ def build_proposal(
     ]
     if hardship:
         checks.append(_check("hardship_grounds", *_hardship_grounds(case)))
+    if case.product:
+        details = {"approved_script": "Script is in the approved catalog.", "contact_hours": f"Contact hours: {hours} KST; now {local:%H:%M}.",
+                   "weekly_limit": f"{sent_7d} contacts in seven days; limit {MAX_CONTACTS_PER_7_DAYS}.",
+                   "banned_words": "Check for prohibited expressions.", "pii_tokens": "Check for pseudonym tokens.",
+                   "hardship_grounds": "Check repeated missed payments or a qualifying recent alert."}
+        for check in checks:
+            check["detail"] = ("Pass: " if check["ok"] else "Fail: ") + details[check["id"]]
     return {
+        **(case.product.model_dump() if case.product else {}),
         "status": "pending_officer",
         "script_id": script_id,
         "text": text,
@@ -438,7 +491,7 @@ def build_proposal(
             "installment_no": case.installment_no,
             "due_on": case.due_on.isoformat(),
             "contact_on": case.contact_on.isoformat(),
-            "amount_krw": case.amount_krw,
+            **case.money_fields,
             "missed_count": case.missed_count,
             "recent_alert": recent,
             "contacts_7d": sent_7d,
@@ -491,6 +544,9 @@ def settle_proposal(
     else:
         return Settled(unchanged, None, None, [f"알 수 없는 결정입니다: {decision}"])
     issues = message_issues(send_text)
+    if case.product:
+        issues = (["Message violates contact policy."] if issues else []) + usd_language.issues(
+            send_text, [case.amount_cents], [case.installment_no])
     if issues:
         return Settled(unchanged, None, None, issues)
     contact = remind(case.case_id, contacts, case.contact_on, now, script_id=str(proposal.get("script_id")), by="officer",

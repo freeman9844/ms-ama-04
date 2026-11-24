@@ -7,7 +7,7 @@
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from agents.officer_facts import SETTLEMENT_RATE, counteroffer, evidence_menu
 from agents.runtime import AgentError, AgentSpec
 from shared.opinions import CURRENT
+from shared.product_context import product_of
 
 OFFICER_AGENT = "officer-assistant"
 # 게이트웨이 429는 런타임이 지수 백오프로 최대 5번 다시 보낸다(조기경보와 같은 값).
@@ -98,8 +99,10 @@ def _full_request_answer(snapshot: Mapping[str, Any], language: str) -> str:
             "decline": "검토된 의견은 신청액 전액 승인을 권고하지 않습니다.",
         }.get(rec, "신청액 전액에 대해 검토를 통과한 현행 의견이 없습니다.")
     policy = snapshot.get("policy") or {}
-    requested = (snapshot.get("application") or {}).get("requested_amount_krw")
-    limit = policy.get("max_amount_krw")
+    app = snapshot.get("application") or {}
+    unit = "cents" if product_of(app) else "krw"
+    requested = app.get(f"requested_amount_{unit}")
+    limit = policy.get(f"max_amount_{unit}")
     if rec == "decline" and isinstance(requested, int) and isinstance(limit, int) and requested > limit:
         return answer + (" The request exceeds the policy limit." if en else " 신청액이 정책 한도를 초과합니다.")
     if rec == "refer" and any(r.get("code") == "R108" for r in policy.get("reason_codes") or ()):
@@ -119,7 +122,14 @@ class OfficerChat:
         if mask is not None:
             question = mask(question)
             history = [{**turn, "text": mask(str(turn.get("text", "")))} for turn in history]
-        requested = (snapshot.get("application") or {}).get("requested_amount_krw")
+        app = snapshot.get("application") or {}
+        product = product_of(app)
+        if product:
+            language = "en"
+            opinion = snapshot.get("agent_opinion") or {}
+            if opinion.get("review_passed") is not True and opinion.get("state") != "legacy":
+                snapshot = {**snapshot, "agent_opinion": None}
+        requested = app.get("requested_amount_cents" if product else "requested_amount_krw")
         menu = evidence_menu(snapshot, language)
         lines = [_full_request_answer(snapshot, language)]
         if _RATE_QUESTION.search(question):
@@ -128,14 +138,17 @@ class OfficerChat:
         if ((snapshot.get("agent_opinion") or {}).get("recommendation") not in CURRENT
                 and re.search(r"권고|추천|의견|recommend|opinion", question, re.I)):
             return ChatAnswer("\n".join(lines), 0, 0)
-        history = [turn for turn in history if not counteroffer(str(turn.get("text", "")), requested)]
-        if counteroffer(question, requested):
+        history = [turn for turn in history if not counteroffer(str(turn.get("text", "")), requested, usd=bool(product))]
+        if counteroffer(question, requested, usd=bool(product)):
             question = ("Explain the reviewed opinion on the full request and the next checks."
                         if language == "en" else "신청액 전액에 대한 검토 의견과 다음 확인 사항을 설명하세요.")
         payload = json.dumps({"snapshot": snapshot, "history": list(history), "question": question,
                               "answer_language": language}, ensure_ascii=False)
         try:
-            run = self._runner.run(self._spec, payload, {})
+            spec = replace(self._spec, instructions="Select up to six relevant verified evidence paths from the USD "
+                           "snapshot. Return only one exact key per line, no prose or amounts. Never propose alternative "
+                           "credit terms or infer an officer decision.") if product else self._spec
+            run = self._runner.run(spec, payload, {})
         except AgentError as e:
             self._delete(e.conversation_id)
             raise

@@ -316,7 +316,11 @@ class GrievanceSubmission(BaseModel):
     text: str = Field(min_length=1, max_length=GRIEVANCE_TEXT_MAX)
 
 
-class GrievanceDecision(BaseModel):
+class UsdGrievanceSubmission(GrievanceSubmission, UsdProduct):
+    pass
+
+
+class _GrievanceDecision(BaseModel):
     """grievance-decisions 큐 메시지. uphold는 원결정 유지, rereview는 재심사 결과를 기록한다."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -327,13 +331,21 @@ class GrievanceDecision(BaseModel):
     officer_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=500)
     new_decision: Literal["approve", "conditional", "decline"] | None = None
-    amount_krw: int | None = Field(default=None, gt=0)
     conditions: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _outcome(self) -> "GrievanceDecision":
         if self.outcome == "rereview" and self.new_decision is None:
             raise ValueError("재심사에는 새 결정이 필요하다")
-        if self.outcome == "uphold" and (self.new_decision or self.amount_krw or self.conditions):
+        amount = getattr(self, "amount_cents", None) or getattr(self, "amount_krw", None)
+        if self.outcome == "uphold" and (self.new_decision or amount or self.conditions):
             raise ValueError("원결정 유지에는 새 결정을 둘 수 없다")
         return self
+
+
+class GrievanceDecision(_GrievanceDecision):
+    amount_krw: int | None = Field(default=None, gt=0)
+
+
+class UsdGrievanceDecision(_GrievanceDecision, UsdProduct):
+    amount_cents: int | None = Field(default=None, strict=True, gt=0)

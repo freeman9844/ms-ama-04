@@ -193,7 +193,7 @@ class FoundryAgents:
         self._sleep = sleep
         # False면 429를 다시 보내지 않고 바로 GatewayThrottled로 올린다(게이트웨이 프로브).
         self._retry_throttle = retry_throttle
-        self._versions: dict[str, str] = {}
+        self._versions: dict[tuple[str, str], str] = {}
 
     def _request(self, method: str, path: str, body: Any) -> httpx.Response:
         return self._client.request(
@@ -224,15 +224,17 @@ class FoundryAgents:
         return r.json() if r.content else {}
 
     def ensure_agent(self, spec: AgentSpec) -> str:
-        if spec.name not in self._versions:
+        definition = spec.definition()
+        key = (spec.name, json.dumps(definition, sort_keys=True, ensure_ascii=False))
+        if key not in self._versions:
             created = self._call(
                 "POST",
                 f"/agents/{spec.name}/versions?api-version={AGENTS_API_VERSION}",
-                {"definition": spec.definition()},
+                {"definition": definition},
                 throttle_retries=spec.throttle_retries,
             )
-            self._versions[spec.name] = str(created.get("version", ""))
-        return self._versions[spec.name]
+            self._versions[key] = str(created.get("version", ""))
+        return self._versions[key]
 
     @staticmethod
     def _invoke(call: dict[str, Any], handlers: Mapping[str, ToolHandler]) -> tuple[dict[str, Any], dict[str, Any]]:
