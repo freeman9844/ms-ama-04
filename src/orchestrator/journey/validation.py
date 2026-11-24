@@ -11,13 +11,20 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from journey.models import OfficerDecision
+from journey.models import OfficerDecision, StartRequest, UsdStartRequest
 
 # 상품 최대 한도(`src/policy/rulesets/v4.yaml`의 product.max_amount_krw). 테스트가 값 일치를 확인한다.
 OVERRIDE_MAX_AMOUNT_KRW = 10_000_000
 REREVIEW_ERRORS = {
     "rereview_outside_policy": "정책 결과가 거절이거나 없는 건은 이의 재심사로 승인할 수 없습니다. 예외 승인은 원 심사 결정에서만 할 수 있습니다.",
 }
+
+
+def parse_start_request(raw: dict[str, Any]) -> StartRequest | UsdStartRequest:
+    """Only an unversioned, valid legacy payload can take the KRW path."""
+    if "product_version" in raw:
+        return UsdStartRequest.model_validate(raw)
+    return StartRequest.model_validate(raw)
 
 
 def validate_officer_decision(

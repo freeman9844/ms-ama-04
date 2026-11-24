@@ -17,6 +17,9 @@ from pydantic import (
     model_validator,
 )
 
+from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS, UsdProduct
+from shared.money import RequestedUsdCents
+
 KST = timezone(timedelta(hours=9), "KST")
 APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
 CONSENT_SCOPES = ("account", "tax", "pg", "marketplace")
@@ -86,13 +89,11 @@ class Status(StrEnum):
     FAILED = "failed"
 
 
-class StartRequest(BaseModel):
+class _StartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     application_id: str = Field(pattern=APPLICATION_ID_PATTERN)
     applicant_id: str = Field(min_length=1, max_length=64)
-    requested_amount_krw: int = Field(gt=0, le=10_000_000)
-    requested_tenor_months: int = Field(ge=1, le=12)
     sla_hours: float = Field(default=24, gt=0, le=720)
     # 심사역 대기 시작부터 미결 종료까지(기본 1주일). SLA 초과(sla_hours) 뒤에도 결정이 없으면 이 시각에 닫는다.
     close_hours: float = Field(default=168, gt=0, le=720)
@@ -106,10 +107,20 @@ class StartRequest(BaseModel):
         return v.replace(tzinfo=UTC) if v and v.tzinfo is None else v
 
     @model_validator(mode="after")
-    def _close_after_sla(self) -> "StartRequest":
+    def _close_after_sla(self) -> "_StartRequest":
         if self.close_hours <= self.sla_hours:
             raise ValueError("close_hours는 sla_hours보다 커야 합니다")
         return self
+
+
+class StartRequest(_StartRequest):
+    requested_amount_krw: int = Field(gt=0, le=10_000_000)
+    requested_tenor_months: int = Field(ge=1, le=12)
+
+
+class UsdStartRequest(_StartRequest, UsdProduct):
+    requested_amount_cents: RequestedUsdCents
+    requested_tenor_months: int = Field(strict=True, ge=MIN_TENOR_MONTHS, le=MAX_TENOR_MONTHS)
 
 
 class OfficerDecision(BaseModel):

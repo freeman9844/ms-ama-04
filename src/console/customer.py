@@ -3,9 +3,13 @@
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from console.i18n import _
 from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
+from shared.money import RequestedUsdCents, parse_usd_cents
 
+_USD_PRINCIPAL = TypeAdapter(RequestedUsdCents)
 MIN_AMOUNT_KRW = 500_000
 MAX_AMOUNT_KRW = 10_000_000
 CONSENT_FIELDS = ("consent_account", "consent_tax", "consent_pg")
@@ -73,6 +77,10 @@ def customer_status(doc: dict[str, Any] | None) -> CustomerStatus:
     return CustomerStatus(_("처리 종료"), "bad", _("신청 처리가 끝났습니다. 자세한 내용은 고객센터로 문의해 주세요."), False, step, stopped=True)
 
 
+def parse_requested_usd_cents(text: str) -> int:
+    return _USD_PRINCIPAL.validate_python(parse_usd_cents(text))
+
+
 def validate_apply(form: dict[str, str], applicants: tuple[str, ...]) -> str | None:
     """오류 코드를 돌려준다. 동의를 가장 먼저 본다."""
     if not all(form.get(f) == "on" for f in CONSENT_FIELDS):
@@ -84,6 +92,8 @@ def validate_request(form: dict[str, str], applicants: tuple[str, ...]) -> str |
     """신청인·금액·기간 오류 코드. 고객 신청(/apply)과 콘솔 신규 신청이 같은 기준을 쓴다."""
     if form.get("applicant_id", "").strip() not in applicants:
         return "applicant_invalid"
+    if {"product_version", "currency", "language", "requested_amount_cents"} & form.keys():
+        return "amount_invalid"
     amount = _digits(form.get("requested_amount_krw", ""))
     if amount is None or not MIN_AMOUNT_KRW <= amount <= MAX_AMOUNT_KRW:
         return "amount_invalid"

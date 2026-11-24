@@ -4,7 +4,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_serializer, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, model_serializer, model_validator
 
 SchemaV1 = Literal["1"]
 NonNegFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
@@ -15,6 +15,12 @@ MAX_TENOR_MONTHS = 6
 
 class Contract(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class UsdProduct(Contract):
+    product_version: Literal["usd-v1"]
+    currency: Literal["USD"]
+    language: Literal["en"]
 
 
 class ConsentScope(StrEnum):
@@ -54,18 +60,12 @@ class ApplicantProfile(Contract):
 TxnTypeCode = Literal["CARD_SETTLE", "PG_SETTLE", "TRANSFER_IN", "TRANSFER_OUT", "AUTO_DEBIT", "TAX"]
 
 
-class Transaction(Contract):
-    """계좌 거래 1건. amount_krw > 0 이면 입금."""
-
+class _Transaction(Contract):
     schema_version: SchemaV1 = "1"
     txn_id: str = Field(min_length=1)
     loan_id: str | None = None  # Legacy synthetic post-loan feeds are already loan-scoped.
     scheduled_item_key: str | None = None  # Only synthetic scheduled debits are replaceable by a plan.
     booked_on: date
-    amount_krw: int
-    balance_after_krw: int
-    description: str
-    txn_type_code: TxnTypeCode
 
     @model_serializer(mode="wrap")
     def _omit_absent_repayment_metadata(self, serialize):
@@ -76,10 +76,32 @@ class Transaction(Contract):
             data.pop("scheduled_item_key", None)
         return data
 
+
+class Transaction(_Transaction):
+    """계좌 거래 1건. amount_krw > 0 이면 입금."""
+
+    amount_krw: int
+    balance_after_krw: int
+    description: str
+    txn_type_code: TxnTypeCode
+
     @model_validator(mode="after")
     def _nonzero(self) -> "Transaction":
         if self.amount_krw == 0:
             raise ValueError("amount_krw는 0일 수 없다")
+        return self
+
+
+class UsdTransaction(_Transaction, UsdProduct):
+    amount_cents: StrictInt
+    balance_after_cents: StrictInt
+    description: str
+    txn_type_code: TxnTypeCode
+
+    @model_validator(mode="after")
+    def _nonzero(self) -> "UsdTransaction":
+        if self.amount_cents == 0:
+            raise ValueError("Transaction amount must be nonzero")
         return self
 
 
