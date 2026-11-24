@@ -28,7 +28,7 @@
 
 아래 실행 명령의 `pytest`는 저장소 루트에서 `.\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`를 뜻한다. 각 단계는 테스트 추가 → 실패 확인 → 구현 → 같은 명령 통과 → 해당 변경만 커밋 순서다.
 
-### 1. 금액 계약과 입력 경계
+### Task 1: 금액 계약과 입력 경계
 
 **파일:** 신규 `src/shared/money.py`, `tests/shared/test_money.py`; 수정 `src/shared/contracts.py`, `src/orchestrator/journey/models.py`, `src/orchestrator/journey/validation.py`, `src/console/customer.py`.
 
@@ -37,7 +37,7 @@
 - [ ] `parse_usd_cents(text: str) -> int`와 `format_usd(cents: int) -> str`를 구현한다. 도메인 경계에서 `product_version="usd-v1"`, `currency="USD"`, `language="en"`과 `*_cents`를 검증한다. 기존 `*_krw` 입력은 구버전 판독기로만 처리한다. 두 표현을 함께 받지 않는다.
 - [ ] 위 테스트와 기존 큐 계약 검증을 실행한다. 통과 후 `feat: introduce versioned USD money contracts`로 커밋한다.
 
-### 2. 합성 원장과 결정적 정책
+### Task 2: 합성 원장과 결정적 정책
 
 **파일:** `src/shared/sellers.py`, `src/mockapis/synth.py`, `src/mockapis/sellerdata/engine.py`, `src/mockapis/postloan.py`, `src/agents/classify.py`, `src/agents/pg_ledger.py`, `src/agents/features.py`, `src/policy/engine.py`, `src/policy/rules.py`; 신규 `src/policy/rulesets/usd-v1.yaml`, `tests/mockapis/test_usd_sellers.py`.
 
@@ -46,7 +46,7 @@
 - [ ] 셀러 식별자는 유지하고 신규 `usd-v1` 원천에 영문 명칭·거래 적요·일관된 플랫폼 코드를 저장한다. 원천과 캐시에 상품을 구분한다. 기존 원장 환산 없이 거래를 생성한다. 정책 범위 `10000..1000000`센트, 한도 절삭 `10000`센트, 이력 대체 상한 `500000`센트. 비율·기간은 v4 기준을 유지한다.
 - [ ] `pytest tests/mockapis/test_usd_sellers.py tests/mockapis/test_policy_v4_sellers.py tests/agents/test_pg_ledger.py` 통과 후 `feat: generate English USD ledgers and policy decisions`로 커밋한다.
 
-### 3. 생성 영어, 개인정보와 근거 검증
+### Task 3: 생성 영어, 개인정보와 근거 검증
 
 **파일:** `src/shared/pseudonymize.py`, `src/shared/amount_advice.py`, `src/agents/underwriting.py`, `src/agents/early_warning.py`, `src/agents/collections.py`, `src/agents/notices.py`, `src/agents/officer_facts.py`, `src/agents/officer_chat.py`, `src/orchestrator/journey/pretranslate.py`; 신규 `tests/agents/test_usd_language.py`.
 
@@ -54,7 +54,7 @@
 - [ ] `pytest tests/agents/test_usd_language.py` 실패 확인 후, 프롬프트·도구 인자·결과 검사·폴백 템플릿에 상품 문맥을 전달한다. 모델은 통화를 결정하지 않는다. 잘못된 한국어 생성은 기존 검토/실패 경로로 보내고 검증 없는 영문을 새 의견으로 만들지 않는다. USD 신규 원문에는 번역 트리거를 실행하지 않는다. 인간 입력은 감사 원문을 유지한다.
 - [ ] 신규 테스트와 기존 심사역 채팅·동의 안내 테스트를 통과시킨 후 `feat: produce grounded English USD case records`로 커밋한다.
 
-### 4. 승인 이후 상환과 보호 규칙
+### Task 4: 승인 이후 상환과 보호 규칙
 
 **파일:** `src/agents/repayment.py`, `src/agents/repayment_plan.py`, `src/agents/escalation.py`, `src/orchestrator/journey/activities.py`, `src/orchestrator/journey/monitoring.py`, `src/agents/forecast.py`, `tests/agents/test_repayment.py`, `tests/orchestrator/test_monitoring_handlers.py`.
 
@@ -63,7 +63,7 @@
 - [ ] 신청의 계약을 일정·출금·전망·알림·추심 문서까지 전파한다. 신규 기록은 센트로 FIFO 충당한다. 잔액 0 판정과 조건부 발송 쓰기는 기존 원자성 규칙을 보존한다. 연락 횟수만 통화 간 연계하고 금융 금액은 합산하지 않는다. 구버전 진행 중 오케스트레이션의 재생 순서와 활동 계약은 변경하지 않는다.
 - [ ] 위 테스트와 구버전 승인 후 재전달 테스트 통과 후 `feat: service USD loans without mixing legacy balances`로 커밋한다.
 
-### 5. 기본 화면, KRW 기록 조회, 지표
+### Task 5: 기본 화면, KRW 기록 조회, 지표
 
 **파일:** `src/console/i18n.py`, `src/console/app.py`, `src/console/dashboard.py`, `src/console/customer.py`, `src/console/monitoring.py`, `src/console/translate.py`, `src/console/templates/`, `src/console/locales/en/`, `src/opsmetrics/projection.py`, `src/opsmetrics/insights.py`; `tests/console/test_i18n.py`, 신규 `tests/console/test_usd_views.py`.
 
@@ -72,7 +72,7 @@
 - [ ] 처음 접속은 영어, 명시적 선택은 새 쿠키로 기록한다. 고객·심사역 입력, 상태, 통지, 오류, 차트, 빈 상태에 카탈로그와 통화별 포매터를 적용한다. 아카이브 진입점은 `/legacy`, 기존 식별자 링크는 유지한다. 저장소 쿼리에서 통화를 먼저 제한하고 그 뒤 정렬·페이지 제한·집계한다. 동일 셀러의 신규 이의·운영 지표에도 적용한다.
 - [ ] 번역기를 끈 USD 화면과 기존 KRW 직접 링크를 포함해 위 테스트 통과 후 `feat: default to English USD views with a KRW archive`로 커밋한다.
 
-### 6. 실제 서비스 전환과 판정 기준
+### Task 6: 실제 서비스 전환과 판정 기준
 
 **파일:** `infra/resources.bicep`, `docs/runbook/deploy-history.md`; 실행 경계는 신청 접수 플래그 `USD_ORIGINATION_ENABLED`(기본 꺼짐). 이미 저장된 신청의 처리에는 이 플래그를 사용하지 않는다.
 
