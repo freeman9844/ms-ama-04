@@ -44,7 +44,9 @@ from journey.activities import (
     _TRANSACTIONS,
     _USD_TRANSACTIONS,
     ENDED_CONSENT,
+    ConsentEnded,
     Deps,
+    _drop_if_consent_ended,
     _remember_foundry,
     _semantic,
     raw_container,
@@ -124,6 +126,12 @@ def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, 
     return profile, apply_plan(txns, history, loan_id=loan["id"]), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
 
 
+def _put_monitoring_raw(deps: Deps, consent_id: str, name: str, value: Any) -> None:
+    container = raw_container(consent_id)
+    deps.raw.put_json(container, name, value)
+    _drop_if_consent_ended(deps, consent_id, container)
+
+
 def _collect_pg_flow(
     deps: Deps, token: str, terms: dict[str, Any], consent_id: str, loan_id: str
 ) -> PgFlow | None:
@@ -132,12 +140,15 @@ def _collect_pg_flow(
         raw = deps.mock.fetch("pg_flow", token, terms)
         pg = (UsdPgFlow if "amount_cents" in terms else PgFlow).model_validate(raw)
     except Exception as e:
-        if "amount_cents" in terms and isinstance(e, ValidationError):
-            raise
-        log.warning("사후 PG 원장 수집 실패(계좌 데이터로 계속): %s %s", loan_id, f"{type(e).__name__}: {e}"[:200])
-        return None
-    deps.raw.put_json(raw_container(consent_id), "pg_flow.json", raw)
-    return pg
+        if "amount_cents" not in terms or not isinstance(e, ValidationError):
+            _drop_if_consent_ended(deps, consent_id, raw_container(consent_id))
+            log.warning("Optional PG flow unavailable: %s %s", loan_id, type(e).__name__)
+            return None
+    else:
+        _put_monitoring_raw(deps, consent_id, "pg_flow.json", raw)
+        return pg
+    # Raise outside the handler: validation errors contain raw values, even in their exception chain.
+    raise ValueError("invalid_usd_pg_flow")
 
 
 def _ledger_baseline(
@@ -246,7 +257,7 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
             credits = [t.amount_cents for t in txns if t.loan_id and t.txn_type_code == "TRANSFER_IN"]
             if credits != [loan["amount_cents"]] or any(t.loan_id not in (None, loan_id) for t in txns):
                 raise ValueError("Source flow does not match the approved loan")
-        deps.raw.put_json(raw_container(consent_id), "flow.json", flow)
+        _put_monitoring_raw(deps, consent_id, "flow.json", flow)
         flow_start = min(t.booked_on for t in txns)
         pg = _collect_pg_flow(deps, grant["token"], terms, consent_id, loan_id)
         loan["monitoring"].update(
@@ -259,6 +270,12 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         loan["repayment"] = (usd_schedule(flow_start, loan["amount_cents"], loan["tenor_months"]) if product
                              else build_schedule(flow_start, WEEKS * 7, terms["installment_krw"]))
         deps.store.upsert(LOANS, loan)
+    except ConsentEnded:
+        loan["monitoring"].update(status="stopped", consent_id=consent_id, error="monitoring_consent_ended",
+                                  stopped_at=deps.clock().isoformat())
+        loan["updated_at"] = loan["monitoring"]["stopped_at"]
+        deps.store.upsert(LOANS, loan)
+        return None
     except Exception as e:
         # 선점한 문서가 replaying으로 남으면 30분(REPLAY_GUARD) 동안 콘솔·큐가 막힌다. 실패를 기록하고 원래 예외를 다시 던진다
         # (이 단계는 LLM을 쓰지 않아 큐 재시도가 싸고, 일시 오류는 재시도로 복구된다).
@@ -952,6 +969,12 @@ def _contacts_doc(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any]:
         "contacts": []}
 
 
+def _contact_identity(item: dict[str, str]) -> str:
+    # Preserve hashes in existing cap windows. A tagged pair cannot equal a modern string ref.
+    ref = item.get("ref") or ["legacy_alert", item["alert_id"]]
+    return hashlib.sha256(json.dumps([item["loan_id"], ref, item["by"], item["on"]]).encode()).hexdigest()
+
+
 def _reserve_contact(deps, loan_id, entry):
     """Reserve before delivery: conflicting loans cannot both consume the last slot.
 
@@ -962,10 +985,7 @@ def _reserve_contact(deps, loan_id, entry):
         return
     borrower = deps.store.read(LOANS, loan_id, loan_id)["applicant_id"]
     partition = "cap-" + hashlib.sha256(borrower.encode()).hexdigest()
-    def identity(item):
-        return hashlib.sha256(json.dumps([item[k] for k in ("loan_id", "ref", "by", "on")]).encode()).hexdigest()
-
-    slot = identity(dict(entry, loan_id=loan_id))
+    slot = _contact_identity(dict(entry, loan_id=loan_id))
     on = date.fromisoformat(entry["on"])
     ends = [on + timedelta(days=i) for i in range(7)]
     for _ in range(WRITE_ATTEMPTS):
@@ -977,7 +997,7 @@ def _reserve_contact(deps, loan_id, entry):
                 if prior is None:
                     prior = deps.store.prior_contact_slots(borrower, (on - timedelta(days=6)).isoformat(),
                                                            ends[-1].isoformat())
-                doc = dict(id=key, loan_id=partition, slots=sorted({identity(s) for s in prior if
+                doc = dict(id=key, loan_id=partition, slots=sorted({_contact_identity(s) for s in prior if
                            (end - timedelta(days=6)).isoformat() <= s["on"] <= end.isoformat()}))
             if slot not in doc["slots"]:
                 if len(doc["slots"]) >= MAX_CONTACTS_PER_7_DAYS:
@@ -1015,8 +1035,9 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
     else:
         _, _, mask = _mask_and_flow(deps, loan)
     case, now = RepaymentCase.from_doc(doc), deps.clock()
-    count = len(deps.store.prior_contact_slots(loan["applicant_id"], (case.contact_on - timedelta(days=6)).isoformat(),
-                                              case.contact_on.isoformat()))
+    prior = deps.store.prior_contact_slots(loan["applicant_id"], (case.contact_on - timedelta(days=6)).isoformat(),
+                                          case.contact_on.isoformat())
+    count = len({_contact_identity(s) for s in prior})
     ctx = CollectionsContext(case=case, contacts=contacts, now=now, mask=mask, borrower_contacts_7d=count)
     result = act(ctx, runner=deps.agents, model=deps.collections_model)
     _remember_foundry(deps, loan["monitoring"]["consent_id"], result.conversations, [])

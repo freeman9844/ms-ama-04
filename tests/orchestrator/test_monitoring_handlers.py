@@ -215,7 +215,7 @@ def mock_app():
 class RegistrationStore(MemoryStore):
     def prior_contact_slots(self, borrower, lo, hi):
         ids = {i for (c, i), d in self.docs.items() if c == LOANS and d.get("applicant_id") == borrower}
-        return [dict(loan_id=d["loan_id"], ref=s["ref"], by=s["by"], on=s["on"])
+        return [dict(loan_id=d["loan_id"], **{k: s[k] for k in ("ref", "alert_id", "by", "on") if k in s})
                 for (c, _), d in self.docs.items() if c == ALERTS and d.get("loan_id") in ids
                 for s in d.get("contacts", []) if s["status"] == "sent" and lo <= s["on"] <= hi]
 
@@ -372,6 +372,82 @@ def test_cross_loan_slot_race_and_recovery_expose_no_case_or_amount(mock_app, mo
     assert send(LOAN, "rc-usd-i1-b49999") == "sent"  # retry of the winning slot
     records = [doc for (c, k), doc in deps.store.docs.items() if k.startswith("cap-")]
     assert records and "b49999" not in str(records)
+
+
+def test_pre_ref_receipts_count_once_across_currencies(mock_app):
+    from shared.contracts import USD_V1
+
+    deps = make_deps(mock_app)
+    borrower = "seller-bakery-20"
+    deps.store.upsert(LOANS, dict(id="old", applicant_id=borrower))
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id=borrower))
+    old = dict(alert_id="ew-one", by="agent", on="2026-11-02", at=NOW.isoformat(),
+               status="sent", script_id="payment_reminder", reason=None)
+    # One repeated historical receipt, plus five distinct modern receipts; the identical
+    # string in the modern ref namespace denotes a different contact.
+    current = [{k: v for k, v in old.items() if k != "alert_id"} | {"ref": ref}
+               for ref in ("ew-one", "r2", "r3", "r4", "r5")]
+    deps.store.upsert(ALERTS, dict(id="contacts-history", loan_id="old", contacts=[old, old, *current]))
+    def attempt(ref):
+        contact = dict(ref=ref, by="officer", on=old["on"], status="sent")
+        monitoring_module._reserve_contact(deps, LOAN, contact)
+        return contact
+    assert attempt("seventh")["status"] == "sent"
+    assert attempt("seventh")["status"] == "sent"  # Redelivery consumes no additional slot.
+    assert attempt("eighth")["reason"] == "weekly_limit"
+
+
+@pytest.mark.parametrize("filename", ["flow.json", "pg_flow.json"])
+@pytest.mark.parametrize("end_before_put", [True, False])
+def test_replay_stops_if_raw_write_follows_deletion_proof(mock_app, monkeypatch, filename, end_before_put):
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put = deps.raw.put_json
+    ended = []
+    def end_during_write(container, name, value):
+        if not end_before_put:
+            put(container, name, value)
+        if name == filename:
+            cid = container.removeprefix("consent-")
+            reason, trigger = ("revoked", "revoke") if end_before_put else ("expired", "timer")
+            result = delete_consent_data(deps, dict(consent_id=cid, reason=reason, trigger=trigger,
+                                                    requested_by="test"))
+            assert result["complete"] and deps.raw.manifest(container) is None
+            ended.append(cid)
+        if end_before_put:
+            put(container, name, value)
+    monkeypatch.setattr(deps.raw, "put_json", end_during_write)
+    assert replay(deps) is None
+    cid, = ended
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert deps.raw.manifest(f"consent-{cid}") is None
+    assert deps.store.read("consents", cid, cid)["late_cleanup"][-1]["outcome"] == (
+        "deleted" if end_before_put else "absent")
+    assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+
+
+def test_invalid_usd_pg_flow_never_exposes_source_values(mock_app, monkeypatch, caplog):
+    from shared.contracts import USD_V1
+
+    deps = make_deps(mock_app, events=Outbox())
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id="seller-bakery-20",
+                                  underwriting_consent_id="prior", amount_cents=500000, tenor_months=6))
+    fetch = deps.mock.fetch
+    sentinel = "SYNTHETIC-PRIVATE-PG-VALUE"
+    def corrupt(source, token, terms):
+        if source == "pg_flow":
+            return {**USD_V1.model_dump(), "orders": sentinel, "settlements": []}
+        return fetch(source, token, terms)
+    monkeypatch.setattr(deps.mock, "fetch", corrupt)
+    with pytest.raises(ValueError) as exc:
+        replay(deps, **USD_V1.model_dump())
+    mon = loan(deps)["monitoring"]
+    assert sentinel not in caplog.text and sentinel not in json.dumps(mon)
+    assert str(exc.value) == "invalid_usd_pg_flow" and exc.value.__context__ is None
+    assert mon["status"] == "failed" and "invalid_usd_pg_flow" in mon["error"] and not flows(deps.events)
 
 
 def test_usd_worker_partial_redelivery_and_late_payoff(mock_app):

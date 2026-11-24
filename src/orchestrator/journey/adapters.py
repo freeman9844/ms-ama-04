@@ -144,7 +144,8 @@ class CosmosStore:
         slots = []
         for loan_id in loans:
             slots.extend(alerts.query_items(
-                'SELECT VALUE {"loan_id": c.loan_id, "ref": s["ref"], "by": s["by"], "on": s["on"]} '
+                'SELECT VALUE {"loan_id": c.loan_id, "ref": s["ref"], "alert_id": s.alert_id, '
+                '"by": s["by"], "on": s["on"]} '
                 'FROM c JOIN s IN c.contacts '
                 """WHERE STARTSWITH(c.id, 'contacts-') AND s.status='sent' AND s["on"] BETWEEN @lo AND @hi""",
                 parameters=[{"name": "@lo", "value": lo}, {"name": "@hi", "value": hi}], partition_key=loan_id))
