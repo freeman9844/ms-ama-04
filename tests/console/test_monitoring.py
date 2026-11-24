@@ -306,7 +306,10 @@ def test_awaiting_resume_offers_resume_and_stop(setup, mask, action, text):
     assert 'action="/loans/app-1/replay/resume"' in page and 'action="/loans/app-1/replay/stop"' in page
     r = client.post(f"/loans/app-1/replay/{action}", data={"csrf": csrf(client)}, headers=OFFICER)
     assert r.status_code == 202 and text in r.text
-    assert queue.sent == [(REPLAY_QUEUE, {"loan_id": "app-1", "action": action, "replay_id": "rp-1"})]
+    message = {"loan_id": "app-1", "action": action, "replay_id": "rp-1"}
+    if action == "resume":
+        message["paused_week"] = 2
+    assert queue.sent == [(REPLAY_QUEUE, message)]
 
 
 @pytest.mark.parametrize("status", ["replaying", "paused", "completed", "stopped"])

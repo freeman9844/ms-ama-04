@@ -180,6 +180,12 @@ and escalate; never unmask the public routes to run this test.
    both consents before reading raw data. It ignores a stale replay and
    conditionally stops a matching active replay whose consent ended. A failed
    stop write must retry; redelivery must preserve completed or failed results.
+   A Service Bus resume records the Storage Queue message ID and pending week
+   when it accepts the command. If the guard, stop write or send fails, retry
+   the original delivery, not a new console click. A lost send acknowledgement
+   may republish the same week with the same Service Bus message ID. Processing
+   that week or stopping the replay clears its pending intent. Deploy the
+   worker before the console that adds `paused_week` to new resume requests.
    Inspect old `late_cleanup` failures before rollout;
    old missing manifests/cleared markers cannot be
    reconstructed by the timer. Escalate unresolved historical gaps. Check

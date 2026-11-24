@@ -299,7 +299,7 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         raise
     return {"loan_id": loan_id, "replay_id": replay_id, "mode": loan["monitoring"]["mode"]}
 
-def handle_replay(deps: Deps, body: str) -> dict[str, Any] | None:
+def handle_replay(deps: Deps, body: str, *, command_id: str | None = None) -> dict[str, Any] | None:
     try:
         req = _command(deps, body, ReplayRequest)
     except ValueError:
@@ -308,7 +308,7 @@ def handle_replay(deps: Deps, body: str) -> dict[str, Any] | None:
     if req.action == "stop":
         return stop_replay(deps, req.loan_id, req.replay_id)  # type: ignore[arg-type]
     if req.action == "resume":
-        resumed = resume_replay(deps, req.loan_id, req.replay_id)  # type: ignore[arg-type]
+        resumed = resume_replay(deps, req.loan_id, req.replay_id, command_id or uuid4().hex, req.paused_week)  # type: ignore[arg-type]
         if resumed is not None and resumed["from_week"] <= WEEKS:
             _run_weeks(deps, req.loan_id, resumed["replay_id"], resumed["from_week"])
         return resumed
@@ -349,29 +349,42 @@ def _resume_blocker(deps: Deps, loan: dict[str, Any], *, require_grant: bool = F
     return None
 
 
-def resume_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | None:
-    """모든 대기 항목(재조정·추심 승인·상환 계획 등)이 정리되어 재개 대기가 된 재생을 paused_week 다음 주차부터 잇는다.
-    30분 가드도 다시 시작한다."""
-    loan = _held_loan(deps, loan_id, replay_id, "awaiting_resume")
-    if loan is None:
-        return None
-    mon, now = loan["monitoring"], deps.clock().isoformat()
-    blocker = _resume_blocker(deps, loan)
-    if blocker:
-        # 재개를 받아 주면 주차 처리가 계속 실패해 '재생 중'에 멈춘다. 이유를 남기고 재생을 끝낸다.
-        log.warning("재생을 이어갈 수 없음: %s (%s)", loan_id, blocker)
-        mon.update(status="stopped", stopped_at=now, error=blocker)
+def resume_replay(deps: Deps, loan_id: str, replay_id: str, command_id: str,
+                  paused_week: int | None) -> dict[str, Any] | None:
+    """Accept once per pause; only the original queue delivery can recover its unprocessed week."""
+    from_week = None
+
+    def accept(loan: dict) -> bool | None:
+        nonlocal from_week
+        from_week = None  # Re-evaluate after every ETag conflict.
+        mon = loan.get("monitoring") or {}
+        if mon.get("replay_id") != replay_id or paused_week is not None and mon.get("paused_week") != paused_week:
+            return False
+        pending = mon.get("pending_resume") or {}
+        if mon.get("status") == "replaying" and pending.get("command_id") == command_id:
+            if mon["processed_week"] + 1 == pending["week"]:
+                if deps.events is None:
+                    raise RuntimeError("Pending resume requires Service Bus")
+                from_week = pending["week"]
+            return False
+        if mon.get("status") != "awaiting_resume" or command_id in mon.get("resume_commands", []):
+            return False
+        now = deps.clock().isoformat()
         loan["updated_at"] = now
-        if not deps.store.replace(LOANS, loan, loan.get("_etag")):
-            log.warning("동시 요청으로 재생 종료 기록 실패: %s", loan_id)
+        if blocker := _resume_blocker(deps, loan):
+            mon.update(status="stopped", stopped_at=now, error=blocker)
+            return
+        from_week = mon["paused_week"] + 1
+        mon.update(status="completed" if from_week > WEEKS else "replaying",
+                   started_at=now, resumed_at=[*mon.get("resumed_at", []), now])
+        mon.setdefault("resume_commands", []).append(command_id)
+        if deps.events is not None and from_week <= WEEKS:
+            mon["pending_resume"] = {"command_id": command_id, "week": from_week}
+
+    loan = update_doc(deps.store, LOANS, loan_id, loan_id, accept)
+    if from_week is None or loan is None:
         return None
-    mon.update(status="completed" if mon["paused_week"] == WEEKS else "replaying",
-               started_at=now, resumed_at=[*mon.get("resumed_at", []), now])
-    loan["updated_at"] = now
-    if not deps.store.replace(LOANS, loan, loan.get("_etag")):
-        log.warning("동시 재개 요청 무시: %s", loan_id)
-        return None
-    return {"loan_id": loan_id, "replay_id": replay_id, "mode": mon["mode"], "from_week": mon["paused_week"] + 1}
+    return {"loan_id": loan_id, "replay_id": replay_id, "mode": loan["monitoring"]["mode"], "from_week": from_week}
 
 
 def stop_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | None:
@@ -624,6 +637,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             _escalate(deps, loan_id, replay_id, loan, alert_id, result.alert.severity.value, rows[-1], hi, week, pg, lb)
     _repayment_week(deps, loan_id, replay_id, loan, visible, lo, hi, week, entry)
     mon["processed_week"] = week
+    if (mon.get("pending_resume") or {}).get("week") == week:
+        mon.pop("pending_resume")
     mon["weeks"].append(entry)
     if week == WEEKS and not (product_of(loan) and (_week_cases(entry) or pending_holds(loan, None))):
         mon["status"] = "completed"
@@ -988,6 +1003,7 @@ def _stop_withdrawn_replay(deps: Deps, loan_id: str, replay_id: str) -> None:
             return False
         now = deps.clock().isoformat()
         replay.update(status="stopped", error="monitoring_consent_ended", stopped_at=now)
+        replay.pop("pending_resume", None)
         current["updated_at"] = now
 
     update_doc(deps.store, LOANS, loan_id, loan_id, stop)

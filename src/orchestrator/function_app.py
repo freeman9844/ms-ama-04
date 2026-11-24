@@ -145,7 +145,9 @@ def grievance_decision(msg: func.QueueMessage) -> None:
 
 @app.queue_trigger(arg_name="msg", queue_name="monitoring-replay", connection="AzureWebJobsStorage")
 def monitoring_replay(msg: func.QueueMessage) -> None:
-    handle_replay(deps(), msg.get_body().decode("utf-8"))
+    if not msg.id:
+        raise RuntimeError("Replay command has no queue message ID")
+    handle_replay(deps(), msg.get_body().decode("utf-8"), command_id=msg.id)
 
 
 @app.queue_trigger(arg_name="msg", queue_name="restructure-decisions", connection="AzureWebJobsStorage")

@@ -955,6 +955,90 @@ def test_manual_resume_rechecks_after_acceptance_before_publishing(mock_app, mon
             (rid, "stopped") if change == "withdrawal" else ("replacement", "replaying"))
 
 
+@pytest.mark.parametrize("fault", ["guard", "stop", "send_accepted", "processed_before_retry"])
+def test_resume_queue_redelivery_recovers_only_its_pending_week(mock_app, monkeypatch, fault):
+    import azure.functions as func
+    import function_app
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    pump(deps, outbox)
+    settle_holds(deps)
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    def deliver(mid="original", replay_id=rid, **fields):
+        body = json.dumps(dict(loan_id=LOAN, action="resume", replay_id=replay_id, **fields))
+        function_app.monitoring_replay(func.QueueMessage(id=mid, body=body))
+
+    resume = monitoring_module.resume_replay
+    before = len(flows(outbox))
+    with monkeypatch.context() as patch:
+        def accepted(*args, **kwargs):
+            result = resume(*args, **kwargs)
+            assert result["from_week"] == 6
+            if fault == "stop":
+                delete_consent_data(deps, end(loan(deps)["monitoring"]["consent_id"]))
+                patch.setattr(deps.store, "replace", lambda *_: False)
+            elif fault == "guard":
+                read = deps.store.read
+                def unavailable(container, *args):
+                    if container == "consents":
+                        raise TimeoutError("guard unavailable")
+                    return read(container, *args)
+                patch.setattr(deps.store, "read", unavailable)
+            else:
+                publish = outbox.publish
+                def lost_ack(*args, **kwargs):
+                    publish(*args, **kwargs)
+                    raise TimeoutError("send acknowledgement lost")
+                patch.setattr(outbox, "publish", lost_ack)
+            return result
+        patch.setattr(monitoring_module, "resume_replay", accepted)
+        with pytest.raises((RuntimeError, TimeoutError)):
+            deliver()
+
+    ambiguous = fault in ("send_accepted", "processed_before_retry")
+    assert len(flows(outbox)) == before + ambiguous
+    deliver("fresh-click")
+    deliver(replay_id="rp-stale")
+    deliver(paused_week=4)
+    assert len(flows(outbox)) == before + ambiguous
+    assert loan(deps)["monitoring"]["status"] == "replaying"
+    if fault == "processed_before_retry":
+        assert handle_flow_update(deps, outbox.bodies(TOPIC_FLOW)[-1])["week"] == 6
+        published = len(flows(outbox))
+        deliver()
+        assert len(flows(outbox)) == published and loan(deps)["monitoring"]["processed_week"] == 6
+        return
+    deliver()
+    if fault == "stop":
+        assert loan(deps)["monitoring"]["status"] == "stopped"
+        assert len(flows(outbox)) == before
+        return
+    events = flows(outbox)[before:]
+    assert len(events) == 1 + ambiguous
+    assert all(m[2:] == (f"flow.updated:{LOAN}:{rid}:6", LOAN) for m in events)
+    for i, event in enumerate(events):
+        result = handle_flow_update(deps, json.dumps(event[1]))
+        if i == 0:
+            assert result["week"] == 6
+        else:
+            assert result is None
+    mon = loan(deps)["monitoring"]
+    assert [w["week"] for w in mon["weeks"]].count(6) == len(mon["resumed_at"]) == 1
+    # A late dequeue of the accepted command cannot accept a different pause.
+    current = loan(deps)
+    current["monitoring"].update(status="awaiting_resume", paused_week=6)
+    deps.store.upsert(LOANS, current)
+    count = len(flows(outbox))
+    deliver()
+    deliver("late-click", paused_week=5)
+    assert len(flows(outbox)) == count and loan(deps)["monitoring"]["status"] == "awaiting_resume"
+
+
 def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
     outbox = Outbox()
     deps = missing_first_due(make_deps(mock_app, events=outbox, agents=ScriptedAgents()))

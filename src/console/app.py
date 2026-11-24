@@ -849,8 +849,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         mon = loan.get("monitoring") or {}
         if mon.get("status") != "awaiting_resume":
             return loan_page(user, loan, 409, error=_("재개 확인을 기다리는 재생이 없습니다."))
-        message = ReplayRequest(loan_id=loan["id"], action=action, replay_id=mon["replay_id"])
-        queue_servicing(REPLAY_QUEUE, loan, message)
+        message = ReplayRequest(loan_id=loan["id"], action=action, replay_id=mon["replay_id"],
+                                paused_week=mon["paused_week"] if action == "resume" else None)
+        queue_servicing(REPLAY_QUEUE, loan, message, exclude_none=True)
         weeks_left = WEEKS - (mon.get("paused_week") or 0)
         text = (_("남은 %(n)s주 재생을 이어서 요청했습니다.", n=weeks_left) if action == "resume"
                 else _("남은 재생을 종료하도록 요청했습니다."))

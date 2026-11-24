@@ -166,6 +166,7 @@ class ReplayRequest(BaseModel):
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
     action: Literal["start", "resume", "stop"] = "start"
     replay_id: str | None = Field(default=None, min_length=1, max_length=64)
+    paused_week: int | None = Field(default=None, ge=1, le=53)
 
     @model_validator(mode="after")
     def _replay_id_for_paused(self) -> "ReplayRequest":
