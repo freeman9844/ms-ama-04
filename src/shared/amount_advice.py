@@ -16,12 +16,13 @@ _USD_REQUEST = re.compile(rf"\bapprove\s+(?:the\s+)?(?:full\s+)?requested\s+(?:a
 _MONEY = rf"(?:(?:[₩$]|KRW|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:억|천만|백만|만|천|million|thousand|[mk])?\s*(?:원|won|krw|dollars?))"
 _USD_VALUE = rf"-?(?:(?:\$|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:dollars?|USD))"
 _FACT_LABEL = r"(?:deposit|balance|settlement|transaction|revenue|sales|payment|policy (?:cap|limit)|remaining amount)"
+_REFERENCED_VALUE = r"(?:this|that|the (?:same|preceding|above|previous|cited|verified)) (?:amount|sum|figure|value)"
 _USD_FACT = re.compile(
     rf"(?:(?:verify|check|confirm)\s+(?:the\s+)?{_USD_VALUE}(?:\s+{_FACT_LABEL})?"
     rf"|(?:the\s+|your\s+)?(?:outstanding\s+|pending\s+)?{_FACT_LABEL}\s*(?::|=|is|was|of)?\s*{_USD_VALUE}"
-    rf"|(?:which|what)\s+(?:month|week|day|period)\s+(?:had|included|contained)\s+(?:the\s+)?{_USD_VALUE}\s+{_FACT_LABEL}"
+    rf"|(?:which|what)\s+(?:month|week|day|period)\s+(?:had|included|contained)\s+"
+    rf"(?:(?:the\s+)?{_USD_VALUE}\s+{_FACT_LABEL}|{_REFERENCED_VALUE})"
     rf"|{_USD_REQUEST.pattern}(?:\s+in full)?)", re.I)
-_REFERENCED_VALUE = r"(?:this|that|the (?:same|preceding|above|previous|cited|verified)) (?:amount|sum|figure|value)"
 _EVIDENCE_SUBJECT = rf"(?:(?:the |its )?(?:{_FACT_LABEL}|loan file|record|evidence)(?: timing| date)?|{_REFERENCED_VALUE})"
 _EVIDENCE_STATE = r"(?:uncertain|unknown|unverified|verified|pending|missing|incomplete|complete|unconfirmed|confirmed|recorded)"
 _EVIDENCE_CLAUSE = re.compile(

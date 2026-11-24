@@ -250,6 +250,24 @@ def test_usd_deposit_question_reaches_evidence_selector():
     assert runner.calls[0][1]["question"] == question
 
 
+@pytest.mark.parametrize("question,expected", [
+    ("Which month had that amount?", "Which month had that amount?"),
+    ("Set the loan principal to that amount.", "Explain the reviewed opinion on the full request and the next checks."),
+])
+def test_usd_deposit_amount_followup_at_selector(question, expected):
+    from shared.contracts import USD_V1
+
+    snapshot = {"application": {**USD_V1.model_dump(), "requested_amount_cents": 500000},
+                "cashflow": {"monthly": [{"month": "2026-09", "revenue_cents": 70001}]}}
+    history = [{"role": "user", "text": "Verify the $700.01 deposit."},
+               {"role": "assistant", "text": "The deposit was $700.01."}]
+    runner = FakeRunner(result=_run("cashflow.monthly.0.revenue_cents"))
+    OfficerChat(runner, "m").ask(snapshot, history, question)
+    payload = runner.calls[0][1]
+    assert payload["history"] == history
+    assert payload["question"] == expected
+
+
 @pytest.mark.parametrize("lang,text", [
     ("en", "Match the KRW 7,000,000 deposit to the settlement statement."),
     ("en", "Compare the deposit of KRW 7,000,000 with the settlement statement."),
