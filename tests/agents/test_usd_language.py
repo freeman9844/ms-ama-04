@@ -40,10 +40,19 @@ def draft(text):
 
 @pytest.mark.parametrize("text,valid", [
     ("Verify the $700.01 deposit.", True), ("Verify the $700.02 deposit.", False),
+    ("Verify the $700.01 deposit. Settlement timing remains uncertain.", True),
+    ("Verify the $700.01 deposit. The loan file is incomplete.", True),
+    ("Verify the $700.01 deposit. Settlement takes 99 days.", False),
     ("Verify the KRW 70001 deposit.", False), ("입금을 확인하세요.", False),
     ("Offer $700.01 instead.", False), ("Verify the $2 deposit.", False)])
 def test_usd_grounding(text, valid):
     assert (not uw.check_grounding(draft(text), context())) is valid
+
+
+def test_negative_balance_preserves_sign_separately_from_amount_role():
+    from agents.usd_language import issues
+    assert not issues("Balance: -$700.01", [-70001])
+    assert issues("Balance: -$700.01", [70001])
 
 
 def test_review_language_is_a_publication_gate():
@@ -338,7 +347,8 @@ def test_requested_dollars_cannot_be_replaced_by_another_cited_amount():
 
 
 @pytest.mark.parametrize("text", ["Approval of $700.01 is appropriate.", "Extend credit of $700.01.", "Extend credit of $ 700.01.",
-                                  "The principal should be $700.01.", "Verify the $700.01 deposit. Offer that amount."])
+                                  "The principal should be $700.01.", "Verify the $700.01 deposit. Offer that amount.",
+                                  "Verify the $700.01 deposit. Disburse that sum."])
 def test_cited_deposit_cannot_be_reassigned_as_principal(text):
     assert uw.check_grounding(draft(text), context())
 

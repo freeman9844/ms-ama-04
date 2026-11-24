@@ -492,6 +492,25 @@ def test_proposal_modify_sends_text_and_hardship_choice(setup, mask):
     assert msg["text"] == "상환일 안내드립니다. 문의는 담당자에게 주세요." and msg["include_hardship"] is False
 
 
+def test_usd_proposal_only_queues_worker_accepted_text(setup, mask):
+    from shared.contracts import USD_V1
+    case = make_proposal_case(mask)
+    case.update(USD_V1.model_dump())
+    del case["installment"]["amount_krw"]
+    case["installment"]["amount_cents"] = 70001
+    case["proposal"] = build_proposal(RepaymentCase.from_doc(case), {"script_id": "missed_payment"},
+                                      [], NOW, [], str)
+    client, queue, *_ = setup(loan=held_loan("paused"), alerts=[case])
+    form = {"csrf": csrf(client), "decision": "modify"}
+    balance = "Your balance is $700.01."
+    assert f'<option value="{balance}">' in client.get("/loans/app-1", headers=OFFICER).text
+    for text in ("Please call us to discuss payment options.", "Your balance is $700.02."):
+        r = client.post(PROPOSAL_PATH, data={**form, "text": text}, headers=OFFICER)
+        assert r.status_code == 422 and balance in r.text and not queue.sent
+    assert client.post(PROPOSAL_PATH, data={**form, "text": balance}, headers=OFFICER).status_code == 202
+    assert queue.sent[0][1]["text"] == balance
+
+
 @pytest.mark.parametrize("text", ["법적 조치를 진행하겠습니다.", "", "가" * 301, "[[PERSON_1]]님 안내"],
                          ids=["banned", "empty", "too_long", "pii_token"])
 def test_proposal_modify_with_banned_text_is_422_and_not_queued(setup, mask, text):

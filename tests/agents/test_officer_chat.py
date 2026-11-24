@@ -241,6 +241,15 @@ def test_factual_money_questions_and_context_reach_selector_unmodified():
     assert runner.calls[1][1]["history"] == history
 
 
+def test_usd_deposit_question_reaches_evidence_selector():
+    from shared.contracts import USD_V1
+    question = "Which month had the $700.01 deposit?"
+    runner = FakeRunner(result=_run("application.requested_amount_cents"))
+    snapshot = {"application": {**USD_V1.model_dump(), "requested_amount_cents": 500000}}
+    OfficerChat(runner, "m").ask(snapshot, [], question)
+    assert runner.calls[0][1]["question"] == question
+
+
 @pytest.mark.parametrize("lang,text", [
     ("en", "Match the KRW 7,000,000 deposit to the settlement statement."),
     ("en", "Compare the deposit of KRW 7,000,000 with the settlement statement."),

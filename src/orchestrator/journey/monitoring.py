@@ -1116,10 +1116,20 @@ def _contact_day_if_current(deps: Deps, case: dict[str, Any]) -> date | None:
     item = next((s for s in ledger.get("schedule", ()) if s.get("case_id") == case["case_id"]), None)
     if not item or item["status"] == "paid":
         return None
-    balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
-    quoted = case["proposal"]["evidence"]["amount_krw"]
-    if not (balance > 0 and balance == quoted == case.get("balance_krw", balance)):
+    product = product_of(case)
+    if product != product_of(loan):
         return None
+    if product:
+        balance = item.get("balance_cents")
+        quotes = (case["proposal"]["evidence"].get("amount_cents"), case["installment"].get("amount_cents"),
+                  case.get("balance_cents", balance))
+        if type(balance) is not int or balance <= 0 or any(type(q) is not int or q != balance for q in quotes):
+            return None
+    else:
+        balance = item.get("balance_krw", item_amount(item, ledger["installment_krw"]))
+        quoted = case["proposal"]["evidence"]["amount_krw"]
+        if not (balance > 0 and balance == quoted == case.get("balance_krw", balance)):
+            return None
     if mon["processed_week"] >= case["week"]:
         return week_window(date.fromisoformat(mon["flow_start"]), mon["processed_week"])[1]
     return date.fromisoformat(case.get("as_of") or item["due_on"])

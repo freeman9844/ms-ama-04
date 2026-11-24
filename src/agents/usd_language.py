@@ -76,4 +76,4 @@ def issues(text: str, cents: Iterable[int] = (), numbers: Iterable[float] = (), 
     remainder = _DOLLARS.sub(verify, text)
     if re.search(r"\$|\b(?:dollars?|cents?)\b", remainder, re.I):
         errors.append("Use a numeric USD amount.")
-    return errors + ungrounded(remainder, list(numbers))
+    return errors + ungrounded(remainder, list(numbers), include_small=True)

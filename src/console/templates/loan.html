@@ -72,7 +72,13 @@
     <label><input type="radio" name="decision" value="modify"{{ locked }}> {{ pgettext("button", "수정 후 승인") }}</label>
     <label><input type="radio" name="decision" value="reject"{{ locked }}> {{ _("반려(발송 안 함)") }}</label>
   </fieldset>
+  {% if p.text_choices is defined %}
+  <label>Message to send if modified <select name="text"{{ locked }}>
+    {% for choice in p.text_choices %}<option value="{{ choice }}">{{ choice }}</option>{% endfor %}
+  </select></label>
+  {% else %}
   <label>{{ _("수정 문구(수정 후 승인일 때 이 문구로 발송, 300자 이하)") }} <textarea name="text" rows="4" maxlength="300"{{ locked }}>{{ p.text }}</textarea></label>
+  {% endif %}
   {% if p.hardship %}<label><input type="checkbox" name="include_hardship" value="1"{{ locked }}> {{ _("재조정 상담 요청도 만들기(체크할 때만 생성, 기본은 문구만 발송)") }}</label>{% endif %}
   <label>{{ _("사유(반려할 때 필수)") }} <textarea name="reason" rows="2"{{ locked }}></textarea></label>
   <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("결정 보내기") }}</button>

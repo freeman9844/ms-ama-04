@@ -510,6 +510,27 @@ class Settled:
     errors: list[str]
 
 
+def usd_text_choices(script: str, decision: str, case: RepaymentCase) -> list[str]:
+    if not case.product or script not in USD_SCRIPTS:
+        return []
+    choices = [render_script(script, case)]
+    if decision == "modify":
+        choices.append(f"Your balance is {format_usd(case.amount_cents)}.")
+    return choices
+
+
+def proposal_text_issues(text: str, script: str, decision: str, case: RepaymentCase) -> list[str]:
+    issues = message_issues(text)
+    if not case.product:
+        return issues
+    choices = usd_text_choices(script, decision, case)
+    if not choices:
+        return ["This proposal does not have an approved USD script."]
+    if issues or text not in choices:
+        return ["Choose one of the following exact messages: " + " | ".join(choices)]
+    return []
+
+
 def settle_proposal(
     proposal: Mapping[str, Any],
     decision: str,
@@ -543,13 +564,7 @@ def settle_proposal(
         return Settled(decided, None, None, [])
     else:
         return Settled(unchanged, None, None, [f"알 수 없는 결정입니다: {decision}"])
-    issues = message_issues(send_text)
-    if case.product:
-        script = proposal.get("script_id")
-        permitted = {render_script(script, case)} if script in USD_SCRIPTS else set()
-        if permitted and decision == "modify":
-            permitted.add(f"Your balance is {format_usd(case.amount_cents)}.")
-        issues = ["Use the approved script or the recorded balance."] if issues or send_text not in permitted else []
+    issues = proposal_text_issues(send_text, str(proposal.get("script_id")), decision, case)
     if issues:
         return Settled(unchanged, None, None, issues)
     contact = remind(case.case_id, contacts, case.contact_on, now, script_id=str(proposal.get("script_id")), by="officer",

@@ -14,12 +14,15 @@ _KRW_UNITS = {None: 1, "천": 1000, "만": 10000, "백만": 1000000, "천만": 1
 _USD_REQUEST = re.compile(rf"\bapprove\s+(?:the\s+)?(?:full\s+)?requested\s+(?:amount\s+(?:of\s+)?)?"
                           rf"(?:USD\s*|\$)\s*(?P<number>{_NUMBER})", re.I)
 _MONEY = rf"(?:(?:[₩$]|KRW|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:억|천만|백만|만|천|million|thousand|[mk])?\s*(?:원|won|krw|dollars?))"
-_USD_VALUE = rf"(?:(?:\$|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:dollars?|USD))"
+_USD_VALUE = rf"-?(?:(?:\$|USD)\s*{_NUMBER}|{_NUMBER}\s*(?:dollars?|USD))"
 _FACT_LABEL = r"(?:deposit|balance|settlement|transaction|revenue|sales|payment|policy (?:cap|limit)|remaining amount)"
 _USD_FACT = re.compile(
     rf"(?:(?:verify|check|confirm)\s+(?:the\s+)?{_USD_VALUE}(?:\s+{_FACT_LABEL})?"
     rf"|(?:the\s+|your\s+)?(?:outstanding\s+|pending\s+)?{_FACT_LABEL}\s*(?::|=|is|was|of)?\s*{_USD_VALUE}"
+    rf"|(?:which|what)\s+(?:month|week|day|period)\s+(?:had|included|contained)\s+(?:the\s+)?{_USD_VALUE}\s+{_FACT_LABEL}"
     rf"|{_USD_REQUEST.pattern}(?:\s+in full)?)", re.I)
+_CREDIT_ROLE = re.compile(r"\b(?:offer\w*|lend\w*|disburs\w*|extend credit|approv\w*|instead|"
+                          r"as (?:the )?(?:loan|principal)|suggest\w*|recommend\w*|propos\w*|would work)\b", re.I)
 _PROPOSAL = re.compile(
     rf"{_MONEY}\s*(?:으로|로|만|까지|을|를|의)?\s*(?:감액|승인|대출\s*(?:제안|권고)|제안|권고|추천)"
     rf"|(?:제안|추천|권고|대안|승인)\s*(?:금액|액)?(?:은|는)?\s*[:：]?\s*{_MONEY}"
@@ -50,12 +53,15 @@ def has_proposal(text: str, requested: int | None, *, usd: bool = False) -> bool
         for match in _USD_REQUEST.finditer(text):
             if Decimal(match["number"].replace(",", "")) * 100 != requested:
                 return True
-        # A grounded number is not necessarily a grounded use. Limit monetary prose to
-        # self-contained evidence clauses; a second sentence cannot repurpose the figure.
+        # Check the role of monetary citations, not the wording of unrelated observations.
+        # A separate clause can still repurpose the cited amount without repeating it.
         if "$" in text or re.search(_USD_VALUE, text, re.I):
-            clauses = re.split(r"[;!?]|\.(?!\d)", text)
-            if any(not _USD_FACT.fullmatch(s.strip()) for s in clauses if s.strip()):
-                return True
+            for clause in re.split(r"[;!?]|\.(?!\d)", text):
+                if "$" in clause or re.search(_USD_VALUE, clause, re.I):
+                    if not _USD_FACT.fullmatch(clause.strip()):
+                        return True
+                elif _CREDIT_ROLE.search(clause):
+                    return True
         text = _USD_REQUEST.sub("approve the full request", text)
         text = re.sub(r"\bpolicy (?:limit|cap)(?=\s*[:=]?\s*(?:USD|\$))", "policy fact", text, flags=re.I)
     return bool(_PROPOSAL.search(_REQUEST_APPROVAL.sub(full_request, text)))

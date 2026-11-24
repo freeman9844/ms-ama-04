@@ -8,7 +8,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from agents.collections import SCRIPTS
+from agents.collections import RepaymentCase, SCRIPTS, usd_text_choices
 from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
 from agents.repayment import item_amount, item_key
@@ -16,6 +16,7 @@ from console import i18n
 from console.i18n import _
 from console.views import RawData, RawStore, _map_strings, _text_functions, raw_container
 from shared.contracts import ApplicantProfile, Transaction
+from shared.product_context import product_of
 
 SEVERITY_LABELS = {"low": "낮음", "medium": "중간", "high": "높음"}
 ACTION_LABELS = {
@@ -172,6 +173,8 @@ def loan_view(
             proposal = doc.get("proposal")
             if proposal:
                 proposal = {**proposal, **_map_strings({k: proposal.get(k) for k in _PROPOSAL_FIELDS}, model_text)}
+                if _pending(proposal) and product_of(doc):
+                    proposal["text_choices"] = usd_text_choices(proposal.get("script_id", ""), "modify", RepaymentCase.from_doc(doc))
             cases.append(
                 {
                     **doc,

@@ -29,7 +29,7 @@ from jinja2 import Environment, FileSystemLoader
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from agents.collections import message_issues
+from agents.collections import RepaymentCase, message_issues, proposal_text_issues
 from console import i18n
 from console.i18n import _
 from agents.monitoring import WEEKS
@@ -881,7 +881,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         reason = form.get("reason", "").strip()
         text = form.get("text", "").strip() if decision == "modify" else None
         if decision in ("approve", "modify"):
-            issues = message_issues(str(proposal.get("text") or "") if text is None else text)
+            send_text = str(proposal.get("text") or "") if text is None else text
+            issues = (proposal_text_issues(send_text, str(proposal.get("script_id")), decision, RepaymentCase.from_doc(case))
+                      if product_of(case) else message_issues(send_text))
             if issues:
                 return loan_page(user, loan, 422, alerts=alerts, error=_("고객 문구를 보낼 수 없습니다: ") + " ".join(_issue_text(i) for i in issues))
         if decision == "reject" and not reason:

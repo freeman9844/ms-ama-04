@@ -1217,6 +1217,22 @@ def test_missed_payment_creates_proposal_and_pauses_without_contact(mock_app):
     assert not [c for c in contacts(deps, mon["replay_id"]) if c["by"] in ("agent", "fallback", "officer")]
 
 
+@pytest.mark.parametrize("live,accepted", [(70000, False), (70001, True)])
+def test_usd_collection_worker_rechecks_live_cent_balance(mock_app, live, accepted):
+    from shared.contracts import USD_V1
+    deps, meta = make_deps(mock_app), USD_V1.model_dump()
+    cid, rid = "rc-rp-1-i1", "rp-1"
+    deps.store.upsert(LOANS, dict(meta, id=LOAN, monitoring=dict(replay_id=rid, processed_week=0),
+        repayment={"schedule": [dict(case_id=cid, status="missed", balance_cents=live, due_on="2026-11-02")]}))
+    deps.store.upsert(ALERTS, dict(meta, id=cid, case_id=cid, loan_id=LOAN, replay_id=rid,
+        kind="repayment_case", week=1, missed_count=1, status="proposal_pending",
+        installment={"no": 1, "due_on": "2026-11-02", "amount_cents": 70001},
+        proposal=dict(status="pending_officer", script_id="missed_payment", evidence=dict(meta, amount_cents=70001))))
+    text = "Your balance is $700.01."
+    assert decide_collections(deps, cid, "modify", text=text) is accepted
+    assert [c["text"] for c in officer_contacts(deps, rid)] == ([text] if accepted else [])
+
+
 def test_approve_sends_exact_text_and_awaits_resume(mock_app):
     deps, replay_id, case = missed_without_agents(mock_app)
     assert decide_collections(deps, case["case_id"], "approve") is True
