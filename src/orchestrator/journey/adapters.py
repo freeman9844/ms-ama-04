@@ -28,7 +28,7 @@ from journey.activities import (
 )
 from journey.circuit import CircuitBreaker
 from journey.models import KST
-from shared.contracts import PolicyDecision
+from shared.contracts import PolicyDecision, UsdPolicyDecision, UsdProduct
 
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -52,10 +52,12 @@ class HttpMockApi:
     def __init__(self, base_url: str = "", *, client: httpx.Client | None = None, timeout: float = 30.0) -> None:
         self._client = _http(base_url, client, timeout)
 
-    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int) -> dict[str, Any]:
+    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int,
+                       *, product: UsdProduct | None = None) -> dict[str, Any]:
         r = self._client.post(
             "/consents",
-            json={"applicant_id": applicant_id, "scopes": scopes, "purpose": purpose, "ttl_days": ttl_days},
+            json={"applicant_id": applicant_id, "scopes": scopes, "purpose": purpose, "ttl_days": ttl_days,
+                  **(product.model_dump() if product else {})},
         )
         r.raise_for_status()
         return r.json()
@@ -113,7 +115,8 @@ class HttpPolicyApi:
             b.failure() if r.status_code >= 500 else b.success()
         if r.status_code != 200:
             raise PolicyUnavailable(f"HTTP {r.status_code} {r.text[:200]}")
-        return PolicyDecision.model_validate(r.json()).model_dump(mode="json")
+        model = UsdPolicyDecision if features.get("product_version") == "usd-v1" else PolicyDecision
+        return model.model_validate(r.json()).model_dump(mode="json")
 
 
 class CosmosStore:

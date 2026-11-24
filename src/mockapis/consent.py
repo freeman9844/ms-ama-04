@@ -9,9 +9,11 @@ from collections.abc import Collection, Iterable
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from shared.contracts import ConsentGrant, ConsentScope
+from shared.contracts import ConsentGrant, ConsentScope, UsdConsentGrant, UsdProduct
+
+_GRANT = TypeAdapter(ConsentGrant | UsdConsentGrant)
 
 ConsentErrorCode = Literal["invalid", "expired", "scope", "revoked"]
 
@@ -58,7 +60,7 @@ def verify_token(
     if not hmac.compare_digest(sig.encode(), _sign(payload, secret).encode()):
         raise ConsentError("invalid")
     try:
-        grant = ConsentGrant.model_validate_json(payload)
+        grant = _GRANT.validate_json(payload)
     except ValidationError:
         raise ConsentError("invalid") from None
     if grant.consent_id in revoked:
@@ -84,10 +86,12 @@ class ConsentRegistry:
         purpose: str,
         ttl: timedelta,
         now: datetime,
+        product: UsdProduct | None = None,
     ) -> ConsentGrant:
         if not _MIN_TTL <= ttl <= _MAX_TTL:
             raise ValueError("ttl은 1~365일이어야 한다")
-        g = ConsentGrant(
+        g = (UsdConsentGrant if product else ConsentGrant)(
+            **(product.model_dump() if product else {}),
             consent_id=uuid.uuid4().hex,
             applicant_id=applicant_id,
             scopes=frozenset(scopes),

@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from mockapis.consent import ConsentError, ConsentRegistry, issue_token, verify_token
 from mockapis.demo import FlowStore
 from mockapis.postloan import LoanTerms, PostLoanFlow
-from mockapis.synth import SyntheticCase
+from mockapis.synth import SyntheticCase, UsdCase
+from shared.contracts import USD_V1, UsdConsentGrant, UsdProduct, UsdTransaction
+from shared.usd_source import UsdMarketplace, UsdPgFlow, UsdProfile, UsdSettlement, UsdTaxFiling
 from shared.contracts import (
     ApplicantProfile,
     ConsentScope,
@@ -37,6 +39,10 @@ class ConsentResponse(BaseModel):
     consent_id: str
     token: str
     expires_at: datetime
+
+
+class UsdConsentRequest(ConsentRequest, UsdProduct):
+    pass
 
 
 FAULT_MODES = ("none", "unavailable", "flaky")
@@ -67,7 +73,7 @@ def create_app(
     # flaky: (동의, 경로)마다 첫 요청만 503
     seen: set[tuple[str, str]] = set()
 
-    def authorize(authorization: str | None, scope: ConsentScope, path: str) -> SyntheticCase:
+    def authorize(authorization: str | None, scope: ConsentScope, path: str) -> SyntheticCase | UsdCase:
         if state["fault"] == "unavailable":
             raise _error(503, "unavailable")
         if not authorization or not authorization.startswith("Bearer "):
@@ -80,6 +86,11 @@ def create_app(
         if state["fault"] == "flaky" and (grant.consent_id, path) not in seen:
             seen.add((grant.consent_id, path))
             raise _error(503, "flaky")
+        if isinstance(grant, UsdConsentGrant):
+            case = flows.usd_case(grant.applicant_id) if isinstance(flows, FlowStore) else None
+            if case is None:
+                raise _error(404, "unknown_applicant")
+            return case
         return cases[grant.applicant_id]
 
     def loan_terms(amount_krw: int | None, installment_krw: int | None) -> LoanTerms | None:
@@ -102,10 +113,12 @@ def create_app(
         return {"status": "ok"}
 
     @app.post("/consents", status_code=201)
-    def create_consent(req: ConsentRequest) -> ConsentResponse:
-        if req.applicant_id not in cases:
+    def create_consent(req: ConsentRequest | UsdConsentRequest) -> ConsentResponse:
+        usd = isinstance(req, UsdConsentRequest)
+        if req.applicant_id not in cases or usd and (not isinstance(flows, FlowStore) or not flows.usd_case(req.applicant_id)):
             raise _error(404, "unknown_applicant")
-        grant = registry.grant(req.applicant_id, req.scopes, req.purpose, timedelta(days=req.ttl_days), clock())
+        grant = registry.grant(req.applicant_id, req.scopes, req.purpose, timedelta(days=req.ttl_days), clock(),
+                               USD_V1 if usd else None)
         return ConsentResponse(
             consent_id=grant.consent_id,
             token=issue_token(grant, secret),
@@ -119,11 +132,11 @@ def create_app(
         return Response(status_code=204)
 
     @app.get("/mydata/profile")
-    def get_profile(authorization: AuthHeader = None) -> ApplicantProfile:
+    def get_profile(authorization: AuthHeader = None) -> UsdProfile | ApplicantProfile:
         return authorize(authorization, ConsentScope.ACCOUNT, "/mydata/profile").profile
 
     @app.get("/mydata/transactions")
-    def get_transactions(authorization: AuthHeader = None) -> list[Transaction]:
+    def get_transactions(authorization: AuthHeader = None) -> list[Transaction | UsdTransaction]:
         return list(authorize(authorization, ConsentScope.ACCOUNT, "/mydata/transactions").transactions)
 
     @app.get("/mydata/flow")
@@ -133,11 +146,11 @@ def create_app(
         end: date | None = None,
         amount_krw: int | None = None,
         installment_krw: int | None = None,
-    ) -> list[Transaction]:
+        amount_cents: int | None = None, installment_cents: int | None = None, loan_id: str | None = None,
+    ) -> list[Transaction | UsdTransaction]:
         """대출 실행 이후 거래(조기경보 재생용). start·end는 포함 구간이다."""
         case = authorize(authorization, ConsentScope.ACCOUNT, "/mydata/flow")
-        loan = loan_terms(amount_krw, installment_krw)
-        flow = flow_for(case.profile.applicant_id, loan)
+        flow = product_flow(case, amount_krw, installment_krw, amount_cents, installment_cents, loan_id)
         if flow is None:
             raise _error(404, "no_flow")
         return [
@@ -153,13 +166,19 @@ def create_app(
         end: date | None = None,
         amount_krw: int | None = None,
         installment_krw: int | None = None,
-    ) -> PgFlow:
+        amount_cents: int | None = None, installment_cents: int | None = None, loan_id: str | None = None,
+    ) -> PgFlow | UsdPgFlow:
         """대출 실행 이후 PG 정산·주문 원장(조기경보 재생용). start·end는 settled_on/order_on 포함 구간이다."""
         case = authorize(authorization, ConsentScope.PG, "/pg/flow")
-        loan = loan_terms(amount_krw, installment_krw)
-        flow = flow_for(case.profile.applicant_id, loan)
+        flow = product_flow(case, amount_krw, installment_krw, amount_cents, installment_cents, loan_id)
         if flow is None:
             raise _error(404, "no_flow")
+        if isinstance(case, UsdCase):
+            return UsdPgFlow(**USD_V1.model_dump(),
+                             settlements=tuple(s for s in flow.pg_settlements
+                                               if (not start or start <= s.settled_on) and (not end or s.settled_on <= end)),
+                             orders=tuple(o for o in flow.orders
+                                          if (not start or start <= o.order_on) and (not end or o.order_on <= end)))
         pg = flow.pg_flow()
         return PgFlow(
             settlements=tuple(
@@ -173,17 +192,29 @@ def create_app(
         )
 
     @app.get("/tax/filings")
-    def get_tax_filings(authorization: AuthHeader = None) -> list[TaxFiling]:
+    def get_tax_filings(authorization: AuthHeader = None) -> list[TaxFiling | UsdTaxFiling]:
         return list(authorize(authorization, ConsentScope.TAX, "/tax/filings").tax_filings)
 
     @app.get("/pg/settlements")
-    def get_pg_settlements(authorization: AuthHeader = None) -> list[PgSettlement]:
+    def get_pg_settlements(authorization: AuthHeader = None) -> list[PgSettlement | UsdSettlement]:
         return list(authorize(authorization, ConsentScope.PG, "/pg/settlements").pg_settlements)
 
     @app.get("/marketplace/store")
-    def get_marketplace_store(authorization: AuthHeader = None) -> MarketplaceStore:
+    def get_marketplace_store(authorization: AuthHeader = None) -> MarketplaceStore | UsdMarketplace:
         case = authorize(authorization, ConsentScope.MARKETPLACE, "/marketplace/store")
         return case.marketplace or MarketplaceStore(as_of=clock().date())
+
+    def product_flow(case, amount_krw, installment_krw, amount_cents, installment_cents, loan_id):
+        if isinstance(case, UsdCase):
+            if amount_krw is not None or installment_krw is not None:
+                raise _error(422, "loan_terms")
+            try:
+                return flows.usd_flow(case.profile.applicant_id, loan_id, amount_cents, installment_cents)
+            except ValueError:
+                raise _error(422, "loan_terms") from None
+        if any(v is not None for v in (amount_cents, installment_cents, loan_id)):
+            raise _error(422, "loan_terms")
+        return flow_for(case.profile.applicant_id, loan_terms(amount_krw, installment_krw))
 
     @app.post("/admin/faults", status_code=204)
     def set_fault(req: FaultRequest) -> Response:

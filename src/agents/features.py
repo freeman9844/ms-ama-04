@@ -14,11 +14,14 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from agents.classify import RULES_VERSION, Category, classify
 from agents.marketplace import features_of as marketplace_features_of
 from agents.marketplace import store_summary
-from agents.pg_ledger import features_of, ledger_summary
+from agents.pg_ledger import features_of, ledger_summary, usd_ledger_summary
+from shared.contracts import USD_V1, UsdCashFlowFeatures, UsdTransaction
+from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 from shared.contracts import (
     ApplicantProfile,
     CashFlowFeatures,
@@ -77,7 +80,7 @@ _LABEL_GROUP = {
 
 @dataclass(frozen=True)
 class Underwriting:
-    features: CashFlowFeatures
+    features: CashFlowFeatures | UsdCashFlowFeatures
     signals: dict[str, int | float | str]
     flags: list[str]
     monthly: list[dict[str, int | str]]
@@ -102,12 +105,16 @@ def _month(d: date) -> tuple[int, int]:
 WATCH_METRICS: dict[str, float] = {"tax_bank_match_ratio": 0.7}
 
 
-def _tax_match(transactions: Sequence[Transaction], categories: dict[str, Category], filings: Sequence[TaxFiling]) -> float:
+def _amount(t: Transaction | UsdTransaction) -> int:
+    return t.amount_cents if isinstance(t, UsdTransaction) else t.amount_krw
+
+
+def _tax_match(transactions, categories, filings) -> float:
     if not filings:
         return 0.0
-    declared = sum(f.declared_revenue_krw for f in filings)
+    declared = sum(f.declared_revenue_cents if isinstance(f, UsdTaxFiling) else f.declared_revenue_krw for f in filings)
     observed = sum(
-        t.amount_krw
+        _amount(t)
         for f in filings
         for t in transactions
         if categories[t.txn_id] is Category.REVENUE and f.period_start <= t.booked_on <= f.period_end
@@ -137,9 +144,9 @@ def _revenue_trend(txns: Sequence[Transaction], categories: Mapping[str, Categor
     prior_days = (split - prior_from).days
     if prior_days < TREND_MIN_PRIOR_DAYS:
         return None
-    rev = [t for t in txns if categories.get(t.txn_id) is Category.REVENUE and t.amount_krw > 0]
-    recent = sum(t.amount_krw for t in rev if split <= t.booked_on < end) / TREND_RECENT_DAYS
-    prior = sum(t.amount_krw for t in rev if prior_from <= t.booked_on < split) / prior_days
+    rev = [t for t in txns if categories.get(t.txn_id) is Category.REVENUE and _amount(t) > 0]
+    recent = sum(_amount(t) for t in rev if split <= t.booked_on < end) / TREND_RECENT_DAYS
+    prior = sum(_amount(t) for t in rev if prior_from <= t.booked_on < split) / prior_days
     return round(recent / prior, 3) if prior > 0 else None
 
 
@@ -151,7 +158,7 @@ def _compute(
     categories: dict[str, Category],
     *,
     as_of: date,
-    requested_amount_krw: int,
+    principal: int,
     requested_tenor_months: int,
 ) -> Underwriting:
     current = _month(as_of)
@@ -159,10 +166,17 @@ def _compute(
     totals: dict[tuple[int, int], dict[Category, int]] = defaultdict(lambda: defaultdict(int))
     for t in transactions:
         if _month(t.booked_on) < current:
-            totals[_month(t.booked_on)][categories[t.txn_id]] += t.amount_krw
+            totals[_month(t.booked_on)][categories[t.txn_id]] += _amount(t)
 
     n = len(months)
-    new_installment = monthly_installment(requested_amount_krw, requested_tenor_months)
+    usd = isinstance(profile, UsdProfile)
+    unit = "cents" if usd else "krw"
+    if usd:
+        r = Decimal(str(ANNUAL_RATE)) / 12
+        new_installment = int((principal * r / (1 - (1 + r) ** -requested_tenor_months))
+                              .quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    else:
+        new_installment = monthly_installment(principal, requested_tenor_months)
 
     def monthly_avg(cats: Sequence[Category]) -> float:
         return sum(totals[m][c] for m in months for c in cats) / n if n else 0.0
@@ -176,7 +190,7 @@ def _compute(
     volatility = statistics.pstdev(revenue) / mean_rev if mean_rev > 0 else 0.0
 
     recent = [
-        t.balance_after_krw
+        t.balance_after_cents if usd else t.balance_after_krw
         for t in transactions
         if as_of - timedelta(days=BUFFER_LOOKBACK_DAYS) <= t.booked_on < as_of
     ]
@@ -187,15 +201,15 @@ def _compute(
     counts = defaultdict(int)
     for c in categories.values():
         counts[c] += 1
-    features = CashFlowFeatures(
+    features = (UsdCashFlowFeatures if usd else CashFlowFeatures)(
+        **(USD_V1.model_dump() if usd else {}),
         application_id=application_id,
         months_of_history=n,
-        avg_monthly_inflow_krw=int(sum(revenue) / n) if n else 0,
+        **{f"avg_monthly_inflow_{unit}": sum(revenue) // n if n else 0, f"requested_amount_{unit}": principal},
         dscr=round(float(dscr), 3),
         cash_buffer_days=round(float(buffer), 1),
         revenue_volatility=round(float(volatility), 3),
         tax_bank_match_ratio=round(float(match), 3),
-        requested_amount_krw=requested_amount_krw,
         requested_tenor_months=requested_tenor_months,
         industry=profile.industry,
         region=profile.region,
@@ -206,10 +220,10 @@ def _compute(
     signals: dict[str, int | float | str] = {
         "classification_rules": RULES_VERSION,
         "months_used": n,
-        "avg_monthly_noi_krw": int(noi),
-        "avg_monthly_debt_service_krw": int(debt),
-        "new_installment_krw": int(new_installment),
-        "avg_monthly_owner_draw_krw": int(owner),
+        f"avg_monthly_noi_{unit}": int(noi),
+        f"avg_monthly_debt_service_{unit}": int(debt),
+        f"new_installment_{unit}": int(new_installment),
+        f"avg_monthly_owner_draw_{unit}": int(owner),
         "dscr_after_owner_draw": round(max(noi - owner, 0.0) / (debt + new_installment), 3) if n else 0.0,
         "unclassified_count": counts[Category.UNCLASSIFIED_IN] + counts[Category.UNCLASSIFIED_OUT],
         "high_cost_lender_count": counts[Category.HIGH_COST_LENDER],
@@ -226,7 +240,13 @@ def _compute(
         }
         for y, mo in months
     ]
+    if usd:
+        monthly = _cent_rows(monthly)
     return Underwriting(features=features, signals=signals, flags=flags, monthly=monthly, categories=categories)
+
+
+def _cent_rows(rows):
+    return [{("month" if k == "month" else f"{k}_cents"): v for k, v in row.items()} for row in rows]
 
 
 def compute_underwriting(
@@ -243,9 +263,32 @@ def compute_underwriting(
     pg_settlements: Sequence[PgSettlement] | None = None,
     marketplace: MarketplaceStore | None = None,
 ) -> Underwriting:
+    if isinstance(profile, UsdProfile) or any(isinstance(t, UsdTransaction) for t in transactions) or any(
+            isinstance(f, UsdTaxFiling) for f in tax_filings) or isinstance(marketplace, UsdMarketplace):
+        raise ValueError("Use USD sources only with the USD underwriting contract")
+    return _underwrite(application_id, profile, transactions, tax_filings, as_of, requested_amount_krw,
+                       requested_tenor_months, overrides, semantic_labels, pg_settlements, marketplace)
+
+
+def compute_usd_underwriting(application_id: str, profile: UsdProfile, transactions: Sequence[UsdTransaction],
+                             tax_filings: Sequence[UsdTaxFiling], *, as_of: date, requested_amount_cents: int,
+                             requested_tenor_months: int, pg_settlements: Sequence[UsdSettlement] | None = None,
+                             marketplace: UsdMarketplace | None = None, overrides=None, semantic_labels=None) -> Underwriting:
+    if (not isinstance(profile, UsdProfile) or not all(isinstance(t, UsdTransaction) for t in transactions)
+            or not all(isinstance(f, UsdTaxFiling) for f in tax_filings)
+            or not all(isinstance(s, UsdSettlement) for s in pg_settlements or ())
+            or marketplace is not None and not isinstance(marketplace, UsdMarketplace)):
+        raise ValueError("Expected USD sources throughout underwriting")
+    return _underwrite(application_id, profile, transactions, tax_filings, as_of, requested_amount_cents,
+                       requested_tenor_months, overrides, semantic_labels, pg_settlements, marketplace)
+
+
+def _underwrite(application_id, profile, transactions, tax_filings, as_of, principal, requested_tenor_months,
+                overrides, semantic_labels, pg_settlements, marketplace):
+    usd = isinstance(profile, UsdProfile)
     rules = {t.txn_id: classify(t) for t in transactions}
     args = (application_id, profile, transactions, tax_filings)
-    kw = {"as_of": as_of, "requested_amount_krw": requested_amount_krw, "requested_tenor_months": requested_tenor_months}
+    kw = {"as_of": as_of, "principal": principal, "requested_tenor_months": requested_tenor_months}
     base = _compute(*args, rules, **kw)
     applied = {
         k: v
@@ -254,10 +297,12 @@ def compute_underwriting(
     }
     adjusted = _compute(*args, rules | applied, **kw) if applied else base
     features = _conservative(base.features, adjusted.features)
-    pg = ledger_summary(pg_settlements or (), transactions, data_end(transactions, as_of))
+    pg = (usd_ledger_summary if usd else ledger_summary)(pg_settlements or (), transactions, data_end(transactions, as_of))
     features = features.model_copy(update=features_of(pg))
     market = store_summary(marketplace, as_of)
-    features = features.model_copy(update=marketplace_features_of(market))
+    market_features = ({k: v for k, v in market.items() if k.startswith("mkt_")}
+                       if usd else marketplace_features_of(market))
+    features = features.model_copy(update=market_features)
     signals = {
         **adjusted.signals,
         "semantic_overrides": len(applied),
@@ -268,14 +313,15 @@ def compute_underwriting(
           if pg.get(k) is not None},
         **({"pg_unmatched_count": pg["unmatched_count"]} if "unmatched_count" in pg else {}),
     }
+    expenses = expense_monthly(transactions, adjusted.categories, semantic_labels or {}, as_of)
     return Underwriting(
         features=features,
         signals=signals,
         flags=adjusted.flags,
         monthly=adjusted.monthly,
         categories=adjusted.categories,
-        expense_breakdown=expense_breakdown(transactions, adjusted.categories, semantic_labels or {}, as_of),
-        expense_monthly=expense_monthly(transactions, adjusted.categories, semantic_labels or {}, as_of),
+        expense_breakdown=expense_breakdown(transactions, adjusted.categories, semantic_labels or {}, as_of, usd=usd),
+        expense_monthly=_cent_rows(expenses) if usd else expenses,
         pg_ledger=pg,
         marketplace=market,
     )
@@ -293,10 +339,10 @@ def expense_monthly(
     sums = {m: dict.fromkeys((g for g, _ in EXPENSE_GROUPS), 0) for m in months}
     for t in transactions:
         m = _month(t.booked_on)
-        if t.amount_krw >= 0 or m >= current:
+        if _amount(t) >= 0 or m >= current:
             continue
         group = _RULE_GROUP.get(categories[t.txn_id]) or _LABEL_GROUP.get(labels.get(t.txn_id, ""), "unclassified")
-        sums[m][group] -= t.amount_krw
+        sums[m][group] -= _amount(t)
     return [{"month": f"{y:04d}-{mo:02d}", **sums[(y, mo)]} for y, mo in months]
 
 
@@ -305,11 +351,13 @@ def expense_breakdown(
     categories: Mapping[str, Category],
     labels: Mapping[str, str],
     as_of: date,
+    *, usd: bool = False,
 ) -> list[dict[str, int | str]]:
     """완결 월 평균 출금(양수 원)을 EXPENSE_GROUPS 순서로 낸다."""
     rows = expense_monthly(transactions, categories, labels, as_of)
     n = len(rows)
-    return [{"group": g, "label": label, "monthly_avg_krw": round(sum(r[g] for r in rows) / n) if n else 0}
+    return [{"group": g, "label": g.replace("_", " ").title() if usd else label,
+             ("monthly_avg_cents" if usd else "monthly_avg_krw"): round(sum(r[g] for r in rows) / n) if n else 0}
             for g, label in EXPENSE_GROUPS]
 
 

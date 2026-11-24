@@ -43,6 +43,73 @@ DEMO_SELLERS: tuple[DemoSeller, ...] = (
 SELLER_BY_ID = {s.applicant_id: s for s in DEMO_SELLERS}
 
 
+@dataclass(frozen=True)
+class UsdSeller:
+    business_name: str
+    representative: str
+    region: str
+    industry: str
+    supplier: str
+    weekly_sales_cents: int
+    channel_percent: tuple[tuple[str, int], ...]
+    history_months: int = 12
+    suspension_days_ago: int | None = None
+
+
+USD_CHANNEL_NAMES = {"coupang": "Coupang", "naver_smart_store": "Naver Smart Store",
+                     "own_store": "Own Store", "11st": "11st"}
+_GENERAL = (("coupang", 45), ("naver_smart_store", 40), ("own_store", 15))
+_RETAIL = (("coupang", 50), ("naver_smart_store", 35), ("11st", 15))
+_STUDIO = (("naver_smart_store", 65), ("own_store", 35))
+_TWO_MARKETS = (("coupang", 55), ("naver_smart_store", 45))
+USD_SELLERS = {
+    "seller-bakery-20": UsdSeller("Daejeon Bakery", "Yun Boksun", "Daejeon", "Food", "Geumgang Flour",
+                                  420_000, _GENERAL),
+    "seller-petfood-07": UsdSeller("Gwanggyo Pet Food Lab", "Shin Hyewon", "Suwon", "Pet supplies",
+                                   "Natural Pet Foods", 510_000, _GENERAL,
+                                   suspension_days_ago=40),
+    "seller-knitroom-04": UsdSeller("Pangyo Hand-Knit Studio", "Yun Jia", "Seongnam", "Handmade",
+                                    "Thread and Needle", 315_000, (("naver_smart_store", 87), ("own_store", 13)), 4),
+    "seller-dailylook-01": UsdSeller("Seongsu Daily Look", "Kim Minsu", "Seoul", "Apparel",
+                                     "Dongdaemun Fabric", 620_000,
+                                     (("naver_smart_store", 45), ("coupang", 35), ("own_store", 20))),
+    "seller-mangwon-02": UsdSeller("Mangwon Table Market", "Choi Yeonghui", "Seoul", "Food",
+                                   "Hankki Foods", 390_000, _RETAIL),
+    "seller-glowlab-03": UsdSeller("Haeundae Beauty Lab", "Jeong Daeho", "Busan", "Beauty",
+                                   "Cos Lab", 480_000, _GENERAL),
+    "seller-candle-05": UsdSeller("Yeonnam Candle Works", "Seo Jiu", "Seoul", "Home and living",
+                                  "Soy Wax Korea", 225_000, _STUDIO),
+    "seller-gearstore-06": UsdSeller("Yongsan Gear Store", "Hwang Jaeseok", "Seoul", "Electronics",
+                                     "Hanbit Electronics", 695_000, _RETAIL),
+    "seller-ceramic-08": UsdSeller("Icheon Pottery Studio", "Jang Inho", "Icheon", "Handmade",
+                                   "Yeoju Clay", 195_000, _STUDIO),
+    "seller-kimchi-09": UsdSeller("Jeonju Hansang Kimchi", "Jeon Sunja", "Jeonju", "Food",
+                                  "Honam Produce", 385_000, _GENERAL),
+    "seller-linen-10": UsdSeller("Euljiro Linen", "Ryu Sangcheol", "Seoul", "Apparel",
+                                 "Daegu Textiles", 410_000, _GENERAL),
+    "seller-skinlab-11": UsdSeller("Daegu Skin Lab", "Son Yeji", "Daegu", "Beauty",
+                                   "Dalbit Cosmetics", 375_000, _RETAIL),
+    "seller-kitchen-12": UsdSeller("Incheon Kitchenware", "O Changsu", "Incheon", "Home and living",
+                                   "Steel Living", 340_000, _RETAIL),
+    "seller-cable-13": UsdSeller("Guro Cable Mall", "Lee Gangsan", "Seoul", "Electronics",
+                                 "Tech Line", 455_000, _RETAIL),
+    "seller-leather-14": UsdSeller("Seongsu Leather Studio", "Mun Taesik", "Seoul", "Handmade",
+                                   "Seongsu Leather Supply", 170_000, _STUDIO, 4),
+    "seller-tangerine-15": UsdSeller("Jeju Tangerine Day", "Gang Misuk", "Jeju", "Food",
+                                     "Seogwipo Citrus", 270_000, _GENERAL),
+    "seller-petcare-16": UsdSeller("Bundang Pet Care Shop", "Kim Sohui", "Seongnam", "Pet supplies",
+                                   "Pet and Life", 295_000, _TWO_MARKETS),
+    "seller-tint-17": UsdSeller("Hongdae Tint House", "Bak Hana", "Seoul", "Beauty",
+                                "Cos Lab", 165_000, _STUDIO, 4),
+    "seller-sofa-18": UsdSeller("Gwangju Sofa Factory", "Na Jeonghun", "Gwangju", "Home and living",
+                                "Honam Timber", 570_000, _GENERAL),
+    "seller-streetfit-19": UsdSeller("Dongdaemun Street Fit", "Choi Wonbin", "Seoul", "Apparel",
+                                     "Dongdaemun Fabric", 275_000, _TWO_MARKETS, 4),
+    "seller-mugshop-21": UsdSeller("Yeonnam Mug Shop", "Byeon Jaemin", "Seoul", "Home and living",
+                                   "Hanyang Ceramics", 325_000, _GENERAL),
+}
+
+
 def seller_label(applicant_id: str) -> str:
     seller = SELLER_BY_ID.get(applicant_id)
     return seller.label if seller else applicant_id

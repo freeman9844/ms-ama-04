@@ -160,6 +160,30 @@ def underwrite_input(consent_id):
     }
 
 
+def test_explicit_usd_inputs_through_source_and_decision_activities(deps):
+    from dataclasses import replace
+    from mockapis.demo import FlowStore
+    from shared.contracts import USD_V1
+
+    cases = build_demo_cases(AS_OF)
+    app = create_mock_app(cases, SECRET, lambda: NOW, flows=FlowStore(cases, AS_OF))
+    deps = replace(deps, mock=HttpMockApi(client=TestClient(app)))
+    meta = USD_V1.model_dump()
+    common = {**meta, "application_id": "app-usd", "applicant_id": "seller-bakery-20"}
+    consent = request_consent(deps, common)
+    cid = consent["consent_id"]
+    assert deps.store.read("consents", cid, cid).get("currency") == "USD"
+    assert deps.store.read("consents", cid, cid)["purpose"].isascii()
+    assert assemble_data(deps, {**common, **consent})["status"] == "complete"
+    payload = {**common, "consent_id": cid, "as_of": AS_OF.isoformat(),
+               "requested_amount_cents": 500000, "requested_tenor_months": 6}
+    uw = underwrite(deps, payload)
+    assert "_krw" not in str(uw)
+    assert evaluate_policy(deps, uw["features"])["max_amount_cents"] == 500000
+    with pytest.raises(ValueError):
+        underwrite(deps, payload | {"requested_amount_krw": 500000})
+
+
 def test_save_document_rejects_unknown_container(deps):
     with pytest.raises(ValueError):
         save_document(deps, {"container": "secrets", "document": {"id": "x"}})

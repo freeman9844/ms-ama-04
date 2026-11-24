@@ -79,6 +79,18 @@ class LimitBoost(_Model):
     substituted_max_amount_krw: int = Field(gt=0)
 
 
+class UsdLimits(_Model):
+    min_amount_cents: int = Field(gt=0)
+    max_amount_cents: int = Field(gt=0)
+    limit_unit_cents: int = Field(gt=0)
+    inflow_multiplier: float = Field(gt=0)
+
+
+class UsdBoost(_Model):
+    pending_settlement_ratio: float = Field(gt=0, le=1)
+    substituted_max_amount_cents: int = Field(gt=0)
+
+
 class RuleSet(_Model):
     version: str = Field(min_length=1)
     product: ProductLimits
@@ -119,9 +131,16 @@ class RuleSet(_Model):
                 raise ValueError(f"{s.code}: 탈락 규칙의 대체는 refer만 가능하다")
 
 
+class UsdRuleSet(RuleSet):
+    version: Literal["usd-v1"]
+    product: UsdLimits
+    limit_boost: UsdBoost
+
+
 def load_rules(path: Path = DEFAULT_RULES_PATH) -> RuleSet:
     with open(path, encoding="utf-8") as f:
-        return RuleSet.model_validate(yaml.safe_load(f))
+        data = yaml.safe_load(f)
+    return (UsdRuleSet if isinstance(data, dict) and data.get("version") == "usd-v1" else RuleSet).model_validate(data)
 
 
 @cache

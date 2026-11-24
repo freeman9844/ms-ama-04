@@ -14,6 +14,7 @@ from shared.krcalendar import month_add
 from mockapis.sellerdata.categories import TxnCategory
 from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.engine import simulate
+from mockapis.sellerdata.usd import simulate_usd
 from mockapis.sellerdata.marketplace import (
     MARKETPLACE_SEED_OFFSET,
     StoreOverride,
@@ -22,8 +23,12 @@ from mockapis.sellerdata.marketplace import (
 )
 from mockapis.sellerdata.personas import DEMO_PERSONAS, Persona, business_reg_no, load_persona
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
+from shared.contracts import USD_V1, StorePenalty, UsdTransaction
+from shared.sellers import USD_SELLERS
+from shared.usd_source import UsdMarketplace, UsdOrderDay, UsdProfile, UsdSettlement, UsdStorePlatform, UsdTaxFiling
 
-__all__ = ["INJECTION_TEXT", "Archetype", "Persona", "SyntheticCase", "TxnCategory", "generate_case", "load_persona"]
+__all__ = ["INJECTION_TEXT", "Archetype", "Persona", "SyntheticCase", "TxnCategory", "generate_case", "load_persona",
+           "UsdCase", "generate_usd_case"]
 
 
 class Archetype(StrEnum):
@@ -73,6 +78,51 @@ class SyntheticCase:
     persona: Persona
     opening_balance_krw: int
     marketplace: MarketplaceStore | None = None
+
+
+@dataclass(frozen=True)
+class UsdCase:
+    profile: UsdProfile
+    opening_balance_cents: int
+    transactions: tuple[UsdTransaction, ...]
+    pg_settlements: tuple[UsdSettlement, ...]
+    tax_filings: tuple[UsdTaxFiling, ...]
+    marketplace: UsdMarketplace
+    pending: tuple[UsdSettlement, ...]
+    orders: tuple[UsdOrderDay, ...]
+
+
+def generate_usd_case(applicant_id: str, as_of: date, seed: int) -> UsdCase:
+    seller = USD_SELLERS[applicant_id]
+    meta = USD_V1.model_dump()
+    start = date(*month_add(as_of.year, as_of.month, -seller.history_months), 1)
+    opening = 3 * seller.weekly_sales_cents
+    books = simulate_usd(seller, applicant_id, start, as_of - timedelta(days=1), seed, opening)
+    profile = UsdProfile(**meta, applicant_id=applicant_id, business_name=seller.business_name,
+                         representative_name=seller.representative, industry=seller.industry, region=seller.region,
+                         business_age_months=38, business_reg_no=business_reg_no(random.Random(seed)))
+    platforms = []
+    for code, _ in seller.channel_percent:
+        recent = [o for o in books.orders if o.platform_code == code and o.order_on >= as_of - timedelta(days=90)]
+        platforms.append(UsdStorePlatform(**meta, platform_code=code, opened_on=as_of-timedelta(days=790),
+                                          rating=4.8, review_count=len(recent)*3,
+                                          gross_90d_cents=sum(o.gross_cents for o in recent),
+                                          return_90d_cents=sum(o.returns_cents for o in recent), cancel_90d_cents=0,
+                                          pending_settlement_cents=sum(s.net_cents for s in books.pending
+                                                                       if s.platform_code == code)))
+    penalties = () if not seller.suspension_days_ago else (
+        StorePenalty(platform=platforms[0].platform_code, occurred_on=as_of-timedelta(days=seller.suspension_days_ago),
+                     kind="suspension"),)
+    market = UsdMarketplace(**meta, as_of=as_of, platforms=tuple(platforms), penalties=penalties)
+    filings = []
+    for month in range(seller.history_months):
+        begin = date(*month_add(start.year, start.month, month), 1)
+        end = date(*month_add(begin.year, begin.month, 1), 1)
+        declared = sum(s.net_cents for s in books.settlements if begin <= s.settled_on < end)
+        filings.append(UsdTaxFiling(**meta, period_start=begin, period_end=end-timedelta(days=1),
+                                    declared_revenue_cents=declared))
+    return UsdCase(profile, opening, books.transactions, books.settlements, tuple(filings), market,
+                   books.pending, books.orders)
 
 
 def stress_lending(persona: Persona, onset: date, end: date) -> list[Event]:

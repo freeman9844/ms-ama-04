@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
+from shared.contracts import UsdProduct, UsdTransaction
+from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 from shared.pseudonymize import Pseudonymizer
 
 AGENT_NAME = "data-assembly"
@@ -42,6 +44,11 @@ _ADAPTERS: dict[str, TypeAdapter[Any]] = {
     "tax": TypeAdapter(list[TaxFiling]),
     "pg": TypeAdapter(list[PgSettlement]),
     "marketplace": TypeAdapter(MarketplaceStore),
+}
+_USD_ADAPTERS = {
+    "profile": TypeAdapter(UsdProfile), "transactions": TypeAdapter(list[UsdTransaction]),
+    "tax": TypeAdapter(list[UsdTaxFiling]), "pg": TypeAdapter(list[UsdSettlement]),
+    "marketplace": TypeAdapter(UsdMarketplace),
 }
 _UNUSUAL = re.compile(r"[\[\]{}<>]|지시|무시|승인|ignore|system|instruction", re.IGNORECASE)
 _PAYROLL = re.compile(r"^급여\s+(\S+)$")
@@ -209,7 +216,7 @@ def _summarize(source: str, parsed: Any) -> dict[str, Any]:
         "count": len(parsed),
         "first_date": dates[0].isoformat() if dates else None,
         "last_date": dates[-1].isoformat() if dates else None,
-        "platforms": sorted({s.platform for s in parsed}),
+        "platforms": sorted({s.platform_code if isinstance(s, UsdSettlement) else s.platform for s in parsed}),
     }
 
 
@@ -246,7 +253,9 @@ def build_pseudonymizer(
 class AssemblySession:
     """원천별 수집 상태. 도구 핸들러(fetch_source)와 안전망이 같은 세션을 쓴다."""
 
-    def __init__(self, api: SourceApi, token: str, scopes: Collection[str], pseudonym_key: bytes) -> None:
+    def __init__(self, api: SourceApi, token: str, scopes: Collection[str], pseudonym_key: bytes,
+                 product: UsdProduct | None = None) -> None:
+        self._adapters = _USD_ADAPTERS if product is not None else _ADAPTERS
         self._api = api
         self._token = token
         self._scopes = frozenset(scopes)
@@ -291,7 +300,7 @@ class AssemblySession:
             self.last_error[source] = "unavailable"
             return {"error": "unavailable", "retryable": self.can_retry(source)}
         try:
-            parsed = _ADAPTERS[source].validate_json(json.dumps(raw))
+            parsed = self._adapters[source].validate_json(json.dumps(raw))
         except (ValidationError, TypeError, ValueError):
             self.last_error[source] = "invalid_payload"
             return {"error": "invalid_payload", "retryable": False}
@@ -341,8 +350,9 @@ def assemble(
     pseudonym_key: bytes,
     runner: AgentRunner | None = None,
     model: str = DEFAULT_MODEL,
+    product: UsdProduct | None = None,
 ) -> AssemblyResult:
-    session = AssemblySession(api, token, scopes, pseudonym_key)
+    session = AssemblySession(api, token, scopes, pseudonym_key, product)
     flags: list[str] = []
     agent_record = assessment = agent_error = conversation_id = None
 

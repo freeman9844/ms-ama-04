@@ -12,7 +12,7 @@ from pydantic import TypeAdapter
 
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
-from agents.features import compute_underwriting, monthly_installment
+from agents.features import compute_underwriting, compute_usd_underwriting, monthly_installment
 from agents.marketplace import FLAG_MARKETPLACE_UNAVAILABLE
 from agents.monitoring import Baseline, settlement_for
 from agents.pg_ledger import FLAG_PG_LEDGER_UNAVAILABLE
@@ -21,6 +21,8 @@ from agents.txn_classify import ClassificationCache, Decider, LlmFallback, class
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
+from shared.contracts import UsdProduct, UsdTransaction
+from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 
 CONTAINERS = ("applications", "consents")
 CLASSIFICATION_CONTAINER = "classifications"
@@ -39,6 +41,9 @@ EVENT_CONSENT_GRANTED = "consent.granted"
 _TRANSACTIONS = TypeAdapter(list[Transaction])
 _FILINGS = TypeAdapter(list[TaxFiling])
 _PG = TypeAdapter(list[PgSettlement])
+_USD_TRANSACTIONS = TypeAdapter(list[UsdTransaction])
+_USD_FILINGS = TypeAdapter(list[UsdTaxFiling])
+_USD_PG = TypeAdapter(list[UsdSettlement])
 
 
 class DocumentStore(Protocol):
@@ -69,7 +74,8 @@ class RawStore(Protocol):
 
 
 class MockApi(Protocol):
-    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int) -> dict[str, Any]: ...
+    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int,
+                       *, product: UsdProduct | None = None) -> dict[str, Any]: ...
     def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any: ...
     def revoke(self, consent_id: str) -> str:
         """revoked | absent(레지스트리에 없음)."""
@@ -186,17 +192,31 @@ def schedule_lifecycle(deps: Deps, doc: dict[str, Any]) -> None:
         raise
 
 
+def _product(payload: Mapping[str, Any]) -> UsdProduct | None:
+    fields = {k: payload[k] for k in UsdProduct.model_fields if k in payload}
+    if not fields and "requested_amount_cents" not in payload:
+        return None
+    if "requested_amount_krw" in payload:
+        raise ValueError("USD activities cannot use KRW principal")
+    return UsdProduct.model_validate(fields)
+
+
 def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
+    product = _product(payload)
+    meta = product.model_dump() if product else {}
     scopes = list(CONSENT_SCOPES)
-    grant = deps.mock.create_consent(payload["applicant_id"], scopes, CONSENT_PURPOSE, CONSENT_TTL_DAYS)
+    purpose = "Working capital loan assessment" if product else CONSENT_PURPOSE
+    grant = deps.mock.create_consent(payload["applicant_id"], scopes, purpose, CONSENT_TTL_DAYS,
+                                     **({"product": product} if product else {}))
     consent_id = grant["consent_id"]
     doc = {
+        **meta,
         "id": consent_id,
         "consent_id": consent_id,
         "application_id": payload["application_id"],
         "applicant_id": payload["applicant_id"],
         "scopes": scopes,
-        "purpose": CONSENT_PURPOSE,
+        "purpose": purpose,
         "granted_at": deps.clock().isoformat(),
         "expires_at": grant["expires_at"],
         "status": "granted",
@@ -209,6 +229,7 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         doc["event_error"] = "servicebus_disabled"
     else:
         message = {
+            **meta,
             "type": EVENT_CONSENT_GRANTED,
             "consent_id": consent_id,
             "application_id": payload["application_id"],
@@ -221,7 +242,7 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001 - 알림 실패가 동의 자체를 무효로 하지 않는다
             doc["event_error"] = f"{type(e).__name__}: {e}"[:300]
     schedule_lifecycle(deps, doc)
-    return {"consent_id": consent_id, "token": grant["token"], "scopes": scopes, "expires_at": grant["expires_at"]}
+    return {**meta, "consent_id": consent_id, "token": grant["token"], "scopes": scopes, "expires_at": grant["expires_at"]}
 
 
 class ConsentEnded(RuntimeError):
@@ -230,14 +251,16 @@ class ConsentEnded(RuntimeError):
 
 def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     consent_id = payload["consent_id"]
+    product = _product(payload)
     result = assemble(
         payload["application_id"],
         scopes=payload["scopes"],
         token=payload["token"],
         api=deps.mock,
         pseudonym_key=deps.pseudonym_key,
-        runner=deps.agents,
+        runner=None if product else deps.agents,
         model=deps.model,
+        product=product,
     )
     container = raw_container(consent_id)
     for source, raw in result.data.items():
@@ -365,17 +388,33 @@ def _semantic(
 
 
 def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
-    profile, txns, filings = _load(deps, payload["consent_id"])
-    pg, pg_flags = _load_pg(deps, payload["consent_id"])
-    store, store_flags = _load_marketplace(deps, payload["consent_id"])
-    classification, overrides, labels = _semantic(deps, profile, txns, payload["consent_id"])
-    result = compute_underwriting(
+    product = _product(payload)
+    cid = payload["consent_id"]
+    if product:
+        container = raw_container(cid)
+        def read(source):
+            return deps.raw.get_json(container, f"{source}.json")
+        profile = UsdProfile.model_validate(read("profile"))
+        txns = _USD_TRANSACTIONS.validate_python(read("transactions"))
+        filings = _USD_FILINGS.validate_python(read("tax") or [])
+        pg = _USD_PG.validate_python(read("pg") or [])
+        market = read("marketplace")
+        store = None if market is None else UsdMarketplace.model_validate(market)
+        pg_flags, store_flags = [], []
+        classification, overrides, labels = None, {}, {}
+    else:
+        profile, txns, filings = _load(deps, cid)
+        pg, pg_flags = _load_pg(deps, cid)
+        store, store_flags = _load_marketplace(deps, cid)
+        classification, overrides, labels = _semantic(deps, profile, txns, cid)
+    amount_key = "requested_amount_cents" if product else "requested_amount_krw"
+    result = (compute_usd_underwriting if product else compute_underwriting)(
         payload["application_id"],
         profile,
         txns,
         filings,
         as_of=date.fromisoformat(payload["as_of"]),
-        requested_amount_krw=payload["requested_amount_krw"],
+        **{amount_key: payload[amount_key]},
         requested_tenor_months=payload["requested_tenor_months"],
         overrides=overrides,
         semantic_labels=labels,
@@ -384,13 +423,14 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     )
     as_of = date.fromisoformat(payload["as_of"])
     return {
+        **(product.model_dump() if product else {}),
         "features": result.features.model_dump(mode="json"),
         "signals": result.signals,
         "flags": [*result.flags, *pg_flags, *store_flags],
         "monthly": result.monthly,
         "expense_breakdown": result.expense_breakdown,
         "expense_monthly": result.expense_monthly,
-        "settlement_profile": settlement_for(txns, overrides, as_of, profile.industry),
+        "settlement_profile": None if product else settlement_for(txns, overrides, as_of, profile.industry),
         "classification": classification,
         "category_overrides": {k: v.value for k, v in overrides.items()},
         "pg_ledger": result.pg_ledger,
