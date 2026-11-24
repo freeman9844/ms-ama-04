@@ -192,11 +192,44 @@ def _interpreter_item(item: dict) -> bool:
     return kind == "reasoning" and isinstance(item.get("summary"), list)
 
 
+def _collect_citations(message: dict, cited: list[str]) -> bool:
+    complete = True
+    content = message.get("content")
+    if not isinstance(content, list):
+        complete = False
+        content = [content]
+    for part in content:
+        if not isinstance(part, dict) or "annotations" not in part:
+            continue
+        annotations = part["annotations"]
+        if not isinstance(annotations, list):
+            complete = False
+            annotations = [annotations]
+        for annotation in annotations:
+            if not isinstance(annotation, dict):
+                complete = False
+                continue
+            kind = annotation.get("type")
+            if not isinstance(kind, str) or not kind.strip():
+                complete = False
+            if kind != "container_file_citation" and "container_id" not in annotation:
+                continue
+            cid = annotation.get("container_id")
+            if isinstance(cid, str) and cid.strip():
+                cited.append(cid)
+            else:
+                complete = False
+            if kind != "container_file_citation":
+                complete = False
+    return complete
+
+
 def _collect_containers(response: dict, containers: list[str], *, itemized: bool) -> None:
     items = response.get("output", None if itemized else [])
     if not isinstance(items, list) or (itemized and not items):
         raise AgentError("Incomplete response inventory")
     complete = True
+    cited: list[str] = []
     for item in items:
         kind = item.get("type") if isinstance(item, dict) else None
         if kind == "code_interpreter_call":
@@ -206,6 +239,14 @@ def _collect_containers(response: dict, containers: list[str], *, itemized: bool
             elif cid not in containers:
                 containers.append(cid)
         elif itemized and (not isinstance(item, dict) or not _interpreter_item(item)):
+            complete = False
+        if kind == "message" and not _collect_citations(item, cited):
+            complete = False
+    # A citation can precede its call in this list or refer to a previous round.
+    # An unmatched citation is a cleanup target, not proof that every call was enumerated.
+    for cid in cited:
+        if cid not in containers:
+            containers.append(cid)
             complete = False
     # Scan the entire list first: valid target IDs may follow a malformed item.
     if not complete:

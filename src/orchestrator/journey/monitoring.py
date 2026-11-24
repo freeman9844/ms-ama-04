@@ -327,9 +327,11 @@ def _held_loan(deps: Deps, loan_id: str, replay_id: str, status: str) -> dict[st
     return loan
 
 
-def _consent_ended(deps: Deps, cid: str | None) -> str | None:
+def _consent_ended(deps: Deps, cid: str | None, *, require_grant: bool = False) -> str | None:
     consent = deps.store.read("consents", cid, cid) if cid else None
     status = (consent or {}).get("status")
+    if require_grant and status != "granted" and status not in ENDED_CONSENT:
+        raise RuntimeError("Cannot verify replay consent")
     return status if status in ENDED_CONSENT else None
 
 
@@ -338,11 +340,11 @@ def _underwriting_consent_ended(deps: Deps, loan: dict[str, Any]) -> str | None:
     return _consent_ended(deps, loan["underwriting_consent_id"])
 
 
-def _resume_blocker(deps: Deps, loan: dict[str, Any]) -> str | None:
+def _resume_blocker(deps: Deps, loan: dict[str, Any], *, require_grant: bool = False) -> str | None:
     """재개하면 남은 주차가 읽을 원천(심사 프로필·사후 flow.json)이 동의 종료로 지워졌는지."""
-    if ended := _underwriting_consent_ended(deps, loan):
+    if ended := _consent_ended(deps, loan["underwriting_consent_id"], require_grant=require_grant):
         return f"심사 동의가 끝나({ended}) 재생을 이어갈 수 없습니다."
-    if ended := _consent_ended(deps, loan["monitoring"].get("consent_id")):
+    if ended := _consent_ended(deps, loan["monitoring"].get("consent_id"), require_grant=require_grant):
         return f"사후 동의가 끝나({ended}) 재생을 이어갈 수 없습니다."
     return None
 
@@ -385,10 +387,19 @@ def stop_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | No
     return {"loan_id": loan_id, "replay_id": replay_id, "status": "stopped"}
 
 
-def _publish_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> None:
+def _publish_week(deps: Deps, loan_id: str, replay_id: str, week: int, *, continuation: bool = False) -> None:
+    loan = deps.store.read(LOANS, loan_id, loan_id)
+    if continuation:
+        mon = (loan or {}).get("monitoring") or {}
+        if (mon.get("replay_id") != replay_id or mon.get("status") != "replaying"
+                or mon.get("processed_week") != week - 1):
+            return
+        if _resume_blocker(deps, loan, require_grant=True):
+            _stop_withdrawn_replay(deps, loan_id, replay_id)
+            return
     message = FlowUpdated(type=TOPIC_FLOW, loan_id=loan_id, replay_id=replay_id, week=week)
     deps.events.publish(  # type: ignore[union-attr]
-        TOPIC_FLOW, {**message.model_dump(mode="json"), **_meta(deps.store.read(LOANS, loan_id, loan_id))},
+        TOPIC_FLOW, {**message.model_dump(mode="json"), **_meta(loan)},
         f"{TOPIC_FLOW}:{loan_id}:{replay_id}:{week}", session_id=loan_id
     )
 
@@ -495,7 +506,7 @@ def _refresh_hold(deps: Deps, loan_id: str) -> None:
 
 def _continue(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: str | None) -> None:
     if _after_week(deps, loan_id, replay_id, week, case_id) == "next":
-        _publish_week(deps, loan_id, replay_id, week + 1)
+        _publish_week(deps, loan_id, replay_id, week + 1, continuation=True)
 
 
 def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[str, Any] | None:
@@ -955,7 +966,7 @@ def _deliver_replay(deps: Deps, loan_id: str, replay_id: str,
                     work: Callable[[], dict[str, Any] | None]) -> dict[str, Any] | None:
     loan = deps.store.read(LOANS, loan_id, loan_id)
     mon = (loan or {}).get("monitoring") or {}
-    if mon.get("replay_id") != replay_id or mon.get("status") == "stopped":
+    if mon.get("replay_id") != replay_id or mon.get("status") in ("failed", "stopped"):
         return None
     if not _resume_blocker(deps, loan):
         try:
@@ -965,16 +976,21 @@ def _deliver_replay(deps: Deps, loan_id: str, replay_id: str,
             if not _resume_blocker(deps, loan):
                 raise
 
+    _stop_withdrawn_replay(deps, loan_id, replay_id)
+    return None
+
+
+def _stop_withdrawn_replay(deps: Deps, loan_id: str, replay_id: str) -> None:
     def stop(current: dict) -> bool | None:
         replay = current.get("monitoring") or {}
-        if replay.get("replay_id") != replay_id or replay.get("status") == "stopped":
+        if (replay.get("replay_id") != replay_id or replay.get("status") in ("failed", "completed", "stopped")
+                or not _resume_blocker(deps, current)):
             return False
         now = deps.clock().isoformat()
         replay.update(status="stopped", error="monitoring_consent_ended", stopped_at=now)
         current["updated_at"] = now
 
     update_doc(deps.store, LOANS, loan_id, loan_id, stop)
-    return None
 
 
 def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:

@@ -229,6 +229,60 @@ def test_no_interpreter_accepts_text_only_result():
     assert agents(FakeFoundry(response)).run(SPEC, "input", {}).output == Out(status="ok")
 
 
+def cited_message(*annotations):
+    message = done({"status": "ok"}).json()["output"][0]
+    message["content"][0]["annotations"] = list(annotations)
+    return message
+
+
+def container_citation(cid):
+    return {"type": "container_file_citation", "container_id": cid, "file_id": "file_1",
+            "filename": "synthetic.csv", "start_index": 0, "end_index": 1}
+
+
+@pytest.mark.parametrize("citation", [
+    container_citation("cntr_citation_only"), container_citation(None), None, {"container_id": "cntr_untyped"},
+])
+def test_unaccounted_container_citation_keeps_entire_known_inventory(citation):
+    spec = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    first = tool_round(ci("cntr_first"), fc("f", "fetch_source", {}))
+    final = tool_round(cited_message(citation, container_citation("cntr_extra")), ci("cntr_last"))
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(first, final)).run(spec, "input", {})
+    expected = {"cntr_first", "cntr_extra", "cntr_last"}
+    if isinstance(citation, dict) and citation.get("container_id"):
+        expected.add(citation["container_id"])
+    assert err.value.conversation_id == "conv_1" and set(err.value.containers) == expected
+
+
+@pytest.mark.parametrize("wrong", [None, {}, "invalid", [None], [container_citation("")]])
+def test_malformed_annotations_cannot_certify_interpreter_inventory(wrong):
+    spec = dataclasses.replace(SPEC, tools=({"type": "code_interpreter"},))
+    message = cited_message()
+    message["content"][0]["annotations"] = wrong
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(tool_round(message, ci("cntr_after")))).run(spec, "input", {})
+    assert err.value.containers == ("cntr_after",)
+
+
+def test_malformed_citation_envelope_keeps_identifiable_target():
+    spec = dataclasses.replace(SPEC, tools=({"type": "code_interpreter"},))
+    message = {"type": "message", "content": {"type": "output_text",
+               "annotations": container_citation("cntr_recoverable")}}
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(tool_round(message))).run(spec, "input", {})
+    assert err.value.containers == ("cntr_recoverable",)
+
+
+def test_container_citations_can_reference_prior_or_later_calls_in_itemized_output():
+    spec = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    first = tool_round(ci("cntr_first"), fc("f", "fetch_source", {}))
+    final = tool_round(cited_message(container_citation("cntr_first"), container_citation("cntr_last"),
+                                     {"type": "file_citation", "file_id": "file_1"}), ci("cntr_last"))
+    run = agents(FakeFoundry(first, final)).run(spec, "input", {})
+    assert run.containers == ("cntr_first", "cntr_last")
+
+
 @pytest.mark.parametrize("status,extra", [
     ("incomplete", []),
     ("completed", [{"type": "message", "content": []}]),

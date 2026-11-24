@@ -169,10 +169,13 @@ and escalate; never unmask the public routes to run this test.
    authorized same-project inventory and target reconciliation; neither age,
    cleanup of known IDs nor successful redelivery clears an earlier fence.
    With Code Interpreter enabled, inspect itemized output for every response
-   round: top-level text alone cannot establish the container inventory. On
-   the Service Bus path, withdrawal must stop the matching replay without
-   scheduling another week. A stop-write failure must retry; redelivery after
-   deletion must not load raw data or stop a replacement replay.
+   round: top-level text alone cannot establish the container inventory.
+   Retain container IDs from file citations as cleanup targets. A citation
+   not accounted for by an interpreter call leaves the inventory pending.
+   On the Service Bus path, check the replay and both grants again immediately
+   before publishing another week. A stop-write failure must retry; redelivery
+   after deletion must not load raw data, stop a replacement replay, or
+   overwrite a completed or failed replay's original result.
    Inspect old `late_cleanup` failures before rollout;
    old missing manifests/cleared markers cannot be
    reconstructed by the timer. Escalate unresolved historical gaps. Check

@@ -1783,6 +1783,85 @@ def test_service_bus_withdrawal_stops_only_matching_delivery(mock_app, monkeypat
         assert (mon["replay_id"], mon["status"], mon["error"]) == (replay_id, "stopped", "monitoring_consent_ended")
 
 
+@pytest.mark.parametrize("change", ["underwriting", "monitoring", "replacement", "read_failure", "missing"])
+def test_next_week_checks_fresh_replay_and_both_grants_after_agentless_work(mock_app, monkeypatch, change):
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = replace(make_deps(mock_app, events=outbox), raw=DeletableRaw())
+    approved_loan(deps)
+    replay(deps)
+    body, = outbox.bodies(TOPIC_FLOW)
+    after_week = monitoring_module._after_week
+    def interleave(*args):
+        decision = after_week(*args)
+        assert decision == "next"
+        current = loan(deps)
+        mon = current["monitoring"]
+        assert mon["processed_week"] == 1
+        if change == "replacement":
+            mon.update(replay_id="replacement", processed_week=0)
+            deps.store.upsert(LOANS, current)
+        elif change in ("read_failure", "missing"):
+            read = deps.store.read
+            def fail(container, key, partition):
+                if container == "consents":
+                    if change == "missing":
+                        return None
+                    raise TimeoutError("synthetic checkpoint outage")
+                return read(container, key, partition)
+            monkeypatch.setattr(deps.store, "read", fail)
+        else:
+            cid = current["underwriting_consent_id"] if change == "underwriting" else mon["consent_id"]
+            delete_consent_data(deps, end(cid))
+        return decision
+    monkeypatch.setattr(monitoring_module, "_after_week", interleave)
+    if change in ("read_failure", "missing"):
+        with pytest.raises(TimeoutError if change == "read_failure" else RuntimeError):
+            handle_flow_update(deps, body)
+    else:
+        handle_flow_update(deps, body)
+    assert outbox.bodies(TOPIC_FLOW) == [body]
+    assert loan(deps)["monitoring"]["status"] == ("stopped" if change in ("underwriting", "monitoring") else "replaying")
+
+
+@pytest.mark.parametrize("status", ["failed", "completed"])
+@pytest.mark.parametrize("race", [False, True])
+def test_withdrawal_cannot_overwrite_terminal_repayment_delivery(mock_app, monkeypatch, status, race):
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    replay(deps)
+    pump(deps, outbox, topics=(TOPIC_FLOW,))
+    body, = outbox.bodies(TOPIC_REPAYMENT)
+    delete_consent_data(deps, end(loan(deps)["monitoring"]["consent_id"]))
+    def terminal():
+        current = loan(deps)
+        current["monitoring"].update(status=status, error="original_result")
+        deps.store.upsert(LOANS, current)
+    if race:
+        replace_doc = deps.store.replace
+        def raced(container, doc, etag):
+            if container == LOANS:
+                monkeypatch.setattr(deps.store, "replace", replace_doc)
+                terminal()
+            return replace_doc(container, doc, etag)
+        monkeypatch.setattr(deps.store, "replace", raced)
+    else:
+        terminal()
+    monkeypatch.setattr(deps.raw, "get_json", lambda *_: pytest.fail("Read deleted raw data"))
+    before = len(outbox.sent)
+    for _ in range(2):
+        assert handle_repayment_updated(deps, body) is None
+        mon = loan(deps)["monitoring"]
+        assert (mon["status"], mon["error"]) == (status, "original_result")
+    assert len(outbox.sent) == before
+
+
 def test_collections_crash_and_redelivery_cannot_certify_first_attempt(mock_app, monkeypatch):
     from journey.activities import Conflict
     from journey.consent import IncompleteDeletion, delete_consent_data
