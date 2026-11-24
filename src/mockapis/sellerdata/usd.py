@@ -50,7 +50,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
     while d <= end:
         if d == start and principal:
             post(principal, "AMALend loan proceeds", "TRANSFER_IN", loan=loan_id)
-            post(-principal * 3 // 4, f"{seller.supplier} inventory purchase", "TRANSFER_OUT")
+            post(-principal * 3 // 4, f"{seller.supplier} inventory purchase", "TRANSFER_OUT", loan=loan_id)
         if is_business_day(d):
             daily = seller.weekly_sales_cents * rng.randint(90, 110) // 500
             if slump_on and d >= slump_on:

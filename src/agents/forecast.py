@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
-from agents.classify import Category
+from agents.classify import Category, classify
 from agents.settlement import expected_payouts
 from shared.contracts import Transaction, UsdTransaction
 from shared.krcalendar import is_business_day, month_add, next_business_day
@@ -189,15 +189,25 @@ def summarize(projection: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 def project_usd(visible: Sequence[UsdTransaction], start: date, hi: date, dues: Mapping[date, int]) -> dict[str, Any]:
-    """Average observed business-day net, excluding this loan's principal and repayments."""
+    """Forecast ordinary cash flows; synthetic owner withdrawals sweep only surplus funds."""
     lo = max(start, hi - timedelta(days=HORIZON_DAYS - 1))
     days = sum(is_business_day(lo + timedelta(days=i)) for i in range((hi - lo).days + 1))
-    daily = sum(t.amount_cents for t in visible if lo <= t.booked_on <= hi and not t.loan_id) // max(days, 1)
+    ordinary, sweep_floor = 0, {}
+    for t in visible:
+        if not lo <= t.booked_on <= hi or t.loan_id:
+            continue
+        if classify(t) == Category.OWNER_TRANSFER:
+            sweep_floor[t.booked_on.weekday()] = t.balance_after_cents
+        else:
+            ordinary += t.amount_cents
+    daily = ordinary // max(days, 1)
     balance = visible[-1].balance_after_cents
     path = []
     for n in range(1, HORIZON_DAYS + 1):
         d = hi + timedelta(days=n)
         before = balance + (daily if is_business_day(d) else 0)
+        if is_business_day(d) and d.weekday() in sweep_floor:
+            before = min(before, sweep_floor[d.weekday()])
         balance = before - dues.get(d, 0)
         path.append({"date": d.isoformat(), "balance_cents": balance,
                      "before_payment_cents": before, "installment_cents": dues.get(d, 0)})
