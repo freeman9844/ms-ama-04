@@ -378,6 +378,11 @@ def assemble(
         while session.consented(source) and source not in session.data and session.can_retry(source):
             session.fetch(source, "safety_net")
 
+    if product is not None:
+        invalid = [source for source, error in session.last_error.items() if error == "invalid_payload"]
+        if invalid:
+            raise ValueError(f"Invalid {product.product_version} source payload: {', '.join(invalid)}")
+
     missing = [s for s in SOURCES if s not in session.data and (session.consented(s) or s in REQUIRED)]
     status = "complete" if all(s in session.data for s in REQUIRED) else "incomplete"
     if assessment is not None and assessment["status"] != status:

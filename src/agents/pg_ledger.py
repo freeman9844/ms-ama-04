@@ -188,8 +188,8 @@ def _summary(settlements, transactions, as_of, unit, lag_days):
             round(sum(s.net for s in unmatched if id(s) in advance_pairs) / unmatched_total, 3)
             if unmatched_total else None
         ),
-        "platforms": [{"platform": p, f"gross_{unit}": g, "share": round(shares[p], 3), f"unpaid_{unit}": unpaid[p],
-                      "lag_days": lag_days.get(p)}
+        "platforms": [{"platform": p, f"gross_{unit}": g, "share": round(shares[p], 3) if total else None,
+                       f"unpaid_{unit}": unpaid[p], "lag_days": lag_days.get(p)}
                       for p, g in sorted(gross.items(), key=lambda kv: (-kv[1], kv[0]))],
         "monthly_take_rate": [{"month": k, "rate": round(fee + off, 4), "fee_rate": round(fee, 4),
                                "offset_rate": round(off, 4)} for k, fee, off in monthly_raw],

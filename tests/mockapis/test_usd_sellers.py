@@ -14,6 +14,7 @@ from policy.engine import explain
 from policy.rules import load_rules, rules_for_version
 from shared.contracts import Transaction, UsdPolicyDecision, UsdTransaction
 from shared.sellers import DEMO_SELLERS
+from shared.usd_source import UsdSettlement
 
 AS_OF = date(2026, 11, 24)
 BAKERY = "seller-bakery-20"
@@ -107,6 +108,29 @@ def test_actual_policy_endpoint_selects_by_contract():
         assert client.post("/v1/decisions", json=bad).status_code == 422
     with pytest.raises(ValidationError):
         UsdPolicyDecision.model_validate(d.json() | {"decision": "ineligible"})
+
+
+def test_usd_rules_cannot_be_configured_as_the_legacy_policy():
+    with pytest.raises(ValueError, match="legacy"):
+        create_app(rules_for_version("usd-v1"))
+
+
+def test_usd_flow_rejects_a_gap_that_would_drop_pending_receipts():
+    case = case_for(BAKERY)
+    delayed = date(2026, 12, 1)
+    assert sum(s.net_cents for s in case.pending if AS_OF <= s.settled_on < delayed) == 335750
+    with pytest.raises(ValueError, match="contiguous"):
+        postloan.generate_usd_postloan(case, delayed, 1120, loan_id="after-gap",
+                                       amount_cents=500000, installment_cents=84000)
+
+
+def test_zero_gross_settlement_has_no_concentration_evidence():
+    s = UsdSettlement(product_version="usd-v1", currency="USD", language="en", platform_code="coupang",
+                      settled_on=date(2026, 10, 15), gross_cents=0, fee_cents=0, net_cents=0)
+    summary = pg_ledger.usd_ledger_summary([s], [], AS_OF)
+    assert summary["settlement_count"] == 1
+    assert summary["pg_top_platform_share"] is None and summary["pg_hhi"] is None
+    assert summary["platforms"][0]["share"] is None
 
 
 def test_signed_consent_selects_source_and_flow_cache():

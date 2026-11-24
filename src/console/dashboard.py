@@ -294,7 +294,8 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
          "tone": ("red" if advance_n >= 1 else "green") if charts.is_num(advance_n) else "neutral"},
     ]
     platforms_list = list(pg.get("platforms") or ())
-    platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue") for p in platforms_list],
+    platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue")
+                              for p in platforms_list if charts.is_num(p.get("share"))],
                              width=320, label_w=88)
     cycles = [{"platform": dt(p["platform"]), "cycle": _(PLATFORM_CYCLES.get(p["platform"], "—")),
                "lag_days": p.get("lag_days")} for p in platforms_list]

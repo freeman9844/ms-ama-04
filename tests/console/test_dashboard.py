@@ -395,6 +395,12 @@ def test_settlement_card_unavailable_for_old_docs():
     assert dashboard.settlement_card({"available": False}) == {"available": False}
 
 
+def test_settlement_card_does_not_plot_undefined_concentration():
+    card = dashboard.settlement_card({**LEDGER, "pg_top_platform_share": None,
+                                      "platforms": [{"platform": "쿠팡", "share": None}]})
+    assert card["platforms"]["bars"] == [] and card["kpis"][1]["value"] == "—"
+
+
 LEDGER_V2 = {
     **LEDGER,
     "pg_cash_conversion_days": 21.4, "pg_advance_suspected_count": 1, "pg_advance_share": 0.92,

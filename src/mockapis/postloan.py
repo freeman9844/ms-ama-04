@@ -114,6 +114,8 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
             or type(installment_cents) is not int or not 0 < installment_cents <= amount_cents):
         raise ValueError("Invalid USD loan terms")
     start = next_business_day(start)
+    if start != next_business_day(case.transactions[-1].booked_on + timedelta(days=1)):
+        raise ValueError("USD flow start must be contiguous with the account history")
     end = start + timedelta(days=POSTLOAN_DAYS-1)
     seller_id = case.profile.applicant_id
     slump = seller_id == "seller-dailylook-01"

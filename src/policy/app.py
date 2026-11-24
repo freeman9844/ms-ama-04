@@ -4,13 +4,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from policy.engine import decision_payload, evaluate
-from policy.rules import RuleSet, rules_for_version
+from policy.rules import RuleSet, UsdRuleSet, rules_for_version
 from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures
 
 FAULT_MODES = ("none", "unavailable")
 
 
 def create_app(rules: RuleSet, fault: str = "none") -> FastAPI:
+    if isinstance(rules, UsdRuleSet):
+        raise ValueError("POLICY_RULES_PATH must select a legacy KRW ruleset; USD is selected by contract")
     if fault not in FAULT_MODES:
         raise ValueError(f"FAULT_MODE: {fault}")
     app = FastAPI(title="Policy Engine")
