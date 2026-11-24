@@ -20,7 +20,7 @@ from agents.pretranslate import load_case_raw
 from journey.activities import Deps, update_doc
 from journey.models import GrievanceDecision, GrievanceSubmission, UsdGrievanceDecision, UsdGrievanceSubmission
 from shared.product_context import product_of
-from journey.validation import validate_rereview_decision
+from journey.validation import validate_rereview_decision, usd_rereview_error
 from shared.opinions import opinion_state, published_opinion
 
 log = logging.getLogger("journey.grievance")
@@ -143,17 +143,7 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
         return "invalid"
     if msg.outcome == "rereview":
         if isinstance(msg, UsdGrievanceDecision):
-            policy = record.get("policy") or {}
-            if msg.new_decision == "conditional":
-                error = "conditional_retired"
-            elif msg.new_decision == "decline":
-                error = "invalid_payload" if msg.amount_cents is not None else None
-            elif policy.get("decision") not in ("eligible", "refer") or product_of(policy) != product:
-                error = "rereview_outside_policy"
-            elif msg.amount_cents is None:
-                error = "amount_required"
-            else:
-                error = "amount_exceeds_policy" if msg.amount_cents > policy["max_amount_cents"] else None
+            error = usd_rereview_error(msg, record.get("policy") or {})
         else:
             proposed = {"decision": msg.new_decision, "officer_id": msg.officer_id, "amount_krw": msg.amount_krw,
                         "conditions": msg.conditions, "reason": msg.reason}
@@ -170,7 +160,7 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
             update_doc(deps.store, GRIEVANCES_CONTAINER, msg.grievance_id, msg.application_id, reject)
             return "rejected"
     decision = {**msg.model_dump(mode="json", exclude={"grievance_id", "application_id"}), "at": at}
-    mask = _reason_mask(deps, current) if deps.agents is not None else None
+    mask = _reason_mask(deps, current) if not product and deps.agents is not None else None
     reply = write_grievance_reply(grievance_facts(record, decision), runner=deps.agents, model=deps.grievance_model, mask=mask)
     resolved = False
 

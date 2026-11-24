@@ -11,7 +11,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from journey.models import OfficerDecision, StartRequest, UsdStartRequest
+from journey.models import OfficerDecision, StartRequest, UsdGrievanceDecision, UsdStartRequest
+from shared.product_context import product_of
 
 # 상품 최대 한도(`src/policy/rulesets/v4.yaml`의 product.max_amount_krw). 테스트가 값 일치를 확인한다.
 OVERRIDE_MAX_AMOUNT_KRW = 10_000_000
@@ -71,3 +72,16 @@ def _validate_override(d: OfficerDecision) -> tuple[OfficerDecision | None, str 
     if d.amount_krw > OVERRIDE_MAX_AMOUNT_KRW:
         return None, "amount_exceeds_product"
     return d, None
+
+
+def usd_rereview_error(msg: UsdGrievanceDecision, policy: dict[str, Any]) -> str | None:
+    if msg.new_decision == "conditional":
+        return "conditional_retired"
+    if msg.new_decision == "decline":
+        return "invalid_payload" if msg.amount_cents is not None else None
+    if policy.get("decision") not in ("eligible", "refer") or product_of(policy) != product_of(msg.model_dump()):
+        return "rereview_outside_policy"
+    if msg.amount_cents is None:
+        return "amount_required"
+    cap = policy.get("max_amount_cents")
+    return None if type(cap) is int and msg.amount_cents <= cap else "amount_exceeds_policy"

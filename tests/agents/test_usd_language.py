@@ -335,3 +335,38 @@ def test_requested_dollars_cannot_be_replaced_by_another_cited_amount():
     candidate.claims[0].metric_ids = ["M:requested_amount_cents", "P:max_amount_cents"]
     candidate.claims[0].text = "Policy limit: $5,000.00. Approve the requested $5,000.00 in full."
     assert not uw.check_grounding(candidate, context())
+
+
+@pytest.mark.parametrize("text", ["Approval of $700.01 is appropriate.", "Extend credit of $700.01.", "Extend credit of $ 700.01.",
+                                  "The principal should be $700.01.", "Verify the $700.01 deposit. Offer that amount."])
+def test_cited_deposit_cannot_be_reassigned_as_principal(text):
+    assert uw.check_grounding(draft(text), context())
+
+
+def test_usd_propose_distinguishes_a_balance_from_a_new_credit_amount():
+    case = collections.RepaymentCase.from_doc(dict(META, case_id="c", loan_id="l",
+        installment={"no": 1, "amount_cents": 70001, "due_on": "2026-11-24"}, missed_count=1))
+    ctx = collections.CollectionsContext(case, [], datetime.now(timezone.utc), str)
+    assert ctx.propose(dict(script_id="missed_payment", reason="Extend credit of $700.01.")).get("error")
+    assert ctx.propose(dict(script_id="missed_payment", reason="Make a counteroffer at half the balance.")).get("error")
+    assert ctx.propose(dict(script_id="missed_payment", reason="The outstanding balance is $700.01."))["accepted"]
+
+
+def test_upheld_approval_renders_original_amount_not_policy_limit():
+    app = dict(META, officer_decision=dict(decision="approve", amount_cents=70001),
+               policy=dict(META, decision="eligible", max_amount_cents=90000))
+    facts = notices.grievance_facts(app, dict(outcome="uphold", reason="Recorded reason"))
+    note = notices.write_grievance_reply(facts, runner=None, model="g")
+    assert "$700.01" in note.body and "$900.00" not in note.body and "upheld" in note.body
+
+
+@pytest.mark.parametrize("text", ["Your balance is CHF 1.", "Your balance is $700.01 trillion.",
+                                  "Your balance is seven million pesos.", "Your balance is 1."])
+def test_usd_final_contact_cannot_invent_money(text):
+    case = collections.RepaymentCase.from_doc(dict(META, case_id="c", loan_id="l",
+        installment={"no": 1, "amount_cents": 70001, "due_on": "2026-11-24"}, missed_count=1))
+    proposal = {"status": "pending_officer", "script_id": "missed_payment"}
+    for edited, accepted in ((text, False), ("Your balance is $700.01.", True)):
+        result = collections.settle_proposal(proposal, "modify", text=edited, include_hardship=False, reason="audit",
+            contacts=[], now=datetime(2026,11,24,3,tzinfo=timezone.utc), officer_id="o", case=case)
+        assert (result.contact is not None) == accepted

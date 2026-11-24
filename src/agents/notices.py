@@ -259,7 +259,8 @@ def grievance_facts(application: Mapping[str, Any], decision: Mapping[str, Any])
         if policy and product != product_of(policy):
             raise ValueError("Grievance policy product mismatch")
         labels = {"approve": "approved", "conditional": "conditionally approved", "decline": "declined"}
-        facts = {**product.model_dump(), "original_decision": labels.get((application.get("officer_decision") or {}).get("decision"), "not recorded"),
+        original = application.get("officer_decision") or {}
+        facts = {**product.model_dump(), "original_decision": labels.get(original.get("decision"), "not recorded"),
                  "outcome": {"uphold": "upheld", "rereview": "reviewed again"}[decision["outcome"]],
                  "officer_reason": decision["reason"],
                  "reasons": [{k: r.get(k) for k in ("message", "observed", "threshold")} for r in policy.get("reason_codes") or ()]}
@@ -267,6 +268,8 @@ def grievance_facts(application: Mapping[str, Any], decision: Mapping[str, Any])
             if decision.get("amount_krw") is not None:
                 raise ValueError("USD review cannot use a KRW decision amount")
             facts.update(new_decision=labels[decision["new_decision"]], amount_cents=decision.get("amount_cents"))
+        elif original.get("decision") == "approve":
+            facts["amount_cents"] = original.get("amount_cents")
         return facts
     assessment = published_opinion(application.get("assessment"), application.get("requested_amount_krw")) or {}
     officer = application.get("officer_decision") or {}
@@ -313,10 +316,7 @@ def _usd_draft_issues(draft, required, facts):
 
 def check_grievance_reply(facts: Mapping[str, Any], draft: Draft) -> list[str]:
     if product_of(facts):
-        required = [facts["outcome"], facts.get("new_decision", "")]
-        if facts.get("amount_cents") is not None:
-            required.append(format_usd(facts["amount_cents"]))
-        return _usd_draft_issues(draft, required, facts)
+        return [] if draft == template_grievance_reply(facts) else ["Use the recorded grievance outcome."]
     outcome = next(k for k, v in OUTCOME_LABELS.items() if v == facts["outcome"])
     required = [OUTCOME_KEYWORDS[outcome]]
     if outcome == "rereview":
@@ -369,9 +369,10 @@ def write_grievance_reply(
 
     템플릿 대체 문안은 원래 사유를 쓴다(모델을 거치지 않는다).
     """
-    spec = _spec(GRIEVANCE_AGENT, model, "Write a plain English reply from the recorded decision only. Include the "
-                 "outcome, new decision and exact USD amount when present. No alternative offers, promises or identifiers."
-                 if product_of(facts) else GRIEVANCE_INSTRUCTIONS)
+    if product_of(facts):
+        receipt = template_grievance_reply(facts)
+        return Notice(receipt.title, receipt.body, "template")
+    spec = _spec(GRIEVANCE_AGENT, model, GRIEVANCE_INSTRUCTIONS)
     model_facts = {k: v for k, v in facts.items() if k != "officer_reason"}
     if mask is not None:
         model_facts["officer_reason"] = mask(facts["officer_reason"])

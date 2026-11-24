@@ -308,6 +308,41 @@ def test_grievance_submission_is_enqueued(env):
                                           "applicant_id": "seller-dailylook-01", "text": "한도가 낮습니다"})]
 
 
+def test_usd_grievance_forms_deliver_both_commands_to_workers(raw, key):
+    from journey.activities import Deps
+    from journey.grievance import handle_grievance, handle_grievance_decision
+    from shared.contracts import USD_V1
+    from tests.orchestrator.test_grievance import MemoryStore
+    meta = USD_V1.model_dump()
+    applicant, gid = "seller-dailylook-01", "grv-new001"
+    app = dict(meta, id="app-2", application_id="app-2", applicant_id=applicant,
+               status="approved", requested_amount_cents=90000,
+               policy=dict(meta, decision="eligible", max_amount_cents=80000, rate_band="A", reason_codes=[]),
+               officer_decision=dict(decision="approve", amount_cents=80000, officer_id="old", reason="original"))
+    queue, privacy, store = FakeQueue(), FakePrivacy([consent("c-2", "app-2")], [], []), MemoryStore()
+    store.upsert("applications", app)
+    worker = Deps(store=store, raw=raw, mock=None, policy=None, events=None, clock=lambda: NOW, pseudonym_key=key)
+    client = TestClient(create_app(ConsoleDeps(store=FakeStore([app]), raw=raw, queue=queue, pseudonym_key=key,
+        privacy=privacy, new_grievance_id=lambda: gid)))
+    path = f"{HOME}/grievances"
+    assert post(client, CUSTOMER, path, path, application_id="app-2", text="Please review.", currency="KRW").status_code == 202
+    topic, submission = queue.sent.pop()
+    assert topic == "grievances" and handle_grievance(worker, json.dumps(submission)) == "created"
+    privacy.grievances[("app-2", gid)] = store.read("grievances", gid, "app-2")
+    path = f"/grievances/app-2/{gid}"
+    page = client.get(path, headers=OFFICER).text
+    assert 'name="amount_usd"' in page and "$800.00" in page and 'name="amount_krw"' not in page
+    fields = dict(outcome="rereview", new_decision="approve", reason="Recorded review.")
+    for invalid in ("700.011", "800.01"):
+        assert post(client, OFFICER, path+"/decision", path, **fields, amount_usd=invalid).status_code == 422
+        assert not queue.sent
+    assert post(client, OFFICER, path+"/decision", path, **fields, amount_usd="700.01").status_code == 202
+    topic, decision = queue.sent.pop()
+    assert topic == "grievance-decisions" and decision["amount_cents"] == 70001 and "amount_krw" not in decision
+    assert handle_grievance_decision(worker, json.dumps(decision)) == "resolved"
+    assert "$700.01" in store.read("grievances", gid, "app-2")["reply"]["body"]
+
+
 @pytest.mark.parametrize("fields, status", [
     ({"application_id": "app-2", "text": " "}, 422),
     ({"application_id": "app-2", "text": "가" * 1001}, 422),

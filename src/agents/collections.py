@@ -545,8 +545,11 @@ def settle_proposal(
         return Settled(unchanged, None, None, [f"알 수 없는 결정입니다: {decision}"])
     issues = message_issues(send_text)
     if case.product:
-        issues = (["Message violates contact policy."] if issues else []) + usd_language.issues(
-            send_text, [case.amount_cents], [case.installment_no])
+        script = proposal.get("script_id")
+        permitted = {render_script(script, case)} if script in USD_SCRIPTS else set()
+        if permitted and decision == "modify":
+            permitted.add(f"Your balance is {format_usd(case.amount_cents)}.")
+        issues = ["Use the approved script or the recorded balance."] if issues or send_text not in permitted else []
     if issues:
         return Settled(unchanged, None, None, issues)
     contact = remind(case.case_id, contacts, case.contact_on, now, script_id=str(proposal.get("script_id")), by="officer",

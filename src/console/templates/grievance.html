@@ -17,10 +17,10 @@
 <section>
 <h2>{{ _("접수 시점 판단 기록") }}</h2>
 {% if r.officer_decision %}{% set od = r.officer_decision %}
-<p>{{ _("원결정") }}: <strong>{{ od.decision|decision_label }}</strong> · {{ od.amount_krw|krw }} · {{ od.officer_id }}{% if od.reason %} · {{ od.reason|mt }}{% endif %}</p>
+<p>{{ _("원결정") }}: <strong>{{ od.decision|decision_label }}</strong> · {{ od.amount_cents|usd_cents if g.product_version == 'usd-v1' else od.amount_krw|krw }} · {{ od.officer_id }}{% if od.reason %} · {{ od.reason|mt }}{% endif %}</p>
 {% endif %}
 {% if r.policy %}
-<p>{{ _("정책 판정 %(decision)s · 한도 %(limit)s · 금리 구간 %(band)s", decision=r.policy.decision, limit=r.policy.max_amount_krw|krw, band=r.policy.rate_band or "-") }} <small>{{ r.policy.rules_version }}</small></p>
+<p>{{ _("정책 판정 %(decision)s · 한도 %(limit)s · 금리 구간 %(band)s", decision=r.policy.decision, limit=r.policy.max_amount_cents|usd_cents if g.product_version == 'usd-v1' else r.policy.max_amount_krw|krw, band=r.policy.rate_band or "-") }} <small>{{ r.policy.rules_version }}</small></p>
 <table>
   <thead><tr><th>{{ _("코드") }}</th><th>{{ _("내용") }}</th><th>{{ _("관측값") }}</th><th>{{ _("기준") }}</th></tr></thead>
   <tbody>{% for c in r.policy.reason_codes %}<tr><td>{{ c.code }}</td><td>{{ c.message|mt }}</td><td>{{ c.observed }}</td><td>{{ c.threshold }}</td></tr>{% endfor %}</tbody>
@@ -37,7 +37,7 @@
 <section>
 <h2>{{ _("처리") }}</h2>
 {% if g.decision %}{% set dd = g.decision %}
-<p><strong>{{ dd.outcome|outcome_label }}</strong>{% if dd.new_decision %} → {{ dd.new_decision|decision_label }} {{ dd.amount_krw|krw }}{% endif %} · {{ dd.officer_id }} · {{ dd.reason|mt }}</p>
+<p><strong>{{ dd.outcome|outcome_label }}</strong>{% if dd.new_decision %} → {{ dd.new_decision|decision_label }} {{ dd.amount_cents|usd_cents if g.product_version == 'usd-v1' else dd.amount_krw|krw }}{% endif %} · {{ dd.officer_id }} · {{ dd.reason|mt }}</p>
 {% if dd.conditions %}<ul>{% for c in dd.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
 <p class="note">{{ _("재심사 결과는 기록만 남깁니다. 신청 문서(원 판단 기록)는 바꾸지 않습니다.") }}</p>
 {% endif %}
@@ -69,7 +69,11 @@
     {% for value, label in (("approve", pgettext("button", "승인")), ("decline", pgettext("button", "거절"))) %}
     <label><input type="radio" name="new_decision" value="{{ value }}"{% if nd == value %} checked{% endif %}> {{ label }}</label>
     {% endfor %}
+    {% if g.product_version == 'usd-v1' %}
+    <label>Amount (USD) <input name="amount_usd" inputmode="decimal" value="{{ form.amount_usd if form else '' }}"></label>
+    {% else %}
     <label>{% if r.policy %}{{ _("금액(원, 한도 %(limit)s)", limit=r.policy.max_amount_krw|krw) }}{% else %}{{ _("금액(원)") }}{% endif %} <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else '' }}"></label>
+    {% endif %}
   </fieldset>
   <label>{{ _("사유") }} <textarea name="reason" rows="3">{{ form.reason if form else "" }}</textarea></label>
   <button type="submit">{{ _("처리 보내기") }}</button>

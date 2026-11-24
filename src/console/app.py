@@ -87,6 +87,8 @@ from journey.models import (
     ConsentCommand,
     GrievanceDecision,
     GrievanceSubmission,
+    UsdGrievanceDecision,
+    UsdGrievanceSubmission,
     OfferExpire,
     OfficerMessage,
     PlanChoice,
@@ -98,10 +100,11 @@ from journey.models import (
     replay_in_progress,
 )
 from agents.data_assembly import build_pseudonymizer
-from journey.validation import REREVIEW_ERRORS, validate_officer_decision, validate_rereview_decision
+from journey.validation import REREVIEW_ERRORS, usd_rereview_error, validate_officer_decision, validate_rereview_decision
 from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
 from shared.product_context import product_of
+from shared.money import format_usd, parse_usd_cents
 from shared.sellers import DEMO_SELLERS, seller_label, seller_name
 
 HERE = Path(__file__).parent
@@ -250,6 +253,7 @@ def _templates() -> Environment:
     env.install_gettext_callables(gettext=i18n.gettext, ngettext=lambda s, p, n: i18n.gettext(s if n == 1 else p),
                                   pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
+    env.filters["usd_cents"] = lambda cents: format_usd(cents) if type(cents) is int else "-"
     env.filters["kst"] = _kst
     env.filters["status_label"] = lambda s: i18n.label(STATUS_LABELS, s)
     env.filters["path"] = lambda s: quote(str(s), safe="")
@@ -673,7 +677,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         # 스냅샷은 원천 없이(raw=None) 저장된 가명 텍스트로만 만든다. 원천은 심사역이 쓴 질문·대화를 그 건의
         # 가명처리기로 가리는 데만 쓴다. 원천을 읽다 오류가 나면 엔티티 없이 가린 문장을 보내지 않고 실패로 답한다.
         raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
-        if not readable:
+        if not readable or (usd and raw is None):
             return _chat_error("failed", usd)
         masker = (build_pseudonymizer(deps.pseudonym_key, raw.profile, raw.transactions) if raw is not None
                   else Pseudonymizer(deps.pseudonym_key))
@@ -1076,7 +1080,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if not doc.get("officer_decision"):
             raise HTTPException(409, "application has no decision yet")
         try:
-            message = GrievanceSubmission(
+            product = product_of(doc)
+            message = (UsdGrievanceSubmission if product else GrievanceSubmission)(
+                **(product.model_dump() if product else {}),
                 grievance_id=deps.new_grievance_id(), application_id=application_id, applicant_id=applicant_id,
                 text=form.get("text", ""),
             )
@@ -1192,25 +1198,39 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         outcome = form.get("outcome", "")
         rereview = outcome == "rereview"
         new_decision = form.get("new_decision", "") if rereview else ""
-        amount_text = form.get("amount_krw", "").strip() if rereview and new_decision != "decline" else ""
-        amount = _int(amount_text) if amount_text else None
+        product = product_of(doc)
 
         def invalid(message: str, code: str | None = None) -> HTMLResponse:
             return render("grievance.html", user, 422, texts=grievance_texts(doc), g=doc, error=message,
                           error_code=code, form=form)
 
+        record = doc.get("record") or {}
+        if product != product_of(record):
+            return invalid("Grievance record product mismatch.")
+        if product and ("amount_krw" in form or "amount_cents" in form):
+            return invalid("Enter the amount in USD.")
+        amount_text = form.get("amount_usd" if product else "amount_krw", "").strip()
+        if not product and (not rereview or new_decision == "decline"):
+            amount_text = ""
+        try:
+            amount = (parse_usd_cents if product else _int)(amount_text) if amount_text else None
+        except ValueError:
+            return invalid("Enter a dollar amount with at most two decimal places.")
         if amount_text and amount is None:
             return invalid(_(DECISION_ERRORS["invalid_payload"]))
         try:
             # 심사역 ID는 폼이 아니라 로그인 주체에서만 가져온다.
-            message = GrievanceDecision(
+            message = (UsdGrievanceDecision if product else GrievanceDecision)(
                 grievance_id=grievance_id, application_id=application_id, outcome=outcome,
                 officer_id=user.user_id, reason=form.get("reason", ""), new_decision=new_decision or None,
-                amount_krw=amount,
+                **({**product.model_dump(), "amount_cents": amount} if product else {"amount_krw": amount}),
             )
         except ValidationError:
             return invalid(_("처리 결과와 사유를 확인하세요(재심사에는 새 결정이 필요합니다)."))
-        if rereview:
+        if rereview and isinstance(message, UsdGrievanceDecision):
+            if error := usd_rereview_error(message, record.get("policy") or {}):
+                return invalid(_(DECISION_ERRORS.get(error, error)), error)
+        elif rereview:
             proposed = message.model_dump(include={"officer_id", "amount_krw", "conditions", "reason"})
             _proposed, error = validate_rereview_decision(
                 {**proposed, "decision": message.new_decision}, (doc.get("record") or {}).get("policy")

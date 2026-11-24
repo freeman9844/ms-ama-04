@@ -132,6 +132,22 @@ def test_usd_rereview_requires_matching_contract_and_preserves_audit_reason(deps
     assert "$4,999.99" in doc["reply"]["body"] and doc["reply"]["body"].isascii()
 
 
+def test_usd_grievance_receipt_cannot_reverse_approval_or_leak_human_reason(deps):
+    from shared.contracts import USD_V1
+    meta = USD_V1.model_dump()
+    runner = ReplyRunner(Draft(title="Declined", body="Your application was reviewed again and not approved for $700.01."))
+    deps = replace(deps, agents=runner)
+    deps.store.upsert("applications", {**APPLICATION, **meta, "assessment": None,
+        "policy": {**meta, "decision": "eligible", "max_amount_cents": 80000, "reason_codes": []}})
+    assert submit(deps, **meta) == "created"
+    assert decide(deps, **meta, outcome="rereview", new_decision="approve", amount_cents=70001,
+                  reason="Contact Jamie Park") == "resolved"
+    g = grievance(deps)
+    assert "Jamie Park" not in str(runner.inputs)
+    assert "not approved" not in g["reply"]["body"] and "approved" in g["reply"]["body"] and "$700.01" in g["reply"]["body"]
+    assert g["decision"]["reason"] == "Contact Jamie Park"
+
+
 def test_submission_records_snapshot_and_publishes_without_text(deps):
     assert submit(deps) == "created"
     doc = grievance(deps)

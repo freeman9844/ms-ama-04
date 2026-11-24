@@ -23,7 +23,7 @@
   <p class="quote">{{ g.text|mt_ref(g.application_id) }}</p>
   {% if g|archived_reply %}
   <p>{{ _("과거 심사 의견을 참조한 회신은 감사 기록에 보관합니다.") }}</p>
-  {% if g.decision %}<p>{{ g.decision.outcome|outcome_label }}{% if g.decision.new_decision %} · {{ g.decision.new_decision|decision_label }} {{ g.decision.amount_krw|krw }}{% endif %}</p>{% endif %}
+  {% if g.decision %}<p>{{ g.decision.outcome|outcome_label }}{% if g.decision.new_decision %} · {{ g.decision.new_decision|decision_label }} {{ g.decision.amount_cents|usd_cents if g.product_version == 'usd-v1' else g.decision.amount_krw|krw }}{% endif %}</p>{% endif %}
   {% elif g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title|mt(g.application_id) }}</summary><p class="notice">{{ g.reply.body|mt_ref(g.application_id) }}</p></details>{% endif %}
 </article>
 {% endfor %}

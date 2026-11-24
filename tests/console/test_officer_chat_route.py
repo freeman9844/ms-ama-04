@@ -129,6 +129,16 @@ def test_usd_chat_disabled_error_is_english_with_korean_locale(raw, key):
     assert response.status_code == 503 and response.json()["error"].isascii()
 
 
+def test_usd_missing_mask_sources_do_not_send_free_text(key):
+    from shared.contracts import USD_V1
+    from tests.console.conftest import FakeRaw
+    doc = dict(USD_V1.model_dump(), id="app-1", application_id="app-1", consent={"consent_id": "missing"})
+    chat = FakeChat()
+    response = _post(_client(lambda: doc, FakeRaw({}), key, chat), key,
+                     {"question": "Ask Jamie Park.", "history": [{"role": "user", "text": "Jamie Park"}]})
+    assert response.status_code == 502 and not chat.calls
+
+
 @pytest.mark.parametrize("error, status, message", [
     (GatewayThrottled("rate_limited", "c"), 429, "요청이 많습니다. 잠시 후 다시 질문해 주세요."),
     (GatewayBlocked("content_blocked", "c"), 422, "이 질문에는 답할 수 없습니다."),
