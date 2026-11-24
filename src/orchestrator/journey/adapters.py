@@ -138,7 +138,7 @@ class CosmosStore:
 
     def pending_raw_repairs(self) -> list[str]:
         return list(self._db.get_container_client("consents").query_items(
-            "SELECT VALUE c.id FROM c WHERE c.raw_repair_pending = true OR "
+            "SELECT VALUE c.id FROM c WHERE c.deletion_notice_pending = true OR c.raw_repair_pending = true OR "
             "(c.raw_write_count > 0 AND c.status IN ('revoked', 'expired'))", enable_cross_partition_query=True))
 
     def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]:

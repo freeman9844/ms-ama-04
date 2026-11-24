@@ -217,7 +217,7 @@ def mock_app():
 
 class RegistrationStore(MemoryStore):
     def pending_raw_repairs(self):
-        return [i for (c, i), d in self.docs.items() if c == "consents" and (d.get("raw_repair_pending")
+        return [i for (c, i), d in self.docs.items() if c == "consents" and (d.get("deletion_notice_pending") or d.get("raw_repair_pending")
                 or d.get("raw_write_count") and d.get("status") in ("revoked", "expired"))]
 
     def prior_contact_slots(self, borrower, lo, hi):

@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import sqlite3
 import sys
 from copy import deepcopy
 from dataclasses import replace
@@ -12,7 +14,7 @@ from fastapi.testclient import TestClient
 from agents.notices import Draft
 from agents.runtime import AgentRun
 from journey.activities import ConsentEnded, Deps, _remember_foundry, assemble_data, request_consent
-from journey.adapters import BlobRawStore, HttpMockApi, HttpPolicyApi
+from journey.adapters import BlobRawStore, CosmosStore, HttpMockApi, HttpPolicyApi
 from journey.models import KST
 from journey.consent import (
     CONSENT_ACTIVITIES,
@@ -24,6 +26,7 @@ from journey.consent import (
     handle_consent_command,
     handle_lifecycle_start,
     send_consent_notice,
+    sweep_raw_repairs,
 )
 from mockapis.app import create_app as create_mock_app
 from mockapis.demo import build_demo_cases
@@ -46,6 +49,10 @@ class MemoryStore:
     def upsert(self, container, document):
         self.docs[(container, document["id"])] = deepcopy(document)
         self.etags[(container, document["id"])] = self.etags.get((container, document["id"]), 0) + 1
+
+    def create_if_absent(self, container, document):
+        if (container, document["id"]) not in self.docs:
+            self.upsert(container, document)
 
     def read(self, container, item_id, partition_key):
         doc = self.docs.get((container, item_id))
@@ -609,6 +616,150 @@ def test_retry_keeps_items_verified_on_an_earlier_attempt(mock_client):
     assert runner.deleted_containers == ["cntr_1"]
     proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
     assert proof["attempts"] == 2 and all(i["verified"] for i in proof["items"])
+
+
+@pytest.fixture
+def cosmos_proofs(monkeypatch):
+    # Keep the production store's conflict handling; substitute only its SDK transport.
+    backing = MemoryStore()
+    errors = SimpleNamespace(**{name: type(name, (Exception,), {}) for name in
+                             ("CosmosResourceExistsError", "CosmosResourceNotFoundError", "CosmosAccessConditionFailedError")})
+    match = SimpleNamespace(IfNotModified=object())
+    monkeypatch.setitem(sys.modules, "azure.cosmos.exceptions", errors)
+    monkeypatch.setitem(sys.modules, "azure.core", SimpleNamespace(MatchConditions=match))
+
+    class Container:
+        def read_item(self, cid, partition_key):
+            doc = backing.read(PROOFS_CONTAINER, cid, partition_key)
+            if not doc:
+                raise errors.CosmosResourceNotFoundError()
+            return doc
+
+        def create_item(self, doc):
+            if backing.read(PROOFS_CONTAINER, doc["id"], doc["id"]):
+                raise errors.CosmosResourceExistsError()
+            backing.upsert(PROOFS_CONTAINER, doc)
+
+        def replace_item(self, cid, doc, etag, match_condition):
+            assert cid == doc["id"] and match_condition is match.IfNotModified
+            if not backing.replace(PROOFS_CONTAINER, doc, etag):
+                raise errors.CosmosAccessConditionFailedError()
+
+    real = CosmosStore.__new__(CosmosStore)
+    real._db = SimpleNamespace(get_container_client=lambda _: Container())
+    return real
+
+
+@pytest.mark.parametrize("pause_at", ["manifest", "delete"])
+def test_interleaved_first_proof_keeps_original_manifest(mock_client, monkeypatch, cosmos_proofs, pause_at):
+    deps = make_deps(mock_client)
+    for method in ("create_if_absent", "read", "replace"):
+        local, cosmos = getattr(deps.store, method), getattr(cosmos_proofs, method)
+        monkeypatch.setattr(deps.store, method, lambda c, *args, local=local, cosmos=cosmos:
+                            (cosmos if c == PROOFS_CONTAINER else local)(c, *args))
+    cid = consent_for(deps)["consent_id"]
+    container = f"consent-{cid}"
+    deps.raw.put_json(container, "flow.json", {"sample": 1})
+    original = deps.raw.manifest(container)
+    digest = hashlib.sha256(json.dumps(original, sort_keys=True).encode()).hexdigest()
+    deps.store.upsert("consents", dict(deps.store.read("consents", cid, cid), raw_write_count=1))
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", lambda: [cid], raising=False)
+    method = "manifest" if pause_at == "manifest" else "delete_container"
+    operation = getattr(deps.raw, method)
+    winner = {}
+
+    def interleave(target):
+        monkeypatch.setattr(deps.raw, method, operation)
+        if pause_at == "delete":
+            result = operation(target)
+        sweep_raw_repairs(deps)
+        winner.update(deps.store.read(PROOFS_CONTAINER, cid, cid))
+        return operation(target) if pause_at == "manifest" else result
+
+    monkeypatch.setattr(deps.raw, method, interleave)
+    try:
+        delete_consent_data(deps, end(cid))
+    except IncompleteDeletion:
+        pass  # A stale replacement may lose to the sweep.
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert proof["complete"] and proof == winner
+    assert (proof["manifest"], proof["manifest_sha256"]) == (original, digest)
+
+
+@pytest.mark.parametrize("other_verified", [False, True])
+def test_repair_resumes_lifecycle_generation_without_restore_flag(mock_client, monkeypatch, other_verified):
+    deps = make_deps(mock_client, FoundryRunner(exists=not other_verified))
+    cid = granted(deps)["consent_id"]
+    container = f"consent-{cid}"
+    # The late writer arrives after the lifecycle marked the consent, before its first proof.
+    doc = deps.store.read("consents", cid, cid)
+    deps.store.upsert("consents", dict(doc, status="revoked", raw_repair_generation=1, raw_repair_pending=True))
+    with monkeypatch.context() as m:
+        m.setattr(deps.raw, "delete_container", lambda _: False)
+        with pytest.raises(IncompleteDeletion):
+            delete_consent_data(deps, end(cid))
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", lambda: [cid], raising=False)
+    sweep_raw_repairs(deps)
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert deps.raw.manifest(container) is None and proof["items"][0]["verified"]
+    assert proof["complete"] is other_verified
+    assert not deps.store.read("consents", cid, cid)["raw_repair_pending"]
+    assert any(m["type"] == "consent.revoked" for _, m, _ in deps.events.sent) is other_verified
+
+
+def test_sweep_rediscovers_failed_notice_without_repeating_deletion(mock_client, monkeypatch):
+    deps = make_deps(mock_client, FoundryRunner())
+    cid = granted(deps)["consent_id"]
+    doc = deps.store.read("consents", cid, cid)
+    deps.store.upsert("consents", dict(doc, status="revoked", raw_write_count=1, deletion_request=end(cid)))
+
+    def query(sql, enable_cross_partition_query):
+        doc = deps.store.read("consents", cid, cid)
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE c (id,status,raw_write_count,raw_repair_pending,deletion_notice_pending)")
+            db.execute("INSERT INTO c VALUES (?,?,?,?,?)", [doc.get(k) for k in
+                       ("id", "status", "raw_write_count", "raw_repair_pending", "deletion_notice_pending")])
+            return [r[0] for r in db.execute(sql.replace("SELECT VALUE", "SELECT"))]
+
+    cosmos = CosmosStore.__new__(CosmosStore)
+    cosmos._db = SimpleNamespace(get_container_client=lambda _: SimpleNamespace(query_items=query))
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", cosmos.pending_raw_repairs, raising=False)
+    replace_doc = deps.store.replace
+
+    def fail_notice(c, doc, etag):
+        if c == "consents" and doc.get("notices"):
+            raise OSError("notice write interrupted")
+        return replace_doc(c, doc, etag)
+
+    with monkeypatch.context() as m:
+        m.setattr(deps.store, "replace", fail_notice)
+        sweep_raw_repairs(deps)
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert proof["complete"] and not deps.store.read("consents", cid, cid)["raw_write_count"]
+    assert cosmos.pending_raw_repairs() == [cid]
+    sweep_raw_repairs(deps)
+    send_consent_notice(deps, dict(consent_id=cid, kind="deletion"))
+    assert not cosmos.pending_raw_repairs()
+    assert [n["kind"] for n in deps.store.read("consents", cid, cid)["notices"]] == ["deletion"]
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid) == proof
+    assert deps.agents.deleted_conversations.count("conv_a") == 1
+    assert deps.agents.deleted_containers == ["cntr_1"]
+
+
+def test_repair_accepts_verified_legacy_checkpoint_before_ack(mock_client, monkeypatch):
+    deps = make_deps(mock_client)
+    cid = consent_for(deps)["consent_id"]
+    delete_consent_data(deps, end(cid))
+    # Older repair persisted verified items with restore_complete=False, then died before ack.
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    deps.store.upsert(PROOFS_CONTAINER, dict(proof, complete=False, restore_complete=False, raw_repair_generation=1))
+    doc = deps.store.read("consents", cid, cid)
+    deps.store.upsert("consents", dict(doc, raw_repair_pending=True, raw_repair_generation=1, deletion_complete=False))
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", lambda: [cid], raising=False)
+    monkeypatch.setattr(deps.raw, "delete_container", lambda _: pytest.fail("repeated verified deletion"))
+    sweep_raw_repairs(deps)
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert deps.store.read("consents", cid, cid)["deletion_complete"]
 
 
 @pytest.mark.parametrize("prior_notice", [False, True])

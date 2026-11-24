@@ -89,24 +89,26 @@ def _repair_raw(deps: Deps, consent: dict, container: str) -> bool:
     def invalidate(proof: dict) -> bool | None:
         if proof.get("raw_repair_generation", 0) >= generation:
             return False
-        proof["restore_complete"] = proof["complete"] or proof.get("restore_complete", False)
         proof.update(complete=False, raw_repair_generation=generation)
         raw = next(i for i in proof["items"] if i["kind"] == "raw_container")
         raw.update(verified=False, outcome="pending", detail="late_write")
 
     update_doc(deps.store, PROOFS_CONTAINER, cid, cid, invalidate)
     proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
-    if proof and proof.get("raw_repair_generation") != generation:
+    if not proof or proof.get("raw_repair_generation") != generation:
         return False
-    raw = next((i for i in (proof or {}).get("items", []) if i["kind"] == "raw_container"), None)
-    needs_verification = not raw or not raw["verified"]
+    raw = next(i for i in proof["items"] if i["kind"] == "raw_container")
+    needs_verification = not raw["verified"]
     if needs_verification:
         raw = _delete_raw(deps, container, fence_writers=bool(consent.get("raw_write_count")))
-    if proof and needs_verification:
         proof["items"] = [raw if i["kind"] == "raw_container" else i for i in proof["items"]]
-        proof["complete"] = proof["restore_complete"] and all(i["verified"] for i in proof["items"])
-        proof["attempts"] += 1
+    complete = all(i["verified"] for i in proof["items"])
+    if needs_verification or proof["complete"] != complete:
+        proof["complete"] = complete
+        proof["attempts"] = proof.get("attempts", 0) + 1
         proof["deleted_at"] = deps.clock().isoformat()
+        if proof["complete"] and not proof.get("event_published"):
+            _publish_ended(deps, proof)
         if not deps.store.replace(PROOFS_CONTAINER, proof, proof["_etag"]):
             return False
 
@@ -119,11 +121,19 @@ def _repair_raw(deps: Deps, consent: dict, container: str) -> bool:
         if (last.get("generation"), last.get("outcome")) != (generation, outcome):
             history.append({"kind": "raw_container", "target": container, "outcome": outcome,
                             "generation": generation, "at": deps.clock().isoformat()})
-        if proof and raw["verified"]:
-            doc.update(raw_repair_pending=False, raw_write_count=0, deletion_complete=proof["complete"])
+        if raw["verified"]:
+            doc.update(raw_repair_pending=False, deletion_complete=proof["complete"])
+            if proof["complete"] or not doc.get("deletion_request"):
+                _finish_writes(doc)
 
     update_doc(deps.store, "consents", cid, cid, finish)
-    return bool(proof and raw["verified"])
+    return raw["verified"]
+
+
+def _finish_writes(doc: dict) -> None:
+    if doc.get("deletion_request") and not any(n["kind"] == "deletion" for n in doc.get("notices", [])):
+        doc["deletion_notice_pending"] = True
+    doc["raw_write_count"] = 0
 
 
 def sweep_raw_repairs(deps: Deps) -> None:
@@ -139,6 +149,8 @@ def sweep_raw_repairs(deps: Deps) -> None:
             elif consent.get("raw_repair_pending"):
                 if not _repair_raw(deps, consent, consent.get("raw_container") or raw_container(cid)):
                     log.warning("raw_repair_deferred ref=%s reason=unverified", ref)
+            elif consent.get("deletion_notice_pending"):
+                send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
         except Exception:  # Per-item retry: never log raw SDK errors or block the rest of the scan.
             log.warning("raw_repair_deferred ref=%s reason=checkpoint", ref)
 
@@ -220,57 +232,50 @@ def delete_consent_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     if consent is None:
         raise LookupError(f"동의 문서 없음: {consent_id}")
     container = consent.get("raw_container") or raw_container(consent_id)
-    manifest = existing["manifest"] if existing else (deps.raw.manifest(container) or [])
-    # 앞선 시도에서 확인된 항목은 다시 지우지 않는다(이미 지운 Foundry 컨테이너는 다시 지우면 404라 미확인이 된다).
-    # 원천 컨테이너는 늦은 쓰기가 있을 수 있어 매번 확인한다.
-    done = {(i["kind"], i["target"]): i for i in (existing or {}).get("items", []) if i["verified"]}
     steps: list[tuple[str, str, Callable[[], dict[str, Any]]]] = [
         ("consent_registry", consent_id, lambda: _revoke_registry(deps, consent_id))
     ]
     steps += [("conversation", c, partial(_delete_conversation, deps, c)) for c in consent.get("foundry_conversations", [])]
     steps += [("container", c["id"], partial(_delete_container, deps, c)) for c in consent.get("foundry_containers", [])]
+    if existing is None:
+        # Both the lifecycle and the sweep can start here. Only the first manifest survives.
+        manifest = deps.raw.manifest(container) or []
+        application_id = consent.get("application_id")
+        pending = [_item("raw_container", container, "pending", False)]
+        pending.extend(_item(kind, target, "pending", False) for kind, target, _ in steps)
+        deps.store.create_if_absent(PROOFS_CONTAINER, {
+            "id": consent_id, "consent_id": consent_id, "application_id": application_id,
+            "applicant_id": consent.get("applicant_id"), "reason": consent["status"],
+            "trigger": payload["trigger"], "requested_by": payload["requested_by"], "deleted_at": now,
+            "items": pending, "manifest": manifest,
+            "manifest_sha256": hashlib.sha256(json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
+            "retained": ([{"kind": "application_record", "target": f"applications/{application_id}", "note": RETAINED}]
+                         if application_id else []),
+            "complete": False, "attempts": 0, "raw_repair_generation": consent.get("raw_repair_generation", 0),
+            "event_published": False, "event_error": None,
+        })
+        existing = deps.store.read(PROOFS_CONTAINER, consent_id, consent_id)
+        if not existing:
+            raise IncompleteDeletion(f"Deletion checkpoint unavailable: {consent_id}")
+        if proof_is_current(deps.store.read("consents", consent_id, consent_id), existing):
+            return _proof_summary(existing)
+    if existing.get("raw_repair_generation", 0) > consent.get("raw_repair_generation", 0):
+        raise IncompleteDeletion(f"Deletion generation changed: {consent_id}")
+    done = {(i["kind"], i["target"]): i for i in existing["items"] if i["verified"]}
     items = [_delete_raw(deps, container, fence_writers=bool(consent.get("raw_write_count")))]
     items += [done.get((kind, target)) or run() for kind, target, run in steps]
-    first = existing or payload
-    application_id = consent.get("application_id")
-    proof = {
-        "id": consent_id,
-        "consent_id": consent_id,
-        "application_id": application_id,
-        "applicant_id": consent.get("applicant_id"),
-        "reason": consent["status"],
-        "trigger": first["trigger"],
-        "requested_by": first["requested_by"],
-        "deleted_at": now,
-        "items": items,
-        "manifest": manifest,
-        "manifest_sha256": hashlib.sha256(
-            json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode("utf-8")
-        ).hexdigest(),
-        "retained": (
-            [{"kind": "application_record", "target": f"applications/{application_id}", "note": RETAINED}]
-            if application_id
-            else []
-        ),
-        "complete": all(i["verified"] for i in items),
-        "attempts": (existing or {}).get("attempts", 0) + 1,
-        "raw_repair_generation": consent.get("raw_repair_generation", 0),
-        "event_published": bool((existing or {}).get("event_published")),
-        "event_error": None,
-    }
-    if proof["complete"] and not proof["event_published"]:
+    proof = dict(existing, items=items, complete=all(i["verified"] for i in items), deleted_at=now,
+                 attempts=existing.get("attempts", 0) + 1, raw_repair_generation=consent.get("raw_repair_generation", 0))
+    if proof["complete"] and not proof.get("event_published"):
         _publish_ended(deps, proof)
-    if existing:
-        if not deps.store.replace(PROOFS_CONTAINER, proof, existing["_etag"]):
-            raise IncompleteDeletion(f"Deletion proof changed: {consent_id}")
-    else:
-        deps.store.upsert(PROOFS_CONTAINER, proof)
+    if not deps.store.replace(PROOFS_CONTAINER, proof, existing["_etag"]):
+        raise IncompleteDeletion(f"Deletion proof changed: {consent_id}")
 
     def finish(doc: dict[str, Any]) -> bool | None:
         if doc.get("raw_repair_generation", 0) != proof["raw_repair_generation"]:
             return False
         if proof["complete"]:
-            doc["raw_write_count"] = 0
+            _finish_writes(doc)
         doc["deletion_complete"] = proof["complete"] and not doc.get("raw_repair_pending")
 
     final = update_doc(deps.store, "consents", consent_id, consent_id, finish)
@@ -296,21 +301,26 @@ def send_consent_notice(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     def sent_deletion(doc: dict[str, Any]) -> dict[str, Any] | None:
         return next((n for n in doc.get("notices", []) if n["kind"] == "deletion"), None)
 
-    proof = None
+    proof = prior = None
     if kind == "deletion":
         proof = deps.store.read(PROOFS_CONTAINER, consent_id, consent_id)
         if not proof_is_current(consent, proof):
             raise LookupError(f"완료된 삭제 증명 없음: {consent_id}")
-        if (prior := sent_deletion(consent)) is not None:
+        if (prior := sent_deletion(consent)) is not None and not consent.get("deletion_notice_pending"):
             return _notice_summary(prior)
-    notice = write_notice(consent_facts(kind, consent, proof=proof), runner=deps.agents, model=deps.notice_model)
-    entry = {"kind": kind, "at": deps.clock().isoformat(), **notice.as_dict()}
+    if prior is not None:
+        entry = prior
+    else:
+        notice = write_notice(consent_facts(kind, consent, proof=proof), runner=deps.agents, model=deps.notice_model)
+        entry = {"kind": kind, "at": deps.clock().isoformat(), **notice.as_dict()}
 
     def append(doc: dict[str, Any]) -> bool | None:
         if kind == "deletion" and not proof_is_current(doc, proof):
             raise LookupError(f"완료된 삭제 증명 없음: {consent_id}")
-        if kind == "deletion" and sent_deletion(doc) is not None:
-            return False
+        if kind == "deletion":
+            pending = doc.pop("deletion_notice_pending", False)
+            if sent_deletion(doc) is not None:
+                return bool(pending)
         doc.setdefault("notices", []).append(entry)
         return None
 
