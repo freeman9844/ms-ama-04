@@ -65,6 +65,9 @@ class MemoryStore:
 
 
 class MemoryRaw:
+    def open_container(self, container):
+        pass
+
     def __init__(self):
         self.blobs = {}
 

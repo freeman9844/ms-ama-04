@@ -63,6 +63,9 @@ class MemoryStore:
 
 
 class MemoryRaw:
+    def open_container(self, container):
+        pass
+
     def __init__(self):
         self.blobs = {}
 
@@ -606,6 +609,115 @@ def test_retry_keeps_items_verified_on_an_earlier_attempt(mock_client):
     assert runner.deleted_containers == ["cntr_1"]
     proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
     assert proof["attempts"] == 2 and all(i["verified"] for i in proof["items"])
+
+
+@pytest.mark.parametrize("prior_notice", [False, True])
+def test_pending_generation_hides_stale_proof_and_blocks_notice(mock_client, prior_notice, monkeypatch):
+    from console.adapters import CosmosPrivacy
+
+    deps = make_deps(mock_client)
+    cid = consent_for(deps)["consent_id"]
+    delete_consent_data(deps, end(cid))
+    payload = dict(consent_id=cid, kind="deletion")
+    if prior_notice:
+        send_consent_notice(deps, payload)
+    consent = deps.store.read("consents", cid, cid)
+    deps.store.upsert("consents", dict(consent, raw_repair_pending=True, raw_repair_generation=2,
+                                       deletion_complete=False))
+    def reader(container):
+        return SimpleNamespace(read_item=lambda item, partition_key: deps.store.read(container, item, partition_key))
+    api = CosmosPrivacy(reader("consents"), reader(PROOFS_CONTAINER), None)
+    assert not api.get_proof(cid)["complete"]
+    with pytest.raises(LookupError):
+        send_consent_notice(deps, payload)
+    deleted = []
+    delete = deps.raw.delete_container
+    def record(target):
+        deleted.append(target)
+        return delete(target)
+    monkeypatch.setattr(deps.raw, "delete_container", record)
+    delete_consent_data(deps, end(cid))
+    assert len(deleted) == 1
+    assert api.get_proof(cid)["complete"]
+    send_consent_notice(deps, payload)
+    assert len(deps.store.read("consents", cid, cid)["notices"]) == 1
+
+
+def test_sweep_isolates_failed_item_and_reports_without_payload(mock_client, monkeypatch, caplog):
+    from journey.consent import sweep_raw_repairs
+
+    deps = make_deps(mock_client)
+    ids = [consent_for(deps)["consent_id"] for _ in range(2)]
+    for cid in ids:
+        delete_consent_data(deps, end(cid))
+        doc = deps.store.read("consents", cid, cid)
+        deps.store.upsert("consents", dict(doc, raw_repair_pending=True, raw_repair_generation=1,
+                                           deletion_complete=False))
+        deps.raw.put_json(f"consent-{cid}", "flow.json", "synthetic")
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", lambda: ids, raising=False)
+    replace_doc = deps.store.replace
+    def fail_first(container, doc, etag):
+        if doc["id"] == ids[0]:
+            raise OSError("synthetic-private-payload")
+        return replace_doc(container, doc, etag)
+    monkeypatch.setattr(deps.store, "replace", fail_first)
+    sweep_raw_repairs(deps)
+    assert deps.raw.manifest(f"consent-{ids[0]}") and not deps.raw.manifest(f"consent-{ids[1]}")
+    assert deps.store.read("consents", ids[0], ids[0])["raw_repair_pending"]
+    assert "raw_repair_deferred" in caplog.text and "synthetic-private-payload" not in caplog.text
+    monkeypatch.setattr(deps.store, "replace", replace_doc)
+    sweep_raw_repairs(deps)
+    assert not deps.raw.manifest(f"consent-{ids[0]}")
+    assert deps.store.read("consents", ids[0], ids[0])["deletion_complete"]
+
+
+def test_overlapping_writers_fenced_before_certifying_abandoned_intent(mock_client, monkeypatch, azure_errors):
+    from azure.core.exceptions import ResourceNotFoundError
+    from journey.activities import put_consent_raw
+    from journey.consent import sweep_raw_repairs
+
+    class Namespace(AsyncDeleteContainer):
+        exists = False
+
+        def create_container(self):
+            assert not self.exists
+            self.exists = True
+
+        def list_blobs(self):
+            if not self.exists:
+                raise ResourceNotFoundError()
+            return super().list_blobs()
+
+        def upload_blob(self, name, data, overwrite):
+            if name == "flow.json":
+                overlap()
+            if not self.exists:
+                raise ResourceNotFoundError()
+            self.blobs[name] = data
+
+    ns = Namespace([])
+    raw = BlobRawStore.__new__(BlobRawStore)
+    raw._svc = SimpleNamespace(get_container_client=lambda _: ns)
+    deps = replace(make_deps(mock_client), raw=raw)
+    cid = consent_for(deps)["consent_id"]
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", lambda: [cid], raising=False)
+    def doc():
+        return deps.store.read("consents", cid, cid)
+    def overlap():
+        assert doc()["raw_write_count"] == 1
+        put_consent_raw(deps, cid, "pg_flow.json", {})
+        assert doc()["raw_write_count"] == 1  # the second writer cannot acknowledge the first
+        with pytest.raises(IncompleteDeletion):
+            delete_consent_data(deps, end(cid))
+        sweep_raw_repairs(deps)
+        assert ns.delete_requested and ns.exists and not ns.blobs
+        assert doc()["raw_write_count"] and not doc()["deletion_complete"]
+        ns.exists = False  # the service has now actually removed the namespace
+        sweep_raw_repairs(deps)
+        assert doc()["deletion_complete"] and not doc()["raw_write_count"]
+    with pytest.raises(ConsentEnded):
+        put_consent_raw(deps, cid, "flow.json", {})
+    assert not ns.exists and not ns.blobs and doc()["deletion_complete"]
 
 
 class RevokeOnWriteRaw(MemoryRaw):

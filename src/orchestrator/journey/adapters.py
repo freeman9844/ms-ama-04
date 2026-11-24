@@ -138,7 +138,8 @@ class CosmosStore:
 
     def pending_raw_repairs(self) -> list[str]:
         return list(self._db.get_container_client("consents").query_items(
-            "SELECT VALUE c.id FROM c WHERE c.raw_repair_pending = true", enable_cross_partition_query=True))
+            "SELECT VALUE c.id FROM c WHERE c.raw_repair_pending = true OR "
+            "(c.raw_write_count > 0 AND c.status IN ('revoked', 'expired'))", enable_cross_partition_query=True))
 
     def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]:
         loans = self._db.get_container_client("loans").query_items(
@@ -200,14 +201,12 @@ class BlobRawStore:
 
         self._svc = BlobServiceClient(account_url, credential=credential)
 
-    def put_json(self, container: str, name: str, value: Any) -> None:
-        from azure.core.exceptions import ResourceExistsError
+    def open_container(self, container: str) -> None:
+        # Only a fresh grant provisions its unique namespace, before it becomes discoverable.
+        self._svc.get_container_client(container).create_container()
 
+    def put_json(self, container: str, name: str, value: Any) -> None:
         client = self._svc.get_container_client(container)
-        try:
-            client.create_container()
-        except ResourceExistsError:
-            pass
         client.upload_blob(name, json.dumps(value, ensure_ascii=False).encode(), overwrite=True)
 
     def get_json(self, container: str, name: str) -> Any | None:

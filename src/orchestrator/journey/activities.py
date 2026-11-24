@@ -68,7 +68,12 @@ class DocumentStore(Protocol):
 
 
 class RawStore(Protocol):
-    def put_json(self, container: str, name: str, value: Any) -> None: ...
+    def open_container(self, container: str) -> None:
+        """Create the unique namespace once, before publishing a new grant."""
+        ...
+    def put_json(self, container: str, name: str, value: Any) -> None:
+        """Upload only to an existing namespace. Never recreate a deleted container."""
+        ...
     def get_json(self, container: str, name: str) -> Any | None: ...
     def manifest(self, container: str) -> list[dict[str, Any]] | None:
         """[{name, size, sha256}]. 컨테이너가 없으면 None."""
@@ -182,6 +187,7 @@ def schedule_lifecycle(deps: Deps, doc: dict[str, Any]) -> None:
     만료 처리가 예약되지 않은 동의로는 데이터를 가져오지 않는다(fail-closed).
     """
     doc["lifecycle_error"] = None
+    deps.raw.open_container(doc["raw_container"])
     if deps.queue is None:
         doc["lifecycle_error"] = "queue_disabled"
         deps.store.upsert("consents", doc)
@@ -254,6 +260,34 @@ class ConsentEnded(RuntimeError):
     """데이터 조립 중 동의가 끝났다(철회·만료). 방금 쓴 원천 데이터를 지우고 여정을 멈춘다."""
 
 
+def put_consent_raw(deps: Deps, cid: str, name: str, value: Any) -> None:
+    container = raw_container(cid)
+
+    def begin(doc: dict) -> None:
+        if doc.get("status") != "granted":
+            raise ConsentEnded(cid)
+        doc["raw_write_count"] = doc.get("raw_write_count", 0) + 1
+        doc["raw_repair_generation"] = doc.get("raw_repair_generation", 0) + 1
+
+    if update_doc(deps.store, "consents", cid, cid, begin) is None:
+        raise ConsentEnded(cid)
+    try:
+        deps.raw.put_json(container, name, value)
+    except Exception:
+        _drop_if_consent_ended(deps, cid, container)
+        raise
+
+    def acknowledge(doc: dict) -> bool | None:
+        if doc.get("status") != "granted":
+            return False
+        doc["raw_write_count"] -= 1
+
+    doc = update_doc(deps.store, "consents", cid, cid, acknowledge)
+    if not doc or doc.get("status") != "granted":
+        _drop_if_consent_ended(deps, cid, container)
+        raise ConsentEnded(cid)
+
+
 def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     consent_id = payload["consent_id"]
     product = _product(payload)
@@ -268,9 +302,9 @@ def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         product=product,
     )
     container = raw_container(consent_id)
-    for source, raw in result.data.items():
-        deps.raw.put_json(container, f"{source}.json", raw)
     _remember_foundry(deps, consent_id, [result.conversation_id] if result.conversation_id else [], [])
+    for source, raw in result.data.items():
+        put_consent_raw(deps, consent_id, f"{source}.json", raw)
     _drop_if_consent_ended(deps, consent_id, container)
     return result.report
 

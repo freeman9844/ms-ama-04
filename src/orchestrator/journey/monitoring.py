@@ -47,6 +47,7 @@ from journey.activities import (
     ConsentEnded,
     Deps,
     _drop_if_consent_ended,
+    put_consent_raw,
     _remember_foundry,
     _semantic,
     raw_container,
@@ -126,12 +127,6 @@ def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, 
     return profile, apply_plan(txns, history, loan_id=loan["id"]), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
 
 
-def _put_monitoring_raw(deps: Deps, consent_id: str, name: str, value: Any) -> None:
-    container = raw_container(consent_id)
-    deps.raw.put_json(container, name, value)
-    _drop_if_consent_ended(deps, consent_id, container)
-
-
 def _collect_pg_flow(
     deps: Deps, token: str, terms: dict[str, Any], consent_id: str, loan_id: str
 ) -> PgFlow | None:
@@ -145,7 +140,7 @@ def _collect_pg_flow(
             log.warning("Optional PG flow unavailable: %s %s", loan_id, type(e).__name__)
             return None
     else:
-        _put_monitoring_raw(deps, consent_id, "pg_flow.json", raw)
+        put_consent_raw(deps, consent_id, "pg_flow.json", raw)
         return pg
     # Raise outside the handler: validation errors contain raw values, even in their exception chain.
     raise ValueError("invalid_usd_pg_flow")
@@ -257,7 +252,7 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
             credits = [t.amount_cents for t in txns if t.loan_id and t.txn_type_code == "TRANSFER_IN"]
             if credits != [loan["amount_cents"]] or any(t.loan_id not in (None, loan_id) for t in txns):
                 raise ValueError("Source flow does not match the approved loan")
-        _put_monitoring_raw(deps, consent_id, "flow.json", flow)
+        put_consent_raw(deps, consent_id, "flow.json", flow)
         flow_start = min(t.booked_on for t in txns)
         pg = _collect_pg_flow(deps, grant["token"], terms, consent_id, loan_id)
         loan["monitoring"].update(

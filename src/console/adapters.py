@@ -17,6 +17,7 @@ from typing import Any
 from console.app import ConsoleDeps
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
 from opsmetrics.projection import project
+from shared.deletion import proof_is_current
 from shared.opinions import opinion_state
 
 APPLICATIONS = "applications"
@@ -155,7 +156,12 @@ class CosmosPrivacy:
         return _read_or_none(self._consents, consent_id, consent_id)
 
     def get_proof(self, consent_id: str) -> dict[str, Any] | None:
-        return _read_or_none(self._proofs, consent_id, consent_id)
+        proof = _read_or_none(self._proofs, consent_id, consent_id)
+        if proof and proof.get("complete") and not proof_is_current(self.get_consent(consent_id), proof):
+            return {**proof, "complete": False, "items": [
+                {**i, "verified": False, "outcome": "pending"} if i["kind"] == "raw_container" else i
+                for i in proof.get("items", [])]}
+        return proof
 
     def list_grievances(self, limit: int) -> list[dict[str, Any]]:
         return self._query(self._grievances, GRIEVANCES_QUERY, "@limit", limit)

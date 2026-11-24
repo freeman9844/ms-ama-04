@@ -89,6 +89,9 @@ class MemoryQueue:
 
 
 class MemoryRaw:
+    def open_container(self, container):
+        pass
+
     def __init__(self):
         self.blobs = {}
 
@@ -214,7 +217,8 @@ def mock_app():
 
 class RegistrationStore(MemoryStore):
     def pending_raw_repairs(self):
-        return [i for (c, i), d in self.docs.items() if c == "consents" and d.get("raw_repair_pending")]
+        return [i for (c, i), d in self.docs.items() if c == "consents" and (d.get("raw_repair_pending")
+                or d.get("raw_write_count") and d.get("status") in ("revoked", "expired"))]
 
     def prior_contact_slots(self, borrower, lo, hi):
         ids = {i for (c, i), d in self.docs.items() if c == LOANS and d.get("applicant_id") == borrower}
@@ -483,8 +487,7 @@ def test_late_raw_cleanup_recovered_by_timer(mock_app, monkeypatch, filename):
         return replace_doc(container, doc, etag)
     with monkeypatch.context() as m:
         m.setattr(deps.store, "replace", interrupt_checkpoint)
-        with pytest.raises(OSError, match="crash after proof"):
-            function_app.repair_consent_deletions(None)
+        function_app.repair_consent_deletions(None)
     assert proof()["complete"] and not consent()["deletion_complete"]
     monkeypatch.setattr(deps.raw, "delete_container", lambda *_: pytest.fail("repeated verified deletion"))
     function_app.repair_consent_deletions(None)
@@ -499,7 +502,9 @@ def test_late_raw_cleanup_recovered_by_timer(mock_app, monkeypatch, filename):
 
 def test_repair_marker_stops_replay_if_proof_checkpoint_is_unavailable(mock_app, monkeypatch):
     import function_app
-    from journey.consent import PROOFS_CONTAINER, delete_consent_data
+    from types import SimpleNamespace
+    from console.adapters import CosmosPrivacy
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data, send_consent_notice
     from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
 
     deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
@@ -520,12 +525,68 @@ def test_repair_marker_stops_replay_if_proof_checkpoint_is_unavailable(mock_app,
     assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
     assert not deps.store.read("consents", cid, cid)["deletion_complete"]
     assert deps.raw.manifest(f"consent-{cid}")
+    def reader(container):
+        return SimpleNamespace(read_item=lambda item, partition_key: deps.store.read(container, item, partition_key))
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert not CosmosPrivacy(reader("consents"), reader(PROOFS_CONTAINER), None).get_proof(cid)["complete"]
+    with pytest.raises(LookupError):
+        send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
     monkeypatch.setattr(deps.store, "replace", replace_doc)
     monkeypatch.setattr(function_app, "deps", lambda: deps)
     function_app.repair_consent_deletions(None)
     assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
     assert deps.store.read("consents", cid, cid)["deletion_complete"]
     assert not deps.raw.manifest(f"consent-{cid}")
+
+
+@pytest.mark.parametrize("filename", ["flow.json", "pg_flow.json"])
+def test_failed_write_intent_never_uploads(mock_app, monkeypatch, filename):
+    deps = make_deps(mock_app, events=Outbox())
+    approved_loan(deps)
+    fetch, replace_doc = deps.mock.fetch, deps.store.replace
+    def fail_after_fetch(source, token, terms):
+        value = fetch(source, token, terms)
+        if source + ".json" == filename:
+            def fail_marker(container, doc, etag):
+                if container == "consents":
+                    raise OSError("intent unavailable")
+                return replace_doc(container, doc, etag)
+            monkeypatch.setattr(deps.store, "replace", fail_marker)
+        return value
+    monkeypatch.setattr(deps.mock, "fetch", fail_after_fetch)
+    with pytest.raises(OSError, match="intent unavailable"):
+        replay(deps)
+    assert not any(name == filename for _, name in deps.raw.blobs)
+    assert not flows(deps.events)
+
+
+def test_abandoned_upload_keeps_intent_until_ended_cleanup(mock_app, monkeypatch):
+    import function_app
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put = deps.raw.put_json
+    class WorkerLost(BaseException):
+        pass
+    def die_after_upload(container, name, value):
+        put(container, name, value)
+        raise WorkerLost()
+    monkeypatch.setattr(deps.raw, "put_json", die_after_upload)
+    with pytest.raises(WorkerLost):
+        replay(deps)
+    container, = [c for c, n in deps.raw.blobs if n == "flow.json"]
+    cid = container.removeprefix("consent-")
+    def consent():
+        return deps.store.read("consents", cid, cid)
+    assert consent().get("raw_write_count") == 1
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    function_app.repair_consent_deletions(None)
+    assert deps.raw.manifest(container) and consent()["raw_write_count"] == 1
+    assert delete_consent_data(deps, dict(consent_id=cid, reason="revoked", trigger="revoke",
+                                         requested_by="test"))["complete"]
+    assert not deps.raw.manifest(container) and not consent().get("raw_write_count")
 
 
 def test_invalid_usd_pg_flow_never_exposes_source_values(mock_app, monkeypatch, caplog):
