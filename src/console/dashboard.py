@@ -16,7 +16,6 @@ from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import MKT_FEATURES
-from shared.money import format_usd
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -161,7 +160,6 @@ def home_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "groups": groups,
         "donut": charts.donut([(label, n, color) for label, color, n in groups]),
         "recommendations": recommendations,
-        "rec_bars": charts.hbars(recommendations),
     }
 
 
@@ -580,8 +578,15 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def display_usd(cents: int) -> str:
+    if type(cents) is not int:
+        return "-"
+    dollars = (abs(cents) + 50) // 100
+    return f"{'-' if cents < 0 and dollars else ''}${dollars}"
+
+
 def _usd_tick(value: Any) -> str:
-    return f"{format_usd(round(value))} USD" if charts.is_num(value) else "-"
+    return display_usd(round(value)) if charts.is_num(value) else "-"
 
 
 def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[str, Any]:

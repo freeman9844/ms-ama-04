@@ -41,6 +41,7 @@ from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principa
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, parse_requested_usd_cents, validate_apply, validate_request
 from shared.portfolio import in_portfolio
 from console.dashboard import (
+    display_usd,
     POLICY_DECISIONS,
     RECOMMENDATION_LABELS,
     detail_summary,
@@ -259,8 +260,8 @@ def _templates() -> Environment:
     env.install_gettext_callables(gettext=i18n.gettext, ngettext=lambda s, p, n: i18n.gettext(s if n == 1 else p),
                                   pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
-    env.filters["usd_cents"] = lambda cents: f"{format_usd(cents)} USD" if type(cents) is int else "-"
-    env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "") if type(cents) is int else ""
+    env.filters["usd_cents"] = display_usd
+    env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "").removesuffix(".00") if type(cents) is int else ""
     env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s
     env.filters["channel"] = lambda s: USD_CHANNEL_NAMES.get(s, s)
     env.filters["kst"] = _kst

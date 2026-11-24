@@ -57,6 +57,19 @@ def test_negative_balance_preserves_sign_separately_from_amount_role():
     assert issues("Balance: -$700.01", [70001])
 
 
+def test_usd_retry_identifies_the_repair_without_echoing_rejected_evidence():
+    ctx = context()
+    rejected = draft("Revenue was $700.02, which supports full approval.")
+    feedback = uw.check_grounding(rejected, ctx)
+    assert any("claims[0]" in issue and "qualitative" in issue for issue in feedback)
+    assert "$700.02" not in str(feedback)
+    unknown = draft("Verify the deposit.")
+    unknown.claims[0].metric_ids = ["M:private_unknown"]
+    feedback = uw.check_grounding(unknown, ctx)
+    assert any("exact evidence ID" in issue for issue in feedback)
+    assert "private_unknown" not in str(feedback)
+
+
 def test_review_language_is_a_publication_gate():
     from agents.runtime import AgentRun
 
@@ -73,6 +86,31 @@ def test_review_language_is_a_publication_gate():
     assert result.assessment is None
     assert result.record["rounds"][0]["review_issues"]
     english(result.record["error"])
+
+
+def test_independent_review_retry_points_to_rejected_claim_without_copying_reviewer_text():
+    from agents.runtime import AgentRun
+
+    class Runner:
+        reviews = 0
+
+        def run(self, spec, text, handlers):
+            if handlers:
+                if self.reviews:
+                    issues = json.loads(text.split("Revise the draft:\n")[1])["issues"]
+                    assert any("claims[0]" in issue for issue in issues)
+                    assert "private-review-text" not in str(issues)
+                output = draft("Verify the pending settlement." if self.reviews else "The deposit is available.")
+            else:
+                self.reviews += 1
+                supported = "Verify the pending settlement." in text
+                output = uw.ReviewerOutput.model_validate(dict(summary_supported=True, check_verdicts=[],
+                    feedback="", verdicts=[dict(claim_index=0, supported=supported, reason="private-review-text")]))
+            return AgentRun(spec.name, "1", "conversation", output, [], 10, 1, ())
+
+    result = uw.assess(context(), runner=Runner(), analyst_model="a", reviewer_model="r", max_rounds=2)
+    assert result.assessment and result.assessment.review.rounds == 2
+    assert "private-review-text" not in str(result.record)
 
 
 def test_english_output_without_translator():

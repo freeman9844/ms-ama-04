@@ -23,7 +23,7 @@ def test_home_summary_counts_groups_and_recommendations():
     assert [n for _, _, n in s["groups"]] == [2, 2, 1, 1, 2]
     assert s["recommendations"] == [("전액 승인 권고", 2, "green"), ("판단 보류", 1, "purple"), ("전액 승인 비권고", 1, "red"),
                                     ("과거 의견", 1, "neutral"), ("의견 없음", 3, "neutral")]
-    assert s["donut"]["total"] == 8 and len(s["rec_bars"]["bars"]) == 5
+    assert s["donut"]["total"] == 8 and len(s["recommendations"]) == 5
 
 
 def test_home_summary_without_decided_rows_has_no_approval_rate():

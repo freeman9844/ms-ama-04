@@ -335,7 +335,7 @@ def test_usd_grievance_forms_deliver_both_commands_to_workers(raw, key):
     privacy.grievances[("app-2", gid)] = store.read("grievances", gid, "app-2")
     path = f"/grievances/app-2/{gid}"
     page = client.get(path, headers=OFFICER).text
-    assert 'name="amount_usd"' in page and "$800.00" in page and 'name="amount_krw"' not in page
+    assert 'name="amount_usd"' in page and "$800" in page and 'name="amount_krw"' not in page
     assert "Seongsu Daily Look" in page and "Seongsu Daily Look" in client.get("/grievances", headers=OFFICER).text
     fields = dict(outcome="rereview", new_decision="approve", reason="Recorded review.")
     for invalid in ("700.011", "800.01"):

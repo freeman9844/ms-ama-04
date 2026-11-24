@@ -59,7 +59,7 @@ def test_archive_before_limit():
     deps.store = CosmosApplications(QueryContainer([*legacy, DOC]))
     client = TestClient(create_app(deps))
     home = client.get("/").text
-    assert "usd-first" in home and "old-0" not in home and "$5,000.01 USD" in home
+    assert "usd-first" in home and "old-0" not in home and "$5000" in home
     assert "Daejeon Bakery" in home
     archive = client.get("/legacy").text
     assert "usd-first" not in archive and "₩4,000,000" in archive
@@ -69,6 +69,14 @@ def test_archive_before_limit():
 
 def token(html):
     return re.search(r'name="csrf" value="([^"]+)"', html)[1]
+
+
+def test_rounded_display_preserves_editable_principal():
+    deps = fixtures.build_deps()
+    deps.store.docs[DOC["id"]] = dict(DOC, requested_amount_cents=499975)
+    html = TestClient(create_app(deps)).get("/applications/usd-first").text
+    assert "<strong>$5000</strong>" in html
+    assert 'name="amount_usd" inputmode="decimal" value="4999.75"' in html
 
 
 @pytest.mark.parametrize("setting, expected", [(None, 503), ("false", 503), ("yes", 503), ("true", 303)])
@@ -106,7 +114,7 @@ def test_usd_form_to_real_start_consumer(page, endpoint, source):
     deps = fixtures.build_deps()
     client = TestClient(create_app(deps), follow_redirects=False)
     html = client.get(page).text
-    assert 'name="requested_amount_usd"' in html and 'value="5000.00"' in html
+    assert 'name="requested_amount_usd"' in html and 'value="5000"' in html
     assert "New USD applications are not open yet." in html
     form = dict(csrf=token(html), applicant_id=SELLER, requested_amount_usd="5,000.01", requested_tenor_months="6",
                 consent_account="on", consent_tax="on", consent_pg="on")
@@ -131,7 +139,7 @@ def test_usd_officer_detail_to_real_decision_consumer(enabled):
     deps.store.docs[DOC["id"]] = DOC
     client = TestClient(create_app(deps))
     html = client.get("/applications/usd-first").text
-    assert "$5,000.01 USD" in html and "$6,000.00 USD" in html and 'name="amount_usd"' in html
+    assert "$5000" in html and "$6000" in html and 'name="amount_usd"' in html
     assert "Daejeon Bakery" in html and "₩" not in html
     result = client.post("/applications/usd-first/decision", data=dict(csrf=token(html), decision="approve",
                                                                        amount_usd="5000.01", reason="Reviewed"))
@@ -197,7 +205,7 @@ def test_usd_loan_repayment_and_chart_are_native():
                      "due_on": "2026-11-24", "status": "partial"}]})
     deps.monitoring.loans["usd-loan"] = loan
     html = TestClient(create_app(deps)).get("/loans/usd-loan").text
-    assert all(s in html for s in ["Daejeon Bakery", "$5,000.01 USD", "$4,041.23 USD", "$0.01 USD", "$833.32 USD"])
+    assert all(s in html for s in ["Daejeon Bakery", "$5000", "$4041", "$0", "$833"])
     assert "₩" not in html
 
 
@@ -209,7 +217,7 @@ def test_borrower_portfolios_find_applications_before_consent_exists():
     client = TestClient(create_app(deps))
     path = f"/borrower/{SELLER}"
     usd = client.get(path + "?lang=ko").text
-    assert "$5,000.01 USD" in usd and "usd-first" in usd and "old-case" not in usd
+    assert "$5000" in usd and "usd-first" in usd and "old-case" not in usd
     archive = client.get("/legacy" + path + "?lang=en").text
     assert "₩4,500,000" in archive and "old-case" in archive and "usd-first" not in archive
 
@@ -219,10 +227,10 @@ def test_offline_preview_presents_named_seller_and_original_human_and_agent_reco
     home = client.get("/").text
     assert "Daejeon Bakery" in home
     detail = client.get("/applications/preview-usd-bakery").text
-    assert "$5,000.00 USD" in detail and "Verified settlement receipts." in detail
+    assert "$5000" in detail and "Verified settlement receipts." in detail
     assert "Settlement receipts support the requested amount." in detail
     assert "preview-usd-bakery" not in client.get("/legacy").text
-    assert "$5,000.00 USD" in client.get("/apply/preview-usd-bakery").text
+    assert "$5000" in client.get("/apply/preview-usd-bakery").text
 
 
 def test_grievance_submission_cannot_target_other_portfolio_for_same_seller():
@@ -251,8 +259,8 @@ def test_usd_review_renders_stored_policy_seller_and_settlement_evidence():
     doc["underwriting"]["pg_ledger"] = {"available": True, "pg_reconciliation_ratio": .9, "unmatched": [
         {"settled_on": "2026-11-03", "platform": "coupang", "net_cents": 45678}]}
     page = TestClient(create_app(deps)).get("/applications/preview-usd-bakery").text
-    for value in ["R107", "Sales depend on one channel.", "Naver Smart Store", "$123.45 USD", "Coupang",
-                  "$456.78 USD", "90.0%"]:
+    for value in ["R107", "Sales depend on one channel.", "Naver Smart Store", "$123", "Coupang",
+                  "$457", "90.0%"]:
         assert value in page
 
 
@@ -316,7 +324,7 @@ def test_policy_reason_displays_whole_cents_without_rounding_other_values():
     ]
     page = TestClient(create_app(deps)).get("/applications/" + doc["id"]).text
     reasons = re.findall(r"<p>(R\d+.*?)</p>", page, re.S)
-    assert "$0.00 USD" in reasons[0] and "$100.00 USD" in reasons[0]
+    assert "$0" in reasons[0] and "$100" in reasons[0]
     assert "0.95" in reasons[1] and "0.85" in reasons[1] and "$" not in reasons[1]
 
 
