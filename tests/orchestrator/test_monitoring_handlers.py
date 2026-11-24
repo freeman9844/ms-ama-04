@@ -1707,6 +1707,82 @@ def test_monitoring_withdrawal_during_remote_call(mock_app, producer, confirmed,
     assert "synthetic-private-error" not in caplog.text
 
 
+@pytest.mark.parametrize("producer", [EW_AGENT, COLLECTIONS_AGENT])
+@pytest.mark.parametrize("timing", ["during", "before", "replacement", "conflict"])
+def test_service_bus_withdrawal_stops_only_matching_delivery(mock_app, monkeypatch, producer, timing):
+    from agents.runtime import AgentError
+    from journey.activities import Conflict
+    from journey.consent import IncompleteDeletion, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import FoundryRunner, MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    cid = loan(deps)["monitoring"]["consent_id"]
+    if producer == COLLECTIONS_AGENT:
+        pump(deps, outbox, topics=(TOPIC_FLOW,))
+    topic, deliver = ((TOPIC_FLOW, handle_flow_update) if producer == EW_AGENT
+                      else (TOPIC_REPAYMENT, handle_repayment_updated))
+    calls = []
+
+    class Withdrawing(FoundryRunner):
+        def run(self, spec, text, handlers):
+            assert spec.name == producer
+            calls.append(spec.name)
+            with pytest.raises(IncompleteDeletion):
+                delete_consent_data(worker, end(cid))
+            raise AgentError("synthetic-private-error", "conv_partial")
+
+    worker = replace(deps, agents=Withdrawing())
+    def forbid_raw(*args):
+        pytest.fail("A terminal/stale delivery must not access deleted raw data")
+
+    replace_doc = deps.store.replace
+    def race(container, doc, etag):
+        if container == LOANS and doc["monitoring"].get("status") == "stopped":
+            if timing == "conflict":
+                return False
+            if timing == "replacement":
+                newer = loan(deps)
+                newer["monitoring"].update(replay_id="replacement", consent_id="fresh-grant")
+                deps.store.upsert(LOANS, newer)
+                return False
+        return replace_doc(container, doc, etag)
+
+    if timing == "before":
+        delete_consent_data(deps, end(cid))
+        monkeypatch.setattr(deps.raw, "get_json", forbid_raw)
+    monkeypatch.setattr(deps.store, "replace", race)
+    conflicts = 0
+    for _ in range(WEEKS):
+        body = outbox.bodies(topic)[-1]
+        published = len(flows(outbox))
+        if timing == "conflict":
+            try:
+                result = deliver(worker, body)
+            except Conflict:
+                conflicts += 1
+                assert calls and loan(deps)["monitoring"]["status"] == "replaying"
+                monkeypatch.setattr(deps.store, "replace", replace_doc)
+                monkeypatch.setattr(deps.raw, "get_json", forbid_raw)
+                result = deliver(worker, body)
+        else:
+            result = deliver(worker, body)
+        if calls or timing == "before":
+            break
+    assert result is None and len(flows(outbox)) == published
+    monkeypatch.setattr(deps.raw, "get_json", forbid_raw)
+    assert deliver(worker, body) is None and len(flows(outbox)) == published
+    mon = loan(deps)["monitoring"]
+    assert calls == ([] if timing == "before" else [producer])
+    assert conflicts == int(timing == "conflict")
+    if timing == "replacement":
+        assert (mon["replay_id"], mon["status"]) == ("replacement", "replaying")
+    else:
+        assert (mon["replay_id"], mon["status"], mon["error"]) == (replay_id, "stopped", "monitoring_consent_ended")
+
+
 def test_collections_crash_and_redelivery_cannot_certify_first_attempt(mock_app, monkeypatch):
     from journey.activities import Conflict
     from journey.consent import IncompleteDeletion, delete_consent_data

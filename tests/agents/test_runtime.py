@@ -208,6 +208,43 @@ def test_missing_interpreter_container_is_not_complete_enumeration():
     assert err.value.conversation_id == "conv_1" and err.value.containers == ("cntr_known",)
 
 
+@pytest.mark.parametrize("fields,known", [
+    ({}, ()), ({"output": None}, ()), ({"output": []}, ()), ({"output": {}}, ()),
+    ({"output": [None, ci("cntr_late")]}, ("cntr_late",)),
+    ({"output": [{"untyped": True}, ci("cntr_late")]}, ("cntr_late",)),
+    ({"output": [{"type": "message", "content": "invalid"}]}, ()),
+    ({"output": [ci("cntr_late")]}, ("cntr_late",)),
+])
+def test_interpreter_requires_itemized_response_across_rounds(fields, known):
+    enabled = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    response = {"status": "completed", "output_text": '{"status":"ok"}', **fields}
+    fake = FakeFoundry(tool_round(ci("cntr_early"), fc("f", "fetch_source", {})), httpx.Response(200, json=response))
+    with pytest.raises(AgentError) as err:
+        agents(fake).run(enabled, "input", {})
+    assert err.value.conversation_id == "conv_1" and err.value.containers == ("cntr_early", *known)
+
+
+def test_no_interpreter_accepts_text_only_result():
+    response = httpx.Response(200, json={"status": "completed", "output_text": '{"status":"ok"}'})
+    assert agents(FakeFoundry(response)).run(SPEC, "input", {}).output == Out(status="ok")
+
+
+@pytest.mark.parametrize("status,extra", [
+    ("incomplete", []),
+    ("completed", [{"type": "message", "content": []}]),
+    ("completed", [{"type": "message", "content": [{"type": "unknown"}]}]),
+    ("completed", [{"type": "function_call", "call_id": "broken"}]),
+])
+def test_malformed_intermediate_inventory_cannot_be_repaired_by_later_output(status, extra):
+    enabled = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    response = {"status": status, "output": [*extra, ci("cntr_known"), fc("f", "fetch_source", {})]}
+    fake = FakeFoundry(httpx.Response(200, json=response), done({"status": "ok"}))
+    with pytest.raises(AgentError) as err:
+        agents(fake).run(enabled, "input", {})
+    assert err.value.containers == ("cntr_known",)
+    assert len(fake.responses_bodies()) == 1
+
+
 def test_agent_error_carries_containers_for_cleanup():
     body = done("not json").json()
     body["output"] = [ci("cntr_x"), *body["output"]]

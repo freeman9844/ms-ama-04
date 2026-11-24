@@ -440,6 +440,29 @@ def test_retry_of_unfinished_legacy_proof_rechecks_absent_registry(mock_client):
     assert registry["outcome"] == "revoked"
 
 
+def test_text_only_analyst_inventory_remains_pending_after_confirmed_redelivery(mock_client):
+    from journey.activities import assess_credit
+    from tests.agents.test_runtime import FakeFoundry, agents, ci, done, fc, tool_round
+    from tests.orchestrator.test_activities import ANALYST_DRAFT, REVIEW, assess_input
+
+    deps = make_deps(mock_client)
+    grant, payload = assess_input(deps)
+    cid = grant["consent_id"]
+    text_only = httpx.Response(200, json={"status": "completed", "output_text": json.dumps(ANALYST_DRAFT)})
+    first = agents(FakeFoundry(tool_round(ci("cntr_known"), fc("f", "get_metrics", {})), text_only, done(REVIEW)))
+    assert assess_credit(replace(deps, agents=first), payload)["assessment"] is None
+    good = agents(FakeFoundry(done(ANALYST_DRAFT), done(REVIEW)))
+    assert assess_credit(replace(deps, agents=good), payload)["assessment"]
+    worker = replace(deps, agents=FoundryRunner())
+    with pytest.raises(IncompleteDeletion):
+        delete_consent_data(worker, end(cid))
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert proof["foundry_inventory_pending"] and not proof["complete"]
+    assert {"conv_1", "cntr_known"} <= {i["target"] for i in proof["items"] if i["verified"]}
+    with pytest.raises(LookupError):
+        send_consent_notice(worker, {"kind": "deletion", "consent_id": cid})
+
+
 def test_overlapping_delivery_cannot_release_other_assessment(mock_client):
     from journey.activities import assess_credit
     from tests.orchestrator.test_activities import UnderwritingRunner, assess_input

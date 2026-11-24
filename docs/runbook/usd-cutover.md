@@ -168,6 +168,11 @@ and escalate; never unmask the public routes to run this test.
    known targets **and** unknown ones. Keep proof and notice pending until
    authorized same-project inventory and target reconciliation; neither age,
    cleanup of known IDs nor successful redelivery clears an earlier fence.
+   With Code Interpreter enabled, inspect itemized output for every response
+   round: top-level text alone cannot establish the container inventory. On
+   the Service Bus path, withdrawal must stop the matching replay without
+   scheduling another week. A stop-write failure must retry; redelivery after
+   deletion must not load raw data or stop a replacement replay.
    Inspect old `late_cleanup` failures before rollout;
    old missing manifests/cleared markers cannot be
    reconstructed by the timer. Escalate unresolved historical gaps. Check

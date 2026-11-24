@@ -19,6 +19,7 @@ Service Bus가 꺼져 있으면(deps.events is None) handle_replay가 같은 처
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
 from uuid import uuid4
@@ -52,6 +53,7 @@ from journey.activities import (
     _semantic,
     raw_container,
     schedule_lifecycle,
+    update_doc,
 )
 from journey.holds import HOLD_ORDER, held_status, pending_holds
 from journey.models import (
@@ -949,12 +951,42 @@ def _mark_publish_failed(deps: Deps, loan_id: str, doc_id: str, e: Exception) ->
         deps.store.upsert(ALERTS, doc)
 
 
+def _deliver_replay(deps: Deps, loan_id: str, replay_id: str,
+                    work: Callable[[], dict[str, Any] | None]) -> dict[str, Any] | None:
+    loan = deps.store.read(LOANS, loan_id, loan_id)
+    mon = (loan or {}).get("monitoring") or {}
+    if mon.get("replay_id") != replay_id or mon.get("status") == "stopped":
+        return None
+    if not _resume_blocker(deps, loan):
+        try:
+            return work()
+        except ConsentEnded:
+            # Only confirmed withdrawal/expiry is terminal. Storage failures still need delivery retries.
+            if not _resume_blocker(deps, loan):
+                raise
+
+    def stop(current: dict) -> bool | None:
+        replay = current.get("monitoring") or {}
+        if replay.get("replay_id") != replay_id or replay.get("status") == "stopped":
+            return False
+        now = deps.clock().isoformat()
+        replay.update(status="stopped", error="monitoring_consent_ended", stopped_at=now)
+        current["updated_at"] = now
+
+    update_doc(deps.store, LOANS, loan_id, loan_id, stop)
+    return None
+
+
 def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:
     try:
         msg = _command(deps, body, FlowUpdated)
     except ValueError:
         log.info("flow.updated 형식이 아닌 메시지 무시(스모크 등)")
         return None
+    return _deliver_replay(deps, msg.loan_id, msg.replay_id, lambda: _deliver_week(deps, msg))
+
+
+def _deliver_week(deps: Deps, msg: FlowUpdated) -> dict[str, Any] | None:
     entry = process_week(deps, msg.loan_id, msg.replay_id, msg.week)
     # 재전달(이미 처리한 주차)이어도 다음 주차 발행이 빠졌을 수 있어 저장된 주차 기록으로 다시 판단한다.
     last = entry or _week_entry(deps, msg.loan_id, msg.replay_id, msg.week)
@@ -963,7 +995,7 @@ def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:
     ids = _week_cases(last)
     for case_id in ids:
         if not _publish_case(deps, msg.loan_id, case_id):
-            run_collections(deps, msg.loan_id, case_id)
+            run_collections(deps, msg.loan_id, case_id, replay_id=msg.replay_id)
     _continue(deps, msg.loan_id, msg.replay_id, msg.week, ids[0] if ids else None)
     return entry
 
@@ -1028,11 +1060,13 @@ def _save_contacts(deps: Deps, contacts: dict[str, Any]) -> None:
         raise RuntimeError(f"연락 기록 충돌: {contacts['id']}")
 
 
-def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | None:
+def run_collections(deps: Deps, loan_id: str, case_id: str, *, replay_id: str | None = None) -> dict[str, Any] | None:
     """추심 에이전트 제안을 심사역 승인용 제안서로 저장한다. 아무것도 보내지 않는다(발송은 심사역 결정 뒤)."""
     doc = deps.store.read(ALERTS, case_id, loan_id)
     loan = deps.store.read(LOANS, loan_id, loan_id)
     if doc is None or loan is None or doc.get("kind") != "repayment_case" or doc.get("collections") is not None:
+        return None
+    if replay_id is not None and (doc["replay_id"] != replay_id or (loan.get("monitoring") or {}).get("replay_id") != replay_id):
         return None
     if doc.get("status") in ("paid", "superseded"):
         return None
@@ -1076,11 +1110,17 @@ def handle_repayment_updated(deps: Deps, body: str) -> dict[str, Any] | None:
     except ValueError:
         log.info("repayment.updated 형식이 아닌 메시지 무시")
         return None
-    result = run_collections(deps, msg.loan_id, msg.case_id)
     doc = deps.store.read(ALERTS, msg.case_id, msg.loan_id)
-    if doc is not None and doc.get("kind") == "repayment_case" and deps.events is not None:
-        _continue(deps, msg.loan_id, doc["replay_id"], doc["week"], msg.case_id)
-    return result
+    if doc is None or doc.get("kind") != "repayment_case":
+        return None
+
+    def deliver() -> dict[str, Any] | None:
+        result = run_collections(deps, msg.loan_id, msg.case_id, replay_id=doc["replay_id"])
+        if deps.events is not None:
+            _continue(deps, msg.loan_id, doc["replay_id"], doc["week"], msg.case_id)
+        return result
+
+    return _deliver_replay(deps, msg.loan_id, doc["replay_id"], deliver)
 
 
 def handle_restructure_decision(deps: Deps, body: str) -> bool:

@@ -165,15 +165,51 @@ def _usage(response: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
-def _output_text(response: dict[str, Any]) -> str:
-    if text := response.get("output_text"):
+def _output_text(response: dict[str, Any], *, itemized: bool = False) -> str:
+    if not itemized and (text := response.get("output_text")):
         return text
     return "".join(
         part.get("text", "")
         for item in response.get("output", [])
         if item.get("type") == "message"
         for part in item.get("content", [])
+        if not itemized or part.get("type") == "output_text"
     )
+
+
+def _interpreter_item(item: dict) -> bool:
+    kind = item.get("type")
+    if kind == "message":
+        content = item.get("content")
+        return isinstance(content, list) and bool(content) and all(
+            isinstance(p, dict) and (
+                p.get("type") == "output_text" and isinstance(p.get("text"), str)
+                or p.get("type") == "refusal" and isinstance(p.get("refusal"), str)
+            ) for p in content
+        )
+    if kind == "function_call":
+        return all(isinstance(item.get(k), str) and item[k].strip() for k in ("name", "call_id", "arguments"))
+    return kind == "reasoning" and isinstance(item.get("summary"), list)
+
+
+def _collect_containers(response: dict, containers: list[str], *, itemized: bool) -> None:
+    items = response.get("output", None if itemized else [])
+    if not isinstance(items, list) or (itemized and not items):
+        raise AgentError("Incomplete response inventory")
+    complete = True
+    for item in items:
+        kind = item.get("type") if isinstance(item, dict) else None
+        if kind == "code_interpreter_call":
+            cid = item.get("container_id")
+            if not isinstance(cid, str) or not cid.strip():
+                complete = False
+            elif cid not in containers:
+                containers.append(cid)
+        elif itemized and (not isinstance(item, dict) or not _interpreter_item(item)):
+            complete = False
+    # Scan the entire list first: valid target IDs may follow a malformed item.
+    if not complete:
+        raise AgentError("Incomplete response inventory")
 
 
 class FoundryAgents:
@@ -316,6 +352,7 @@ class FoundryAgents:
         containers: list[str],
     ) -> AgentRun:
         ref = {"type": "agent_reference", "name": spec.name}
+        itemized = any(tool.get("type") == "code_interpreter" for tool in spec.tools)
         if version:
             # 이 프로세스가 만든 버전에 고정한다. 이름만 쓰면 최신 버전이라 배포 중 옛 인스턴스가 새 지시문으로 돈다.
             ref["version"] = version
@@ -325,17 +362,9 @@ class FoundryAgents:
             response = self._call(
                 "POST", "/openai/v1/responses", body, conversation_id, throttle_retries=spec.throttle_retries
             )
-            missing = False
-            for item in response.get("output", []):
-                if item.get("type") != "code_interpreter_call":
-                    continue
-                cid = item.get("container_id")
-                if not isinstance(cid, str) or not cid.strip():
-                    missing = True
-                elif cid not in containers:
-                    containers.append(cid)
-            if missing:
-                raise AgentError("Incomplete interpreter container inventory", conversation_id)
+            _collect_containers(response, containers, itemized=itemized)
+            if itemized and response.get("status") != "completed":
+                raise _status_error(response, conversation_id)
             return response
 
         response = respond(input_text)
@@ -364,7 +393,7 @@ class FoundryAgents:
         if response.get("status") != "completed":
             raise _status_error(response, conversation_id)
         try:
-            output = spec.output_model.model_validate_json(_output_text(response))
+            output = spec.output_model.model_validate_json(_output_text(response, itemized=itemized))
         except ValidationError as e:
             raise AgentError("출력이 스키마와 맞지 않음", conversation_id) from e
         return AgentRun(
