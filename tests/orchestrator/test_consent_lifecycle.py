@@ -372,6 +372,96 @@ def test_revoke_after_mock_restart_is_recorded_and_verified(mock_client):
     assert (item["outcome"], item["verified"]) == ("revoked", True)
 
 
+@pytest.mark.parametrize("status", [404, 200, 202, 503])
+def test_registry_requires_acknowledgement_before_proof_and_notice(mock_client, status, caplog):
+    deps = make_deps(mock_client)
+    cid = consent_for(deps)["consent_id"]
+    replies = iter([status, 204])
+    with httpx.Client(base_url="https://synthetic.invalid", transport=httpx.MockTransport(
+        lambda _: httpx.Response(next(replies), text="synthetic-private-body")
+    )) as client:
+        worker = replace(deps, mock=HttpMockApi(client=client))
+        with pytest.raises(IncompleteDeletion):
+            delete_consent_data(worker, end(cid))
+        proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+        registry = next(i for i in proof["items"] if i["kind"] == "consent_registry")
+        assert not proof["complete"] and not registry["verified"]
+        with pytest.raises(LookupError):
+            send_consent_notice(worker, {"consent_id": cid, "kind": "deletion"})
+        assert delete_consent_data(worker, end(cid))["complete"]
+        assert send_consent_notice(worker, {"consent_id": cid, "kind": "deletion"})["kind"] == "deletion"
+        assert "synthetic-private-body" not in caplog.text + str(registry)
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_unknown_assessment_survives_successful_redelivery(mock_client, partial, caplog):
+    from agents.runtime import AgentError
+    from journey.activities import assess_credit
+    from tests.orchestrator.test_activities import UnderwritingRunner, assess_input
+
+    deps = make_deps(mock_client)
+    grant, payload = assess_input(deps)
+    cid = grant["consent_id"]
+
+    class Interrupted(FoundryRunner):
+        def run(self, *args):
+            if partial:
+                raise AgentError("synthetic-private-error", "conv_partial", ("container_partial",))
+            raise TimeoutError("synthetic-private-error")
+
+    worker = replace(deps, agents=Interrupted())
+    assert assess_credit(worker, payload)["assessment"] is None
+    assert assess_credit(replace(deps, agents=UnderwritingRunner()), payload)["assessment"]
+    with pytest.raises(IncompleteDeletion):
+        delete_consent_data(worker, end(cid))
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    assert not proof["complete"] and not proof["event_published"]
+    assert proof.get("foundry_inventory_pending") is True
+    verified = {i["target"] for i in proof["items"] if i["verified"]}
+    assert {"conv_1", "conv_2"} <= verified
+    if partial:
+        assert {"conv_partial", "container_partial"} <= verified
+    with pytest.raises(LookupError):
+        send_consent_notice(worker, {"consent_id": cid, "kind": "deletion"})
+    assert "synthetic-private-error" not in caplog.text
+
+
+def test_retry_of_unfinished_legacy_proof_rechecks_absent_registry(mock_client):
+    deps = make_deps(mock_client)
+    cid = granted(deps)["consent_id"]
+    with pytest.raises(IncompleteDeletion):
+        delete_consent_data(deps, end(cid))
+    proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+    registry = next(i for i in proof["items"] if i["kind"] == "consent_registry")
+    registry.update(outcome="absent", verified=True)
+    deps.store.upsert(PROOFS_CONTAINER, proof)
+    assert delete_consent_data(replace(deps, agents=FoundryRunner()), end(cid))["complete"]
+    registry = next(i for i in deps.store.read(PROOFS_CONTAINER, cid, cid)["items"] if i["kind"] == "consent_registry")
+    assert registry["outcome"] == "revoked"
+
+
+def test_overlapping_delivery_cannot_release_other_assessment(mock_client):
+    from journey.activities import assess_credit
+    from tests.orchestrator.test_activities import UnderwritingRunner, assess_input
+
+    deps = make_deps(mock_client)
+    grant, payload = assess_input(deps)
+    cid = grant["consent_id"]
+
+    class Overlapping(FoundryRunner):
+        def run(self, *args):
+            assert assess_credit(replace(deps, agents=UnderwritingRunner()), payload)["assessment"]
+            with pytest.raises(IncompleteDeletion):
+                delete_consent_data(worker, end(cid))
+            return UnderwritingRunner().run(*args)
+
+    worker = replace(deps, agents=Overlapping())
+    with pytest.raises(ConsentEnded):
+        assess_credit(worker, payload)
+    assert delete_consent_data(worker, end(cid))["complete"]
+    assert not worker.store.read(PROOFS_CONTAINER, cid, cid)["foundry_inventory_pending"]
+
+
 def test_delete_unknown_consent_raises(mock_client):
     with pytest.raises(LookupError):
         delete_consent_data(make_deps(mock_client), end("nope"))

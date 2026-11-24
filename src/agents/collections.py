@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict
 
 from agents import usd_language
 from agents.runtime import AgentSpec, ToolHandler
-from agents.underwriting import AgentRunner, _fn, _Session
+from agents.underwriting import AgentRunner, TargetCheckpoint, _fn, _Session
 from shared.contracts import HardshipCategory, UsdProduct
 from shared.money import format_usd
 from shared.product_context import product_of
@@ -384,10 +384,11 @@ def _fallback(ctx: CollectionsContext, reason: str) -> CollectionsResult:
     return CollectionsResult("proposed", reason, ctx.draft, {"error": reason}, [])
 
 
-def act(ctx: CollectionsContext, *, runner: AgentRunner | None, model: str) -> CollectionsResult:
+def act(ctx: CollectionsContext, *, runner: AgentRunner | None, model: str,
+        checkpoint: TargetCheckpoint | None = None) -> CollectionsResult:
     if runner is None:
         return _fallback(ctx, "agents_disabled")
-    session = _Session(runner)
+    session = _Session(runner, checkpoint)
     text = ctx.mask(f"미납 건 {ctx.case.case_id}({ctx.case.installment_no}회차)를 처리하라.")
     spec = collections_spec(model)
     if ctx.case.product:

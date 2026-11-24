@@ -412,6 +412,14 @@ def test_proof_page_lists_verified_items_manifest_and_retained_record(env):
     assert 'href="/applications/app-2"' in text
 
 
+def test_proof_explains_pending_inventory_even_when_known_items_are_verified(env):
+    client, _, privacy = env
+    privacy.proofs["c-0"] = dict(PROOF, complete=False, foundry_inventory_pending=True)
+    client.cookies.set("ama_locale_v2", "en")
+    page = client.get("/consents/c-0/proof", headers=AUDITOR_H)
+    assert page.status_code == 200 and "Foundry target inventory is not yet confirmed" in page.text
+
+
 def test_missing_proof_is_404(env):
     client, _, _ = env
     assert client.get("/consents/c-1/proof", headers=OFFICER).status_code == 404

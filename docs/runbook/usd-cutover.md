@@ -161,10 +161,14 @@ and escalate; never unmask the public routes to run this test.
    Blob namespace absence and same-project Foundry cleanup: after a failed
    DELETE only authoritative GET 404 confirms container absence; forbidden,
    transport and server errors are **pending**, not success. Check repair and
-   notice reconciliation. An assessment fence with no returned target IDs
-   (e.g. a worker lost during a remote run) is not proof of absence: keep
-   deletion incomplete until an authorized same-project inventory and target
-   reconciliation. Inspect old `late_cleanup` failures before rollout;
+   notice reconciliation. For registry revocation, only HTTP 204 acknowledges
+   the durable tombstone; retry 404, unexpected 2xx and transport failures.
+   Assessment, early-warning and collections workers fence each attempt on
+   its consent before calling Foundry. A crash or ambiguous response can leave
+   known targets **and** unknown ones. Keep proof and notice pending until
+   authorized same-project inventory and target reconciliation; neither age,
+   cleanup of known IDs nor successful redelivery clears an earlier fence.
+   Inspect old `late_cleanup` failures before rollout;
    old missing manifests/cleared markers cannot be
    reconstructed by the timer. Escalate unresolved historical gaps. Check
    native English grounded review via the actual model/API and fallback paths

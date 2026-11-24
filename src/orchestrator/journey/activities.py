@@ -6,7 +6,7 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -89,7 +89,7 @@ class MockApi(Protocol):
                        *, product: UsdProduct | None = None) -> dict[str, Any]: ...
     def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any: ...
     def revoke(self, consent_id: str) -> str:
-        """revoked | absent(레지스트리에 없음)."""
+        """Only revoked acknowledges a durable tombstone. Absent/unacknowledged require retry."""
         ...
 
 
@@ -325,10 +325,47 @@ def _drop_if_consent_ended(deps: Deps, consent_id: str, container: str) -> None:
     raise ConsentEnded(f"데이터 조립 중 동의가 끝났습니다: {consent_id}")
 
 
+class _TargetResult(Protocol):
+    conversations: list[str]
+
+
+_Result = TypeVar("_Result", bound=_TargetResult)
+
+
+def run_consent_agent(
+    deps: Deps, consent_id: str, agent: Callable[..., _Result], ctx: Any, **settings: str,
+) -> _Result:
+    """Fence this delivery before I/O; a later delivery can resolve only its own fence."""
+    if deps.agents is None:
+        return agent(ctx, runner=None, **settings)
+    run_id = uuid4().hex
+
+    def begin(doc: dict) -> None:
+        if doc.get("status") != "granted":
+            raise ConsentEnded(consent_id)
+        doc.setdefault("assessment_runs", []).append(run_id)
+
+    if update_doc(deps.store, "consents", consent_id, consent_id, begin) is None:
+        raise ConsentEnded(consent_id)
+    complete: bool | None = None
+
+    def checkpoint(conversations: list[str], containers: list[dict[str, Any]], enumerated: bool) -> None:
+        nonlocal complete
+        complete = enumerated and complete is not False
+        _remember_foundry(deps, consent_id, conversations, containers, run_id=run_id, complete=complete, final=False)
+
+    result = agent(ctx, runner=deps.agents, checkpoint=checkpoint, **settings)
+    # No finally: an interrupted producer may have created unreported targets.
+    _remember_foundry(deps, consent_id, result.conversations, getattr(result, "containers", []),
+                      run_id=run_id, complete=complete is True)
+    return result
+
+
 def _remember_foundry(
-    deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]], *, run_id: str | None = None
+    deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]], *,
+    run_id: str | None = None, complete: bool = False, final: bool = True,
 ) -> None:
-    """Checkpoint targets and release the run fence together, before attempting any deletes."""
+    """Register known targets; only a fully enumerated, stopped producer may release its fence."""
     if not conversations and not containers and run_id is None:
         return
 
@@ -343,7 +380,7 @@ def _remember_foundry(
                 saved.append(c)
                 ids.add(c["id"])
         runs = consent.get("assessment_runs", [])
-        if run_id in runs:
+        if run_id in runs and complete and (final or consent.get("status") in ENDED_CONSENT):
             runs.remove(run_id)
         elif before == len(known) + len(saved):
             return False
@@ -357,6 +394,8 @@ def _remember_foundry(
                            foundry_generation=consent.get("foundry_generation", 0) + 1)
 
     doc = update_doc(deps.store, "consents", consent_id, consent_id, mutate)
+    if doc is None and run_id:
+        raise ConsentEnded(consent_id)
     if doc and doc.get("status") in ENDED_CONSENT:
         if doc.get("foundry_repair_pending"):
             from journey.consent import repair_foundry
@@ -509,17 +548,8 @@ def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         settlement=uw.get("pg_ledger"),
         marketplace=uw.get("marketplace"),
     )
-    run_id = uuid4().hex
-
-    def fence(doc: dict) -> None:
-        if doc.get("status") != "granted":
-            raise ConsentEnded(payload["consent_id"])
-        doc.setdefault("assessment_runs", []).append(run_id)
-
-    if update_doc(deps.store, "consents", payload["consent_id"], payload["consent_id"], fence) is None:
-        raise ConsentEnded(payload["consent_id"])
-    result = assess(ctx, runner=deps.agents, analyst_model=deps.analyst_model, reviewer_model=deps.reviewer_model)
-    _remember_foundry(deps, payload["consent_id"], result.conversations, result.containers, run_id=run_id)
+    result = run_consent_agent(deps, payload["consent_id"], assess, ctx,
+                               analyst_model=deps.analyst_model, reviewer_model=deps.reviewer_model)
     return {
         "assessment": result.assessment.model_dump(mode="json") if result.assessment else None,
         "flags": result.flags,

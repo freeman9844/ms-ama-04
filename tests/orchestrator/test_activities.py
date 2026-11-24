@@ -538,6 +538,18 @@ def test_assess_credit_without_agents_is_unavailable(deps):
     assert (result["assessment"], result["flags"]) == (None, [FLAG_ASSESSMENT_UNAVAILABLE])
 
 
+def test_unreported_assessment_result_is_not_evidence_of_empty_inventory(deps, monkeypatch):
+    from agents.underwriting import AssessmentResult
+    grant, payload = assess_input(deps)
+    monkeypatch.setattr(activities, "assess", lambda *a, **kw: AssessmentResult(
+        None, [FLAG_ASSESSMENT_UNAVAILABLE], {}, ["conv_returned"], [{"id": "cntr_returned", "deleted": False}]))
+    assess_credit(with_deps(deps, agents=UnderwritingRunner()), payload)
+    cid = grant["consent_id"]
+    doc = deps.store.read("consents", cid, cid)
+    assert doc["assessment_runs"] and "conv_returned" in doc["foundry_conversations"]
+    assert {"id": "cntr_returned", "deleted": False} in doc["foundry_containers"]
+
+
 def test_store_cache_round_trip(deps):
     cache = StoreCache(deps.store)
     assert cache.get("k1") is None
@@ -655,11 +667,12 @@ def test_remember_foundry_on_ended_consent_deletes_immediately(deps):
     from tests.orchestrator.test_consent_lifecycle import MemoryStore as LifecycleStore
     runner = CleanupRunner()
     d = with_deps(deps, agents=runner, store=LifecycleStore())
-    d.store.upsert("consents", {"id": "c1", "consent_id": "c1", "status": "revoked", "foundry_conversations": []})
-    _remember_foundry(d, "c1", ["conv_late"], [{"id": "cntr_late", "deleted": False}])
-    doc = d.store.read("consents", "c1", "c1")
+    cid = consent_for(d)["consent_id"]
+    update_doc(d.store, "consents", cid, cid, lambda doc: doc.update(status="revoked"))
+    _remember_foundry(d, cid, ["conv_late"], [{"id": "cntr_late", "deleted": False}])
+    doc = d.store.read("consents", cid, cid)
     assert runner.deleted_conversations == ["conv_late"] and runner.deleted_containers == ["cntr_late"]
-    proof = d.store.read("deletion_proofs", "c1", "c1")
+    proof = d.store.read("deletion_proofs", cid, cid)
     assert doc["deletion_complete"] and proof["complete"]
     assert {(i["kind"], i["target"]) for i in proof["items"] if i["verified"]} >= {
         ("conversation", "conv_late"), ("container", "cntr_late")}

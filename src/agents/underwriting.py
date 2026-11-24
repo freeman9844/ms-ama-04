@@ -646,32 +646,43 @@ def _to_assessment(
     )
 
 
+TargetCheckpoint = Callable[[list[str], list[dict[str, Any]], bool], None]
+
+
 class _Session:
-    def __init__(self, runner: AgentRunner) -> None:
+    def __init__(self, runner: AgentRunner, checkpoint: TargetCheckpoint | None = None) -> None:
         self.runner = runner
+        self.checkpoint = checkpoint
         self.conversations: list[str] = []
         self.containers: list[dict[str, Any]] = []
 
-    def cleanup(self, conversation_id: str | None, containers: Sequence[str]) -> None:
+    def cleanup(self, conversation_id: str | None, containers: Sequence[str], *, complete: bool) -> None:
         if conversation_id:
             self.conversations.append(conversation_id)
+        checked = []
         for cid in containers:
             try:
                 deleted = bool(self.runner.delete_container(cid))
             except Exception:  # noqa: BLE001
                 deleted = False
-            self.containers.append({"id": cid, "deleted": deleted})
+            checked.append({"id": cid, "deleted": deleted})
+        self.containers.extend(checked)
+        if self.checkpoint:
+            self.checkpoint([conversation_id] if conversation_id else [], checked, complete and bool(conversation_id))
 
     def run(self, spec: AgentSpec, text: str, handlers: Mapping[str, ToolHandler]) -> tuple[AgentRun | None, str | None]:
         try:
             run = self.runner.run(spec, text, handlers)
         except AgentError as e:
-            self.cleanup(e.conversation_id, e.containers)
-            return None, str(e)[:300]
+            conversation, containers, error = e.conversation_id, e.containers, str(e)[:300]
         except Exception as e:  # noqa: BLE001 - 토큰 발급 실패 등도 심사 흐름을 멈추지 않는다
-            return None, f"{type(e).__name__}: {e}"[:300]
-        self.cleanup(run.conversation_id, run.containers)
-        return run, None
+            conversation, containers, error = None, (), f"{type(e).__name__}: {e}"[:300]
+        else:
+            self.cleanup(run.conversation_id, run.containers, complete=True)
+            return run, None
+        # Do not chain a private runner error into a checkpoint exception.
+        self.cleanup(conversation, containers, complete=False)
+        return None, error
 
 
 def assess(
@@ -681,8 +692,9 @@ def assess(
     analyst_model: str,
     reviewer_model: str,
     max_rounds: int = MAX_ROUNDS,
+    checkpoint: TargetCheckpoint | None = None,
 ) -> AssessmentResult:
-    session = _Session(runner)
+    session = _Session(runner, checkpoint)
     analyst, reviewer = analyst_spec(analyst_model), reviewer_spec(reviewer_model)
     if ctx.product:
         analyst = usd_language.native_spec(analyst, (
@@ -703,6 +715,8 @@ def assess(
             "Do not treat ratings or pending payouts as repayment guarantees, or missing data as adverse."))
     models = {"analyst": analyst_model, "reviewer": reviewer_model}
     if ctx.policy.get("decision") not in ("eligible", "refer", "ineligible"):
+        if checkpoint:
+            checkpoint([], [], True)  # No remote call was attempted.
         record = {"rounds": [], "models": models, "error": "Unknown policy decision" if ctx.product else "정책 판정을 확인할 수 없다"}
         return AssessmentResult(None, [FLAG_ASSESSMENT_UNAVAILABLE], record, [], [])
     draft: AnalystDraft | None = None

@@ -1668,6 +1668,82 @@ def missed_without_agents(mock_app, **fields):
     return deps, replay_id, cases(deps)[0]
 
 
+@pytest.mark.parametrize("producer", [EW_AGENT, COLLECTIONS_AGENT])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_monitoring_withdrawal_during_remote_call(mock_app, producer, confirmed, caplog):
+    from agents.runtime import AgentError
+    from journey.consent import IncompleteDeletion, delete_consent_data, send_consent_notice
+    from tests.orchestrator.test_consent_lifecycle import FoundryRunner, MemoryRaw as DeletableRaw, end
+
+    deps = missing_first_due(replace(make_deps(mock_app), raw=DeletableRaw()))
+    approved_loan(deps)
+
+    class Withdrawing(FoundryRunner):
+        def run(self, spec, text, handlers):
+            if spec.name != producer:
+                return ScriptedAgents().run(spec, text, handlers)
+            cid = loan(deps)["monitoring"]["consent_id"]
+            with pytest.raises(IncompleteDeletion):
+                delete_consent_data(worker, end(cid))
+            with pytest.raises(LookupError):
+                send_consent_notice(worker, {"consent_id": cid, "kind": "deletion"})
+            if not confirmed:
+                raise AgentError("synthetic-private-error", "conv_partial", ("known_partial",))
+            return ScriptedAgents().run(spec, text, handlers)
+
+    worker = replace(deps, agents=Withdrawing())
+    replay(worker)
+    assert loan(deps)["monitoring"]["status"] == "stopped"
+    cid = loan(deps)["monitoring"]["consent_id"]
+    proof = deps.store.read("deletion_proofs", cid, cid)
+    assert proof["complete"] is confirmed and proof["event_published"] is False
+    notice = {"consent_id": cid, "kind": "deletion"}
+    if confirmed:
+        assert send_consent_notice(deps, notice)["kind"] == "deletion"
+    else:
+        assert {"conv_partial", "known_partial"} <= {i["target"] for i in proof["items"] if i["verified"]}
+        with pytest.raises(LookupError):
+            send_consent_notice(deps, notice)
+    assert "synthetic-private-error" not in caplog.text
+
+
+def test_collections_crash_and_redelivery_cannot_certify_first_attempt(mock_app, monkeypatch):
+    from journey.activities import Conflict
+    from journey.consent import IncompleteDeletion, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import FoundryRunner, MemoryRaw as DeletableRaw, end
+
+    deps, _, case = missed_without_agents(mock_app, raw=DeletableRaw())
+    # Deliver the case as it stood before a proposal was saved.
+    deps.store.upsert(ALERTS, dict(case, collections=None, status="open"))
+    cid = loan(deps)["monitoring"]["consent_id"]
+    calls = []
+
+    class LostWorker(BaseException):
+        pass
+
+    class Interrupted(FoundryRunner):
+        def run(self, *args):
+            calls.append(True)
+            if len(calls) == 1:
+                raise LostWorker
+            return ScriptedAgents().run(*args)
+
+    worker = replace(deps, agents=Interrupted())
+    def deliver():
+        return monitoring_module.run_collections(worker, LOAN, case["id"])
+
+    with monkeypatch.context() as m:
+        m.setattr(deps.store, "replace", lambda *args: False)
+        with pytest.raises(Conflict):
+            deliver()
+    assert not calls
+    with pytest.raises(LostWorker):
+        deliver()
+    assert deliver() and deliver() is None
+    with pytest.raises(IncompleteDeletion):
+        delete_consent_data(worker, end(cid))
+
+
 def test_missed_payment_creates_proposal_and_pauses_without_contact(mock_app):
     deps = missing_first_due(make_deps(mock_app)); approved_loan(deps); replay(deps)
     case, mon = cases(deps)[0], loan(deps)["monitoring"]

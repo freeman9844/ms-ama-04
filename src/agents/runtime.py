@@ -325,10 +325,17 @@ class FoundryAgents:
             response = self._call(
                 "POST", "/openai/v1/responses", body, conversation_id, throttle_retries=spec.throttle_retries
             )
+            missing = False
             for item in response.get("output", []):
-                cid = item.get("container_id") if item.get("type") == "code_interpreter_call" else None
-                if cid and cid not in containers:
+                if item.get("type") != "code_interpreter_call":
+                    continue
+                cid = item.get("container_id")
+                if not isinstance(cid, str) or not cid.strip():
+                    missing = True
+                elif cid not in containers:
                     containers.append(cid)
+            if missing:
+                raise AgentError("Incomplete interpreter container inventory", conversation_id)
             return response
 
         response = respond(input_text)

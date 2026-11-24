@@ -23,7 +23,7 @@ from shared.product_context import product_of, validate_usd_evidence
 from agents.ledger_monitor import CAUSE_FIELDS, CauseCandidate, LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, FORECAST_FIELDS, WEEK_FIELDS, cohort, evidence_catalog, week_window
 from agents.runtime import AgentSpec, ToolHandler
-from agents.underwriting import AgentRunner, _fn, _Session
+from agents.underwriting import AgentRunner, TargetCheckpoint, _fn, _Session
 from shared.contracts import (
     EVIDENCE_ID_PATTERN,
     AlertCause,
@@ -540,11 +540,12 @@ class EwResult:
     conversations: list[str]
 
 
-def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str) -> EwResult:
+def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str,
+                checkpoint: TargetCheckpoint | None = None) -> EwResult:
     if runner is None:
         alert = fallback_alert(ctx, "agents_disabled")
         return EwResult(alert, "fallback_alert", "agents_disabled", {"error": "agents_disabled"}, [])
-    session = _Session(runner)
+    session = _Session(runner, checkpoint)
     text = ctx.mask(
         f"대출 {ctx.loan_id} {ctx.week}주차({week_window(ctx.start, ctx.week)[0]}~{ctx.as_of}) 흐름에서 "
         f"탐지기 트리거 {json.dumps(list(ctx.triggers))}가 걸렸다. 조사해서 경보 여부를 결정하라."

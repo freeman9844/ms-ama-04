@@ -107,6 +107,7 @@
   "삭제 증명 %(id)s": "Deletion proof %(id)s",
   "완료": "Complete",
   "미완료": "Incomplete",
+  "Foundry 삭제 대상 목록을 아직 확인하지 못했습니다. 삭제 완료 안내는 보류됩니다.": "Foundry target inventory is not yet confirmed. The deletion notice is on hold.",
   "요청자": "Requested by",
   "삭제 시각": "Deleted at",
   "시도": "Attempts",

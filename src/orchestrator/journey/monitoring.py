@@ -48,7 +48,7 @@ from journey.activities import (
     Deps,
     _drop_if_consent_ended,
     put_consent_raw,
-    _remember_foundry,
+    run_consent_agent,
     _semantic,
     raw_container,
     schedule_lifecycle,
@@ -406,11 +406,14 @@ def _run_weeks(deps: Deps, loan_id: str, replay_id: str, first_week: int) -> Non
             if _after_week(deps, loan_id, replay_id, week, ids[0] if ids else None) != "next":
                 break
     except Exception as e:  # noqa: BLE001 - 큐 재시도는 13주를 처음부터 다시 돌린다(LLM 비용). 실패를 기록하고 콘솔에서 다시 시작한다
-        log.exception("인라인 재생 실패: %s %s", loan_id, replay_id)
         loan = deps.store.read(LOANS, loan_id, loan_id)
         if loan and (loan.get("monitoring") or {}).get("replay_id") == replay_id:
-            loan["monitoring"].update(status="failed", error=f"{type(e).__name__}: {e}"[:300])
             loan["updated_at"] = deps.clock().isoformat()
+            if isinstance(e, ConsentEnded):
+                loan["monitoring"].update(status="stopped", error="monitoring_consent_ended", stopped_at=loan["updated_at"])
+            else:
+                log.exception("인라인 재생 실패: %s %s", loan_id, replay_id)
+                loan["monitoring"].update(status="failed", error=f"{type(e).__name__}: {e}"[:300])
             deps.store.upsert(LOANS, loan)
 
 
@@ -586,8 +589,7 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             pg_weeks=pg_weeks,
             ledger_baseline=lb,
         )
-        result = investigate(ctx, runner=deps.agents, model=deps.ew_model)
-        _remember_foundry(deps, mon["consent_id"], result.conversations, [])
+        result = run_consent_agent(deps, mon["consent_id"], investigate, ctx, model=deps.ew_model)
         mon["seen_triggers"].extend(new)
         entry["investigation"] = {"decision": result.decision, "reason": result.reason, "record": result.record}
         if result.alert is not None:
@@ -1050,8 +1052,7 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
                                           case.contact_on.isoformat())
     count = len({_contact_identity(s) for s in prior})
     ctx = CollectionsContext(case=case, contacts=contacts, now=now, mask=mask, borrower_contacts_7d=count)
-    result = act(ctx, runner=deps.agents, model=deps.collections_model)
-    _remember_foundry(deps, loan["monitoring"]["consent_id"], result.conversations, [])
+    result = run_consent_agent(deps, loan["monitoring"]["consent_id"], act, ctx, model=deps.collections_model)
     escalation = [c for c in contacts if c.get("by") == "early_warning"]
     doc["proposal"] = build_proposal(case, result.draft or {}, contacts, now, escalation, mask,
                                      borrower_contacts_7d=count)

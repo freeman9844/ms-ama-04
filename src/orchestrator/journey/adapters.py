@@ -68,7 +68,7 @@ class HttpMockApi:
         if r.status_code == 404:
             return "absent"
         r.raise_for_status()
-        return "revoked"
+        return "revoked" if r.status_code == 204 else "unacknowledged"
 
     def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any:
         try:

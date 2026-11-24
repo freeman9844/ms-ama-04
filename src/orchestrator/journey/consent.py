@@ -75,9 +75,16 @@ def _delete_raw(deps: Deps, container: str, *, fence_writers: bool = False) -> d
 def _revoke_registry(deps: Deps, consent_id: str) -> dict[str, Any]:
     try:
         outcome = deps.mock.revoke(consent_id)
-        return _item("consent_registry", consent_id, outcome, outcome in ("revoked", "absent"))
+        return _item("consent_registry", consent_id, outcome, outcome == "revoked",
+                     "tombstone_acknowledged" if outcome == "revoked" else None)
     except Exception as e:  # noqa: BLE001
-        return _item("consent_registry", consent_id, "failed", False, _error(e))
+        return _item("consent_registry", consent_id, "failed", False, type(e).__name__)
+
+
+def _verified_item(item: dict) -> bool:
+    # Completed legacy proofs remain history; don't reuse a bare 404 or unspecified 2xx to finish a new proof.
+    return item["verified"] and (item["kind"] != "consent_registry" or
+                                 item["outcome"] == "revoked" and item.get("detail") == "tombstone_acknowledged")
 
 
 def start_raw_repair(deps: Deps, cid: str, container: str) -> None:
@@ -114,7 +121,7 @@ def _repair_raw(deps: Deps, consent: dict, container: str) -> bool:
         raw = _delete_raw(deps, container, fence_writers=bool(consent.get("raw_write_count")))
         proof["items"] = [raw if i["kind"] == "raw_container" else i for i in proof["items"]]
     complete = (not consent.get("foundry_repair_pending") and not consent.get("assessment_runs")
-                and all(i["verified"] for i in proof["items"]))
+                and all(_verified_item(i) for i in proof["items"]))
     if needs_verification or proof["complete"] != complete:
         proof["complete"] = complete
         proof["attempts"] = proof.get("attempts", 0) + 1
@@ -296,6 +303,7 @@ def delete_consent_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
             "retained": ([{"kind": "application_record", "target": f"applications/{application_id}", "note": RETAINED}]
                          if application_id else []),
             "complete": False, "attempts": 0, "raw_repair_generation": consent.get("raw_repair_generation", 0),
+            "foundry_inventory_pending": bool(consent.get("assessment_runs")),
             "event_published": False, "event_error": None,
         })
         existing = deps.store.read(PROOFS_CONTAINER, consent_id, consent_id)
@@ -306,10 +314,12 @@ def delete_consent_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     if (existing.get("raw_repair_generation", 0) > consent.get("raw_repair_generation", 0)
             or existing.get("foundry_generation", 0) > consent.get("foundry_generation", 0)):
         raise IncompleteDeletion(f"Deletion generation changed: {consent_id}")
-    done = {(i["kind"], i["target"]): i for i in existing["items"] if i["verified"]}
+    done = {(i["kind"], i["target"]): i for i in existing["items"] if _verified_item(i)}
     items = [_delete_raw(deps, container, fence_writers=bool(consent.get("raw_write_count")))]
     items += [done.get((kind, target)) or run() for kind, target, run in steps]
-    proof = dict(existing, items=items, complete=not consent.get("assessment_runs") and all(i["verified"] for i in items),
+    inventory_pending = bool(consent.get("assessment_runs"))
+    proof = dict(existing, items=items, complete=not inventory_pending and all(i["verified"] for i in items),
+                 foundry_inventory_pending=inventory_pending,
                  foundry_generation=consent.get("foundry_generation", 0), deleted_at=now,
                  attempts=existing.get("attempts", 0) + 1, raw_repair_generation=consent.get("raw_repair_generation", 0))
     if proof["complete"] and not proof.get("event_published"):

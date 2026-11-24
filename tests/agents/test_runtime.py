@@ -200,6 +200,14 @@ def test_run_records_code_interpreter_containers_across_rounds():
     assert run.record()["containers"] == ["cntr_a", "cntr_b"]
 
 
+def test_missing_interpreter_container_is_not_complete_enumeration():
+    body = done({"status": "ok"}).json()
+    body["output"] = [ci(""), ci("cntr_known"), *body["output"]]
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(httpx.Response(200, json=body))).run(SPEC, "input", {})
+    assert err.value.conversation_id == "conv_1" and err.value.containers == ("cntr_known",)
+
+
 def test_agent_error_carries_containers_for_cleanup():
     body = done("not json").json()
     body["output"] = [ci("cntr_x"), *body["output"]]
