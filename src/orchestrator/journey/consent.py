@@ -176,11 +176,17 @@ def _delete_container(deps: Deps, container: dict[str, Any]) -> dict[str, Any]:
         return _item("container", container["id"], "deleted", True, "deleted_after_run")
     if deps.agents is None:
         return _item("container", container["id"], "failed", False, "agents_disabled")
+    target = container["id"]
     try:
-        deleted = bool(deps.agents.delete_container(container["id"]))
+        if deps.agents.delete_container(target):
+            return _item("container", target, "deleted", True)
+        # A prior DELETE may have succeeded before its proof lost an ETag race.
+        probe = getattr(deps.agents, "container_exists", None)
+        if probe is not None and probe(target) is False:
+            return _item("container", target, "absent", True)
     except Exception:  # noqa: BLE001
-        deleted = False
-    return _item("container", container["id"], "deleted" if deleted else "failed", deleted)
+        pass
+    return _item("container", target, "failed", False)
 
 
 def _proof_summary(proof: dict[str, Any]) -> dict[str, Any]:

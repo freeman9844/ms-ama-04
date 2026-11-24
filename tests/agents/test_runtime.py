@@ -243,6 +243,21 @@ def test_delete_container_failure_returns_false():
     assert agents(fake).delete_container("cntr_a") is False
 
 
+@pytest.mark.parametrize(("status", "expected"), [(404, False), (200, True), (403, None), (503, None), (None, None)])
+def test_container_exists_only_confirms_absence_for_target_404(status, expected):
+    requests = []
+
+    def handler(request):
+        requests.append((request.method, str(request.url)))
+        if status is None:
+            raise httpx.ConnectError("offline", request=request)
+        return httpx.Response(status)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert FoundryAgents(BASE, lambda: "tok", client=client).container_exists("cntr_actual") is expected
+    assert requests == [("GET", BASE + "/openai/v1/containers/cntr_actual")]
+
+
 def conversations_api(status: int, *, get_status: int = 404):
     seen = []
 

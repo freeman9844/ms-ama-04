@@ -8,11 +8,12 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from types import ModuleType, SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from agents.notices import Draft
-from agents.runtime import AgentRun
+from agents.runtime import AgentRun, FoundryAgents
 from journey.activities import ConsentEnded, Deps, _remember_foundry, assemble_data, request_consent
 from journey.adapters import BlobRawStore, CosmosStore, HttpMockApi, HttpPolicyApi
 from journey.models import KST
@@ -616,6 +617,41 @@ def test_retry_keeps_items_verified_on_an_earlier_attempt(mock_client):
     assert runner.deleted_containers == ["cntr_1"]
     proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
     assert proof["attempts"] == 2 and all(i["verified"] for i in proof["items"])
+
+
+def test_container_retry_after_proof_conflict_requires_confirmed_absence(mock_client):
+    deps = make_deps(mock_client)
+    cid = consent_for(deps)["consent_id"]
+    _remember_foundry(deps, cid, [], [{"id": "cntr_actual", "deleted": False}])
+    remaining = {"cntr_actual"}
+    probe_status = 403
+
+    def handle(request):
+        if request.url.path != "/api/projects/demo/openai/v1/containers/cntr_actual":
+            return httpx.Response(400)
+        if request.method == "GET":
+            return httpx.Response(probe_status)
+        if request.method == "DELETE" and remaining:
+            remaining.remove("cntr_actual")
+            deps.store.conflicts = 1  # Another writer advances the proof ETag after the DELETE.
+            return httpx.Response(200, json={"id": "cntr_actual", "deleted": True})
+        return httpx.Response(404)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        agents = FoundryAgents("https://example.invalid/api/projects/demo", lambda: "tok", client=client)
+        deps = replace(deps, agents=agents)
+        with pytest.raises(IncompleteDeletion, match="proof changed"):
+            delete_consent_data(deps, end(cid))
+        assert not remaining
+        with pytest.raises(IncompleteDeletion, match="container:cntr_actual"):
+            delete_consent_data(deps, end(cid))
+        proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
+        assert not proof["complete"] and not next(i for i in proof["items"] if i["kind"] == "container")["verified"]
+
+        probe_status = 404
+        assert delete_consent_data(deps, end(cid))["complete"]
+        item = next(i for i in deps.store.read(PROOFS_CONTAINER, cid, cid)["items"] if i["kind"] == "container")
+        assert (item["target"], item["outcome"], item["verified"]) == ("cntr_actual", "absent", True)
 
 
 @pytest.fixture

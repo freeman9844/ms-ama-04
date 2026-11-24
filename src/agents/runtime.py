@@ -298,6 +298,13 @@ class FoundryAgents:
             return False
         return True if status is not None and status < 400 else None
 
+    def container_exists(self, container_id: str) -> bool | None:
+        """Only a 404 from this container's endpoint confirms absence."""
+        status = self._status("GET", f"/openai/v1/containers/{container_id}")
+        if status == 404:
+            return False
+        return True if status is not None and 200 <= status < 300 else None
+
     def _loop(
         self,
         spec: AgentSpec,
