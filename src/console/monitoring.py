@@ -11,11 +11,11 @@ from typing import Any, Protocol
 from agents.collections import RepaymentCase, SCRIPTS, usd_text_choices
 from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
+from agents.pretranslate import load_case_raw
 from agents.repayment import item_amount, item_key
 from console import i18n
 from console.i18n import _
-from console.views import RawData, RawStore, _map_strings, _text_functions, raw_container
-from shared.contracts import ApplicantProfile, Transaction
+from console.views import RawData, RawStore, _map_strings, _text_functions
 from shared.product_context import product_of
 
 SEVERITY_LABELS = {"low": "낮음", "medium": "중간", "high": "높음"}
@@ -126,7 +126,7 @@ _LEDGER_ROW_FIELDS = ("week", "order_gross", "returns", "held", "deductions", "s
 
 
 class MonitoringStore(Protocol):
-    def list_loans(self, limit: int) -> list[dict[str, Any]]: ...
+    def list_loans(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]: ...
 
     def get_loan(self, loan_id: str) -> dict[str, Any] | None: ...
 
@@ -136,14 +136,8 @@ class MonitoringStore(Protocol):
 
 
 def load_monitoring_raw(store: RawStore, loan: Mapping[str, Any]) -> RawData | None:
-    mon = loan.get("monitoring") or {}
-    if not loan.get("underwriting_consent_id") or not mon.get("consent_id"):
-        return None
-    profile = store.get_json(raw_container(loan["underwriting_consent_id"]), "profile.json")
-    flow = store.get_json(raw_container(mon["consent_id"]), "flow.json")
-    if profile is None or flow is None:
-        return None
-    return RawData(ApplicantProfile.model_validate(profile), [Transaction.model_validate(t) for t in flow])
+    raw = load_case_raw("loans", loan, store, lambda *_: None)
+    return RawData(*raw) if raw else None
 
 
 def loan_view(
@@ -159,10 +153,17 @@ def loan_view(
     mon = loan.get("monitoring") or {}
     weeks = mon.get("weeks") or []
     rows = [w["row"] for w in weeks]
-    catalog = evidence_catalog(rows, Baseline.from_dict(loan["baseline"]), loan.get("industry", "")) if rows else {}
+    usd = bool(product_of(loan))
+    if usd:
+        catalog = {f"{'F' if k.startswith(('projected_', 'due_balance', 'shortfall_date', 'next_due_on')) else 'W'}:{r['week']}:{k}": v
+                   for r in rows for k, v in r.items()}
+        catalog.update({f"B:{k}": v for k, v in (loan.get("baseline") or {}).items()})
+    else:
+        catalog = evidence_catalog(rows, Baseline.from_dict(loan["baseline"]), loan.get("industry", "")) if rows else {}
     lb = mon.get("ledger_baseline")
     catalog |= ledger_catalog(LedgerBaseline.from_dict(lb) if lb else None)
-    ledger_rows = [{k: r[k] for k in _LEDGER_ROW_FIELDS} for r in rows if "order_gross" in r]
+    ledger_rows = ([r for r in rows if "order_gross_cents" in r] if usd else
+                   [{k: r[k] for k in _LEDGER_ROW_FIELDS} for r in rows if "order_gross" in r])
     ledger_note = _(NO_LEDGER_LABEL) if weeks and not ledger_rows else None
     shown: list[dict[str, Any]] = []
     cases: list[dict[str, Any]] = []
@@ -214,7 +215,7 @@ def loan_view(
         {
             "txn_id": t.txn_id,
             "booked_on": t.booked_on.isoformat(),
-            "amount_krw": t.amount_krw,
+            **({"amount_cents": t.amount_cents} if usd else {"amount_krw": t.amount_krw}),
             "description": raw_text(t.description),
         }
         for t in (raw.transactions if raw else ())
@@ -275,17 +276,19 @@ def _auto_contacts(
 
 def _plan_view(led: Mapping[str, Any]) -> dict[str, Any]:
     """플랜 제안·변경 요청·변경 이력(2026-11-11). 옛 문서는 셋 다 없다."""
-    installment = led.get("installment_krw") or 0
+    usd = "installment_cents" in led
+    amount = "amount_cents" if usd else "amount_krw"
+    installment = led.get("installment_cents" if usd else "installment_krw") or 0
     by_key = {item_key(s): s for s in led.get("schedule") or ()}
     change = led.get("plan_change")
     if change:
         before = [
             {"label": _key_label(k), "due_on": s.get("due_on") if s else None,
-             "amount_krw": item_amount(s, installment) if s else None}
+             amount: item_amount(s, installment) if s else None}
             for k in change.get("replaces") or ()
             for s in (by_key.get(k),)
         ]
-        after = [{"label": installment_label(i), "due_on": i["due_on"], "amount_krw": i["amount_krw"]}
+        after = [{"label": installment_label(i), "due_on": i["due_on"], amount: i[amount]}
                  for i in change.get("items") or ()]
         change = {**change, "before": before, "after": after}
     history = [

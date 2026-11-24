@@ -16,9 +16,9 @@ RECENT_LABEL = "최근 신청 100건(전체 채널)"
 
 
 class OpsStore(Protocol):
-    def runs(self) -> list[str]: ...
-    def by_run(self, run_id: str) -> list[dict[str, Any]]: ...
-    def recent(self, limit: int) -> list[dict[str, Any]]: ...
+    def runs(self, *, legacy: bool = False) -> list[str]: ...
+    def by_run(self, run_id: str, *, legacy: bool = False) -> list[dict[str, Any]]: ...
+    def recent(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]: ...
 
 
 def _stamp(run_id: str) -> str:
@@ -39,8 +39,8 @@ def run_options(runs: Iterable[str]) -> list[tuple[str, str]]:
     return [(RECENT_RUN, _(RECENT_LABEL))] + [(r, r) for r in sorted_runs(runs)]
 
 
-def scope_docs(store: OpsStore, selected: str) -> list[dict[str, Any]]:
-    return store.recent(RECENT_LIMIT) if selected == RECENT_RUN else store.by_run(selected)
+def scope_docs(store: OpsStore, selected: str, *, legacy: bool = False) -> list[dict[str, Any]]:
+    return store.recent(RECENT_LIMIT, legacy=legacy) if selected == RECENT_RUN else store.by_run(selected, legacy=legacy)
 
 
 def ops_view(docs: list[dict[str, Any]]) -> dict[str, Any]:

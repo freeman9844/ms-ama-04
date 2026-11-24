@@ -34,17 +34,21 @@ def preview():
     return TestClient(create_app(deps), follow_redirects=False), deps
 
 
-def test_default_locale_is_korean(preview):
+def test_first_visit_and_explicit_locale(preview):
     client, _ = preview
+    client.cookies.set("lang", "ko")
+    client.headers["Accept-Language"] = "ko-KR"
     html = client.get("/").text
-    assert '<html lang="ko">' in html and "사후 모니터링" in html
+    assert '<html lang="en">' in html and "Post-loan monitoring" in html
+    assert '<html lang="ko">' in client.get("/?lang=ko").text
+    assert '<html lang="ko">' in client.get("/").text
 
 
 def test_lang_query_switches_and_sets_cookie(preview):
     client, _ = preview
     r = client.get("/loans?lang=en")
     assert '<html lang="en">' in r.text and "Post-loan monitoring" in r.text
-    assert "lang=en" in r.headers["set-cookie"]
+    assert f"{i18n.COOKIE}=en" in r.headers["set-cookie"]
     assert '<html lang="en">' in client.get("/").text
     assert '<html lang="ko">' in client.get("/?lang=ko").text
 
@@ -52,7 +56,7 @@ def test_lang_query_switches_and_sets_cookie(preview):
 def test_accept_language_picks_english_without_cookie(preview):
     client, _ = preview
     assert '<html lang="en">' in client.get("/", headers={"Accept-Language": "en-US,en;q=0.9"}).text
-    assert '<html lang="ko">' in client.get("/", headers={"Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"}).text
+    assert '<html lang="en">' in client.get("/", headers={"Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"}).text
 
 
 def test_switch_link_keeps_path_and_drops_watch_params(preview):
@@ -63,20 +67,18 @@ def test_switch_link_keeps_path_and_drops_watch_params(preview):
 
 def test_krw_follows_locale(preview):
     client, _ = preview
-    assert "원" in client.get("/loans").text
-    assert "₩" in client.get("/loans?lang=en").text
+    assert "원" in client.get("/legacy/loans?lang=ko").text
+    assert "₩" in client.get("/legacy/loans?lang=en").text
 
 
 def test_button_context_differs_from_status(preview):
     client, _ = preview
     html = client.get("/applications/app-20261103-p01?lang=en").text
     assert "> Approve</label>" in html
-    i18n._locale.set("en")
-    try:
+    with i18n.use("en"):
         assert i18n.gettext("승인") == "Approved" and i18n.pgettext("button", "승인") == "Approve"
-    finally:
-        i18n._locale.set(i18n.DEFAULT)
-    assert i18n.pgettext("button", "승인") == "승인"
+    with i18n.use("ko"):
+        assert i18n.pgettext("button", "승인") == "승인"
 
 
 def test_catalog_placeholders_match():
@@ -182,7 +184,7 @@ def test_english_page_has_no_korean_ui_text(preview, page):
     for source in (deps.store.docs, deps.monitoring.loans, deps.monitoring.alerts, deps.ops.data):
         _data_strings(source, data)
     data.update({"한국어", deps.demo_principal.name})
-    html = client.get(page, headers={"Cookie": "lang=en"}).text
+    html = client.get(page, headers={"Cookie": "ama_locale_v2=en"}).text
     html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S)
     for text in sorted(data, key=len, reverse=True):
         html = html.replace(escape(text, quote=False), " ").replace(escape(text), " ").replace(text, " ")

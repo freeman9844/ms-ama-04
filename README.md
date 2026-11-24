@@ -34,7 +34,9 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN>/
 
 콘솔은 Application Gateway WAF v2 뒤에 있다. 첫 `window open`은 인증서·게이트웨이를 만들려고 두 번 프로비저닝하므로 smoke는 그 뒤에 실행한다([ADR-011](docs/adr/ADR-011-appgw-waf-entry.md), [setup](docs/runbook/setup.md)). 게이트웨이 서브넷은 `Microsoft.Network/applicationGateways`로 위임하고 NSG `nsg-appgw`(인터넷 80/443 허용)를 둔다. IP 제한은 WAF 규칙이 맡는다. 모바일 회선 등으로 공인 IP가 바뀌어 콘솔이 403이면 `CONSOLE_IP`를 갱신한다([deploy](docs/runbook/deploy.md#콘솔-waf-운영자-ip-규칙)).
 
-콘솔 화면은 한국어·영어를 지원한다. 두 콘솔 모두 사이드바 하단의 `한국어 · English` 링크나 `?lang=en`으로 바꾸고 선택은 `lang` 쿠키에 1년 남는다. 쿠키가 없으면 브라우저 `Accept-Language`를 따른다. 영문 화면에서 셀러 상호·정책 사유는 카탈로그로, 에이전트 의견·차주 문구는 기계 번역(`console-translator`, 점선 밑줄, 원문이 기준)으로 보인다. 번역 규칙·용어집은 [src/console/locales/README.md](src/console/locales/README.md)에 있다.
+이 버전의 콘솔 기본 화면은 영어이며 USD 신청·대출·이의와 운영 지표만 조회한다. 기존 원화 건은 **Legacy records (KRW)** (`/legacy`, 고객은 `/legacy/borrower`) 또는 기존 신청·대출 번호 링크에서 조회·처리한다. 신규 USD 신청은 전환 검증 전까지 닫혀 있다. `python -m consolepreview`로 로컬 합성 USD·KRW 화면을 확인할 수 있다.
+
+두 콘솔 모두 사이드바의 `한국어 · English` 링크나 `?lang=ko`로 언어를 바꿀 수 있다. 명시적 선택은 `ama_locale_v2` 쿠키에 1년 남고 이전 `lang` 쿠키와 브라우저 언어는 무시한다. 언어를 바꿔도 금액·상품·원문은 바뀌지 않는다. 기존 원화 기록의 참고 번역 규칙은 [src/console/locales/README.md](src/console/locales/README.md)에 있다.
 
 ## 문서 지도
 

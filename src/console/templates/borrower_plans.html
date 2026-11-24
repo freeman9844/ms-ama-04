@@ -35,7 +35,7 @@
 {% endfor %}</tbody>
 </table>
 {% if p.status == "open" %}
-<form method="post" action="/borrower/{{ applicant_id|path }}/plan" class="decision">
+<form method="post" action="{{ prefix }}/borrower/{{ applicant_id|path }}/plan" class="decision">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="loan_id" value="{{ p.loan_id }}">
   <input type="hidden" name="offer_id" value="{{ o.offer_id }}">

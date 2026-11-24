@@ -4,5 +4,5 @@
 {% block main %}
 <h1>{{ _("사업자 선택") }}</h1>
 <p>{{ _("사업자를 선택하면 해당 사업자의 대출 신청 페이지로 이동합니다.") }}</p>
-<ul class="seller-grid">{% for a in demo_applicants %}<li><a class="seller-card" href="/apply?applicant_id={{ a|urlencode }}"><span class="avatar av-{{ loop.index0 % 6 + 1 }}" aria-hidden="true">{{ a|seller_initial }}</span> <span class="seller-card-label">{{ a|seller_label }}</span></a></li>{% endfor %}</ul>
+<ul class="seller-grid">{% for a in demo_applicants %}<li><a class="seller-card" href="{% if prefix %}{{ prefix }}/borrower/{{ a|path }}{% else %}/apply?applicant_id={{ a|urlencode }}{% endif %}"><span class="avatar av-{{ loop.index0 % 6 + 1 }}" aria-hidden="true">{{ a|seller_initial }}</span> <span class="seller-card-label">{{ a|seller_label if prefix else a|usd_seller }}</span></a></li>{% endfor %}</ul>
 {% endblock %}

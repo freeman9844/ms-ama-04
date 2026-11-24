@@ -12,6 +12,7 @@ from typing import Any
 from agents.features import compute_underwriting
 from agents.forecast import summarize
 from agents.monitoring import settlement_for
+from shared.portfolio import in_portfolio
 from console.app import ConsoleDeps
 from console.auth import CREDIT_OFFICER, Principal
 from mockapis.demo import build_demo_cases, build_load_cases
@@ -19,6 +20,8 @@ from mockapis.synth import SyntheticCase
 from policy.engine import decision_payload, evaluate
 from policy.rules import load_rules
 from shared.opinions import opinion_state
+from shared.contracts import USD_V1
+from opsmetrics.projection import project
 
 KST = timezone(timedelta(hours=9))
 NOW = datetime(2026, 11, 3, 10, 0, tzinfo=KST)
@@ -407,16 +410,19 @@ class MemoryApplications:
     def __init__(self, docs: list[dict[str, Any]]):
         self.docs = {d["id"]: d for d in docs}
 
-    def list_recent(self, limit: int) -> list[dict[str, Any]]:
+    def list_recent(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
         rows = [{"id": d["id"], "applicant_id": d["applicant_id"], "status": d["status"],
-                 "requested_amount_krw": d["requested_amount_krw"], "updated_at": d["updated_at"],
+                 **{k: d[k] for k in ("requested_amount_krw", "requested_amount_cents", "currency") if k in d}, "updated_at": d["updated_at"],
                  "recommendation": opinion_state(d.get("assessment"))} for d in self.docs.values()
-                if not d["id"].startswith("smoke-") and d.get("source") not in ("load", "fault")]
+                if in_portfolio(d, legacy) and not d["id"].startswith("smoke-") and d.get("source") not in ("load", "fault")]
         return sorted(rows, key=lambda r: r["updated_at"], reverse=True)[:limit]
 
-    def list_status_rows(self) -> list[dict[str, Any]]:
+    def list_status_rows(self, *, legacy: bool = False) -> list[dict[str, Any]]:
         return [{"status": d["status"], "recommendation": opinion_state(d.get("assessment"))}
-                for d in self.docs.values()]
+                for d in self.docs.values() if in_portfolio(d, legacy)]
+
+    def for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
+        return [d for d in self.docs.values() if d["applicant_id"] == applicant_id and in_portfolio(d, legacy)]
 
     def get(self, application_id: str) -> dict[str, Any] | None:
         return self.docs.get(application_id)
@@ -442,12 +448,12 @@ class MemoryMonitoring:
         self.loans = {d["id"]: d for d in loans}
         self.alerts = alerts
 
-    def list_loans(self, limit: int) -> list[dict[str, Any]]:
+    def list_loans(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
         return [{"id": d["id"], "applicant_id": d["applicant_id"], "industry": d["industry"],
-                 "amount_krw": d["amount_krw"], "tenor_months": d["tenor_months"],
+                 **{k: d[k] for k in ("amount_krw", "amount_cents", "currency") if k in d}, "tenor_months": d["tenor_months"],
                  "monitoring_status": (d["monitoring"] or {}).get("status"),
                  "alerts": len(d["monitoring"]["alert_ids"]) if d["monitoring"] else None,
-                 "updated_at": d["updated_at"]} for d in self.loans.values()][:limit]
+                 "updated_at": d["updated_at"]} for d in self.loans.values() if in_portfolio(d, legacy)][:limit]
 
     def get_loan(self, loan_id: str) -> dict[str, Any] | None:
         return self.loans.get(loan_id)
@@ -460,7 +466,7 @@ class MemoryMonitoring:
 
 
 class EmptyPrivacy:
-    def consents_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
+    def consents_for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
         return []
 
     def consents_for_application(self, application_id: str) -> list[dict[str, Any]]:
@@ -472,10 +478,10 @@ class EmptyPrivacy:
     def get_proof(self, consent_id: str) -> None:
         return None
 
-    def list_grievances(self, limit: int) -> list[dict[str, Any]]:
+    def list_grievances(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
         return []
 
-    def grievances_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
+    def grievances_for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
         return []
 
     def get_grievance(self, application_id: str, grievance_id: str) -> None:
@@ -486,14 +492,14 @@ class MemoryOps:
     def __init__(self, runs: dict[str, list[dict[str, Any]]]):
         self.data = runs
 
-    def runs(self) -> list[str]:
-        return list(self.data)
+    def runs(self, *, legacy: bool = False) -> list[str]:
+        return [r for r, docs in self.data.items() if any(in_portfolio(d, legacy) for d in docs)]
 
-    def by_run(self, run_id: str) -> list[dict[str, Any]]:
-        return self.data[run_id]
+    def by_run(self, run_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
+        return [d for d in self.data[run_id] if in_portfolio(d, legacy)]
 
-    def recent(self, limit: int) -> list[dict[str, Any]]:
-        docs = [d for run in self.data.values() for d in run]
+    def recent(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
+        docs = [d for run in self.data.values() for d in run if in_portfolio(d, legacy)]
         return sorted(docs, key=lambda d: d.get("received_at") or "", reverse=True)[:limit]
 
 
@@ -511,9 +517,21 @@ class InMemoryTranslations:
 
 def build_deps() -> ConsoleDeps:
     loan_docs, alerts = loans()
+    product = USD_V1.model_dump()
+    app_id = "preview-usd-bakery"
+    bakery = dict(product, id=app_id, application_id=app_id, applicant_id="seller-bakery-20",
+                  submitted_at=NOW.isoformat(), received_at=NOW.isoformat(), updated_at=NOW.isoformat(),
+                  source="customer", status="approved", requested_amount_cents=500000, requested_tenor_months=6,
+                  policy=dict(product, decision="eligible", max_amount_cents=600000, rules_version="usd-v1"),
+                  underwriting={"features": product, "monthly": [{"month": "2026-10", "revenue_cents": 1652700,
+                      "operating_out_cents": 800000, "debt_service_cents": 18500, "owner_draw_cents": 24000}]},
+                  assessment=dict(product, schema_version="2", review={"passed": True}, recommendation="approve",
+                                  summary="Settlement receipts support the requested amount."),
+                  officer_decision=dict(product, decision="approve", amount_cents=500000, officer_id="preview-officer",
+                                        reason="Verified settlement receipts."))
     return ConsoleDeps(
-        store=MemoryApplications(applications()), raw=NoRaw(), queue=RecordingQueue(),
+        store=MemoryApplications([*applications(), bakery]), raw=NoRaw(), queue=RecordingQueue(),
         pseudonym_key=b"preview-pseudonym-key-not-secret-0000", demo_principal=PRINCIPAL,
         monitoring=MemoryMonitoring(loan_docs, alerts), clock=lambda: NOW, privacy=EmptyPrivacy(),
-        ops=MemoryOps({RUN_ID: ops_docs()}),
+        ops=MemoryOps({RUN_ID: ops_docs(), "preview-usd": [project(bakery)]}),
     )

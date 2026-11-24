@@ -38,7 +38,8 @@ from agents.pretranslate import RawScope, active_scope, raw_container, translati
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
 from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
-from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, validate_apply, validate_request
+from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, parse_requested_usd_cents, validate_apply, validate_request
+from shared.portfolio import in_portfolio
 from console.dashboard import (
     POLICY_DECISIONS,
     RECOMMENDATION_LABELS,
@@ -96,7 +97,7 @@ from journey.models import (
     PlanDecision,
     ReplayRequest,
     RestructureDecision,
-    StartRequest,
+    UsdStartRequest,
     replay_held,
     replay_in_progress,
 )
@@ -106,7 +107,8 @@ from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
 from shared.product_context import product_of
 from shared.money import format_usd, parse_usd_cents
-from shared.sellers import DEMO_SELLERS, seller_label, seller_name
+from shared.sellers import DEMO_SELLERS, USD_CHANNEL_NAMES, USD_SELLERS, seller_label, seller_name
+from shared.contracts import USD_V1
 
 HERE = Path(__file__).parent
 START_QUEUE = "applications-start"
@@ -160,9 +162,11 @@ DECISION_ERRORS = {
 
 
 class ApplicationStore(Protocol):
-    def list_recent(self, limit: int) -> list[dict[str, Any]]: ...
+    def for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]: ...
 
-    def list_status_rows(self) -> list[dict[str, Any]]: ...
+    def list_recent(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]: ...
+
+    def list_status_rows(self, *, legacy: bool = False) -> list[dict[str, Any]]: ...
 
     def get(self, application_id: str) -> dict[str, Any] | None: ...
 
@@ -203,6 +207,7 @@ class ConsoleDeps:
     translator: Any | None = None
     # 오케스트레이터가 미리 번역해 둔 문구(translations 컨테이너). 없으면 렌더 때 저장 번역을 쓰지 않는다.
     translations: TranslationReader | None = None
+    usd_origination_enabled: bool = False
 
 
 def state_tag(*docs: Any) -> str:
@@ -254,7 +259,10 @@ def _templates() -> Environment:
     env.install_gettext_callables(gettext=i18n.gettext, ngettext=lambda s, p, n: i18n.gettext(s if n == 1 else p),
                                   pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
-    env.filters["usd_cents"] = lambda cents: format_usd(cents) if type(cents) is int else "-"
+    env.filters["usd_cents"] = lambda cents: f"{format_usd(cents)} USD" if type(cents) is int else "-"
+    env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "") if type(cents) is int else ""
+    env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s
+    env.filters["channel"] = lambda s: USD_CHANNEL_NAMES.get(s, s)
     env.filters["kst"] = _kst
     env.filters["status_label"] = lambda s: i18n.label(STATUS_LABELS, s)
     env.filters["path"] = lambda s: quote(str(s), safe="")
@@ -387,9 +395,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         csrf = csrf_token(csrf_key, user.user_id) if user else ""
 
         def draw() -> str:
-            return templates.get_template(name).render(user=user, csrf=csrf, demo=deps.demo_principal is not None, **ctx)
+            return templates.get_template(name).render(user=user, csrf=csrf, demo=deps.demo_principal is not None,
+                                                       origination_open=deps.usd_origination_enabled, **ctx)
 
-        if i18n.current() == i18n.DEFAULT:
+        if i18n.current() == i18n.SOURCE:
             return HTMLResponse(draw(), status_code=status_code)
         page = texts or PageTexts(Pseudonymizer(deps.pseudonym_key), allow_pending=False)
         with page_scope(page):
@@ -421,7 +430,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return False
 
     def page_texts(raw: Any, owner: str, scope: RawScope) -> PageTexts | None:
-        if i18n.current() == i18n.DEFAULT:
+        if i18n.current() == i18n.SOURCE:
             return None
         stored = stored_translations(owner)
         if raw is None:
@@ -494,11 +503,15 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def detail(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
         state = state_tag(doc)
         ctx.setdefault("decision_pending", decision_pending(doc["application_id"], state))
-        raw = (read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])[0] if i18n.current() != i18n.DEFAULT
+        raw = (read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])[0] if i18n.current() != i18n.SOURCE
                else load_raw(deps.raw, doc))
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
+        if product_of(doc):
+            return render("usd_detail.html", user, status_code, v=view, in_progress=in_progress, state=state,
+                          consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
+                          **ctx)
         return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"], translation_scope("applications", doc)),
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
                       op=opinion_panel(view, doc.get("assessment_run")), in_progress=in_progress, state=state,
@@ -509,39 +522,43 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def healthz() -> JSONResponse:
         return JSONResponse({"status": "ok"})
 
+    @app.get("/legacy", response_class=HTMLResponse)
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         user = viewer(request)
-        rows = deps.store.list_recent(HOME_LIST_LIMIT)
-        ui = home_summary(deps.store.list_status_rows())
-        return render("list.html", user, rows=rows, ui=ui, limit=HOME_LIST_LIMIT)
+        legacy = request.url.path == "/legacy"
+        limit = 100 if legacy else HOME_LIST_LIMIT
+        rows = deps.store.list_recent(limit, legacy=legacy)
+        ui = home_summary(deps.store.list_status_rows(legacy=legacy))
+        return render("list.html", user, rows=rows, ui=ui, limit=limit, prefix="/legacy" if legacy else "")
 
+    @app.get("/legacy/applications/rows", response_class=HTMLResponse)
     @app.get("/applications/rows", response_class=HTMLResponse)
     def rows(request: Request) -> HTMLResponse:
         user = viewer(request)
-        return render("_rows.html", user, rows=deps.store.list_recent(HOME_LIST_LIMIT))
+        legacy = request.url.path.startswith("/legacy/")
+        return render("_rows.html", user, rows=deps.store.list_recent(100 if legacy else HOME_LIST_LIMIT, legacy=legacy))
 
     @app.get("/applications/new", response_class=HTMLResponse)
     def new_form(request: Request) -> HTMLResponse:
         return render("new.html", decider(request))
+
+    def start(form: dict[str, str], source: str) -> UsdStartRequest:
+        req = UsdStartRequest(**USD_V1.model_dump(), application_id=deps.new_application_id(),
+                              applicant_id=form["applicant_id"].strip(), source=source,
+                              requested_amount_cents=parse_requested_usd_cents(form["requested_amount_usd"]),
+                              requested_tenor_months=_int(form["requested_tenor_months"]), submitted_at=deps.clock())
+        deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
+        return req
 
     @app.post("/applications")
     def submit(posted: Posted = Depends(decider_form)):
         user, form = posted.user, posted.form
         if code := validate_request(form, DEMO_APPLICANTS):
             return render("new.html", user, 422, error=_(APPLY_ERRORS[code]), form=form)
-        try:
-            req = StartRequest(
-                application_id=deps.new_application_id(),
-                applicant_id=form.get("applicant_id", "").strip(),
-                requested_amount_krw=_int(form.get("requested_amount_krw", "")),
-                requested_tenor_months=_int(form.get("requested_tenor_months", "")),
-                submitted_at=deps.clock(),
-                source="console",
-            )
-        except ValidationError:
-            return render("new.html", user, 422, error=_("신청 정보가 올바르지 않습니다."), form=form)
-        deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
+        if not deps.usd_origination_enabled:
+            return render("new.html", user, 503, error=_("신규 USD 신청 접수가 아직 열리지 않았습니다."), form=form)
+        req = start(form, "console")
         return RedirectResponse(f"/applications/{quote(req.application_id, safe='')}", status_code=303)
 
     def customer(request: Request) -> Principal:
@@ -576,15 +593,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if code:
             return apply_form(user, 422, error=_(APPLY_ERRORS[code]), error_code=code, form=form,
                               applicant_id=chosen)
-        req = StartRequest(
-            application_id=deps.new_application_id(),
-            applicant_id=form["applicant_id"].strip(),
-            requested_amount_krw=_int(form["requested_amount_krw"]),
-            requested_tenor_months=_int(form["requested_tenor_months"]),
-            submitted_at=deps.clock(),
-            source="customer",
-        )
-        deps.queue.send(START_QUEUE, req.model_dump(mode="json", exclude_none=True))
+        if not deps.usd_origination_enabled:
+            return apply_form(user, 503, error=_("신규 USD 신청 접수가 아직 열리지 않았습니다."), applicant_id=chosen, form=form)
+        req = start(form, "customer")
         return RedirectResponse(f"/apply/{quote(req.application_id, safe='')}?applicant_id={quote(req.applicant_id, safe='')}",
                                 status_code=303)
 
@@ -600,9 +611,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if wait_url and chosen:
             wait_url += f"&applicant_id={quote(chosen, safe='')}"
         return render("apply_status.html", user, application_id=application_id, s=customer_status(doc),
-                      seller=seller_label(chosen) if chosen else None, waiting=doc is None,
+                      seller=(USD_SELLERS[chosen].business_name if doc and product_of(doc) and chosen in USD_SELLERS
+                              else data_label(seller_label(chosen)) if chosen else None), waiting=doc is None,
                       wait_url=wait_url, applicant_id=chosen,
-                      requested_krw=doc.get("requested_amount_krw") if doc else None,
+                      requested=doc.get("requested_amount_cents", doc.get("requested_amount_krw")) if doc else None,
+                      usd=bool(doc and product_of(doc)), prefix="/legacy" if doc and not product_of(doc) else "",
                       tenor=doc.get("requested_tenor_months") if doc else None)
 
     @app.get("/applications/{application_id}", response_class=HTMLResponse)
@@ -631,20 +644,25 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if decision_pending(application_id, state):
             return detail(user, doc, 409, error=taken)
         kind = form.get("decision", "")
-        amount_text = form.get("amount_krw", "").strip()
-        amount = None if kind == "decline" or not amount_text else _int(amount_text)
+        product = product_of(doc)
+        amount_text = form.get("amount_usd" if product else "amount_krw", "").strip()
+        try:
+            amount = None if kind == "decline" or not amount_text else (parse_usd_cents if product else _int)(amount_text)
+        except ValueError:
+            amount = None
         # 심사역 ID는 폼이 아니라 로그인 주체에서만 가져온다.
         raw_decision = {
             "decision": kind,
             "officer_id": user.user_id,
-            "amount_krw": amount,
+            **({**product.model_dump(), "amount_cents": amount} if product else {"amount_krw": amount}),
             "reason": form.get("reason", "").strip(),
             "policy_override": form.get("policy_override", "") == "1",
         }
-        if amount is None and amount_text and kind != "decline":
+        unexpected = {"currency", "product_version", "language", "amount_cents", "amount_krw" if product else "amount_usd"}
+        if unexpected.intersection(form) or (amount is None and amount_text and kind != "decline"):
             decision, error = None, "invalid_payload"
         else:
-            decision, error = validate_officer_decision(raw_decision, doc.get("policy"))
+            decision, error = validate_officer_decision(raw_decision, doc.get("policy"), usd=bool(product))
         if error:
             return detail(user, doc, 422, error=_(DECISION_ERRORS.get(error, error)), error_code=error, form=form)
         if not reserve_decision(application_id, state):
@@ -782,20 +800,22 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         alerts = loan_alerts(loan) if alerts is None else alerts
         if request is not None:
             ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
-        raw = (read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])[0] if i18n.current() != i18n.DEFAULT
+        raw = (read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])[0] if i18n.current() != i18n.SOURCE
                else load_monitoring_raw(deps.raw, loan))
         contacts = monitoring_store().get_contacts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else None
         view = loan_view(loan, alerts, raw, deps.pseudonym_key, restore=user.can_restore, contacts=contacts)
         blocked = replay_in_progress(mon, deps.clock())
         return render("loan.html", user, status_code, texts=page_texts(raw, loan["id"], translation_scope("loans", loan)), v=view, ui=loan_summary(view),
-                      replay_blocked=blocked,
+                      usd=bool(product_of(loan)), replay_blocked=blocked,
                       replay_held=replay_held(mon), weeks_left=WEEKS - (mon.get("paused_week") or 0), **ctx)
 
+    @app.get("/legacy/loans", response_class=HTMLResponse)
     @app.get("/loans", response_class=HTMLResponse)
     def loans(request: Request) -> HTMLResponse:
         user = viewer(request)
-        rows = monitoring_store().list_loans(LIST_LIMIT)
-        return render("loans.html", user, rows=rows, ui=loans_summary(rows), limit=LIST_LIMIT)
+        legacy = request.url.path.startswith("/legacy/")
+        rows = monitoring_store().list_loans(LIST_LIMIT, legacy=legacy)
+        return render("loans.html", user, rows=rows, ui=loans_summary(rows), limit=LIST_LIMIT, prefix="/legacy" if legacy else "")
 
     @app.get("/loans/{loan_id}", response_class=HTMLResponse)
     def loan_detail(loan_id: str, request: Request) -> HTMLResponse:
@@ -955,37 +975,36 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def sent(user: Principal, message: str, back_url: str, back_label: str, **ctx: Any) -> HTMLResponse:
         return render("privacy_sent.html", user, 202, message=message, back_url=back_url, back_label=back_label, **ctx)
 
-    def customer_sent(user: Principal, applicant_id: str, page: str, message: str) -> HTMLResponse:
+    def customer_sent(user: Principal, applicant_id: str, page: str, message: str, *, legacy: bool = False) -> HTMLResponse:
         back = {"plans": _("상환 플랜으로"), "consents": _("동의 관리로"), "grievances": _("이의제기로")}[page]
-        return sent(user, message, borrower_url(applicant_id, page), back,
-                    layout="customer_base.html", applicant_id=applicant_id, nav=page)
+        prefix = "/legacy" if legacy else ""
+        return sent(user, message, prefix + borrower_url(applicant_id, page), back,
+                    layout="customer_base.html", applicant_id=applicant_id, nav=page, prefix=prefix)
 
     def borrower_url(applicant_id: str, page: str = "status") -> str:
         base = f"/borrower/{quote(applicant_id, safe='')}"
         return base if page == "status" else f"{base}/{page}"
 
-    def borrower_page(user: Principal, applicant_id: str, page: str = "status", status_code: int = 200,
+    def borrower_page(user: Principal, applicant_id: str, page: str = "status", status_code: int = 200, legacy: bool = False,
                       **ctx: Any) -> HTMLResponse:
         store = privacy()
-        consents = store.consents_for_applicant(applicant_id)
-        applications = []
-        for application_id in dict.fromkeys(c["application_id"] for c in consents if c.get("application_id")):
-            doc = deps.store.get(application_id)
-            if doc is not None and doc.get("applicant_id") == applicant_id:
-                applications.append(doc)
+        consents = store.consents_for_applicant(applicant_id, legacy=legacy)
+        applications = deps.store.for_applicant(applicant_id, legacy=legacy)
         loans = borrower_loans(applicant_id, applications) if page in {"plans", "notices"} or (
-            page == "consents" and i18n.current() != i18n.DEFAULT) else []
-        grievances = store.grievances_for_applicant(applicant_id)
+            page == "consents" and i18n.current() != i18n.SOURCE) else []
+        grievances = store.grievances_for_applicant(applicant_id, legacy=legacy)
         rows = [
             {"application_id": doc["application_id"], "received_on": str(doc.get("submitted_at") or "")[:10],
-             "amount_krw": doc.get("requested_amount_krw"), "tenor": doc.get("requested_tenor_months"),
+             "amount": doc.get("requested_amount_krw" if legacy else "requested_amount_cents"), "tenor": doc.get("requested_tenor_months"),
              "s": customer_status(doc),
              "link": doc.get("source") == "customer"}
             for doc in sorted(applications, key=lambda d: str(d.get("submitted_at") or ""), reverse=True)
         ]
         return render(
-            BORROWER_PAGES[page], user, status_code, texts=borrower_texts(applications, loans, consents, grievances, page),
+            BORROWER_PAGES[page], user, status_code,
+            texts=borrower_texts(applications, loans, consents, grievances, page) if legacy else None,
             applicant_id=applicant_id, consents=consents, rows=rows,
+            usd=not legacy, prefix="/legacy" if legacy else "",
             applications=applications, grievances=grievances,
             plans=borrower_plans(loans) if page in {"plans", "notices"} else [], **ctx,
         )
@@ -995,7 +1014,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if deps.monitoring is None:
             return []
         loans = (deps.monitoring.get_loan(doc["application_id"]) for doc in applications)
-        return [loan for loan in loans if loan is not None and loan.get("applicant_id") == applicant_id]
+        return [loan for doc, loan in zip(applications, loans, strict=True)
+                if loan is not None and loan.get("applicant_id") == applicant_id and product_of(doc) == product_of(loan)]
 
     def borrower_plans(loans: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """대출별 셀프 플랜 제안과 받은 안내."""
@@ -1009,7 +1029,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
     def borrower_texts(applications, loans, consents, grievances, menu) -> PageTexts | None:
         """고객 콘솔 화면은 여러 신청이 섞이므로 신청·대출 원천의 엔티티를 합쳐 가명처리한다."""
-        if i18n.current() == i18n.DEFAULT:
+        if i18n.current() == i18n.SOURCE:
             return None
         cases, refs, readable = [], [], True
         for doc in applications:
@@ -1037,23 +1057,27 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         page.scope = scope
         return page
 
+    @app.get("/legacy/borrower", response_class=HTMLResponse)
     @app.get("/borrower", response_class=HTMLResponse)
     def borrower_index(request: Request) -> HTMLResponse:
         user = customer(request)
         privacy()
-        return render("customer_select.html", user)
+        return render("customer_select.html", user, prefix="/legacy" if request.url.path.startswith("/legacy/") else "")
 
+    @app.get("/legacy/borrower/{applicant_id}", response_class=HTMLResponse)
     @app.get("/borrower/{applicant_id}", response_class=HTMLResponse)
     def borrower(applicant_id: str, request: Request) -> HTMLResponse:
-        return borrower_page(customer(request), applicant_id)
+        return borrower_page(customer(request), applicant_id, legacy=request.url.path.startswith("/legacy/"))
 
+    @app.get("/legacy/borrower/{applicant_id}/{page}", response_class=HTMLResponse)
     @app.get("/borrower/{applicant_id}/{page}", response_class=HTMLResponse)
     def borrower_menu(applicant_id: str, page: str, request: Request) -> HTMLResponse:
         user = customer(request)
         if page not in BORROWER_PAGES or page == "status":
             raise HTTPException(404, "unknown page")
-        return borrower_page(user, applicant_id, page)
+        return borrower_page(user, applicant_id, page, legacy=request.url.path.startswith("/legacy/"))
 
+    @app.get("/legacy/borrower/{applicant_id}/consents/{consent_id}/proof", response_class=HTMLResponse)
     @app.get("/borrower/{applicant_id}/consents/{consent_id}/proof", response_class=HTMLResponse)
     def borrower_proof(applicant_id: str, consent_id: str, request: Request) -> HTMLResponse:
         user = customer(request)
@@ -1062,9 +1086,11 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         doc = store.get_proof(consent_id) if consent and consent.get("applicant_id") == applicant_id else None
         if doc is None:
             raise HTTPException(404, "deletion proof not found")
-        return render("proof.html", user, p=doc, layout="customer_base.html", applicant_id=applicant_id,
-                      nav="consents", back_url=borrower_url(applicant_id, "consents"), back_label=_("동의 관리로"))
+        prefix = "" if product_of(consent) else "/legacy"
+        return render("proof.html", user, p=doc, layout="customer_base.html", applicant_id=applicant_id, prefix=prefix,
+                      nav="consents", back_url=prefix + borrower_url(applicant_id, "consents"), back_label=_("동의 관리로"))
 
+    @app.post("/legacy/borrower/{applicant_id}/consents/{consent_id}/revoke", response_class=HTMLResponse)
     @app.post("/borrower/{applicant_id}/consents/{consent_id}/revoke", response_class=HTMLResponse)
     def borrower_revoke(applicant_id: str, consent_id: str, posted: Posted = Depends(customer_form)) -> HTMLResponse:
         user = posted.user
@@ -1079,15 +1105,17 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         )
         deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
         return customer_sent(user, applicant_id, "consents", _(
-            "동의 %(id)s 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.", id=consent_id))
+            "동의 %(id)s 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.", id=consent_id), legacy=not product_of(doc))
 
+    @app.post("/legacy/borrower/{applicant_id}/grievances", response_class=HTMLResponse)
     @app.post("/borrower/{applicant_id}/grievances", response_class=HTMLResponse)
-    def borrower_grievance(applicant_id: str, posted: Posted = Depends(customer_form)) -> HTMLResponse:
+    def borrower_grievance(applicant_id: str, request: Request, posted: Posted = Depends(customer_form)) -> HTMLResponse:
         user, form = posted.user, posted.form
         privacy()
         application_id = form.get("application_id", "")
         doc = deps.store.get(application_id)
-        if doc is None or doc.get("applicant_id") != applicant_id:
+        legacy = request.url.path.startswith("/legacy/")
+        if doc is None or doc.get("applicant_id") != applicant_id or not in_portfolio(doc, legacy):
             raise HTTPException(404, "application not found")
         if not doc.get("officer_decision"):
             raise HTTPException(409, "application has no decision yet")
@@ -1099,12 +1127,13 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 text=form.get("text", ""),
             )
         except ValidationError:
-            return borrower_page(user, applicant_id, "grievances", 422,
+            return borrower_page(user, applicant_id, "grievances", 422, legacy=legacy,
                                  error=_("이의 내용은 1~1000자로 입력해야 합니다."), form=form)
         deps.queue.send(GRIEVANCE_QUEUE, message.model_dump(mode="json"))
         return customer_sent(user, applicant_id, "grievances", _(
-            "이의제기 %(id)s를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.", id=message.grievance_id))
+            "이의제기 %(id)s를 접수했습니다. 심사역이 처리하면 회신이 표시됩니다.", id=message.grievance_id), legacy=legacy)
 
+    @app.post("/legacy/borrower/{applicant_id}/plan", response_class=HTMLResponse)
     @app.post("/borrower/{applicant_id}/plan", response_class=HTMLResponse)
     def borrower_plan_choice(applicant_id: str, posted: Posted = Depends(customer_form)) -> HTMLResponse:
         """셀프 상환 플랜 선택. 만료(고객 응답 없이 계속)·응답이 끝난 제안에는 고를 수 없다(409)."""
@@ -1114,10 +1143,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "loan not found")
         offer = (loan.get("repayment") or {}).get("offer")
         if not offer or offer.get("status") != "open" or offer.get("offer_id") != form.get("offer_id"):
-            return borrower_page(user, applicant_id, "plans", 409, error=_("이미 마감된 상환 플랜 제안입니다."))
+            return borrower_page(user, applicant_id, "plans", 409, legacy=not product_of(loan), error=_("이미 마감된 상환 플랜 제안입니다."))
         option = form.get("option", "")
         if option not in {o.get("option") for o in offer.get("options") or ()}:
-            return borrower_page(user, applicant_id, "plans", 422, error=_("제안에 없는 플랜입니다."))
+            return borrower_page(user, applicant_id, "plans", 422, legacy=not product_of(loan), error=_("제안에 없는 플랜입니다."))
         try:
             message = PlanChoice(kind="plan_choice", loan_id=loan["id"], offer_id=offer["offer_id"], option=option)
         except ValidationError:
@@ -1126,7 +1155,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         label = i18n.label(PLAN_OPTION_LABELS, message.option)
         text = (_("플랜(%(label)s)을 선택했습니다. 지금 일정대로 상환합니다.", label=label) if message.option == "keep"
                 else _("플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 상환 플랜 메뉴에 표시됩니다.", label=label))
-        return customer_sent(user, applicant_id, "plans", text)
+        return customer_sent(user, applicant_id, "plans", text, legacy=not product_of(loan))
 
     @app.post("/applications/{application_id}/consents/{consent_id}/{action}", response_class=HTMLResponse)
     def consent_demo(application_id: str, consent_id: str, action: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
@@ -1154,27 +1183,31 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "deletion proof not found")
         return render("proof.html", user, p=doc)
 
+    @app.get("/legacy/grievances", response_class=HTMLResponse)
     @app.get("/grievances", response_class=HTMLResponse)
     def grievances(request: Request) -> HTMLResponse:
         user = viewer(request)
-        return render("grievances.html", user, rows=privacy().list_grievances(LIST_LIMIT))
+        legacy = request.url.path.startswith("/legacy/")
+        return render("grievances.html", user, rows=privacy().list_grievances(LIST_LIMIT, legacy=legacy), prefix="/legacy" if legacy else "")
 
     def ops_store() -> OpsStore:
         if deps.ops is None:
             raise HTTPException(404, "ops metrics not configured")
         return deps.ops
 
+    @app.get("/legacy/ops", response_class=HTMLResponse)
     @app.get("/ops", response_class=HTMLResponse)
     def ops_page(request: Request, run: str | None = None) -> HTMLResponse:
         user = viewer(request)
         store = ops_store()
-        runs = sorted_runs(store.runs())
+        legacy = request.url.path.startswith("/legacy/")
+        runs = sorted_runs(store.runs(legacy=legacy))
         if run is not None and run != RECENT_RUN and run not in runs:
             raise HTTPException(404, "run not found")
         selected = run or default_run(runs) or RECENT_RUN
-        docs = scope_docs(store, selected)
+        docs = scope_docs(store, selected, legacy=legacy)
         summary = ops_view(docs) if docs else None
-        return render("ops.html", user, runs=runs, options=run_options(runs), selected=selected,
+        return render("ops.html", user, runs=runs, options=run_options(runs), selected=selected, prefix="/legacy" if legacy else "",
                       recent=selected == RECENT_RUN, s=summary,
                       ui=ops_summary(summary, STEP_LABELS) if summary else None,
                       AXIS_LABELS={k: i18n.label(AXIS_LABELS, k) for k in AXIS_LABELS},
@@ -1188,7 +1221,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
     def grievance_texts(doc: dict[str, Any]) -> PageTexts | None:
         """이의 화면: 그 신청의 원천으로 가명처리한다."""
-        if i18n.current() == i18n.DEFAULT:
+        if i18n.current() == i18n.SOURCE:
             return None
         owner = doc["application_id"]
         application, _ = read_raw(lambda: deps.store.get(owner), owner)

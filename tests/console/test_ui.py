@@ -21,7 +21,7 @@ TEMPLATES = Path(console_app.__file__).parent / "templates"
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(create_app(build_deps()), follow_redirects=False)
+    return TestClient(create_app(build_deps()), follow_redirects=False, cookies={"ama_locale_v2": "ko"})
 
 
 def page(client, path):
@@ -100,9 +100,9 @@ def test_full_request_detail_and_list(version, passed, rec, ko, en):
     a.update(recommendation=rec, review={"passed": passed, "rounds": 1})
     a["summary"] = "검토 근거" if version == "2" and passed else "300만 원 감액은 권고하지 않습니다"
     doc["assessment_run"]["rounds"][0]["grounding_issues"] = ["300만 원 제안"]
-    client = TestClient(create_app(deps))
+    client = TestClient(create_app(deps), cookies={"ama_locale_v2": "ko"})
     for lang, label in (("ko", ko), ("en", en)):
-        for path in ("/applications/app-20261103-p01", "/applications/rows", "/"):
+        for path in ("/applications/app-20261103-p01", "/legacy/applications/rows", "/legacy"):
             html = page(client, f"{path}?lang={lang}")
             assert label in html
             assert "300만 원 감액" not in html and "300만 원 제안" not in html
@@ -113,7 +113,7 @@ def test_failed_assessment_does_not_display_last_rejected_draft():
     deps = build_deps()
     doc = deps.store.docs["app-20261103-p09"]
     doc["error"] = {"stage": "assess_credit", "message": "review rejected: 311만 원 제안"}
-    html = page(TestClient(create_app(deps)), "/applications/app-20261103-p09")
+    html = page(TestClient(create_app(deps), cookies={"ama_locale_v2": "ko"}), "/applications/app-20261103-p09")
     assert "의견 없음" in html and "311만 원" not in html
 
 
@@ -149,7 +149,7 @@ def test_detail_shows_officer_checks(client):
     deps = build_deps()
     deps.store.docs["app-20261103-p01"]["assessment"]["officer_checks"] = [
         {"text": "선정산 계약서를 확인한다.", "metric_ids": ["M:pg_reconciliation_ratio"], "supported": True}]
-    html = page(TestClient(create_app(deps), follow_redirects=False), "/applications/app-20261103-p01")
+    html = page(TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), "/applications/app-20261103-p01")
     assert "에이전트 확인 사항" in html and "검토자 검증 1/1" in html and "선정산 계약서를 확인한다." in html
 
 
@@ -161,7 +161,7 @@ def test_preview_detail_has_next_checks(client):
 def test_detail_old_doc_shows_no_settlement():
     deps = build_deps()
     deps.store.docs["app-20261103-p01"]["underwriting"].pop("pg_ledger")
-    html = page(TestClient(create_app(deps), follow_redirects=False), "/applications/app-20261103-p01")
+    html = page(TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), "/applications/app-20261103-p01")
     assert "정산 자료 없음" in html and "플랫폼별 정산 비중" not in html
 
 
@@ -185,7 +185,7 @@ def _seller_page(demo_cases, applicant_id, amount=5_000_000):
     doc["requested_amount_krw"], doc["requested_tenor_months"] = amount, 6
     doc["underwriting"] |= {"features": uw.features.model_dump(mode="json"), "marketplace": uw.marketplace}
     doc["policy"] = decision_payload(evaluate(uw.features, load_rules()))
-    return page(TestClient(create_app(deps), follow_redirects=False), f"/applications/{DEMO_APP}")
+    return page(TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), f"/applications/{DEMO_APP}")
 
 
 @pytest.mark.parametrize("cash_only", ["missing", None])
@@ -198,7 +198,7 @@ def test_detail_renders_v3_doc_without_marketplace(cash_only):
     doc["policy"] = evaluate(CashFlowFeatures(**features), rules_for_version("2026.11-v3")).model_dump(mode="json")
     if cash_only == "missing":
         doc["policy"].pop("cash_only")
-    html = page(TestClient(create_app(deps), follow_redirects=False), f"/applications/{DEMO_APP}")
+    html = page(TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), f"/applications/{DEMO_APP}")
     assert "마켓 판매 성과 자료 없음" in html and "현금흐름만 볼 때" not in html and "셀러 데이터 대체" not in html
 
 
@@ -264,7 +264,7 @@ def test_loan_shows_expected_inflow_and_balance_forecast(client):
 
 
 def test_ops_has_gauges_stacked_and_fairness_columns(client):
-    html = page(client, "/ops")
+    html = page(client, "/legacy/ops")
     assert html.count('class="chart gauge"') == 2
     assert 'class="chart stacked-bar"' in html
     assert html.count('class="chart columns"') >= 2

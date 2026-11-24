@@ -115,7 +115,7 @@ class FakeMonitoring:
         self.contacts = contacts or {}
         self.alert_queries = []
 
-    def list_loans(self, limit):
+    def list_loans(self, limit, *, legacy: bool = False):
         return [{"id": d["id"], "applicant_id": d["applicant_id"], "industry": d["industry"],
                  "amount_krw": d["amount_krw"], "tenor_months": d["tenor_months"],
                  "monitoring_status": (d["monitoring"] or {}).get("status"),
@@ -149,7 +149,7 @@ def setup(fake_raw, raw_profile, raw_txns, key, mask):
         queue = FakeQueue()
         deps = ConsoleDeps(store=None, raw=raw, queue=queue, pseudonym_key=key, clock=lambda: NOW,
                            monitoring=store if monitoring else None)
-        return TestClient(create_app(deps), follow_redirects=False), queue, store, raw
+        return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), queue, store, raw
 
     return build
 
@@ -494,6 +494,7 @@ def test_proposal_modify_sends_text_and_hardship_choice(setup, mask):
 
 @pytest.fixture
 def usd_proposal(setup, mask):
+    from mockapis.synth import generate_usd_case
     from shared.contracts import USD_V1
     case = make_proposal_case(mask)
     case.update(USD_V1.model_dump())
@@ -506,7 +507,12 @@ def usd_proposal(setup, mask):
     del loan["amount_krw"]
     del loan["repayment"]["installment_krw"]
     loan["repayment"]["schedule"][0]["balance_cents"] = 70001
-    return setup(loan=loan, alerts=[case])
+    result = setup(loan=loan, alerts=[case])
+    raw = result[3]
+    source = generate_usd_case(loan["applicant_id"], NOW.date(), seed=7)
+    raw.blobs[("consent-c-1", "profile.json")] = source.profile.model_dump(mode="json")
+    raw.blobs[("consent-m-1", "flow.json")] = []
+    return result
 
 
 def test_usd_proposal_only_queues_worker_accepted_text(usd_proposal):

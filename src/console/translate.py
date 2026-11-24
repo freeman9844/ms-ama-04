@@ -36,7 +36,7 @@ def has_korean(text: Any) -> bool:
 
 def catalog(text: str) -> str | None:
     """원문 그대로(앞뒤 공백 무시) 카탈로그에 있으면 영문."""
-    return i18n.CATALOGS.get(i18n.current(), {}).get(text.strip()) if i18n.current() != i18n.DEFAULT else None
+    return i18n.CATALOGS.get(i18n.current(), {}).get(text.strip()) if i18n.current() != i18n.SOURCE else None
 
 
 def data(text: Any) -> Any:
@@ -48,7 +48,7 @@ def data(text: Any) -> Any:
 
 def data_label(text: Any) -> Any:
     """'상호 · 채널·채널 · 업종'처럼 가운뎃점으로 이어 붙인 데이터 라벨을 조각마다 옮긴다."""
-    if not has_korean(text) or i18n.current() == i18n.DEFAULT:
+    if not has_korean(text) or i18n.current() == i18n.SOURCE:
         return text
     return " · ".join(catalog(part) or "·".join(str(data(p)) for p in part.split("·")) for part in text.split(" · "))
 
@@ -227,7 +227,7 @@ def _cached_en(text: str, page: PageTexts, translator: MachineTranslation | None
 
 
 def _mark(text: str, mode: str, translator: MachineTranslation | None, key: bytes, owner: str | None) -> Markup | str:
-    if i18n.current() == i18n.DEFAULT or not has_korean(text):
+    if i18n.current() == i18n.SOURCE or not has_korean(text):
         return text
     fixed = catalog(text)
     if mode == "ref":

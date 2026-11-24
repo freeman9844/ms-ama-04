@@ -1,12 +1,15 @@
 {% extends "base.html" %}
+{% import "_seller.html" as sl %}
+{% set usd = g.product_version == "usd-v1" %}
+{% set prefix = "" if usd else "/legacy" %}
 {% set nav = "grievances" %}
 {% set r = g.record %}
 {% block title %}{{ g.grievance_id }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
 {% block main %}
-<p><a href="/grievances">← {{ _("이의제기 목록") }}</a> · <a href="/applications/{{ g.application_id|path }}">{{ _("신청 %(id)s", id=g.application_id) }}</a></p>
+<p><a href="{{ prefix }}/grievances">← {{ _("이의제기 목록") }}</a> · <a href="/applications/{{ g.application_id|path }}">{{ _("신청 %(id)s", id=g.application_id) }}</a></p>
 <h1>{{ g.grievance_id }} <span class="status g-{{ g.status }}">{{ g.status|grievance_status }}</span></h1>
 <dl class="facts">
-  <dt>{{ _("신청인") }}</dt><dd>{{ g.applicant_id }}</dd>
+  <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(g.applicant_id, user.can_restore, usd) }}</dd>
   <dt>{{ _("접수") }}</dt><dd>{{ g.submitted_at }}</dd>
   {% if g.resolved_at %}<dt>{{ _("처리") }}</dt><dd>{{ g.resolved_at }}</dd>{% endif %}
 </dl>
@@ -17,7 +20,7 @@
 <section>
 <h2>{{ _("접수 시점 판단 기록") }}</h2>
 {% if r.officer_decision %}{% set od = r.officer_decision %}
-<p>{{ _("원결정") }}: <strong>{{ od.decision|decision_label }}</strong> · {{ od.amount_cents|usd_cents if g.product_version == 'usd-v1' else od.amount_krw|krw }} · {{ od.officer_id }}{% if od.reason %} · {{ od.reason|mt }}{% endif %}</p>
+<p>{{ _("원결정") }}: <strong>{{ od.decision|decision_label }}</strong> · {{ od.amount_cents|usd_cents if usd else od.amount_krw|krw }} · {{ od.officer_id }}{% if od.reason %} · {{ od.reason if usd else od.reason|mt_ref }}{% endif %}</p>
 {% endif %}
 {% if r.policy %}
 <p>{{ _("정책 판정 %(decision)s · 한도 %(limit)s · 금리 구간 %(band)s", decision=r.policy.decision, limit=r.policy.max_amount_cents|usd_cents if g.product_version == 'usd-v1' else r.policy.max_amount_krw|krw, band=r.policy.rate_band or "-") }} <small>{{ r.policy.rules_version }}</small></p>
@@ -37,7 +40,7 @@
 <section>
 <h2>{{ _("처리") }}</h2>
 {% if g.decision %}{% set dd = g.decision %}
-<p><strong>{{ dd.outcome|outcome_label }}</strong>{% if dd.new_decision %} → {{ dd.new_decision|decision_label }} {{ dd.amount_cents|usd_cents if g.product_version == 'usd-v1' else dd.amount_krw|krw }}{% endif %} · {{ dd.officer_id }} · {{ dd.reason|mt }}</p>
+<p><strong>{{ dd.outcome|outcome_label }}</strong>{% if dd.new_decision %} → {{ dd.new_decision|decision_label }} {{ dd.amount_cents|usd_cents if usd else dd.amount_krw|krw }}{% endif %} · {{ dd.officer_id }} · {{ dd.reason if usd else dd.reason|mt_ref }}</p>
 {% if dd.conditions %}<ul>{% for c in dd.conditions %}<li>{{ c }}</li>{% endfor %}</ul>{% endif %}
 <p class="note">{{ _("재심사 결과는 기록만 남깁니다. 신청 문서(원 판단 기록)는 바꾸지 않습니다.") }}</p>
 {% endif %}

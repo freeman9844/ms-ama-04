@@ -1,0 +1,12 @@
+{
+  "이전 기록 (KRW)": "Legacy records (KRW)",
+  "신청 금액(USD, $100~$10,000)": "Requested amount (USD, $100–$10,000)",
+  "신청 금액은 USD 100~10,000 범위에서 소수 둘째 자리까지 입력하세요.": "Enter $100–$10,000 USD with at most two decimal places.",
+  "정책 예외 승인에는 사유가 필요합니다. 최대 $10,000 USD입니다.": "Approving outside policy requires a reason. The maximum is $10,000 USD.",
+  "신규 USD 신청 접수가 아직 열리지 않았습니다.": "New USD applications are not open yet.",
+  "월별 자료가 없습니다.": "No monthly data available.",
+  "월": "Month",
+  "자료 없음": "No data available.",
+  "미리보기 심사역": "Preview officer",
+  "데모 사용자": "Demo operator"
+}

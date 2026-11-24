@@ -1,7 +1,7 @@
 """화면 문구 국문/영문 전환.
 
 한국어 원문이 곧 메시지 키다. 영문은 locales/en/*.json(원문 → 영문)에서 찾고, 없으면 원문을 그대로 쓴다.
-언어는 요청마다 ?lang= → lang 쿠키 → Accept-Language 순으로 정하고 ContextVar에 담는다.
+언어는 명시적 선택 → 버전별 선택 쿠키 → 영어 순으로 정한다.
 값을 끼워 넣는 문구는 Jinja newstyle gettext와 같은 %(name)s 형식을 쓴다(리터럴 %는 %%).
 LLM 출력·고객 발송 문구·저장된 데이터는 여기서 번역하지 않는다(console.translate: 데이터 카탈로그 + 기계 번역).
 """
@@ -19,12 +19,13 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 LOCALES = ("ko", "en")
-DEFAULT = "ko"
-COOKIE = "lang"
+SOURCE = "ko"
+DEFAULT = "en"
+COOKIE = "ama_locale_v2"
 COOKIE_MAX_AGE = 365 * 24 * 3600
 LOCALE_DIR = Path(__file__).parent / "locales"
 
-_locale: ContextVar[str] = ContextVar("console_locale", default=DEFAULT)
+_locale: ContextVar[str] = ContextVar("console_locale", default=SOURCE)
 _request_path: ContextVar[tuple[str, tuple[tuple[str, str], ...]]] = ContextVar("console_path", default=("/", ()))
 
 
@@ -56,7 +57,7 @@ def use(lang: str) -> Iterator[None]:
 
 def gettext(message: str, **params: Any) -> str:
     lang = current()
-    text = message if lang == DEFAULT else CATALOGS.get(lang, {}).get(message, message)
+    text = CATALOGS.get(lang, {}).get(message, message)
     return text % params if params else text
 
 
@@ -66,7 +67,7 @@ _ = gettext
 def pgettext(context: str, message: str, **params: Any) -> str:
     """같은 한국어가 문맥마다 다른 영어가 될 때(예: 버튼 '승인'=Approve, 상태 '승인'=Approved). 키는 'context|원문'."""
     lang = current()
-    text = message if lang == DEFAULT else CATALOGS.get(lang, {}).get(f"{context}|{message}", message)
+    text = CATALOGS.get(lang, {}).get(f"{context}|{message}", message)
     return text % params if params else text
 
 
@@ -82,11 +83,6 @@ def negotiate(query: str | None, cookie: str | None, accept_language: str) -> st
     for candidate in (query, cookie):
         if candidate in LOCALES:
             return candidate
-    for part in accept_language.split(","):
-        tag = part.split(";")[0].strip().lower()
-        primary = tag.split("-")[0]
-        if primary in LOCALES:
-            return primary
     return DEFAULT
 
 

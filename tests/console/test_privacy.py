@@ -29,11 +29,15 @@ class FakeStore:
     def __init__(self, docs):
         self.docs = {d["id"]: d for d in docs}
 
-    def list_recent(self, limit):
+    def list_recent(self, limit, *, legacy: bool = False):
         return list(self.docs.values())[:limit]
 
-    def list_status_rows(self):
+    def list_status_rows(self, *, legacy: bool = False):
         return list(self.docs.values())
+
+    def for_applicant(self, applicant_id, *, legacy=False):
+        from shared.portfolio import in_portfolio
+        return [d for d in self.docs.values() if d["applicant_id"] == applicant_id and in_portfolio(d, legacy)]
 
     def get(self, application_id):
         return self.docs.get(application_id)
@@ -53,7 +57,7 @@ class FakePrivacy:
         self.proofs = {p["id"]: p for p in proofs}
         self.grievances = {(g["application_id"], g["id"]): g for g in grievances}
 
-    def consents_for_applicant(self, applicant_id):
+    def consents_for_applicant(self, applicant_id, *, legacy: bool = False):
         return [c for c in self.consents.values() if c["applicant_id"] == applicant_id]
 
     def consents_for_application(self, application_id):
@@ -65,10 +69,10 @@ class FakePrivacy:
     def get_proof(self, consent_id):
         return self.proofs.get(consent_id)
 
-    def list_grievances(self, limit):
+    def list_grievances(self, limit, *, legacy: bool = False):
         return list(self.grievances.values())[:limit]
 
-    def grievances_for_applicant(self, applicant_id):
+    def grievances_for_applicant(self, applicant_id, *, legacy: bool = False):
         return [g for g in self.grievances.values() if g["applicant_id"] == applicant_id]
 
     def get_grievance(self, application_id, grievance_id):
@@ -150,7 +154,7 @@ def env(make_doc, raw, key):
     queue = FakeQueue()
     deps = ConsoleDeps(store=FakeStore([make_doc(), decided, other]), raw=raw, queue=queue, pseudonym_key=key,
                        privacy=privacy, new_grievance_id=lambda: "grv-new001")
-    return TestClient(create_app(deps), follow_redirects=False), queue, privacy
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), queue, privacy
 
 
 def csrf(client, headers, path):
@@ -165,7 +169,7 @@ def post(client, headers, path, token_path, **form):
 # ── 고객 콘솔(내 대출 관리) ──
 
 CUSTOMER = principal(oid="oid-seller", name="김셀러")
-HOME = "/borrower/seller-dailylook-01"
+HOME = "/legacy/borrower/seller-dailylook-01"
 
 
 def test_officer_sidebar_links_customer_console_and_grievances(env):
@@ -184,7 +188,7 @@ def test_borrower_index_lists_demo_applicants(env):
         form = client.get(url, headers=CUSTOMER)
         assert form.status_code == 200 and f'name="applicant_id" value="{seller}"' in form.text
     assert '<li class="n-status active"><a href="/borrower">사업자 선택</a>' in page
-    english = client.get("/borrower", headers={**CUSTOMER, "Cookie": "lang=en"}).text
+    english = client.get("/borrower", headers={**CUSTOMER, "Cookie": "ama_locale_v2=en"}).text
     assert "<h1>Select business</h1>" in english and "Customer choice" not in english
     assert 'class="n-apply' not in page
 
@@ -194,7 +198,7 @@ def test_customer_menu_links_every_page_of_the_chosen_seller(env):
     page = client.get(HOME, headers=CUSTOMER).text
     for sub in ("", "/plans", "/notices", "/consents", "/grievances"):
         assert f'href="{HOME}{sub}"' in page
-    assert 'href="/apply?applicant_id=seller-dailylook-01"' in page and 'href="/borrower">' in page
+    assert 'href="/apply?applicant_id=seller-dailylook-01"' in page and 'href="/legacy/borrower">' in page
     assert '<li class="n-status active">' in page
 
 
@@ -324,7 +328,7 @@ def test_usd_grievance_forms_deliver_both_commands_to_workers(raw, key):
     worker = Deps(store=store, raw=raw, mock=None, policy=None, events=None, clock=lambda: NOW, pseudonym_key=key)
     client = TestClient(create_app(ConsoleDeps(store=FakeStore([app]), raw=raw, queue=queue, pseudonym_key=key,
         privacy=privacy, new_grievance_id=lambda: gid)))
-    path = f"{HOME}/grievances"
+    path = f"/borrower/{applicant}/grievances"
     assert post(client, CUSTOMER, path, path, application_id="app-2", text="Please review.", currency="KRW").status_code == 202
     topic, submission = queue.sent.pop()
     assert topic == "grievances" and handle_grievance(worker, json.dumps(submission)) == "created"
@@ -332,6 +336,7 @@ def test_usd_grievance_forms_deliver_both_commands_to_workers(raw, key):
     path = f"/grievances/app-2/{gid}"
     page = client.get(path, headers=OFFICER).text
     assert 'name="amount_usd"' in page and "$800.00" in page and 'name="amount_krw"' not in page
+    assert "Seongsu Daily Look" in page and "Seongsu Daily Look" in client.get("/grievances", headers=OFFICER).text
     fields = dict(outcome="rereview", new_decision="approve", reason="Recorded review.")
     for invalid in ("700.011", "800.01"):
         assert post(client, OFFICER, path+"/decision", path, **fields, amount_usd=invalid).status_code == 422
@@ -416,7 +421,7 @@ def test_missing_proof_is_404(env):
 
 def test_grievance_list_and_detail(env):
     client, _, _ = env
-    page = client.get("/grievances", headers=AUDITOR_H).text
+    page = client.get("/legacy/grievances", headers=AUDITOR_H).text
     assert 'href="/grievances/app-2/grv-abc123"' in page and "처리 대기" in page and "원결정 유지" in page
     detail = client.get("/grievances/app-2/grv-abc123", headers=OFFICER).text
     assert "&lt;b&gt;한도&lt;/b&gt;" in detail and "R101" in detail and "15,000,000원" in detail
@@ -428,7 +433,7 @@ def test_grievance_list_and_detail(env):
 
 
 def _english(client, path):
-    return client.get(path, headers={**OFFICER, "Cookie": "lang=en"})
+    return client.get(path, headers={**OFFICER, "Cookie": "ama_locale_v2=en"})
 
 
 def _pending(page):
@@ -446,7 +451,7 @@ def _translating(env):
     client, _, _ = env
     deps = client.app.state.deps
     deps.translator, deps.translations = FakeTranslator(), InMemoryTranslations()
-    return TestClient(create_app(deps), follow_redirects=False), deps
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), deps
 
 
 class BrokenRaw:
@@ -456,11 +461,13 @@ class BrokenRaw:
 
 def test_english_grievance_page_reads_stored_translations_of_its_application(env):
     client, deps = _translating(env)
+    deps.privacy.grievances[("app-2", "grv-abc123")]["record"]["officer_decision"]["reason"] = "거절"
     assert client.get("/grievances/app-2/grv-abc123", headers=OFFICER).status_code == 200
     assert deps.translations.calls == []
     en = _english(client, "/grievances/app-2/grv-abc123")
     assert en.status_code == 200 and deps.translations.calls == ["app-2"]
     assert "<b>한도</b>가 너무 낮습니다" in _pending(en)
+    assert '거절<span class="mt-ref">' in en.text and 'href="/legacy/grievances"' in en.text
 
 
 def test_english_grievance_page_translates_counterfactual_explanation(env):
@@ -480,7 +487,7 @@ def test_archived_counteroffer_reply_is_not_replayed_or_translated(env):
     g = privacy.grievances[("app-2", "grv-done01")]
     g["record"]["assessment"]["counterfactuals"] = [{"explanation": "311만 원 제안"}]
     g["reply"]["body"] = "311만 원 감액은 권고하지 않습니다."
-    for path in ("/grievances/app-2/grv-done01", "/borrower/seller-dailylook-01/grievances"):
+    for path in ("/grievances/app-2/grv-done01", "/legacy/borrower/seller-dailylook-01/grievances"):
         for lang in ("ko", "en"):
             response = client.get(f"{path}?lang={lang}", headers=OFFICER)
             assert response.status_code == 200 and "311만 원" not in response.text
@@ -529,20 +536,20 @@ def test_english_borrower_page_merges_entities_and_stored_translations_of_each_a
     from console.app import create_app
 
     client, deps = _borrower_env(env, raw)
-    path = "/borrower/seller-dailylook-01/grievances"
+    path = "/legacy/borrower/seller-dailylook-01/grievances"
     first = _english(client, path)
     assert first.status_code == 200 and deps.translations.calls == ["app-1", "app-2"]
     pending = [p for p in _pending(first) if "[[" in p and "문의" in p]
     assert len(pending) == 1 and len(re.findall(r"\[\[", pending[0])) == 3
     assert all(n not in pending[0] for n in ("다른상점", "박다른", "김대표"))
     deps.translations.items["app-2"] = {translation_id(p): p.replace("문의", "inquiry") for p in pending}
-    again = _english(TestClient(create_app(deps)), path)
+    again = _english(TestClient(create_app(deps), cookies={"ama_locale_v2": "ko"}), path)
     assert "다른상점" in again.text and "inquiry" in again.text and not [p for p in _pending(again) if "문의" in p]
 
 
 def test_english_customer_page_with_pending_text_loads_mt_script_with_csrf(env, raw):
     client, _ = _borrower_env(env, raw)
-    en = _english(client, "/borrower/seller-dailylook-01/grievances")
+    en = _english(client, "/legacy/borrower/seller-dailylook-01/grievances")
     assert _pending(en) and "/static/mt.js" in en.text and 'data-mt-csrf="' in en.text
 
 
@@ -557,10 +564,10 @@ def test_english_borrower_page_with_one_unreadable_source_sends_nothing(env, raw
             return real.get_json(container, name)
 
     deps.raw = OneBroken()
-    en = _english(client, "/borrower/seller-dailylook-01/grievances")
+    en = _english(client, "/legacy/borrower/seller-dailylook-01/grievances")
     assert en.status_code == 200 and "data-mt=" not in en.text and "문의" in en.text
     deps.raw = real
-    assert _pending(_english(client, "/borrower/seller-dailylook-01/grievances"))
+    assert _pending(_english(client, "/legacy/borrower/seller-dailylook-01/grievances"))
 
 
 def test_deleted_mixed_page_uses_only_the_grievances_own_stored_match(env, raw):
@@ -573,7 +580,7 @@ def test_deleted_mixed_page_uses_only_the_grievances_own_stored_match(env, raw):
     key = translation_id(g["text"])
     deps.translations.items["app-1"] = {key: "Other owner's translation"}
     deps.translations.items["app-2"] = {key: "Please check again"}
-    en = _english(client, "/borrower/seller-dailylook-01/grievances")
+    en = _english(client, "/legacy/borrower/seller-dailylook-01/grievances")
     assert "Please check again" in en.text and "Other owner's translation" not in en.text
     assert not _pending(en)
 
@@ -650,15 +657,15 @@ def test_withdrawn_is_terminal_with_label(env, make_doc):
 
 def test_privacy_pages_404_when_not_configured(make_doc, raw, key):
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key)
-    client = TestClient(create_app(deps))
+    client = TestClient(create_app(deps), cookies={"ama_locale_v2": "ko"})
     for path in ("/borrower/seller-dailylook-01", "/grievances", "/consents/c-1/proof"):
         assert client.get(path, headers=OFFICER).status_code == 404
     assert client.get("/applications/app-1", headers=OFFICER).status_code == 200
 
 # ── 셀프 상환 플랜(2026-11-11) ──
 
-PLAN_PATH = "/borrower/seller-dailylook-01/plan"
-BORROWER = "/borrower/seller-dailylook-01"
+PLAN_PATH = "/legacy/borrower/seller-dailylook-01/plan"
+BORROWER = "/legacy/borrower/seller-dailylook-01"
 PLANS = f"{BORROWER}/plans"
 
 
@@ -670,7 +677,7 @@ def plan_env(make_doc, raw, key):
                            privacy=FakePrivacy([consent("c-1", "app-1")], [], []),
                            monitoring=FakeMonitoring([loan], [], contacts),
                            clock=lambda: datetime.fromisoformat("2026-09-30T15:00:00+00:00"))
-        return TestClient(create_app(deps), follow_redirects=False), queue
+        return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), queue
 
     return build
 

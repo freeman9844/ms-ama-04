@@ -1,6 +1,7 @@
 """Cosmos·Storage Queue 어댑터. SDK는 지연 import(로컬 venv에 없음)."""
 
 from typing import Any
+from shared.portfolio import portfolio_sql
 
 
 class QueueSender:
@@ -24,7 +25,8 @@ class CosmosRuns:
     def by_run(self, run_id: str) -> list[dict[str, Any]]:
         return list(
             self._container.query_items(
-                "SELECT * FROM c WHERE c.run_id = @run",
+                "SELECT * FROM c WHERE c.run_id = @run AND "
+                + portfolio_sql(True, krw="requested_amount_krw", cents="requested_amount_cents"),
                 parameters=[{"name": "@run", "value": run_id}],
                 enable_cross_partition_query=True,
             )

@@ -28,11 +28,15 @@ class FakeStore:
     def __init__(self, docs):
         self.docs = {d["id"]: d for d in docs}
 
-    def list_recent(self, limit):
+    def list_recent(self, limit, *, legacy: bool = False):
         return list(self.docs.values())[:limit]
 
-    def list_status_rows(self):
+    def list_status_rows(self, *, legacy: bool = False):
         return list(self.docs.values())
+
+    def for_applicant(self, applicant_id, *, legacy=False):
+        from shared.portfolio import in_portfolio
+        return [d for d in self.docs.values() if d["applicant_id"] == applicant_id and in_portfolio(d, legacy)]
 
     def get(self, application_id):
         return self.docs.get(application_id)
@@ -51,8 +55,8 @@ def env(make_doc, raw, key):
     docs = [make_doc(), make_doc(id="app-2", application_id="app-2", status="approved")]
     queue = FakeQueue()
     deps = ConsoleDeps(store=FakeStore(docs), raw=raw, queue=queue, pseudonym_key=key,
-                       new_application_id=lambda: "app-20261101-abc123")
-    return TestClient(create_app(deps), follow_redirects=False), queue
+                       usd_origination_enabled=True, new_application_id=lambda: "app-20261101-abc123")
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), queue
 
 
 def csrf(client, headers, path="/applications/app-1"):
@@ -302,7 +306,7 @@ def test_new_application_is_enqueued_and_redirects(env):
     assert "seller-dailylook-01" in form_page and "seller-candle-05" in form_page
     token = csrf(client, OFFICER, "/applications/new")
     resp = client.post("/applications", headers=OFFICER, data={
-        "csrf": token, "applicant_id": "seller-dailylook-01", "requested_amount_krw": "10,000,000",
+        "csrf": token, "applicant_id": "seller-dailylook-01", "requested_amount_usd": "10,000",
         "requested_tenor_months": "6"})
     assert resp.status_code == 303
     assert resp.headers["location"] == "/applications/app-20261101-abc123"
@@ -311,18 +315,19 @@ def test_new_application_is_enqueued_and_redirects(env):
     assert datetime.fromisoformat(submitted_at).tzinfo is not None
     assert (queue_name, sent) == ("applications-start", {
         "application_id": "app-20261101-abc123", "applicant_id": "seller-dailylook-01",
-        "requested_amount_krw": 10_000_000, "requested_tenor_months": 6, "sla_hours": 24.0, "close_hours": 168.0,
+        "currency": "USD", "product_version": "usd-v1", "language": "en",
+        "requested_amount_cents": 1_000_000, "requested_tenor_months": 6, "sla_hours": 24.0, "close_hours": 168.0,
         "source": "console"})
 
 
-@pytest.mark.parametrize("fields", [{"requested_amount_krw": "0"}, {"requested_amount_krw": "10000001"},
+@pytest.mark.parametrize("fields", [{"requested_amount_usd": "0"}, {"requested_amount_usd": "10000001"},
                                     {"requested_tenor_months": "2"}, {"requested_tenor_months": "7"},
-                                    {"requested_tenor_months": "12"}, {"applicant_id": ""}, {"requested_amount_krw": "lots"},
-                                    {"requested_amount_krw": "499999"}, {"applicant_id": "seller-unknown"}])
+                                    {"requested_tenor_months": "12"}, {"applicant_id": ""}, {"requested_amount_usd": "lots"},
+                                    {"requested_amount_usd": "99.99"}, {"applicant_id": "seller-unknown"}])
 def test_new_application_validation(env, fields):
     client, queue = env
     token = csrf(client, OFFICER, "/applications/new")
-    form = {"csrf": token, "applicant_id": "seller-dailylook-01",     "requested_amount_krw": "10000000",
+    form = {"csrf": token, "applicant_id": "seller-dailylook-01",     "requested_amount_usd": "10000",
             "requested_tenor_months": "6"} | fields
     assert client.post("/applications", headers=OFFICER, data=form).status_code == 422
     assert client.post("/applications", headers=OFFICER, data=form | {"csrf": ""}).status_code == 403
@@ -358,8 +363,8 @@ def demo_env(make_doc, raw, key):
     queue = FakeQueue()
     demo = Principal(user_id="demo-officer", name="데모 심사역", roles=frozenset({CREDIT_OFFICER}))
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=queue, pseudonym_key=key,
-                       new_application_id=lambda: "app-20261101-demo01", demo_principal=demo)
-    return TestClient(create_app(deps), follow_redirects=False), queue
+                       usd_origination_enabled=True, new_application_id=lambda: "app-20261101-demo01", demo_principal=demo)
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), queue
 
 
 def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
@@ -371,7 +376,7 @@ def test_demo_mode_acts_as_fixed_principal_without_easy_auth_header(demo_env):
     assert "빈스카페(대표 김대표)는 계절성이 있다" in client.get("/applications/app-1").text
     token = csrf(client, {}, "/applications/new")
     resp = client.post("/applications", data={"csrf": token, "applicant_id": "seller-dailylook-01",
-                                              "requested_amount_krw": "5,000,000", "requested_tenor_months": "6"})
+                                              "requested_amount_usd": "5,000", "requested_tenor_months": "6"})
     assert resp.status_code == 303
     assert queue.sent[0][1]["application_id"] == "app-20261101-demo01"
 

@@ -7,12 +7,13 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label>{{ _("신청인(데모)") }}
     <select name="applicant_id">
-    {% for a in demo_applicants %}<option value="{{ a }}"{% if form and form.applicant_id == a %} selected{% endif %}>{{ a|seller_label }}</option>{% endfor %}
+    {% for a in demo_applicants %}<option value="{{ a }}"{% if form and form.applicant_id == a %} selected{% endif %}>{{ a|usd_seller }}</option>{% endfor %}
     </select>
   </label>
-  <label>{{ _("신청 금액(원, 최대 1,000만)") }} <input name="requested_amount_krw" inputmode="numeric" required value="{{ form.requested_amount_krw if form else '5000000' }}"></label>
+  <label>{{ _("신청 금액(USD, $100~$10,000)") }} <input name="requested_amount_usd" inputmode="decimal" required value="{{ form.requested_amount_usd if form else '5000.00' }}"></label>
   <label>{{ _("기간(개월, 3~6)") }} <input name="requested_tenor_months" inputmode="numeric" required value="{{ form.requested_tenor_months if form else '6' }}"></label>
-  <button type="submit">{{ _("제출") }}</button>
+  {% if not origination_open and not error %}<p class="note">{{ _("신규 USD 신청 접수가 아직 열리지 않았습니다.") }}</p>{% endif %}
+  <button type="submit"{% if not origination_open %} disabled{% endif %}>{{ _("제출") }}</button>
 </form>
 <p><a href="/">{{ _("목록으로") }}</a></p>
 {% endblock %}

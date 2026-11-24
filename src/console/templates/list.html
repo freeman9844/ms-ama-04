@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <p class="crumb">{{ _("홈 › 신청") }}</p>
-    <h1>{{ _("신청 대시보드") }}</h1>
+    <h1>{{ _("신청 대시보드") }} · {{ "KRW" if prefix else "USD" }}</h1>
   </div>
   <div class="actions">{% if user.can_decide %}<a class="button" href="/applications/new">{{ _("새 신청") }}</a>{% endif %}</div>
 </div>
@@ -35,7 +35,7 @@
   <p class="note">{{ _("최신 %(n)s건 · 배포 smoke·부하 측정·장애 주입 신청 제외", n=limit) }}</p>
   <table>
     <thead><tr><th>{{ _("신청 ID") }}</th><th>{{ _("신청인") }}</th><th>{{ _("상태") }}</th><th>{{ _("신청 금액") }}</th><th>{{ _("에이전트 권고") }}</th><th>{{ _("갱신 시각") }}</th></tr></thead>
-    <tbody hx-get="/applications/rows" hx-trigger="every 3s" hx-swap="innerHTML">
+    <tbody hx-get="{{ prefix }}/applications/rows" hx-trigger="every 3s" hx-swap="innerHTML">
 {% include "_rows.html" %}
     </tbody>
   </table>

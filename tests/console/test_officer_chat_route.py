@@ -33,7 +33,7 @@ class FakeChat:
 
 def _client(make_doc, raw, key, chat):
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key, chat=chat)
-    return TestClient(create_app(deps), follow_redirects=False)
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"})
 
 
 def _token(key, user_id="oid-officer"):
@@ -58,7 +58,7 @@ def test_chat_answers_in_page_language(make_doc, raw, key):
     client = _client(make_doc, raw, key, chat)
     _post(client, key, {"question": "q"})
     assert chat.language == "ko"
-    client.cookies.set("lang", "en")
+    client.cookies.set("ama_locale_v2", "en")
     _post(client, key, {"question": "q"})
     assert chat.language == "en"
 
@@ -193,7 +193,7 @@ def test_chat_panel_disabled_notice(make_doc, raw, key):
 def test_chat_panel_hidden_without_policy(make_doc, raw, key):
     deps = ConsoleDeps(store=FakeStore([make_doc(status="assessing", policy=None, assessment=None)]), raw=raw,
                        queue=FakeQueue(), pseudonym_key=key, chat=FakeChat())
-    page = TestClient(create_app(deps)).get("/applications/app-1", headers=OFFICER).text
+    page = TestClient(create_app(deps), cookies={"ama_locale_v2": "ko"}).get("/applications/app-1", headers=OFFICER).text
     assert "심사 도우미" not in page
 
 

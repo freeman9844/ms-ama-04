@@ -172,7 +172,7 @@ class FakeMonitoring:
     def get_contacts(self, loan_id, replay_id):
         return CONTACTS if (loan_id, replay_id) == ("app-ledger", "rp-l1") else None
 
-    def list_loans(self, limit):
+    def list_loans(self, limit, *, legacy: bool = False):
         return list(self.loans.values())[:limit]
 
     def get_loan(self, loan_id):
@@ -197,7 +197,7 @@ def client(loan_with_ledger, alert_with_cause, legacy_loan, legacy_alert):
     store = FakeMonitoring([loan_with_ledger, legacy_loan], [alert_with_cause, legacy_alert])
     deps = ConsoleDeps(store=None, raw=FakeRaw(), queue=FakeQueue(), pseudonym_key=KEY, clock=lambda: NOW,
                        monitoring=store)
-    return TestClient(create_app(deps), follow_redirects=False)
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"})
 
 
 def test_alert_cause_chip(loan_with_ledger, alert_with_cause):

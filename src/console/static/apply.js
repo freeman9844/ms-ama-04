@@ -7,7 +7,7 @@
   function sync() {
     var all = true;
     boxes.forEach(function (b) { if (!b.checked) all = false; });
-    button.disabled = !all;
+    button.disabled = !all || button.hasAttribute("data-closed");
   }
   boxes.forEach(function (b) { b.addEventListener("change", sync); });
   sync();

@@ -15,17 +15,18 @@
   <a class="brand" href="/"><svg class="logo-mark" aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3182f6"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#logo-g)"/><text x="16" y="22" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">A</text></svg>AMA Lending <small>{{ _("심사 콘솔") }}</small></a>
   <nav aria-label="{{ _('주 메뉴') }}">
     <ul>
-      <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="/">{{ _("신청") }}</a></li>
-      <li class="n-loans{% if nav == 'loans' %} active{% endif %}"><a href="/loans">{{ _("사후 모니터링") }}</a></li>
-      <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="/grievances">{{ _("이의제기") }}</a></li>
-      <li class="n-ops{% if nav == 'ops' %} active{% endif %}"><a href="/ops">{{ _("운영 지표") }}</a></li>
+      <li class="n-home{% if nav == 'home' %} active{% endif %}"><a href="{{ prefix or '/' }}">{{ _("신청") }}</a></li>
+      <li class="n-loans{% if nav == 'loans' %} active{% endif %}"><a href="{{ prefix }}/loans">{{ _("사후 모니터링") }}</a></li>
+      <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="{{ prefix }}/grievances">{{ _("이의제기") }}</a></li>
+      <li><a href="/legacy">{{ _("이전 기록 (KRW)") }}</a></li>
+      <li class="n-ops{% if nav == 'ops' %} active{% endif %}"><a href="{{ prefix }}/ops">{{ _("운영 지표") }}</a></li>
     </ul>
   </nav>
   <div class="who">
-    <span class="who-name">{{ user.name }}</span>
+    <span class="who-name">{{ _(user.name) if demo else user.name }}</span>
     <span class="who-roles">{{ user.roles|sort|join(", ") }}</span>
     {% if not demo %}<a href="/.auth/logout">{{ _("로그아웃") }}</a>{% endif %}
-    <a class="customer-link" href="/borrower">{{ _("고객 콘솔 열기") }}</a>
+    <a class="customer-link" href="{{ prefix }}/borrower">{{ _("고객 콘솔 열기") }}</a>
     {% include "_lang.html" %}
   </div>
 </aside>
