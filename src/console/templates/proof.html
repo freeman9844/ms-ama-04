@@ -3,6 +3,7 @@
 {% block main %}
 <p>{% if back_url %}<a href="{{ back_url }}">← {{ back_label }}</a>{% elif p.application_id %}<a href="/applications/{{ p.application_id|path }}">← {{ _("신청 %(id)s", id=p.application_id) }}</a>{% endif %}</p>
 <h1>{{ _("삭제 증명 %(id)s", id=p.consent_id) }} <span class="status {{ 'ok' if p.complete else 'warn' }}">{{ _("완료") if p.complete else _("미완료") }}</span></h1>
+{% if p.foundry_inventory_pending %}<p>{{ _("Foundry 삭제 대상 목록을 아직 확인하지 못했습니다. 삭제 완료 안내는 보류됩니다.") }}</p>{% endif %}
 <dl class="facts">
   <dt>{{ _("사유") }}</dt><dd>{{ p.reason|reason_label }} ({{ p.trigger }})</dd>
   <dt>{{ _("요청자") }}</dt><dd>{{ p.requested_by }}</dd>

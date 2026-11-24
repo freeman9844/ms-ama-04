@@ -7,7 +7,7 @@
 <div class="page-head">
   <div>
     <p class="crumb">{{ _("홈") }} › {{ _("사후 모니터링") }}</p>
-    <h1>{{ _("사후 모니터링") }}</h1>
+    <h1>{{ _("사후 모니터링") }} · {{ "KRW" if prefix else "USD" }}</h1>
   </div>
 </div>
 <p class="note">{{ _("승인된 대출의 사후 13주 거래 흐름을 재생해 조기경보(Early-Warning)와 추심(Collections) 에이전트를 시연합니다. 최근 %(limit)s건 기준입니다.", limit=limit) }}</p>
@@ -25,12 +25,12 @@
 {% for r in rows %}
 <tr>
   <td><a href="/loans/{{ r.id|path }}">{{ r.id }}</a></td>
-  <td>{{ sl.applicant(r.applicant_id, user.can_restore) }}</td>
+  <td>{{ sl.applicant(r.applicant_id, user.can_restore, r.currency == "USD") }}</td>
   <td>{{ r.industry|dt }}</td>
-  <td class="num">{{ r.amount_krw|krw }} / {{ _("%(n)s개월", n=r.tenor_months) }}</td>
+  <td class="num">{{ r.amount_cents|usd_cents if r.currency == "USD" else r.amount_krw|krw }} / {{ _("%(n)s개월", n=r.tenor_months) }}</td>
   <td><span class="status m-{{ r.monitoring_status or 'none' }}">{{ r.monitoring_status|monitoring_label }}</span></td>
   <td>{% if r.alerts %}<span class="badge badge-red">{{ r.alerts }}</span>{% else %}{{ r.alerts if r.alerts is not none else "-" }}{% endif %}</td>
-  <td>{{ r.updated_at or "" }}</td>
+  <td>{{ r.updated_at|kst ~ " KST" if r.updated_at else "" }}</td>
 </tr>
 {% else %}
 <tr><td colspan="7">{{ _("승인된 대출이 없습니다. 신청을 승인하면 모니터링 대상이 됩니다.") }}</td></tr>

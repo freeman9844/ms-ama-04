@@ -165,15 +165,92 @@ def _usage(response: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
-def _output_text(response: dict[str, Any]) -> str:
-    if text := response.get("output_text"):
+def _output_text(response: dict[str, Any], *, itemized: bool = False) -> str:
+    if not itemized and (text := response.get("output_text")):
         return text
     return "".join(
         part.get("text", "")
         for item in response.get("output", [])
         if item.get("type") == "message"
         for part in item.get("content", [])
+        if not itemized or part.get("type") == "output_text"
     )
+
+
+def _interpreter_item(item: dict) -> bool:
+    kind = item.get("type")
+    if kind == "message":
+        content = item.get("content")
+        return isinstance(content, list) and bool(content) and all(
+            isinstance(p, dict) and (
+                p.get("type") == "output_text" and isinstance(p.get("text"), str)
+                or p.get("type") == "refusal" and isinstance(p.get("refusal"), str)
+            ) for p in content
+        )
+    if kind == "function_call":
+        return all(isinstance(item.get(k), str) and item[k].strip() for k in ("name", "call_id", "arguments"))
+    return kind == "reasoning" and isinstance(item.get("summary"), list)
+
+
+def _collect_citations(message: dict, cited: list[str]) -> bool:
+    complete = True
+    content = message.get("content")
+    if not isinstance(content, list):
+        complete = False
+        content = [content]
+    for part in content:
+        if not isinstance(part, dict) or "annotations" not in part:
+            continue
+        annotations = part["annotations"]
+        if not isinstance(annotations, list):
+            complete = False
+            annotations = [annotations]
+        for annotation in annotations:
+            if not isinstance(annotation, dict):
+                complete = False
+                continue
+            kind = annotation.get("type")
+            if not isinstance(kind, str) or not kind.strip():
+                complete = False
+            if kind != "container_file_citation" and "container_id" not in annotation:
+                continue
+            cid = annotation.get("container_id")
+            if isinstance(cid, str) and cid.strip():
+                cited.append(cid)
+            else:
+                complete = False
+            if kind != "container_file_citation":
+                complete = False
+    return complete
+
+
+def _collect_containers(response: dict, containers: list[str], *, itemized: bool) -> None:
+    items = response.get("output", None if itemized else [])
+    if not isinstance(items, list) or (itemized and not items):
+        raise AgentError("Incomplete response inventory")
+    complete = True
+    cited: list[str] = []
+    for item in items:
+        kind = item.get("type") if isinstance(item, dict) else None
+        if kind == "code_interpreter_call":
+            cid = item.get("container_id")
+            if not isinstance(cid, str) or not cid.strip():
+                complete = False
+            elif cid not in containers:
+                containers.append(cid)
+        elif itemized and (not isinstance(item, dict) or not _interpreter_item(item)):
+            complete = False
+        if kind == "message" and not _collect_citations(item, cited):
+            complete = False
+    # A citation can precede its call in this list or refer to a previous round.
+    # An unmatched citation is a cleanup target, not proof that every call was enumerated.
+    for cid in cited:
+        if cid not in containers:
+            containers.append(cid)
+            complete = False
+    # Scan the entire list first: valid target IDs may follow a malformed item.
+    if not complete:
+        raise AgentError("Incomplete response inventory")
 
 
 class FoundryAgents:
@@ -193,7 +270,7 @@ class FoundryAgents:
         self._sleep = sleep
         # False면 429를 다시 보내지 않고 바로 GatewayThrottled로 올린다(게이트웨이 프로브).
         self._retry_throttle = retry_throttle
-        self._versions: dict[str, str] = {}
+        self._versions: dict[tuple[str, str], str] = {}
 
     def _request(self, method: str, path: str, body: Any) -> httpx.Response:
         return self._client.request(
@@ -224,15 +301,17 @@ class FoundryAgents:
         return r.json() if r.content else {}
 
     def ensure_agent(self, spec: AgentSpec) -> str:
-        if spec.name not in self._versions:
+        definition = spec.definition()
+        key = (spec.name, json.dumps(definition, sort_keys=True, ensure_ascii=False))
+        if key not in self._versions:
             created = self._call(
                 "POST",
                 f"/agents/{spec.name}/versions?api-version={AGENTS_API_VERSION}",
-                {"definition": spec.definition()},
+                {"definition": definition},
                 throttle_retries=spec.throttle_retries,
             )
-            self._versions[spec.name] = str(created.get("version", ""))
-        return self._versions[spec.name]
+            self._versions[key] = str(created.get("version", ""))
+        return self._versions[key]
 
     @staticmethod
     def _invoke(call: dict[str, Any], handlers: Mapping[str, ToolHandler]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -296,6 +375,13 @@ class FoundryAgents:
             return False
         return True if status is not None and status < 400 else None
 
+    def container_exists(self, container_id: str) -> bool | None:
+        """Only a 404 from this container's endpoint confirms absence."""
+        status = self._status("GET", f"/openai/v1/containers/{container_id}")
+        if status == 404:
+            return False
+        return True if status is not None and 200 <= status < 300 else None
+
     def _loop(
         self,
         spec: AgentSpec,
@@ -307,6 +393,7 @@ class FoundryAgents:
         containers: list[str],
     ) -> AgentRun:
         ref = {"type": "agent_reference", "name": spec.name}
+        itemized = any(tool.get("type") == "code_interpreter" for tool in spec.tools)
         if version:
             # 이 프로세스가 만든 버전에 고정한다. 이름만 쓰면 최신 버전이라 배포 중 옛 인스턴스가 새 지시문으로 돈다.
             ref["version"] = version
@@ -316,10 +403,9 @@ class FoundryAgents:
             response = self._call(
                 "POST", "/openai/v1/responses", body, conversation_id, throttle_retries=spec.throttle_retries
             )
-            for item in response.get("output", []):
-                cid = item.get("container_id") if item.get("type") == "code_interpreter_call" else None
-                if cid and cid not in containers:
-                    containers.append(cid)
+            _collect_containers(response, containers, itemized=itemized)
+            if itemized and response.get("status") != "completed":
+                raise _status_error(response, conversation_id)
             return response
 
         response = respond(input_text)
@@ -348,7 +434,7 @@ class FoundryAgents:
         if response.get("status") != "completed":
             raise _status_error(response, conversation_id)
         try:
-            output = spec.output_model.model_validate_json(_output_text(response))
+            output = spec.output_model.model_validate_json(_output_text(response, itemized=itemized))
         except ValidationError as e:
             raise AgentError("출력이 스키마와 맞지 않음", conversation_id) from e
         return AgentRun(

@@ -16,7 +16,9 @@ from typing import Any
 
 from console.app import ConsoleDeps
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER, Principal
+from shared.portfolio import portfolio_sql
 from opsmetrics.projection import project
+from shared.deletion import proof_is_current
 from shared.opinions import opinion_state
 
 APPLICATIONS = "applications"
@@ -32,14 +34,25 @@ PSEUDONYM_SECRET = "pseudonym-key"
 _OPINION = ('IIF(IS_OBJECT(c.assessment), {"schema_version": c.assessment.schema_version, '
             '"review": {"passed": c.assessment.review.passed = true AND NOT IS_DEFINED(c.assessment.proposed_structure)}, '
             '"recommendation": c.assessment.recommendation}, null) AS opinion')
-LIST_QUERY = (
-    "SELECT TOP @limit c.id, c.applicant_id, c.status, c.requested_amount_krw, c.updated_at, c.source, "
+def _application_scope(legacy: bool) -> str:
+    return portfolio_sql(legacy, krw="requested_amount_krw", cents="requested_amount_cents")
+
+
+def _loan_scope(legacy: bool) -> str:
+    return portfolio_sql(legacy, krw="amount_krw", cents="amount_cents")
+
+
+_LIST_QUERY = (
+    "SELECT TOP @limit c.id, c.applicant_id, c.status, c.product_version, c.currency, c.language, "
+    "c.requested_amount_krw, c.requested_amount_cents, c.updated_at, c.source, "
     f"{_OPINION} FROM c "
-    "WHERE NOT STARTSWITH(c.id, 'smoke-') AND (NOT IS_STRING(c.source) OR c.source NOT IN ('load', 'fault')) "
+    "WHERE {scope} AND NOT STARTSWITH(c.id, 'smoke-') AND (NOT IS_STRING(c.source) OR c.source NOT IN ('load', 'fault')) "
     "ORDER BY c.updated_at DESC"
 )
 # 홈 통계는 모든 신청(테스트 포함)을 집계한다. 상태·권고만 읽는다.
-STATUS_QUERY = f"SELECT c.status, {_OPINION} FROM c"
+_STATUS_QUERY = f"SELECT c.status, {_OPINION} FROM c WHERE {{scope}}"
+LIST_QUERY = _LIST_QUERY.replace("{scope}", _application_scope(False))
+STATUS_QUERY = _STATUS_QUERY.replace("{scope}", _application_scope(False))
 
 
 def _opinion_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -52,14 +65,21 @@ class CosmosApplications:
     def __init__(self, container: Any) -> None:
         self._container = container
 
-    def list_recent(self, limit: int) -> list[dict[str, Any]]:
+    def list_recent(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
         items = self._container.query_items(
-            query=LIST_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
+            query=_LIST_QUERY.replace("{scope}", _application_scope(legacy)),
+            parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
         )
         return [_opinion_row(row) for row in items]
 
-    def list_status_rows(self) -> list[dict[str, Any]]:
-        return [_opinion_row(row) for row in self._container.query_items(query=STATUS_QUERY, enable_cross_partition_query=True)]
+    def list_status_rows(self, *, legacy: bool = False) -> list[dict[str, Any]]:
+        query = _STATUS_QUERY.replace("{scope}", _application_scope(legacy))
+        return [_opinion_row(row) for row in self._container.query_items(query=query, enable_cross_partition_query=True)]
+
+    def for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
+        return list(self._container.query_items(
+            query=f"SELECT * FROM c WHERE c.applicant_id = @applicant AND {_application_scope(legacy)}",
+            parameters=[{"name": "@applicant", "value": applicant_id}], enable_cross_partition_query=True))
 
     def get(self, application_id: str) -> dict[str, Any] | None:
         try:
@@ -70,11 +90,13 @@ class CosmosApplications:
             raise
 
 
-LOANS_QUERY = (
-    "SELECT TOP @limit c.id, c.applicant_id, c.industry, c.amount_krw, c.tenor_months, c.updated_at, "
+_LOANS_QUERY = (
+    "SELECT TOP @limit c.id, c.applicant_id, c.industry, c.amount_krw, c.amount_cents, c.currency, "
+    "c.product_version, c.language, c.tenor_months, c.updated_at, "
     "c.monitoring.status AS monitoring_status, ARRAY_LENGTH(c.monitoring.alert_ids) AS alerts "
-    "FROM c ORDER BY c.updated_at DESC"
+    "FROM c WHERE {scope} ORDER BY c.updated_at DESC"
 )
+LOANS_QUERY = _LOANS_QUERY.format(scope=_loan_scope(False))
 # 같은 파티션(loan_id)에 연락 기록 문서(contacts-*)도 있어 id 접두사로 경보(ew-)와 미납 추심 건(rc-)만 고른다.
 ALERTS_QUERY = (
     "SELECT * FROM c WHERE c.replay_id = @replay AND (STARTSWITH(c.id, 'ew-') OR STARTSWITH(c.id, 'rc-'))"
@@ -86,9 +108,10 @@ class CosmosMonitoring:
         self._loans = loans
         self._alerts = alerts
 
-    def list_loans(self, limit: int) -> list[dict[str, Any]]:
+    def list_loans(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
         items = self._loans.query_items(
-            query=LOANS_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
+            query=_LOANS_QUERY.format(scope=_loan_scope(legacy)), parameters=[{"name": "@limit", "value": limit}],
+            enable_cross_partition_query=True
         )
         return list(items)
 
@@ -111,14 +134,20 @@ class CosmosMonitoring:
         return _read_or_none(self._alerts, f"contacts-{replay_id}", loan_id)
 
 
-CONSENTS_BY_APPLICANT = "SELECT * FROM c WHERE c.applicant_id = @applicant ORDER BY c.granted_at DESC"
+_CONSENTS_BY_APPLICANT = ("SELECT * FROM c WHERE {scope} AND IS_STRING(c.consent_id) AND IS_STRING(c.application_id) "
+                         "AND c.applicant_id = @applicant ORDER BY c.granted_at DESC")
+CONSENTS_BY_APPLICANT = _CONSENTS_BY_APPLICANT.format(scope=portfolio_sql(False))
 CONSENTS_BY_APPLICATION = "SELECT * FROM c WHERE c.application_id = @application ORDER BY c.granted_at DESC"
 # 목록에는 차주가 쓴 이의 내용(text)을 싣지 않는다.
-GRIEVANCES_QUERY = (
+_GRIEVANCES_QUERY = (
     "SELECT TOP @limit c.id, c.grievance_id, c.application_id, c.applicant_id, c.status, c.submitted_at, "
-    "c.resolved_at FROM c ORDER BY c.submitted_at DESC"
+    "c.resolved_at FROM c WHERE {scope} AND IS_STRING(c.grievance_id) AND IS_STRING(c.application_id) "
+    "ORDER BY c.submitted_at DESC"
 )
-GRIEVANCES_BY_APPLICANT = "SELECT * FROM c WHERE c.applicant_id = @applicant ORDER BY c.submitted_at DESC"
+_GRIEVANCES_BY_APPLICANT = ("SELECT * FROM c WHERE {scope} AND IS_STRING(c.grievance_id) AND IS_STRING(c.application_id) "
+                           "AND c.applicant_id = @applicant ORDER BY c.submitted_at DESC")
+GRIEVANCES_QUERY = _GRIEVANCES_QUERY.format(scope=portfolio_sql(False))
+GRIEVANCES_BY_APPLICANT = _GRIEVANCES_BY_APPLICANT.format(scope=portfolio_sql(False))
 
 
 def _read_or_none(container: Any, item: str, partition_key: str) -> dict[str, Any] | None:
@@ -145,8 +174,8 @@ class CosmosPrivacy:
         )
         return list(items)
 
-    def consents_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
-        return self._query(self._consents, CONSENTS_BY_APPLICANT, "@applicant", applicant_id)
+    def consents_for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
+        return self._query(self._consents, _CONSENTS_BY_APPLICANT.format(scope=portfolio_sql(legacy)), "@applicant", applicant_id)
 
     def consents_for_application(self, application_id: str) -> list[dict[str, Any]]:
         return self._query(self._consents, CONSENTS_BY_APPLICATION, "@application", application_id)
@@ -155,13 +184,18 @@ class CosmosPrivacy:
         return _read_or_none(self._consents, consent_id, consent_id)
 
     def get_proof(self, consent_id: str) -> dict[str, Any] | None:
-        return _read_or_none(self._proofs, consent_id, consent_id)
+        proof = _read_or_none(self._proofs, consent_id, consent_id)
+        if proof and proof.get("complete") and not proof_is_current(self.get_consent(consent_id), proof):
+            return {**proof, "complete": False, "items": [
+                {**i, "verified": False, "outcome": "pending"} if i["kind"] == "raw_container" else i
+                for i in proof.get("items", [])]}
+        return proof
 
-    def list_grievances(self, limit: int) -> list[dict[str, Any]]:
-        return self._query(self._grievances, GRIEVANCES_QUERY, "@limit", limit)
+    def list_grievances(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
+        return self._query(self._grievances, _GRIEVANCES_QUERY.format(scope=portfolio_sql(legacy)), "@limit", limit)
 
-    def grievances_for_applicant(self, applicant_id: str) -> list[dict[str, Any]]:
-        return self._query(self._grievances, GRIEVANCES_BY_APPLICANT, "@applicant", applicant_id)
+    def grievances_for_applicant(self, applicant_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
+        return self._query(self._grievances, _GRIEVANCES_BY_APPLICANT.format(scope=portfolio_sql(legacy)), "@applicant", applicant_id)
 
     def get_grievance(self, application_id: str, grievance_id: str) -> dict[str, Any] | None:
         return _read_or_none(self._grievances, grievance_id, application_id)
@@ -181,9 +215,9 @@ class CosmosTranslations:
         return {i["id"]: i["en"] for i in items if i.get("en")}
 
 
-RUNS_QUERY = "SELECT DISTINCT VALUE c.run_id FROM c WHERE IS_STRING(c.run_id)"
-RUN_DOCS_QUERY = "SELECT * FROM c WHERE c.run_id = @run"
-RECENT_DOCS_QUERY = "SELECT TOP @limit * FROM c WHERE IS_STRING(c.received_at) ORDER BY c.received_at DESC"
+RUNS_QUERY = "SELECT DISTINCT VALUE c.run_id FROM c WHERE {scope} AND IS_STRING(c.run_id)"
+RUN_DOCS_QUERY = "SELECT * FROM c WHERE {scope} AND c.run_id = @run"
+RECENT_DOCS_QUERY = "SELECT TOP @limit * FROM c WHERE {scope} AND IS_STRING(c.received_at) ORDER BY c.received_at DESC"
 
 
 class CosmosOps:
@@ -192,18 +226,18 @@ class CosmosOps:
     def __init__(self, applications: Any) -> None:
         self._applications = applications
 
-    def runs(self) -> list[str]:
-        return list(self._applications.query_items(query=RUNS_QUERY, enable_cross_partition_query=True))
+    def runs(self, *, legacy: bool = False) -> list[str]:
+        return list(self._applications.query_items(query=RUNS_QUERY.format(scope=_application_scope(legacy)), enable_cross_partition_query=True))
 
-    def by_run(self, run_id: str) -> list[dict[str, Any]]:
+    def by_run(self, run_id: str, *, legacy: bool = False) -> list[dict[str, Any]]:
         items = self._applications.query_items(
-            query=RUN_DOCS_QUERY, parameters=[{"name": "@run", "value": run_id}], enable_cross_partition_query=True
+            query=RUN_DOCS_QUERY.format(scope=_application_scope(legacy)), parameters=[{"name": "@run", "value": run_id}], enable_cross_partition_query=True
         )
         return [project(d) for d in items]
 
-    def recent(self, limit: int) -> list[dict[str, Any]]:
+    def recent(self, limit: int, *, legacy: bool = False) -> list[dict[str, Any]]:
         items = self._applications.query_items(
-            query=RECENT_DOCS_QUERY, parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
+            query=RECENT_DOCS_QUERY.format(scope=_application_scope(legacy)), parameters=[{"name": "@limit", "value": limit}], enable_cross_partition_query=True
         )
         return [project(d) for d in items]
 
@@ -325,6 +359,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
         queue=StorageQueueSender(_queue_factory(cfg["QUEUE_ENDPOINT"], credential)),
         pseudonym_key=load_pseudonym_key(env, credential),
         demo_principal=demo,
+        usd_origination_enabled=env.get("USD_ORIGINATION_ENABLED") == "true",
         ops=CosmosOps(db.get_container_client(APPLICATIONS)),
         translations=CosmosTranslations(db.get_container_client(TRANSLATIONS)),
         chat=build_chat(env, credential),

@@ -5,10 +5,12 @@ from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 
-from mockapis.postloan import FlowScenario, LoanTerms, PostLoanFlow, generate_postloan
+from mockapis.postloan import FlowScenario, LoanTerms, PostLoanFlow, generate_postloan, generate_usd_postloan
 from mockapis.sellerdata.marketplace import StoreOverride
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, SyntheticCase, generate_case, load_persona
+from mockapis.synth import UsdCase, generate_usd_case
+from shared.sellers import USD_SELLERS
 from shared.krcalendar import next_business_day
 from shared.segments import LOAD_GRID
 
@@ -57,6 +59,11 @@ def build_demo_cases(as_of: date) -> dict[str, SyntheticCase]:
     }
 
 
+def build_usd_cases(as_of: date) -> dict[str, UsdCase]:
+    return {seller: generate_usd_case(seller, as_of, seed)
+            for seller, _, seed, _ in DEMO_APPLICANTS if seller in USD_SELLERS}
+
+
 LOAD_ARCHETYPE = {
     "healthy": Archetype.HEALTHY_SEASONAL,
     "mismatch": Archetype.TAX_MISMATCH,
@@ -97,12 +104,28 @@ class FlowStore:
 
     def __init__(self, cases: Mapping[str, SyntheticCase], as_of: date, maxsize: int = 256) -> None:
         self._cases = dict(cases)
+        self._as_of = as_of
         # 대출은 영업일에 실행된다. 오케스트레이터가 첫 거래일로 상환 원장을 만들므로 시작일에 거래가 있어야 상환일이 맞는다.
         self._start = next_business_day(as_of)
         seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
         seeds.update({a.applicant_id: a.seed for a in LOAD_GRID})
         self._seeds = seeds
         self._generate = lru_cache(maxsize=maxsize)(self._build)
+        self.usd_case = lru_cache(maxsize=maxsize)(self._usd_case)
+        self.usd_flow = lru_cache(maxsize=maxsize)(self._usd_flow)
+
+    def _usd_case(self, applicant_id: str) -> UsdCase | None:
+        if applicant_id not in self._cases or applicant_id not in USD_SELLERS:
+            return None
+        return generate_usd_case(applicant_id, self._as_of, self._seeds[applicant_id])
+
+    def _usd_flow(self, applicant_id: str, loan_id: str, amount_cents: int, installment_cents: int, tenor_months=None):
+        case = self.usd_case(applicant_id)
+        if case is None:
+            return None
+        return generate_usd_postloan(case, self._start, self._seeds[applicant_id] + POSTLOAN_SEED_OFFSET,
+                                     loan_id=loan_id, amount_cents=amount_cents, installment_cents=installment_cents,
+                                     tenor_months=tenor_months)
 
     def _build(self, applicant_id: str, loan: LoanTerms | None) -> PostLoanFlow:
         case = self._cases[applicant_id]

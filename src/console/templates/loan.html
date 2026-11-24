@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_seller.html" as sl %}
 {% set nav = "loans" %}
+{% set prefix = "" if usd else "/legacy" %}
 {% import "_charts.html" as ch %}
 {% macro collections_block(c) -%}
 <h3>{{ _("추심 에이전트") }} <small>{{ c.decision }}</small></h3>
@@ -13,7 +14,7 @@
 {% macro restructure_block(doc_id, rs, decidable) -%}
 <h3>{{ _("재조정 상담 요청") }} <small>{{ rs.status }}</small></h3>
 <p>{{ rs.category }} · {{ rs.note|mt }}</p>
-{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason|mt }}</p>{% endif %}
+{% if rs.officer_id %}<p>{{ rs.officer_id }} · {{ rs.decided_at }} · {{ rs.reason if usd else rs.reason|mt_ref }}</p>{% endif %}
 {% if decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 끝나면 재조정 결정을 내릴 수 있습니다.") }}</small></p>
 {% elif decidable and user.can_decide %}
@@ -39,7 +40,7 @@
 {% if p.hardship %}<p>{{ _("재조정 상담 권고") }}: {{ p.hardship.category }} · {{ p.hardship.note|mt }}</p>{% endif %}
 <h4>{{ _("판단 근거") }}</h4>
 <ul>
-  <li>{{ _("%(no)s회차", no=ev.installment_no) }} {{ ev.due_on }} · {{ ev.amount_krw|krw }} · {{ _("누적 미납 %(n)s회", n=ev.missed_count) }}</li>
+  <li>{{ _("%(no)s회차", no=ev.installment_no) }} {{ ev.due_on }} · {{ ev.amount_cents|usd_cents if usd else ev.amount_krw|krw }} · {{ _("누적 미납 %(n)s회", n=ev.missed_count) }}</li>
   {% if ev.recent_alert %}<li>{{ _("최근 경보") }} {{ ev.recent_alert.severity|severity_label }}: {{ ev.recent_alert.summary|mt }}{% if ev.recent_alert.check_action %}<br>{{ _("확인할 조치") }}: {{ ev.recent_alert.check_action|mt }}{% endif %}</li>{% endif %}
   <li>{{ _("최근 7일 차주 연락 %(n)s회", n=ev.contacts_7d) }}</li>
   {% for e in ev.escalation or () %}<li>{{ _("단계 자동 안내") }}: {{ e.script_id|script_label }} · {{ e.on }} · {{ e.status|contact_status_label }}</li>{% endfor %}
@@ -58,7 +59,7 @@
 <p>{{ p.status|proposal_label }}</p>
 {% elif p.status != "pending_officer" %}
 <h4>{{ _("심사역 결정") }}</h4>
-<p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason|mt }}{% endif %}</p>
+<p>{{ p.status|proposal_label }} · {{ p.officer_id }} · {{ p.decided_at }}{% if p.decision_reason %} · {{ p.decision_reason if usd else p.decision_reason|mt_ref }}{% endif %}</p>
 {% if p.contact %}<p>{{ _("발송 결과") }}: {{ p.contact.status|contact_status_label }}{% if p.contact.reason %} ({{ p.contact.reason|contact_reason_label }}){% endif %} · {{ p.contact.at }}</p>
 <blockquote>{{ (p.sent_text or p.contact.text)|mt_ref }}</blockquote>{% endif %}
 {% elif decidable and user.can_decide and replay_blocked %}
@@ -72,7 +73,13 @@
     <label><input type="radio" name="decision" value="modify"{{ locked }}> {{ pgettext("button", "수정 후 승인") }}</label>
     <label><input type="radio" name="decision" value="reject"{{ locked }}> {{ _("반려(발송 안 함)") }}</label>
   </fieldset>
+  {% if p.text_choices is defined %}
+  <label>Message to send if modified <select name="text"{{ locked }}>
+    {% for choice in p.text_choices %}<option value="{{ choice }}">{{ choice }}</option>{% endfor %}
+  </select></label>
+  {% else %}
   <label>{{ _("수정 문구(수정 후 승인일 때 이 문구로 발송, 300자 이하)") }} <textarea name="text" rows="4" maxlength="300"{{ locked }}>{{ p.text }}</textarea></label>
+  {% endif %}
   {% if p.hardship %}<label><input type="checkbox" name="include_hardship" value="1"{{ locked }}> {{ _("재조정 상담 요청도 만들기(체크할 때만 생성, 기본은 문구만 발송)") }}</label>{% endif %}
   <label>{{ _("사유(반려할 때 필수)") }} <textarea name="reason" rows="2"{{ locked }}></textarea></label>
   <button type="submit"{{ locked }}>{{ _("결정 반영 대기 중") if watch_url else _("결정 보내기") }}</button>
@@ -87,7 +94,7 @@
 {% block main %}
 <div class="page-head">
   <div>
-    <p class="crumb"><a href="/loans">{{ _("홈") }} › {{ _("사후 모니터링") }}</a> › {{ l.id }}</p>
+    <p class="crumb"><a href="{{ prefix }}/loans">{{ _("홈") }} › {{ _("사후 모니터링") }}</a> › {{ l.id }}</p>
     <h1>{{ l.id }} <span class="status m-{{ m.status or 'none' }}">{{ m.status|monitoring_label }}</span></h1>
   </div>
   <div class="actions">
@@ -136,16 +143,16 @@
 {% endif %}
 <div class="grid-4">
   {% set rp = ui.repayment %}
-  {{ ch.kpi(_("대출"), l.amount_krw|krw, _("%(n)s개월", n=l.tenor_months) ~ " · " ~ l.decision ~ ((" · " ~ _("상환 %(paid)s/%(total)s회", paid=rp.paid, total=rp.total) ~ ((" · " ~ _("미납 %(n)s", n=rp.missed)) if rp.missed else "")) if rp else ""), "red" if rp and rp.missed else "neutral") }}
+  {{ ch.kpi(_("대출"), l.amount_cents|usd_cents if usd else l.amount_krw|krw, _("%(n)s개월", n=l.tenor_months) ~ " · " ~ l.decision ~ ((" · " ~ _("상환 %(paid)s/%(total)s회", paid=rp.paid, total=rp.total) ~ ((" · " ~ _("미납 %(n)s", n=rp.missed)) if rp.missed else "")) if rp else ""), "red" if rp and rp.missed else "neutral") }}
   {% call ch.kpi(_("재생 진행"), _("%(done)s/%(total)s주", done=ui.processed, total=ui.weeks_total), m.mode or _("재생 전"), "blue") %}{{ ch.progress(ui.progress_pct, _("재생 진행률")) }}{% endcall %}
   {{ ch.kpi(_("경보"), _("%(n)s건", n=ui.alerts), _("높음 %(high)s · 중간 %(medium)s · 낮음 %(low)s", high=ui.severity.high, medium=ui.severity.medium, low=ui.severity.low), "red" if ui.severity.high else ("amber" if ui.alerts else "neutral")) }}
   {{ ch.kpi(_("최저 현금 버퍼"), "-" if ui.min_buffer is none else _("%(n)s일", n=ui.min_buffer), ("" if ui.min_buffer_week is none else _("%(n)s주차", n=ui.min_buffer_week) ~ " · ") ~ _("기준 %(value)s", value=("-" if ui.baseline_buffer is none else _("%(n)s일", n=ui.baseline_buffer))), "purple") }}
 </div>
 <section class="card">
 <dl class="facts">
-  <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(l.applicant_id, user.can_restore) }} · {{ l.industry|dt }}</dd>
-  <dt>{{ _("대출") }}</dt><dd>{{ l.amount_krw|krw }} / {{ _("%(n)s개월", n=l.tenor_months) }} · {{ l.decision }} · {{ l.approved_at }}</dd>
-  <dt>{{ _("기준선") }}</dt><dd>{{ _("주 평균 매출 %(revenue)s · 현금 버퍼 %(days)s일", revenue=l.baseline.avg_weekly_revenue|krw, days=l.baseline.cash_buffer_days) }}</dd>
+  <dt>{{ _("신청인") }}</dt><dd>{{ sl.applicant(l.applicant_id, user.can_restore, usd) }} · {{ l.industry|dt }}</dd>
+  <dt>{{ _("대출") }}</dt><dd>{{ l.amount_cents|usd_cents if usd else l.amount_krw|krw }} / {{ _("%(n)s개월", n=l.tenor_months) }} · {{ l.decision }} · {{ l.approved_at|kst }} KST</dd>
+  <dt>{{ _("기준선") }}</dt><dd>{{ _("주 평균 매출 %(revenue)s · 현금 버퍼 %(days)s일", revenue=l.baseline.avg_weekly_revenue_cents|usd_cents if usd else l.baseline.avg_weekly_revenue|krw, days=l.baseline.cash_buffer_days) }}</dd>
   {% if m.replay_id %}<dt>{{ _("재생") }}</dt><dd>{{ m.replay_id }} · {{ m.mode }} · {{ _("%(done)s/%(total)s주", done=m.processed_week, total=13) }} · {{ _("시작 %(at)s", at=m.started_at) }}{% if m.resumed_at %} · {{ _("재개 %(n)s회", n=m.resumed_at|length) }}{% endif %}{% if m.stopped_at %} · {{ _("종료 %(at)s", at=m.stopped_at) }}{% endif %}</dd>{% endif %}
   {% if m.error %}<dt>{{ _("오류") }}</dt><dd class="error">{{ m.error }}</dd>{% endif %}
 </dl>
@@ -169,8 +176,8 @@
   <tbody>
 {% for w in v.weeks %}{% set r = w.row %}
 <tr>
-  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue|krw }}</td><td>{{ r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
-  <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
+  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue_cents|usd_cents if usd else r.revenue|krw }}</td><td>{{ r.expected_revenue_cents|usd_cents if usd else r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ r.revenue_vs_expected if r.revenue_vs_expected is defined else r.revenue_ratio }}</td>
+  <td>{{ r.buffer_days }}</td><td>{{ r.projected_min_balance_cents|usd_cents if usd else r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count }}</td>
   <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
   <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% for cid in w.case_ids or ([w.case_id] if w.case_id else []) %} · <a href="#{{ cid }}">{{ _("미납") }}</a>{% endfor %}</td>
 </tr>
@@ -187,7 +194,7 @@
   <tbody>
 {% for r in v.ledger_rows %}
 <tr>
-  <td>{{ r.week }}</td><td>{{ r.order_gross|krw }}</td><td>{{ r.returns|krw }}</td><td>{{ r.held|krw }}</td><td>{{ r.deductions|krw }}</td><td>{{ r.settle_net|krw }}</td>
+  <td>{{ r.week }}</td><td>{{ r.order_gross_cents|usd_cents if usd else r.order_gross|krw }}</td><td>{{ r.returns_cents|usd_cents if usd else r.returns|krw }}</td><td>{{ r.held_cents|usd_cents if usd else r.held|krw }}</td><td>{{ r.deductions_cents|usd_cents if usd else r.deductions|krw }}</td><td>{{ r.settle_net_cents|usd_cents if usd else r.settle_net|krw }}</td>
 </tr>
 {% endfor %}
   </tbody>
@@ -204,9 +211,15 @@
   <tbody>
 {% for s in l.repayment.schedule %}
 <tr>
-  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>({{ _("원래 %(date)s", date=s.from_due_on) }})</small>{% endif %}</td><td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
+  <td>{{ s|installment_label }}</td><td>{{ s.due_on }}{% if s.from_due_on and s.from_due_on != s.due_on %} <small>({{ _("원래 %(date)s", date=s.from_due_on) }})</small>{% endif %}</td>
+  {% if l.product_version == 'usd-v1' %}
+  <td>{{ s.amount_cents|default(l.repayment.installment_cents)|usd_cents }}</td>
+  <td>{{ s.paid_cents|usd_cents }}</td><td>{{ s.balance_cents|usd_cents }}</td>
+  {% else %}
+  <td>{{ (s.amount_krw or l.repayment.installment_krw)|krw }}</td>
   {% set amount = s.amount_krw or l.repayment.installment_krw %}{% set paid = s.paid_krw|default(amount if s.status == "paid" else 0) %}
   <td>{{ paid|krw }}</td><td>{{ s.balance_krw|default(amount - paid)|krw }}</td>
+  {% endif %}
   <td class="r-{{ s.status }}">{{ s.status|repayment_label }}</td>
   <td>{{ s.early_reminded_on or "-" }}{% if s.early_reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
   <td>{{ s.reminded_on or "-" }}{% if s.reminder_status == "deferred" %} ({{ _("보류") }}){% endif %}</td>
@@ -250,11 +263,11 @@
 <table>
   <thead><tr><th>{{ _("지금") }}</th><th>{{ _("바뀐 뒤") }}</th></tr></thead>
   <tbody><tr>
-    <td>{% for b in pc.before %}{{ b.label }} {{ b.due_on or "-" }} · {{ b.amount_krw|krw if b.amount_krw is not none else "-" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
-    <td>{% for a in pc.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+    <td>{% for b in pc.before %}{{ b.label }} {{ b.due_on or "-" }} · {{ b.amount_cents|usd_cents if usd else b.amount_krw|krw if b.amount_krw is not none else "-" }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+    <td>{% for a in pc.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_cents|usd_cents if usd else a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
   </tr></tbody>
 </table>
-{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason|mt }}{% endif %}</p>
+{% if pc.status != "pending_officer" %}<p>{{ pc.status|plan_change_label }} · {{ pc.officer_id }} · {{ pc.decided_at }}{% if pc.reason %} · {{ pc.reason if usd else pc.reason|mt_ref }}{% endif %}</p>
 {% elif v.plan_decidable and user.can_decide and replay_blocked %}
 <p><small>{{ _("재생이 멈추면 결정할 수 있습니다.") }}</small></p>
 {% elif v.plan_decidable and user.can_decide %}{% set locked = " disabled" if watch_url else "" %}
@@ -277,8 +290,8 @@
   <thead><tr><th>{{ _("변경") }}</th><th>{{ _("지금이던 일정") }}</th><th>{{ _("바뀐 일정") }}</th><th>{{ _("적용 시작") }}</th><th>{{ _("심사역") }}</th></tr></thead>
   <tbody>{% for h in v.plan_history %}
 <tr><td>{{ h.option|plan_option_label }}</td>
-<td>{% for b in h.before %}{{ b.label }} {{ b.due_on }} · {{ b.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
-<td>{% for a in h.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+<td>{% for b in h.before %}{{ b.label }} {{ b.due_on }} · {{ b.amount_cents|usd_cents if usd else b.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+<td>{% for a in h.after %}{{ a.label }} {{ a.due_on }} · {{ a.amount_cents|usd_cents if usd else a.amount_krw|krw }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
 <td>{{ h.applied_from }}</td><td>{{ h.officer_id }} · {{ h.decided_at }}</td></tr>
 {% endfor %}</tbody>
 </table>
@@ -287,8 +300,8 @@
 {% if ui.expected_chart %}
 <section class="card">
 <h2>{{ _("기대 입금 대비 실제") }}</h2>
-<p class="note">{{ _("정산 채널별 주기·영업일·계절 지수로 만든 주차별 기대 입금(선)과 실제 정산 입금(막대)입니다. 기대의 85%% 아래인 주는 주황색입니다.") }}</p>
-{% call ch.columns(ui.expected_chart, _("주차별 기대 입금 대비 실제 입금")) %}{{ ch.line_overlay(ui.expected_line, _("기대 입금"), "teal", false) }}{% endcall %}
+{% if not usd %}<p class="note">{{ _("정산 채널별 주기·영업일·계절 지수로 만든 주차별 기대 입금(선)과 실제 정산 입금(막대)입니다. 기대의 85%% 아래인 주는 주황색입니다.") }}</p>{% endif %}
+{% call ch.columns(ui.expected_chart, _("주차별 기대 입금 대비 실제 입금")) %}{{ ch.line_overlay(ui.expected_line, _("기대 입금"), "teal", false, unit="usd_cents" if usd else "krw") }}{% endcall %}
 {{ ch.legend([(_("실제 입금"), "blue"), (_("기대의 85%% 미만"), "amber"), (_("기대 입금"), "teal")]) }}
 </section>
 {% endif %}
@@ -296,18 +309,18 @@
 <section class="card">
 <h2>{{ _("4주 잔고 전망") }} <small>{{ _("%(week)s주차 말 기준", week=f.week) }}</small></h2>
 <div class="grid-4">
-  {{ ch.kpi(_("시작 잔고"), f.start_balance|krw, _("%(week)s주차 마지막 날", week=f.week), "neutral") }}
-  {{ ch.kpi(_("최근 4주 달성률"), f.attainment_pct ~ "%", _("기대 입금 대비 실제(전망 입금에 반영)"), "blue") }}
-  {{ ch.kpi(_("전망 최저 잔고"), f.min_balance|krw if f.min_balance is not none else "-", f.min_date or "", "red" if f.shortfall_date else "green") }}
-  {{ ch.kpi(_("부족 예상일"), f.shortfall_date or _("없음"), _("잔고가 처음 0원 아래로 내려가는 날") if f.shortfall_date else _("28일 안에 0원 아래로 내려가지 않음"), "red" if f.shortfall_date else "green") }}
+  {{ ch.kpi(_("시작 잔고"), f.start_balance|usd_cents if usd else f.start_balance|krw, _("%(week)s주차 마지막 날", week=f.week), "neutral") }}
+  {% if not usd %}{{ ch.kpi(_("최근 4주 달성률"), f.attainment_pct ~ "%", _("기대 입금 대비 실제(전망 입금에 반영)"), "blue") }}{% endif %}
+  {{ ch.kpi(_("전망 최저 잔고"), f.min_balance|usd_cents if usd else f.min_balance|krw if f.min_balance is not none else "-", f.min_date or "", "red" if f.shortfall_date else "green") }}
+  {{ ch.kpi(_("부족 예상일"), f.shortfall_date or _("없음"), "USD" if usd else _("잔고가 처음 0원 아래로 내려가는 날") if f.shortfall_date else _("28일 안에 0원 아래로 내려가지 않음"), "red" if f.shortfall_date else "green") }}
 </div>
-{{ ch.signed_line(f.chart, _("다음 28일 일별 잔고 전망")) }}
-{{ ch.legend([(_("전망 잔고"), "purple"), (_("0원 아래"), "red")]) }}
+{{ ch.signed_line(f.chart, _("다음 28일 일별 잔고 전망"), "usd_cents" if usd else "krw") }}
+{{ ch.legend([(_("전망 잔고"), "purple"), ("< $0.00 USD" if usd else _("0원 아래"), "red")]) }}
 {% if f.totals %}<table>
   <thead><tr><th>{{ _("28일 합계") }}</th><th>{{ _("금액") }}</th></tr></thead>
   <tbody>{% for label, value in f.totals %}<tr><td>{{ label }}</td><td>{{ value|krw }}</td></tr>{% endfor %}</tbody>
 </table>{% endif %}
-<p><small>{{ _('예정 출금 일정은 심사 시점 거래의 반복 패턴에서 뽑았습니다. 고금리 상환은 그 주 금액이 매주 반복된다고 가정합니다. 전망 최저 잔고가 0원 아래면 <span class="chip">잔고 부족 전망</span> 트리거가 걸립니다.') }}</small></p>
+{% if not usd %}<p><small>{{ _('예정 출금 일정은 심사 시점 거래의 반복 패턴에서 뽑았습니다. 고금리 상환은 그 주 금액이 매주 반복된다고 가정합니다. 전망 최저 잔고가 0원 아래면 <span class="chip">잔고 부족 전망</span> 트리거가 걸립니다.') }}</small></p>{% endif %}
 </section>
 {% endif %}
 {% endif %}
@@ -325,7 +338,7 @@
 <ul class="claims">
 {% for s in a.signals %}
   <li><strong>{{ s.kind }}</strong> {{ s.text|mt }}
-    <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val if val is not none else _("없음") }}</span>{% endfor %}
+    <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val|usd_cents if usd and id.endswith('_cents') else val if val is not none else _("없음") }}</span>{% endfor %}
     {% for t in s.txn_ids %}<span class="chip txn">{{ t }}</span>{% endfor %}</div>
   </li>
 {% endfor %}
@@ -354,7 +367,7 @@
 
 {% for c in v.cases %}{% set inst = c.installment %}
 <section id="{{ c.case_id }}" class="card alert-card">
-<h2>{{ _("%(no)s회차 미납", no=inst.no) }} · {{ inst.due_on }} · {{ _("상환 잔액") }} {{ c.balance_krw|default(inst.amount_krw)|krw }} <small>{{ _("누적 미납 %(n)s회", n=c.missed_count) }} · {{ c.status }}</small></h2>
+<h2>{{ _("%(no)s회차 미납", no=inst.no) }} · {{ inst.due_on }} · {{ _("상환 잔액") }} {{ c.balance_cents|default(inst.amount_cents)|usd_cents if usd else c.balance_krw|default(inst.amount_krw)|krw }} <small>{{ _("누적 미납 %(n)s회", n=c.missed_count) }} · {{ c.status }}</small></h2>
 {% if ui.case_steps[c.case_id] %}{{ ch.stepper(ui.case_steps[c.case_id], _("미납 추심 단계"), compact=true) }}{% endif %}
 {% if c.recent_alert %}<p>{{ _("최근 경보") }}: <a href="#{{ c.recent_alert.alert_id }}">{{ _("%(n)s주차", n=c.recent_alert.week) }} {{ c.recent_alert.severity|severity_label }}</a> · {{ c.recent_alert.summary|mt }}</p>
 {% else %}<p class="note">{{ _("이번 재생에 앞선 경보 없음.") }}</p>{% endif %}
@@ -370,7 +383,7 @@
 <h2>{{ _("근거 거래") }}</h2>
 <table>
   <thead><tr><th>{{ _("거래 ID") }}</th><th>{{ _("일자") }}</th><th>{{ _("금액") }}</th><th>{{ _("적요") }}</th></tr></thead>
-  <tbody>{% for t in v.transactions %}<tr><td>{{ t.txn_id }}</td><td>{{ t.booked_on }}</td><td>{{ t.amount_krw|krw }}</td><td>{{ t.description }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for t in v.transactions %}<tr><td>{{ t.txn_id }}</td><td>{{ t.booked_on }}</td><td>{{ t.amount_cents|usd_cents if usd else t.amount_krw|krw }}</td><td>{{ t.description }}</td></tr>{% endfor %}</tbody>
 </table>
 </section>
 {% endif %}

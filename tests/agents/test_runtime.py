@@ -200,6 +200,105 @@ def test_run_records_code_interpreter_containers_across_rounds():
     assert run.record()["containers"] == ["cntr_a", "cntr_b"]
 
 
+def test_missing_interpreter_container_is_not_complete_enumeration():
+    body = done({"status": "ok"}).json()
+    body["output"] = [ci(""), ci("cntr_known"), *body["output"]]
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(httpx.Response(200, json=body))).run(SPEC, "input", {})
+    assert err.value.conversation_id == "conv_1" and err.value.containers == ("cntr_known",)
+
+
+@pytest.mark.parametrize("fields,known", [
+    ({}, ()), ({"output": None}, ()), ({"output": []}, ()), ({"output": {}}, ()),
+    ({"output": [None, ci("cntr_late")]}, ("cntr_late",)),
+    ({"output": [{"untyped": True}, ci("cntr_late")]}, ("cntr_late",)),
+    ({"output": [{"type": "message", "content": "invalid"}]}, ()),
+    ({"output": [ci("cntr_late")]}, ("cntr_late",)),
+])
+def test_interpreter_requires_itemized_response_across_rounds(fields, known):
+    enabled = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    response = {"status": "completed", "output_text": '{"status":"ok"}', **fields}
+    fake = FakeFoundry(tool_round(ci("cntr_early"), fc("f", "fetch_source", {})), httpx.Response(200, json=response))
+    with pytest.raises(AgentError) as err:
+        agents(fake).run(enabled, "input", {})
+    assert err.value.conversation_id == "conv_1" and err.value.containers == ("cntr_early", *known)
+
+
+def test_no_interpreter_accepts_text_only_result():
+    response = httpx.Response(200, json={"status": "completed", "output_text": '{"status":"ok"}'})
+    assert agents(FakeFoundry(response)).run(SPEC, "input", {}).output == Out(status="ok")
+
+
+def cited_message(*annotations):
+    message = done({"status": "ok"}).json()["output"][0]
+    message["content"][0]["annotations"] = list(annotations)
+    return message
+
+
+def container_citation(cid):
+    return {"type": "container_file_citation", "container_id": cid, "file_id": "file_1",
+            "filename": "synthetic.csv", "start_index": 0, "end_index": 1}
+
+
+@pytest.mark.parametrize("citation", [
+    container_citation("cntr_citation_only"), container_citation(None), None, {"container_id": "cntr_untyped"},
+])
+def test_unaccounted_container_citation_keeps_entire_known_inventory(citation):
+    spec = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    first = tool_round(ci("cntr_first"), fc("f", "fetch_source", {}))
+    final = tool_round(cited_message(citation, container_citation("cntr_extra")), ci("cntr_last"))
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(first, final)).run(spec, "input", {})
+    expected = {"cntr_first", "cntr_extra", "cntr_last"}
+    if isinstance(citation, dict) and citation.get("container_id"):
+        expected.add(citation["container_id"])
+    assert err.value.conversation_id == "conv_1" and set(err.value.containers) == expected
+
+
+@pytest.mark.parametrize("wrong", [None, {}, "invalid", [None], [container_citation("")]])
+def test_malformed_annotations_cannot_certify_interpreter_inventory(wrong):
+    spec = dataclasses.replace(SPEC, tools=({"type": "code_interpreter"},))
+    message = cited_message()
+    message["content"][0]["annotations"] = wrong
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(tool_round(message, ci("cntr_after")))).run(spec, "input", {})
+    assert err.value.containers == ("cntr_after",)
+
+
+def test_malformed_citation_envelope_keeps_identifiable_target():
+    spec = dataclasses.replace(SPEC, tools=({"type": "code_interpreter"},))
+    message = {"type": "message", "content": {"type": "output_text",
+               "annotations": container_citation("cntr_recoverable")}}
+    with pytest.raises(AgentError) as err:
+        agents(FakeFoundry(tool_round(message))).run(spec, "input", {})
+    assert err.value.containers == ("cntr_recoverable",)
+
+
+def test_container_citations_can_reference_prior_or_later_calls_in_itemized_output():
+    spec = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    first = tool_round(ci("cntr_first"), fc("f", "fetch_source", {}))
+    final = tool_round(cited_message(container_citation("cntr_first"), container_citation("cntr_last"),
+                                     {"type": "file_citation", "file_id": "file_1"}), ci("cntr_last"))
+    run = agents(FakeFoundry(first, final)).run(spec, "input", {})
+    assert run.containers == ("cntr_first", "cntr_last")
+
+
+@pytest.mark.parametrize("status,extra", [
+    ("incomplete", []),
+    ("completed", [{"type": "message", "content": []}]),
+    ("completed", [{"type": "message", "content": [{"type": "unknown"}]}]),
+    ("completed", [{"type": "function_call", "call_id": "broken"}]),
+])
+def test_malformed_intermediate_inventory_cannot_be_repaired_by_later_output(status, extra):
+    enabled = dataclasses.replace(SPEC, tools=(*SPEC.tools, {"type": "code_interpreter"}))
+    response = {"status": status, "output": [*extra, ci("cntr_known"), fc("f", "fetch_source", {})]}
+    fake = FakeFoundry(httpx.Response(200, json=response), done({"status": "ok"}))
+    with pytest.raises(AgentError) as err:
+        agents(fake).run(enabled, "input", {})
+    assert err.value.containers == ("cntr_known",)
+    assert len(fake.responses_bodies()) == 1
+
+
 def test_agent_error_carries_containers_for_cleanup():
     body = done("not json").json()
     body["output"] = [ci("cntr_x"), *body["output"]]
@@ -241,6 +340,21 @@ def test_delete_container_failure_returns_false():
     fake = FakeFoundry()
     fake.delete_response = httpx.Response(404, json={"error": {"code": "not_found"}})
     assert agents(fake).delete_container("cntr_a") is False
+
+
+@pytest.mark.parametrize(("status", "expected"), [(404, False), (200, True), (403, None), (503, None), (None, None)])
+def test_container_exists_only_confirms_absence_for_target_404(status, expected):
+    requests = []
+
+    def handler(request):
+        requests.append((request.method, str(request.url)))
+        if status is None:
+            raise httpx.ConnectError("offline", request=request)
+        return httpx.Response(status)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert FoundryAgents(BASE, lambda: "tok", client=client).container_exists("cntr_actual") is expected
+    assert requests == [("GET", BASE + "/openai/v1/containers/cntr_actual")]
 
 
 def conversations_api(status: int, *, get_status: int = 404):

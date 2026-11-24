@@ -14,9 +14,9 @@ from typing import Any
 
 from agents.ledger_monitor import LedgerBaseline
 from agents.repayment import item_amount, item_key, repayment_debit
-from shared.contracts import PgFlow, Transaction
+from shared.contracts import USD_V1, PgFlow, Transaction, UsdTransaction
 from shared.krcalendar import add_business_days, next_business_day, previous_business_day
-from shared.repayment import LENDER_DEBIT
+from shared.repayment import LENDER_DEBIT, USD_DEBIT
 
 PAYOUT_LOOKBACK = 9  # 지급 주기를 잴 최근 지급일 수
 MOVE_CAP_DAYS = 10
@@ -54,7 +54,8 @@ def next_payout(days: Sequence[date], after: date) -> date | None:
 
 
 def _new_item(item: Mapping[str, Any], part: int | None, due: date, amount: int) -> dict[str, Any]:
-    return {"no": item["no"], "part": part, "due_on": due.isoformat(), "amount_krw": amount,
+    key = "amount_cents" if "amount_cents" in item else "amount_krw"
+    return {"no": item["no"], "part": part, "due_on": due.isoformat(), key: amount,
             "from_due_on": item["due_on"]}
 
 
@@ -110,8 +111,10 @@ def apply_change(schedule: Sequence[Mapping[str, Any]], change: Mapping[str, Any
     gone = set(change.get("replaces") or ())
     out = [dict(s) for s in schedule if item_key(s) not in gone]
     for i in change.get("items") or ():
+        terms = ({"amount_cents": i["amount_cents"], "balance_cents": i["amount_cents"], "paid_cents": 0}
+                 if "amount_cents" in i else {"amount_krw": i["amount_krw"]})
         out.append({
-            "no": i["no"], "part": i.get("part"), "due_on": i["due_on"], "amount_krw": i["amount_krw"],
+            "no": i["no"], "part": i.get("part"), "due_on": i["due_on"], **terms,
             "from_due_on": i.get("from_due_on"), "status": "scheduled", "reminded_on": None, "reminder_status": None,
             "early_reminded_on": None, "early_reminder_status": None, "txn_id": None, "case_id": None,
         })
@@ -126,10 +129,12 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str 
     start = date.fromisoformat(change["applied_from"])
     head = [t for t in txns if t.booked_on < start]
     tail = [t for t in txns if t.booked_on >= start]
+    usd = bool(txns and isinstance(txns[0], UsdTransaction))
+    amount_key, balance_key = (("amount_cents", "balance_after_cents") if usd else ("amount_krw", "balance_after_krw"))
     if head:
-        balance = head[-1].balance_after_krw
+        balance = getattr(head[-1], balance_key)
     elif txns:
-        balance = txns[0].balance_after_krw - txns[0].amount_krw
+        balance = getattr(txns[0], balance_key) - getattr(txns[0], amount_key)
     else:
         balance = 0
     replaced = {(b["key"], date.fromisoformat(b["due_on"])) for b in change.get("before") or ()}
@@ -163,16 +168,18 @@ def _apply_one(txns: list[Transaction], change: Mapping[str, Any], loan_id: str 
     out = list(head)
     for day in sorted(set(by_day) | set(debits)):
         for t in by_day.get(day, ()):
-            balance += t.amount_krw
-            out.append(t if t.balance_after_krw == balance else t.model_copy(update={"balance_after_krw": balance}))
+            balance += getattr(t, amount_key)
+            out.append(t if getattr(t, balance_key) == balance else t.model_copy(update={balance_key: balance}))
         for a in debits.get(day, ()):
-            amount = int(a["amount_krw"])
+            amount = a[amount_key]
             if balance < amount:
                 continue
             balance -= amount
-            out.append(Transaction(txn_id=f"{change['change_id']}-{a['key']}", booked_on=day, amount_krw=-amount,
-                                   balance_after_krw=balance, description=LENDER_DEBIT, txn_type_code=code,
-                                   loan_id=loan_id, scheduled_item_key=a["key"]))
+            model = UsdTransaction if usd else Transaction
+            out.append(model(**(USD_V1.model_dump() if usd else {}), **{amount_key: -amount, balance_key: balance},
+                             txn_id=f"{change['change_id']}-{a['key']}", booked_on=day,
+                             description=USD_DEBIT if usd else LENDER_DEBIT, txn_type_code=code,
+                             loan_id=loan_id, scheduled_item_key=a["key"]))
     return out
 
 

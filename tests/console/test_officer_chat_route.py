@@ -33,7 +33,7 @@ class FakeChat:
 
 def _client(make_doc, raw, key, chat):
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key, chat=chat)
-    return TestClient(create_app(deps), follow_redirects=False)
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"})
 
 
 def _token(key, user_id="oid-officer"):
@@ -58,7 +58,7 @@ def test_chat_answers_in_page_language(make_doc, raw, key):
     client = _client(make_doc, raw, key, chat)
     _post(client, key, {"question": "q"})
     assert chat.language == "ko"
-    client.cookies.set("lang", "en")
+    client.cookies.set("ama_locale_v2", "en")
     _post(client, key, {"question": "q"})
     assert chat.language == "en"
 
@@ -122,6 +122,23 @@ def test_chat_not_found_and_disabled(make_doc, raw, key):
     assert r.status_code == 503 and r.json() == {"error": "채팅을 쓸 수 없습니다."}
 
 
+def test_usd_chat_disabled_error_is_english_with_korean_locale(raw, key):
+    from shared.contracts import USD_V1
+    doc = dict(USD_V1.model_dump(), id="app-1", application_id="app-1", requested_amount_cents=500000)
+    response = _post(_client(lambda: doc, raw, key, None), key, {"question": "Can I chat?"})
+    assert response.status_code == 503 and response.json()["error"].isascii()
+
+
+def test_usd_missing_mask_sources_do_not_send_free_text(key):
+    from shared.contracts import USD_V1
+    from tests.console.conftest import FakeRaw
+    doc = dict(USD_V1.model_dump(), id="app-1", application_id="app-1", consent={"consent_id": "missing"})
+    chat = FakeChat()
+    response = _post(_client(lambda: doc, FakeRaw({}), key, chat), key,
+                     {"question": "Ask Jamie Park.", "history": [{"role": "user", "text": "Jamie Park"}]})
+    assert response.status_code == 502 and not chat.calls
+
+
 @pytest.mark.parametrize("error, status, message", [
     (GatewayThrottled("rate_limited", "c"), 429, "요청이 많습니다. 잠시 후 다시 질문해 주세요."),
     (GatewayBlocked("content_blocked", "c"), 422, "이 질문에는 답할 수 없습니다."),
@@ -176,7 +193,7 @@ def test_chat_panel_disabled_notice(make_doc, raw, key):
 def test_chat_panel_hidden_without_policy(make_doc, raw, key):
     deps = ConsoleDeps(store=FakeStore([make_doc(status="assessing", policy=None, assessment=None)]), raw=raw,
                        queue=FakeQueue(), pseudonym_key=key, chat=FakeChat())
-    page = TestClient(create_app(deps)).get("/applications/app-1", headers=OFFICER).text
+    page = TestClient(create_app(deps), cookies={"ama_locale_v2": "ko"}).get("/applications/app-1", headers=OFFICER).text
     assert "심사 도우미" not in page
 
 

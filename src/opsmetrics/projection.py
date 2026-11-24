@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from shared.opinions import CURRENT, opinion_state
+from shared.product_context import product_of
 
 _LOAD_ID = re.compile(r"^load-(healthy|mismatch|stress|thin)-\d+$")
 _STEP_KEYS = ("step", "outcome", "started_at", "ended_at", "duration_ms", "agent", "usage", "detail")
@@ -21,7 +22,10 @@ def _reason(r: Any) -> Any:
 def project(doc: dict[str, Any]) -> dict[str, Any]:
     policy, assessment, officer = doc.get("policy"), doc.get("assessment"), doc.get("officer_decision")
     rec = opinion_state(assessment)
+    product = product_of(doc)
+    unit = "cents" if product else "krw"
     return {
+        **(product.model_dump() if product else {}),
         "application_id": doc.get("application_id"),
         "applicant_id": doc.get("applicant_id"),
         "status": doc.get("status"),
@@ -38,8 +42,9 @@ def project(doc: dict[str, Any]) -> dict[str, Any]:
         "assessment": ({"schema_version": "2", "recommendation": rec, "review": {"passed": True}}
                        if rec in CURRENT else {"recommendation": "legacy"} if rec == "legacy" else None),
         "officer_decision": officer.get("decision") if isinstance(officer, dict) else None,
-        "approved_amount_krw": officer.get("amount_krw") if isinstance(officer, dict) else None,
+        f"approved_amount_{unit}": officer.get(f"amount_{unit}") if isinstance(officer, dict)
+        and officer.get("decision") in ("approve", "conditional") else None,
         "policy_override": isinstance(officer, dict) and officer.get("policy_override") is True,
-        "requested_amount_krw": doc.get("requested_amount_krw"),
+        f"requested_amount_{unit}": doc.get(f"requested_amount_{unit}"),
         "sla_escalated": isinstance(doc.get("sla"), dict) and doc["sla"].get("escalated") is True,
     }

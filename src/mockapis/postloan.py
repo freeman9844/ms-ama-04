@@ -29,7 +29,13 @@ from mockapis.postloan_scenarios import end_of_day_balances, scenario_plan
 from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.engine import WARMUP_DAYS, simulate
 from mockapis.synth import RECEIPT_SEED_OFFSET, Archetype, SyntheticCase, TxnCategory
+from mockapis.synth import UsdCase
+from mockapis.sellerdata.usd import simulate_usd
 from shared.contracts import AlertCause, PgFlow, PgOrderDay, PgSettlement, Transaction
+from shared.contracts import UsdTransaction
+from shared.sellers import USD_SELLERS
+from shared.usd_source import UsdOrderDay, UsdSettlement
+from shared.money import MIN_REQUEST_CENTS, MAX_REQUEST_CENTS
 from shared.krcalendar import next_business_day
 from shared.repayment import LENDER_CREDIT, LENDER_DEBIT, due_dates
 
@@ -90,6 +96,44 @@ class PostLoanFlow:
 
     def pg_flow(self) -> PgFlow:
         return PgFlow(settlements=self.pg_settlements, orders=self.orders)
+
+
+@dataclass(frozen=True)
+class UsdPostLoanFlow:
+    start: date
+    end: date
+    scenario: FlowScenario
+    transactions: tuple[UsdTransaction, ...]
+    orders: tuple[UsdOrderDay, ...]
+    pg_settlements: tuple[UsdSettlement, ...]
+
+
+def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str, amount_cents: int,
+                          installment_cents: int, tenor_months: int | None = None) -> UsdPostLoanFlow:
+    if (not loan_id or type(amount_cents) is not int or not MIN_REQUEST_CENTS <= amount_cents <= MAX_REQUEST_CENTS
+            or type(installment_cents) is not int or not 0 < installment_cents <= amount_cents):
+        raise ValueError("Invalid USD loan terms")
+    start = next_business_day(start)
+    if start != next_business_day(case.transactions[-1].booked_on + timedelta(days=1)):
+        raise ValueError("USD flow start must be contiguous with the account history")
+    end = start + timedelta(days=POSTLOAN_DAYS-1)
+    seller_id = case.profile.applicant_id
+    slump = seller_id == "seller-dailylook-01"
+    installments = {day: (i, installment_cents) for i, day in enumerate(due_dates(start, POSTLOAN_DAYS), 1)}
+    if tenor_months is not None:
+        from shared.repayment import usd_installments
+        dues = usd_installments(start, amount_cents, tenor_months)
+        if dues[0][1] != installment_cents:
+            raise ValueError("Installment does not match loan terms")
+        installments = {day: (i, a) for i, (day, a) in enumerate(dues, 1)}
+    books = simulate_usd(USD_SELLERS[seller_id], f"{seller_id}:{loan_id}", start, end, seed,
+                         case.transactions[-1].balance_after_cents, pending=case.pending,
+                         slump_on=start+timedelta(weeks=3) if slump else None,
+                         loan_id=loan_id, principal=amount_cents, installments=installments)
+    baseline = start - timedelta(days=PRE_LOAN_DAYS)
+    return UsdPostLoanFlow(start, end, FlowScenario.SALES_SLUMP if slump else FlowScenario.STABLE,
+                           books.transactions, tuple(o for o in case.orders if baseline <= o.order_on < start) + books.orders,
+                           tuple(s for s in case.pg_settlements if baseline <= s.settled_on < start) + books.settlements)
 
 
 def _installments(dues: list[date], installment_krw: int) -> list[Event]:

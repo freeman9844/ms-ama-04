@@ -6,10 +6,10 @@
 <div class="page-head">
   <div>
     <p class="crumb">{{ _("홈 › 운영 지표") }}</p>
-    <h1>{{ _("운영 지표") }} <small>{{ _("합성 데이터 기준") }}</small></h1>
+    <h1>{{ _("운영 지표") }} · {{ "KRW" if prefix else "USD" }} <small>{{ _("합성 데이터 기준") }}</small></h1>
   </div>
   <div class="actions">
-    <form method="get" action="/ops">
+    <form method="get" action="{{ prefix }}/ops">
       <label>{{ _("보기 범위") }}
         <select name="run">
         {% for value, text in options %}<option value="{{ value }}"{% if value == selected %} selected{% endif %}>{{ text }}</option>{% endfor %}
@@ -20,7 +20,7 @@
   </div>
 </div>
 {% if not s %}
-{% if not runs %}
+{% if prefix and not runs %}
 <p>{{ _("측정 실행이 없습니다. 운영자 PC에서 <code>python -m ops load</code>(기본 48건=균형 격자 전체)로 합성 신청을 제출하면 여기에 표시됩니다.") }}</p>
 {% endif %}
 <p class="note">{{ _("선택한 범위에 신청이 없습니다.") }}</p>

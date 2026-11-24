@@ -37,7 +37,7 @@ def test_storage_private_endpoints(closed):
 def test_function_storage_has_deployment_container_and_durable_roles(closed):
     containers = {c["name"].split("/")[-1] for c in closed.of_type(f"{ST}/blobServices/containers")
                   if c["name"].startswith("stfn")}
-    assert containers == {"deploymentpackage"}
+    assert containers == {"deploymentpackage", "consent-authority"}
     assert closed.roles_on("stfn") == {
         ROLE_BLOB_OWNER, ROLE_QUEUE_CONTRIBUTOR, ROLE_TABLE_CONTRIBUTOR, ROLE_QUEUE_SENDER,
     }

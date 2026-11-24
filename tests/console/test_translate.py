@@ -73,7 +73,7 @@ def _token(deps):
 
 def _post(client, deps, body, token=None):
     return client.post("/i18n/translate", json=body,
-                       headers={"X-CSRF-Token": token or _token(deps), "Cookie": "lang=en"})
+                       headers={"X-CSRF-Token": token or _token(deps), "Cookie": "ama_locale_v2=en"})
 
 
 @pytest.fixture
@@ -174,7 +174,7 @@ def test_machine_translation_rejects_token_loss():
 @pytest.mark.parametrize("page", [*EN_PAGES, *CUSTOMER_PAGES])
 def test_english_pages_leave_only_pending_machine_translation(mt, page):
     client, deps = mt
-    r = client.get(page, headers={"Cookie": "lang=en"})
+    r = client.get(page, headers={"Cookie": "ama_locale_v2=en"})
     assert r.status_code == 200
     html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", r.text, flags=re.S)
     html = re.sub(r'<span class="mt" data-mt="[^"]*">.*?</span>', " ", html, flags=re.S)
@@ -188,9 +188,9 @@ def test_english_pages_leave_only_pending_machine_translation(mt, page):
 
 def test_english_page_loads_mt_script_with_csrf(mt):
     client, deps = mt
-    en = client.get("/applications/app-20261103-p01", headers={"Cookie": "lang=en"}).text
+    en = client.get("/applications/app-20261103-p01", headers={"Cookie": "ama_locale_v2=en"}).text
     assert re.search(r'<script src="/static/mt\.js\?v=[0-9a-f]{8,}" defer></script>', en) and f'data-mt-csrf="{_token(deps)}"' in en
-    ko = client.get("/applications/app-20261103-p01").text
+    ko = client.get("/applications/app-20261103-p01?lang=ko").text
     assert "mt.js" not in ko and "data-mt=" not in ko
 
 
@@ -205,7 +205,7 @@ def test_translate_endpoint_fills_cache_for_next_render(mt, caplog):
     assert r.json()["translations"] == [f"EN({t})" for t in texts]
     assert deps.translator.calls == [texts]  # 카탈로그·한글 없는 문구는 보내지 않는다
     assert "result=ok" in caplog.text and texts[0] not in caplog.text
-    again = client.get(page, headers={"Cookie": "lang=en"}).text
+    again = client.get(page, headers={"Cookie": "ama_locale_v2=en"}).text
     assert 'data-mt="' not in again and 'class="mt mt-done"' in again
     _post(client, deps, payload)
     assert len(deps.translator.calls) == 1
@@ -255,10 +255,10 @@ def test_translate_endpoint_disabled_without_translator():
     deps = fixtures.build_deps()
     client = TestClient(create_app(deps))
     assert _post(client, deps, {"texts": ["새 문장"]}).status_code == 503
-    assert "mt.js" not in client.get("/", headers={"Cookie": "lang=en"}).text
+    assert "mt.js" not in client.get("/", headers={"Cookie": "ama_locale_v2=en"}).text
 
 
-EN_HEADERS = {"Cookie": "lang=en"}
+EN_HEADERS = {"Cookie": "ama_locale_v2=en"}
 DETAIL = "/applications/app-20261103-p01"
 
 
@@ -308,7 +308,7 @@ def test_english_detail_uses_stored_translation_without_browser_call(mt):
 def test_korean_page_does_not_read_translations(mt, page):
     client, deps = mt
     deps.translations = fixtures.InMemoryTranslations()
-    r = client.get(page)
+    r = client.get(page, params={"lang":"ko"})
     assert r.status_code == 200 and deps.translations.calls == [] and "mt-tokens" not in r.text
 
 

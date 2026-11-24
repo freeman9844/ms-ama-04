@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from shared.contracts import Transaction
+from shared.contracts import Transaction, UsdTransaction
 
 RULES_VERSION = "classify-v1"
 
@@ -40,7 +40,22 @@ _RULES: tuple[tuple[str, str | None, Category], ...] = (
 )
 
 
-def classify(txn: Transaction) -> Category:
+def classify(txn: Transaction | UsdTransaction) -> Category:
+    if isinstance(txn, UsdTransaction):
+        if txn.platform_code and txn.txn_type_code == "TRANSFER_IN" and txn.amount_cents > 0:
+            return Category.REVENUE
+        for code, keyword, category in (
+            ("PG_SETTLE", "", Category.REVENUE), ("CARD_SETTLE", "", Category.REVENUE),
+            ("TAX", "", Category.TAX), ("AUTO_DEBIT", "rent", Category.RENT),
+            ("AUTO_DEBIT", "high-cost", Category.HIGH_COST_LENDER), ("AUTO_DEBIT", "p2p", Category.HIGH_COST_LENDER),
+            ("AUTO_DEBIT", "loan repayment", Category.LOAN_REPAYMENT), ("AUTO_DEBIT", "insurance", Category.SOCIAL_INSURANCE),
+            ("TRANSFER_OUT", "payroll", Category.PAYROLL), ("TRANSFER_OUT", "owner withdrawal", Category.OWNER_TRANSFER),
+            ("TRANSFER_IN", "loan proceeds", Category.LOAN_PROCEEDS), ("TRANSFER_IN", "advance", Category.LOAN_PROCEEDS),
+            ("TRANSFER_IN", "settlement", Category.REVENUE),
+        ):
+            if code == txn.txn_type_code and keyword in txn.description.casefold():
+                return category
+        return Category.UNCLASSIFIED_IN if txn.amount_cents > 0 else Category.UNCLASSIFIED_OUT
     for code, keyword, category in _RULES:
         if txn.txn_type_code == code and (keyword is None or keyword in txn.description):
             return category

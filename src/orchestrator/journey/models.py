@@ -17,6 +17,9 @@ from pydantic import (
     model_validator,
 )
 
+from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS, UsdProduct
+from shared.money import RequestedUsdCents
+
 KST = timezone(timedelta(hours=9), "KST")
 APPLICATION_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{2,62}$"
 CONSENT_SCOPES = ("account", "tax", "pg", "marketplace")
@@ -86,13 +89,11 @@ class Status(StrEnum):
     FAILED = "failed"
 
 
-class StartRequest(BaseModel):
+class _StartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     application_id: str = Field(pattern=APPLICATION_ID_PATTERN)
     applicant_id: str = Field(min_length=1, max_length=64)
-    requested_amount_krw: int = Field(gt=0, le=10_000_000)
-    requested_tenor_months: int = Field(ge=1, le=12)
     sla_hours: float = Field(default=24, gt=0, le=720)
     # 심사역 대기 시작부터 미결 종료까지(기본 1주일). SLA 초과(sla_hours) 뒤에도 결정이 없으면 이 시각에 닫는다.
     close_hours: float = Field(default=168, gt=0, le=720)
@@ -106,22 +107,45 @@ class StartRequest(BaseModel):
         return v.replace(tzinfo=UTC) if v and v.tzinfo is None else v
 
     @model_validator(mode="after")
-    def _close_after_sla(self) -> "StartRequest":
+    def _close_after_sla(self) -> "_StartRequest":
         if self.close_hours <= self.sla_hours:
             raise ValueError("close_hours는 sla_hours보다 커야 합니다")
         return self
 
 
-class OfficerDecision(BaseModel):
+class StartRequest(_StartRequest):
+    requested_amount_krw: int = Field(gt=0, le=10_000_000)
+    requested_tenor_months: int = Field(ge=1, le=12)
+
+
+class UsdStartRequest(_StartRequest, UsdProduct):
+    requested_amount_cents: RequestedUsdCents
+    requested_tenor_months: int = Field(strict=True, ge=MIN_TENOR_MONTHS, le=MAX_TENOR_MONTHS)
+
+
+class _Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["approve", "conditional", "decline"]
     officer_id: str = Field(min_length=1)
-    amount_krw: int | None = Field(default=None, gt=0)
     conditions: list[str] = Field(default_factory=list)
     reason: str = ""
     # 정책 판정이 거절이거나 결과가 없는 건을 심사역이 확인 후 승인할 때만 True(감사 기록용).
     policy_override: bool = False
+
+
+class OfficerDecision(_Decision):
+    amount_krw: int | None = Field(default=None, gt=0)
+
+
+class UsdOfficerDecision(_Decision, UsdProduct):
+    amount_cents: RequestedUsdCents | None = None
+
+    @model_validator(mode="after")
+    def no_declined_principal(self):
+        if self.decision == "decline" and self.amount_cents is not None:
+            raise ValueError("A declined application has no approved principal")
+        return self
 
 
 class OfficerMessage(BaseModel):
@@ -142,6 +166,7 @@ class ReplayRequest(BaseModel):
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
     action: Literal["start", "resume", "stop"] = "start"
     replay_id: str | None = Field(default=None, min_length=1, max_length=64)
+    paused_week: int | None = Field(default=None, ge=1, le=53)
 
     @model_validator(mode="after")
     def _replay_id_for_paused(self) -> "ReplayRequest":
@@ -171,7 +196,7 @@ class AlertRaised(BaseModel):
     alert_id: str = Field(min_length=1, max_length=128)
 
 
-class RepaymentUpdated(BaseModel):
+class _RepaymentUpdated(BaseModel):
     """repayment.updated 토픽 메시지(세션 = loan_id). 상환일 미납으로 추심 건이 열렸다."""
 
     model_config = ConfigDict(extra="forbid")
@@ -179,7 +204,14 @@ class RepaymentUpdated(BaseModel):
     type: Literal["repayment.updated"]
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
     case_id: str = Field(min_length=1, max_length=128)
+
+
+class RepaymentUpdated(_RepaymentUpdated):
     balance_krw: int | None = Field(default=None, ge=0)
+
+
+class UsdRepaymentUpdated(_RepaymentUpdated, UsdProduct):
+    balance_cents: int = Field(strict=True, ge=0)
 
 
 class RestructureDecision(BaseModel):
@@ -294,6 +326,14 @@ class ConsentCommand(BaseModel):
     application_id: str | None = Field(default=None, pattern=APPLICATION_ID_PATTERN)
 
 
+class UsdConsentCommand(ConsentCommand, UsdProduct):
+    pass
+
+
+class UsdLifecycleStart(LifecycleStart, UsdProduct):
+    pass
+
+
 class GrievanceSubmission(BaseModel):
     """grievances 큐 메시지(차주 이의제기)."""
 
@@ -305,7 +345,11 @@ class GrievanceSubmission(BaseModel):
     text: str = Field(min_length=1, max_length=GRIEVANCE_TEXT_MAX)
 
 
-class GrievanceDecision(BaseModel):
+class UsdGrievanceSubmission(GrievanceSubmission, UsdProduct):
+    pass
+
+
+class _GrievanceDecision(BaseModel):
     """grievance-decisions 큐 메시지. uphold는 원결정 유지, rereview는 재심사 결과를 기록한다."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -316,13 +360,21 @@ class GrievanceDecision(BaseModel):
     officer_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=500)
     new_decision: Literal["approve", "conditional", "decline"] | None = None
-    amount_krw: int | None = Field(default=None, gt=0)
     conditions: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _outcome(self) -> "GrievanceDecision":
         if self.outcome == "rereview" and self.new_decision is None:
             raise ValueError("재심사에는 새 결정이 필요하다")
-        if self.outcome == "uphold" and (self.new_decision or self.amount_krw or self.conditions):
+        amount = getattr(self, "amount_cents", None) or getattr(self, "amount_krw", None)
+        if self.outcome == "uphold" and (self.new_decision or amount or self.conditions):
             raise ValueError("원결정 유지에는 새 결정을 둘 수 없다")
         return self
+
+
+class GrievanceDecision(_GrievanceDecision):
+    amount_krw: int | None = Field(default=None, gt=0)
+
+
+class UsdGrievanceDecision(_GrievanceDecision, UsdProduct):
+    amount_cents: int | None = Field(default=None, strict=True, gt=0)

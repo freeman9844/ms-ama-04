@@ -3,6 +3,8 @@
 > README에 단계별로 쌓였던 설명·배포 순서·실제 배포 기록·문제 대응·알려진 제약을 **원문 그대로** 옮긴 기록본입니다.
 > 당시 기준의 명령·수치·용어이며 고치지 않습니다. 현재 기준 작업 안내는 [setup](setup.md)·[deploy](deploy.md)·[operate](operate.md)·[troubleshooting](troubleshooting.md)을 봅니다.
 
+영어·USD 전환은 이 기록의 배포 실적이 아닙니다. [승인 대기 중인 전환 절차와 중단 기준](usd-cutover.md)을 따릅니다.
+
 ## Azure 인프라(P2)
 
 Korea Central에 전체 비공개 데모 환경을 Bicep + azd로 배포합니다. 설계 근거는

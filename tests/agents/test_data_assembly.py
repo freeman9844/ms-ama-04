@@ -17,6 +17,8 @@ from agents.data_assembly import (
 )
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
+from mockapis.synth import generate_usd_case
+from shared.contracts import USD_V1
 from shared.pseudonymize import Pseudonymizer, find_pii
 
 KEY = b"p" * 32
@@ -114,6 +116,20 @@ def test_agent_collects_all_consented_sources(cases):
     assert set(result.data) == {"profile", "transactions", "tax", "pg", "marketplace"}
     assert api.calls == ["profile", "transactions", "tax", "pg", "marketplace"]
     assert "app-1" in agent.inputs[0] and "account" in agent.inputs[0]
+
+
+def test_usd_optional_marketplace_absence_is_not_a_wrong_product_response(cases):
+    seller = "seller-petfood-07"
+    usd = generate_usd_case(seller, date(2026, 11, 24), 107)
+    args = dict(scopes=ALL_SCOPES, token="tok", pseudonym_key=KEY, product=USD_V1)
+    unavailable = CaseApi(usd, failures={"marketplace": [404] * 3})
+    report = assemble("app-usd", api=unavailable, **args).report
+    assert (report["status"], report["missing_sources"]) == ("complete", ["marketplace"])
+
+    legacy_market = cases[seller].marketplace.model_dump(mode="json")
+    mixed = CaseApi(usd, payloads={"marketplace": legacy_market})
+    with pytest.raises(ValueError, match="marketplace"):
+        assemble("app-usd", api=mixed, **args)
 
 
 def test_cached_source_is_not_fetched_twice(cases):

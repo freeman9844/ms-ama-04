@@ -10,7 +10,7 @@ import azure.functions as func
 from agents.pretranslate import SOURCES
 from journey import telemetry
 from journey.activities import ACTIVITIES, Deps
-from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start
+from journey.consent import CONSENT_ACTIVITIES, handle_consent_command, handle_lifecycle_start, sweep_raw_repairs
 from journey.consent import consent_lifecycle as lifecycle_steps
 from journey.entry import handle_decision, handle_start
 from journey.grievance import handle_grievance, handle_grievance_decision
@@ -103,7 +103,7 @@ def register_monitoring(payload: dict) -> dict:
 @app.queue_trigger(arg_name="msg", queue_name="consent-lifecycle", connection="AzureWebJobsStorage")
 @app.durable_client_input(client_name="client")
 async def consent_lifecycle_start(msg: func.QueueMessage, client: df.DurableOrchestrationClient) -> None:
-    await handle_lifecycle_start(client, msg.get_body().decode("utf-8"))
+    await handle_lifecycle_start(client, msg.get_body().decode("utf-8"), deps().store)
 
 
 @app.queue_trigger(arg_name="msg", queue_name="consent-commands", connection="AzureWebJobsStorage")
@@ -123,6 +123,11 @@ def delete_consent_data(payload: dict) -> dict:
     return CONSENT_ACTIVITIES["delete_consent_data"](deps(), payload)
 
 
+@app.timer_trigger(arg_name="timer", schedule="0 */5 * * * *", use_monitor=True)
+def repair_consent_deletions(timer: func.TimerRequest) -> None:
+    sweep_raw_repairs(deps())
+
+
 @app.activity_trigger(input_name="payload")
 def send_consent_notice(payload: dict) -> dict:
     return CONSENT_ACTIVITIES["send_consent_notice"](deps(), payload)
@@ -140,7 +145,9 @@ def grievance_decision(msg: func.QueueMessage) -> None:
 
 @app.queue_trigger(arg_name="msg", queue_name="monitoring-replay", connection="AzureWebJobsStorage")
 def monitoring_replay(msg: func.QueueMessage) -> None:
-    handle_replay(deps(), msg.get_body().decode("utf-8"))
+    if not msg.id:
+        raise RuntimeError("Replay command has no queue message ID")
+    handle_replay(deps(), msg.get_body().decode("utf-8"), command_id=msg.id)
 
 
 @app.queue_trigger(arg_name="msg", queue_name="restructure-decisions", connection="AzureWebJobsStorage")

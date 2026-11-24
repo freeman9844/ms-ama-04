@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from shared.amount_advice import has_proposal
+from shared.money import format_usd
+from shared.product_context import product_of
 
 SETTLEMENT_RATE = "cashflow.settlement.pg_reconciliation_ratio"
 
@@ -19,7 +21,7 @@ _MONEY = re.compile(r"(?:[₩$]|\b(?:krw|usd)\b|\d[\d,.]*\s*(?:[억만천백]*\s
 _IMPLICIT = re.compile(r"(?:이면|라면|수준이면).{0,16}(?:적절|충분|진행|적당)|정도가\s*적당|"
                        r"\b(?:would work|would (?:be|make) (?:a |the )?(?:prudent|safer|suitable)|"
                        r"(?:suitable|prudent|recommended|appropriate) loan size)\b", re.I)
-_EN_AMOUNT = r"(?:KRW|₩)\s*\d[\d,]*"
+_EN_AMOUNT = r"(?:KRW|₩|USD|\$)\s*\d[\d,]*(?:\.\d{1,2})?"
 _KO_AMOUNT = r"\d[\d,]*\s*(?:억|천만|백만|만|천)?\s*원"
 _DEPOSIT_CHECK = re.compile(
     rf"\b(?:match|compare|reconcile|verify|check)\s+(?:the\s+)?(?:{_EN_AMOUNT}\s+deposit\b|deposit of\s+{_EN_AMOUNT}\b)|"
@@ -30,10 +32,10 @@ _VERDICT = re.compile(r"승인|거절|비권고|판단\s*보류|감액|조건부
                       r"(?:wise|unwise|safe) to proceed|go ahead with the loan)\b", re.I)
 
 
-def counteroffer(text: str, requested: int | None) -> bool:
+def counteroffer(text: str, requested: int | None, *, usd: bool = False) -> bool:
     # Field labels describe facts, not imperative verbs ("policy limit KRW …").
     clauses = re.sub(r"\bpolicy (?:limit|cap)\b|(?:실제\s*)?승인액(?:은|는)?", "field", text, flags=re.I)
-    return bool(_OFFER.search(text) or has_proposal(clauses, requested) or (_MONEY.search(text) and _IMPLICIT.search(text)))
+    return bool(_OFFER.search(text) or has_proposal(clauses, requested, usd=usd) or (_MONEY.search(text) and _IMPLICIT.search(text)))
 
 
 def reviewed_detail(text: str, requested: int | None) -> bool:
@@ -42,11 +44,16 @@ def reviewed_detail(text: str, requested: int | None) -> bool:
 
 
 def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
-    en = language == "en"
+    app = snapshot.get("application") or {}
+    product = product_of(app)
+    unit = "cents" if product else "krw"
+    en = bool(product) or language == "en"
     missing = "not recorded" if en else "기록 없음"
     facts: dict[str, str] = {}
 
     def amount(value: Any) -> str:
+        if product:
+            return format_usd(value) if type(value) is int else missing
         if type(value) not in (int, float):
             return missing
         return f"KRW {value:,}" if en else f"{value:,}원"
@@ -54,16 +61,15 @@ def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
     def money(path: str, ko: str, english: str, value: Any) -> None:
         facts[path] = f"{english if en else ko}: {amount(value)}"
 
-    app = snapshot.get("application") or {}
     policy = snapshot.get("policy") or {}
     officer = snapshot.get("officer_decision") or {}
     cf = snapshot.get("cashflow") or {}
-    money("application.requested_amount_krw", "신청액", "Requested amount", app.get("requested_amount_krw"))
-    money("policy.max_amount_krw", "정책 한도", "Policy limit", policy.get("max_amount_krw"))
-    money("officer_decision.amount_krw", "승인액", "Officer-approved amount",
-          officer.get("amount_krw") if officer.get("decision") in ("approve", "conditional") else None)
-    money("cashflow.features.avg_monthly_inflow_krw", "월평균 입금", "Average monthly inflow",
-          (cf.get("features") or {}).get("avg_monthly_inflow_krw"))
+    money(f"application.requested_amount_{unit}", "신청액", "Requested amount", app.get(f"requested_amount_{unit}"))
+    money(f"policy.max_amount_{unit}", "정책 한도", "Policy limit", policy.get(f"max_amount_{unit}"))
+    money(f"officer_decision.amount_{unit}", "승인액", "Officer-approved amount",
+          officer.get(f"amount_{unit}") if officer.get("decision") in ("approve", "conditional") else None)
+    money(f"cashflow.features.avg_monthly_inflow_{unit}", "월평균 입금", "Average monthly inflow",
+          (cf.get("features") or {}).get(f"avg_monthly_inflow_{unit}"))
 
     # These branches are the console's allowlisted, factual snapshot, not agent prose.
     # Keep a row's rule code or month when displaying one of its members.
@@ -79,9 +85,9 @@ def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
                 walk(f"{path}.{index}", f"{label} [{row or index}]", child)
         elif isinstance(value, (str, bool, int, float)):
             field = path.rsplit(".", 1)[-1]
-            is_krw = field.endswith("_krw") or (
+            is_money = field.endswith(f"_{unit}") or (not product and
                 path.startswith("cashflow.monthly.") and field in ("revenue", "operating_out", "debt_service", "owner_draw"))
-            facts[path] = f"{label}: {amount(value) if is_krw else value}"
+            facts[path] = f"{label}: {amount(value) if is_money else value}"
 
     walk("policy", "Policy" if en else "정책", policy)
     walk("cashflow", "Cash flow" if en else "현금흐름", cf)
@@ -97,7 +103,7 @@ def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
         reasons = []
         for index, month in enumerate(capacity["short_months"]):
             row = rows.get(month, {})
-            if all(type(row.get(k)) in (int, float) for k in ("revenue", "operating_out")):
+            if all(type(row.get(k + ("_cents" if product else ""))) in (int, float) for k in ("revenue", "operating_out")):
                 reason = ("Revenue less operating outflows does not cover existing debt service and the new installment."
                           if en else "매출에서 운영비를 빼면 기존 상환액과 신규 월 상환액을 충당하지 못합니다.")
             else:
@@ -120,13 +126,13 @@ def evidence_menu(snapshot: Mapping[str, Any], language: str) -> dict[str, str]:
                                    ("officer_checks", "다음 확인 사항", "Next check")):
             for index, item in enumerate(opinion.get(group) or ()):
                 evidence = item.get("evidence") or {}
-                refs = [f"{key}: {amount(v) if key.endswith('_krw') else v}"
+                refs = [f"{key}: {amount(v) if key.endswith('_' + unit) else v}"
                         for key, v in evidence.items() if type(v) in (int, float)]
                 refs.extend(t for t in item.get("txn_ids") or ()
                             if isinstance(t, str) and re.fullmatch(r"[a-zA-Z0-9_:.~-]{1,128}", t))
                 text = item.get("text") or ""
                 if refs:
-                    detail = text if reviewed_detail(text, app.get("requested_amount_krw")) else ""
+                    detail = text if reviewed_detail(text, app.get(f"requested_amount_{unit}")) else ""
                     evidence_text = ", ".join(refs)
                     facts[f"agent_opinion.{group}.{index}"] = (
                         f"{english if en else ko}: {detail} ({evidence_text})" if detail

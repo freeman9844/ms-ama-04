@@ -11,7 +11,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from journey.models import OfficerDecision
+from journey.models import OfficerDecision, StartRequest, UsdGrievanceDecision, UsdOfficerDecision, UsdStartRequest
+from shared.product_context import product_of
 
 # 상품 최대 한도(`src/policy/rulesets/v4.yaml`의 product.max_amount_krw). 테스트가 값 일치를 확인한다.
 OVERRIDE_MAX_AMOUNT_KRW = 10_000_000
@@ -20,11 +21,20 @@ REREVIEW_ERRORS = {
 }
 
 
+def parse_start_request(raw: dict[str, Any]) -> StartRequest | UsdStartRequest:
+    """Only an unversioned, valid legacy payload can take the KRW path."""
+    if "product_version" in raw:
+        return UsdStartRequest.model_validate(raw)
+    return StartRequest.model_validate(raw)
+
+
 def validate_officer_decision(
-    raw: Any, policy: dict[str, Any] | None
-) -> tuple[OfficerDecision | None, str | None]:
+    raw: Any, policy: dict[str, Any] | None, *, usd: bool = False
+) -> tuple[OfficerDecision | UsdOfficerDecision | None, str | None]:
     try:
-        d = OfficerDecision.model_validate(raw)
+        d = (UsdOfficerDecision if usd else OfficerDecision).model_validate(raw)
+        if usd and policy is not None and product_of(policy) != product_of(d.model_dump()):
+            return None, "invalid_payload"
     except ValidationError:
         return None, "invalid_payload"
     if d.decision == "conditional":
@@ -33,11 +43,17 @@ def validate_officer_decision(
         d = d.model_copy(update={"policy_override": False})
         return (d, None) if d.reason.strip() else (None, "reason_required")
     if policy is None or policy.get("decision") not in ("eligible", "refer"):
-        return _validate_override(d)
+        if not usd:
+            return _validate_override(d)
+        if not d.policy_override or not d.reason.strip() or d.amount_cents is None:
+            return None, ("override_required" if not d.policy_override else
+                          "reason_required" if not d.reason.strip() else "amount_required")
+        return d, None
     d = d.model_copy(update={"policy_override": False})
-    if d.amount_krw is None:
+    amount = d.amount_cents if usd else d.amount_krw
+    if amount is None:
         return None, "amount_required"
-    if d.amount_krw > int(policy.get("max_amount_krw") or 0):
+    if amount > int(policy.get("max_amount_cents" if usd else "max_amount_krw") or 0):
         return None, "amount_exceeds_policy"
     if policy["decision"] == "refer" and not d.reason.strip():
         return None, "reason_required"
@@ -64,3 +80,16 @@ def _validate_override(d: OfficerDecision) -> tuple[OfficerDecision | None, str 
     if d.amount_krw > OVERRIDE_MAX_AMOUNT_KRW:
         return None, "amount_exceeds_product"
     return d, None
+
+
+def usd_rereview_error(msg: UsdGrievanceDecision, policy: dict[str, Any]) -> str | None:
+    if msg.new_decision == "conditional":
+        return "conditional_retired"
+    if msg.new_decision == "decline":
+        return "invalid_payload" if msg.amount_cents is not None else None
+    if policy.get("decision") not in ("eligible", "refer") or product_of(policy) != product_of(msg.model_dump()):
+        return "rereview_outside_policy"
+    if msg.amount_cents is None:
+        return "amount_required"
+    cap = policy.get("max_amount_cents")
+    return None if type(cap) is int and msg.amount_cents <= cap else "amount_exceeds_policy"

@@ -65,6 +65,9 @@ class MemoryStore:
 
 
 class MemoryRaw:
+    def open_container(self, container):
+        pass
+
     def __init__(self):
         self.blobs = {}
 
@@ -158,6 +161,30 @@ def underwrite_input(consent_id):
         "requested_amount_krw": 3_300_000,
         "requested_tenor_months": 12,
     }
+
+
+def test_explicit_usd_inputs_through_source_and_decision_activities(deps):
+    from dataclasses import replace
+    from mockapis.demo import FlowStore
+    from shared.contracts import USD_V1
+
+    cases = build_demo_cases(AS_OF)
+    app = create_mock_app(cases, SECRET, lambda: NOW, flows=FlowStore(cases, AS_OF))
+    deps = replace(deps, mock=HttpMockApi(client=TestClient(app)))
+    meta = USD_V1.model_dump()
+    common = {**meta, "application_id": "app-usd", "applicant_id": "seller-bakery-20"}
+    consent = request_consent(deps, common)
+    cid = consent["consent_id"]
+    assert deps.store.read("consents", cid, cid).get("currency") == "USD"
+    assert deps.store.read("consents", cid, cid)["purpose"].isascii()
+    assert assemble_data(deps, {**common, **consent})["status"] == "complete"
+    payload = {**common, "consent_id": cid, "as_of": AS_OF.isoformat(),
+               "requested_amount_cents": 500000, "requested_tenor_months": 6}
+    uw = underwrite(deps, payload)
+    assert "_krw" not in str(uw)
+    assert evaluate_policy(deps, uw["features"])["max_amount_cents"] == 500000
+    with pytest.raises(ValueError):
+        underwrite(deps, payload | {"requested_amount_krw": 500000})
 
 
 def test_save_document_rejects_unknown_container(deps):
@@ -485,10 +512,42 @@ def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps, mo
     assert doc["foundry_containers"] == [{"id": "cntr_1", "deleted": True}]
 
 
+def test_assessment_in_flight_blocks_deletion_notice(deps, monkeypatch):
+    from journey.consent import delete_consent_data, send_consent_notice, IncompleteDeletion
+    from tests.orchestrator.test_consent_lifecycle import MemoryStore as LifecycleStore, end
+    deps = with_deps(deps, store=LifecycleStore(), agents=UnderwritingRunner())
+    grant, payload = assess_input(with_deps(deps, agents=None))
+    cid = grant["consent_id"]
+    assess = activities.assess
+    def finish_after_revoke(*args, **kwargs):
+        with pytest.raises(IncompleteDeletion):
+            delete_consent_data(deps, end(cid))
+        with pytest.raises(LookupError):
+            send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
+        return assess(*args, **kwargs)
+    monkeypatch.setattr(activities, "assess", finish_after_revoke)
+    with pytest.raises(activities.ConsentEnded):
+        assess_credit(deps, payload)
+    proof = deps.store.read("deletion_proofs", cid, cid)
+    assert not proof["complete"] and any(i["target"] == "conv_1" for i in proof["items"])
+
+
 def test_assess_credit_without_agents_is_unavailable(deps):
     _, payload = assess_input(deps)
     result = assess_credit(deps, payload)
     assert (result["assessment"], result["flags"]) == (None, [FLAG_ASSESSMENT_UNAVAILABLE])
+
+
+def test_unreported_assessment_result_is_not_evidence_of_empty_inventory(deps, monkeypatch):
+    from agents.underwriting import AssessmentResult
+    grant, payload = assess_input(deps)
+    monkeypatch.setattr(activities, "assess", lambda *a, **kw: AssessmentResult(
+        None, [FLAG_ASSESSMENT_UNAVAILABLE], {}, ["conv_returned"], [{"id": "cntr_returned", "deleted": False}]))
+    assess_credit(with_deps(deps, agents=UnderwritingRunner()), payload)
+    cid = grant["consent_id"]
+    doc = deps.store.read("consents", cid, cid)
+    assert doc["assessment_runs"] and "conv_returned" in doc["foundry_conversations"]
+    assert {"id": "cntr_returned", "deleted": False} in doc["foundry_containers"]
 
 
 def test_store_cache_round_trip(deps):
@@ -600,19 +659,23 @@ class CleanupRunner:
         self.deleted_containers.append(container_id)
         return True
 
+    def conversation_exists(self, conversation_id):
+        return False
+
 
 def test_remember_foundry_on_ended_consent_deletes_immediately(deps):
+    from tests.orchestrator.test_consent_lifecycle import MemoryStore as LifecycleStore
     runner = CleanupRunner()
-    d = with_deps(deps, agents=runner)
-    d.store.upsert("consents", {"id": "c1", "consent_id": "c1", "status": "revoked", "foundry_conversations": []})
-    _remember_foundry(d, "c1", ["conv_late"], [{"id": "cntr_late", "deleted": False}])
-    doc = d.store.read("consents", "c1", "c1")
+    d = with_deps(deps, agents=runner, store=LifecycleStore())
+    cid = consent_for(d)["consent_id"]
+    update_doc(d.store, "consents", cid, cid, lambda doc: doc.update(status="revoked"))
+    _remember_foundry(d, cid, ["conv_late"], [{"id": "cntr_late", "deleted": False}])
+    doc = d.store.read("consents", cid, cid)
     assert runner.deleted_conversations == ["conv_late"] and runner.deleted_containers == ["cntr_late"]
-    assert doc["foundry_conversations"] == []
-    assert doc["late_cleanup"] == [
-        {"kind": "conversation", "target": "conv_late", "outcome": "deleted", "at": NOW.isoformat()},
-        {"kind": "container", "target": "cntr_late", "outcome": "deleted", "at": NOW.isoformat()},
-    ]
+    proof = d.store.read("deletion_proofs", cid, cid)
+    assert doc["deletion_complete"] and proof["complete"]
+    assert {(i["kind"], i["target"]) for i in proof["items"] if i["verified"]} >= {
+        ("conversation", "conv_late"), ("container", "cntr_late")}
 
 
 def test_remember_foundry_on_live_consent_appends(deps):

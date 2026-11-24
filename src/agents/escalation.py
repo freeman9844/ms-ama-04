@@ -11,6 +11,7 @@ from datetime import date, datetime, time
 from typing import Any
 
 from agents.collections import KST, remind
+from shared.money import format_usd
 
 SIM_HOUR = 10
 
@@ -50,8 +51,16 @@ def _krw(amount: int) -> str:
     return f"{amount:,}원"
 
 
-def stage_message(stage: int, *, due_on: date, amount: int, balance: int | None, link: str) -> tuple[str, str]:
+def stage_message(stage: int, *, due_on: date, amount: int, balance: int | None, link: str,
+                  usd: bool = False) -> tuple[str, str]:
     """단계 안내 (script_id, 문구). 1단계는 예상 잔고가 있을 때만 금액을 넣는다."""
+    if usd and stage == 1:
+        funds = f" (projected balance: {format_usd(balance)})" if balance is not None else ""
+        return "balance_warning", (f"Please check your available funds{funds} before the "
+                                   f"{format_usd(amount)} payment on {due_on}. Contact us if you need support.")
+    if usd and stage == 2:
+        return "self_plan_offer", (f"Review available options for your {format_usd(amount)} payment on {due_on}. "
+                                   f"You may also keep the current schedule. {link}")
     values = {"due_on": due_on.isoformat(), "amount": _krw(amount), "link": link}
     if stage == 1:
         if balance is None:

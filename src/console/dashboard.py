@@ -16,6 +16,7 @@ from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import MKT_FEATURES
+from shared.money import format_usd
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -294,7 +295,8 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
          "tone": ("red" if advance_n >= 1 else "green") if charts.is_num(advance_n) else "neutral"},
     ]
     platforms_list = list(pg.get("platforms") or ())
-    platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue") for p in platforms_list],
+    platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue")
+                              for p in platforms_list if charts.is_num(p.get("share"))],
                              width=320, label_w=88)
     cycles = [{"platform": dt(p["platform"]), "cycle": _(PLATFORM_CYCLES.get(p["platform"], "—")),
                "lag_days": p.get("lag_days")} for p in platforms_list]
@@ -520,6 +522,9 @@ def _repayment(loan: Mapping[str, Any]) -> dict[str, int] | None:
 
 def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     loan, mon, weeks, alerts = view["loan"], view["monitoring"] or {}, view["weeks"], view["alerts"]
+    usd = loan.get("currency") == "USD"
+    suffix = "_cents" if usd else ""
+    money = _usd_tick if usd else krw_text
     baseline = loan.get("baseline") or {}
     processed = _int(mon.get("processed_week"))
     severity = dict.fromkeys(("high", "medium", "low"), 0)
@@ -536,15 +541,15 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         triggers = w.get("triggers") or []
         buffer = r.get("buffer_days")
         tip = _("%(week)s주차 %(start)s~%(end)s · 매출 %(revenue)s · 버퍼 %(buffer)s일", week=w.get("week"),
-                start=r.get("start", ""), end=r.get("end", ""), revenue=krw_text(r.get("revenue")),
+                start=r.get("start", ""), end=r.get("end", ""), revenue=money(r.get("revenue" + suffix)),
                 buffer=buffer if charts.is_num(buffer) else "-")
         if triggers:
             tip += " · " + ", ".join(i18n.label(TRIGGER_LABELS, t) for t in triggers)
         bar_color = "red" if triggers else "blue"
-        groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", r.get("revenue"), bar_color, tip)]]))
-    base_rev = baseline.get("avg_weekly_revenue")
+        groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", r.get("revenue" + suffix), bar_color, tip)]]))
+    base_rev = baseline.get("avg_weekly_revenue" + suffix)
     refs = [(_("기준 주매출"), base_rev, "neutral")] if charts.is_num(base_rev) else []
-    chart = charts.columns(groups, refs=refs, tick_fmt=man, **LOAN_CHART) if groups else None
+    chart = charts.columns(groups, refs=refs, tick_fmt=_usd_tick if usd else man, **LOAN_CHART) if groups else None
     markers = []
     if chart:
         for w, g in zip(weeks, chart["groups"], strict=True):
@@ -570,45 +575,52 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "alert_steps": {a.get("alert_id"): alert_steps(a, followups.get(a.get("alert_id"), ())) for a in alerts},
         "case_steps": {c.get("case_id"): case_steps(c) for c in view.get("cases") or ()},
         "repayment": _repayment(loan),
-        **_expected_vs_actual(weeks),
-        "forecast": _forecast(weeks),
+        **_expected_vs_actual(weeks, usd=usd),
+        "forecast": _forecast(weeks, usd=usd),
     }
 
 
-def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _usd_tick(value: Any) -> str:
+    return f"{format_usd(round(value))} USD" if charts.is_num(value) else "-"
+
+
+def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[str, Any]:
     """주차별 실제 입금 막대와 기대 입금 선(같은 축)."""
     rows = [w.get("row") or {} for w in weeks]
-    expected = [r.get("expected_revenue") for r in rows]
+    suffix = "_cents" if usd else ""
+    money = _usd_tick if usd else krw_text
+    expected = [r.get("expected_revenue" + suffix) for r in rows]
     if not any(charts.is_num(v) for v in expected):
         return {"expected_chart": None, "expected_line": None}
     groups = []
     for w, r, exp in zip(weeks, rows, expected, strict=True):
-        rev = r.get("revenue")
+        rev = r.get("revenue" + suffix)
         short = charts.is_num(exp) and charts.is_num(rev) and rev < exp * SHORT_OF_EXPECTED
-        tip = _("%(week)s주차 실제 %(actual)s · 기대 %(expected)s", week=w.get("week"), actual=krw_text(rev),
-                expected=krw_text(exp))
+        tip = _("%(week)s주차 실제 %(actual)s · 기대 %(expected)s", week=w.get("week"), actual=money(rev),
+                expected=money(exp))
         groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", rev, "amber" if short else "blue", tip)]]))
-    top = max([v for v in expected + [r.get("revenue") for r in rows] if charts.is_num(v)], default=0)
-    chart = charts.columns(groups, vmax=top or None, tick_fmt=man, **LOAN_CHART)
+    top = max([v for v in expected + [r.get("revenue" + suffix) for r in rows] if charts.is_num(v)], default=0)
+    chart = charts.columns(groups, vmax=top or None, tick_fmt=_usd_tick if usd else man, **LOAN_CHART)
     return {"expected_chart": chart, "expected_line": charts.line(expected, vmax=chart["vmax"], **LOAN_CHART)}
 
 
-def _forecast(weeks: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+def _forecast(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[str, Any] | None:
     """가장 최근 주차의 4주 잔고 전망. 전망이 없는(정산 프로필이 없던) 대출은 None."""
     latest = next((w for w in reversed(weeks) if w.get("projection")), None)
     if latest is None:
         return None
     p, r = latest["projection"], latest.get("row") or {}
     totals = p.get("totals") or {}
+    suffix = "_cents" if usd else ""
     return {
         "week": latest.get("week"),
-        "start_balance": p.get("start_balance"),
+        "start_balance": p.get("start_balance" + suffix),
         "attainment_pct": round(float(p.get("attainment") or 0) * 100, 1),
-        "min_balance": r.get("projected_min_balance"),
+        "min_balance": r.get("projected_min_balance" + suffix),
         "min_date": r.get("projected_min_date"),
         "shortfall_date": r.get("shortfall_date"),
-        "chart": charts.signed_line([(d["date"][5:], d["balance"]) for d in p.get("path") or []],
-                                    tick_fmt=man, **FORECAST_CHART),
+        "chart": charts.signed_line([(d["date"][5:], d["balance" + suffix]) for d in p.get("path") or []],
+                                    tick_fmt=_usd_tick if usd else man, **FORECAST_CHART),
         "totals": [(_(label), totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items()
                    if k in totals],
     }

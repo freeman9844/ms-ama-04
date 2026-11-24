@@ -12,7 +12,7 @@
   - 저장 번역은 오케스트레이터가 미리 만든 `translations`(owner 단위)다. 화면 문구를 그 건의 가명처리기로 다시 마스킹한 문구의 sha256이 키라서, 조회·메모리 캐시·`data-mt`가 모두 마스킹 문구를 쓴다. 토큰이 달라진 저장 번역은 무시한다.
   - 대기(`data-mt`)는 마스킹 문구를 싣고 브라우저(`static/mt.js`)가 번역을 받아, 페이지의 `script.mt-tokens`(토큰 → 화면 값) 지도로 토큰을 되돌린다. 저장 번역은 서버가 복원하고 감사자 화면의 토큰은 그대로 둔다.
   - 어떤 문구가 사전 번역 대상인지는 `src/agents/pretranslate.py`의 `ALLOWLIST`가 정한다. 심사 의견은 검토를 통과한 v2만 추출하며 과거 제안 구조·검토 라운드 원문은 번역하지 않는다. 새 `|mt`·`|mt_ref` 문구를 템플릿에 더하면 그 허용 경로도 맞춰야 한다(`tests/console/test_pretranslate_coverage.py`가 빠진 곳을 알려 준다).
-- 언어는 `?lang=en|ko` → `lang` 쿠키 → `Accept-Language` 순으로 정한다.
+- 언어는 `?lang=en|ko` → `ama_locale_v2` 쿠키 → 영어 순이다. 카탈로그 키의 원문 언어는 계속 한국어다. 구 `lang` 쿠키와 `Accept-Language`는 사용하지 않는다. 상품 선택과 무관하며 USD 원문·금액에는 번역기가 필요 없다.
 
 ## 용어집
 

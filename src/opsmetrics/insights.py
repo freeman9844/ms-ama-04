@@ -48,7 +48,8 @@ def decision_funnel(docs: list[dict[str, Any]]) -> dict[str, Any]:
         rec, dec = _recommendation(p), p.get("officer_decision")
         if dec not in ("approve", "decline") or rec not in ("approve", "decline"):
             continue
-        requested, approved_amount = p.get("requested_amount_krw"), p.get("approved_amount_krw")
+        unit = "cents" if p.get("currency") == "USD" else "krw"
+        requested, approved_amount = p.get(f"requested_amount_{unit}"), p.get(f"approved_amount_{unit}")
         if type(requested) is not int or requested <= 0:
             continue
         if dec == "approve" and (type(approved_amount) is not int or approved_amount <= 0):

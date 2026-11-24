@@ -6,21 +6,27 @@
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
+from uuid import uuid4
 
 from pydantic import TypeAdapter
 
 from agents.classify import Category, classify
 from agents.data_assembly import DEFAULT_MODEL, assemble, build_pseudonymizer
-from agents.features import compute_underwriting, monthly_installment
+from agents.features import compute_underwriting, compute_usd_underwriting, monthly_installment
 from agents.marketplace import FLAG_MARKETPLACE_UNAVAILABLE
 from agents.monitoring import Baseline, settlement_for
 from agents.pg_ledger import FLAG_PG_LEDGER_UNAVAILABLE
 from agents.translator import TRANSLATE_MODEL
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
-from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
+from agents.usd_monitoring import usd_baseline
+from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart, UsdLifecycleStart
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
+from shared.contracts import UsdProduct, UsdTransaction
+from shared.product_context import product_of, validate_usd_evidence
+from shared.repayment import usd_installments
+from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 
 CONTAINERS = ("applications", "consents")
 CLASSIFICATION_CONTAINER = "classifications"
@@ -39,6 +45,9 @@ EVENT_CONSENT_GRANTED = "consent.granted"
 _TRANSACTIONS = TypeAdapter(list[Transaction])
 _FILINGS = TypeAdapter(list[TaxFiling])
 _PG = TypeAdapter(list[PgSettlement])
+_USD_TRANSACTIONS = TypeAdapter(list[UsdTransaction])
+_USD_FILINGS = TypeAdapter(list[UsdTaxFiling])
+_USD_PG = TypeAdapter(list[UsdSettlement])
 
 
 class DocumentStore(Protocol):
@@ -48,6 +57,8 @@ class DocumentStore(Protocol):
 
     def upsert(self, container: str, document: dict[str, Any]) -> None: ...
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None: ...
+    def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]: ...
+    def pending_raw_repairs(self) -> list[str]: ...
     def replace(self, container: str, document: dict[str, Any], etag: str | None) -> bool:
         """etag가 같을 때만 교체한다. 다른 쓰기가 끼어들었으면 False."""
         ...
@@ -58,7 +69,12 @@ class DocumentStore(Protocol):
 
 
 class RawStore(Protocol):
-    def put_json(self, container: str, name: str, value: Any) -> None: ...
+    def open_container(self, container: str) -> None:
+        """Create the unique namespace once, before publishing a new grant."""
+        ...
+    def put_json(self, container: str, name: str, value: Any) -> None:
+        """Upload only to an existing namespace. Never recreate a deleted container."""
+        ...
     def get_json(self, container: str, name: str) -> Any | None: ...
     def manifest(self, container: str) -> list[dict[str, Any]] | None:
         """[{name, size, sha256}]. 컨테이너가 없으면 None."""
@@ -69,10 +85,11 @@ class RawStore(Protocol):
 
 
 class MockApi(Protocol):
-    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int) -> dict[str, Any]: ...
+    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int,
+                       *, product: UsdProduct | None = None) -> dict[str, Any]: ...
     def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any: ...
     def revoke(self, consent_id: str) -> str:
-        """revoked | absent(레지스트리에 없음)."""
+        """Only revoked acknowledges a durable tombstone. Absent/unacknowledged require retry."""
         ...
 
 
@@ -171,12 +188,15 @@ def schedule_lifecycle(deps: Deps, doc: dict[str, Any]) -> None:
     만료 처리가 예약되지 않은 동의로는 데이터를 가져오지 않는다(fail-closed).
     """
     doc["lifecycle_error"] = None
+    deps.raw.open_container(doc["raw_container"])
     if deps.queue is None:
         doc["lifecycle_error"] = "queue_disabled"
         deps.store.upsert("consents", doc)
         return
     deps.store.upsert("consents", doc)
-    message = LifecycleStart(consent_id=doc["consent_id"], expires_at=doc["expires_at"])
+    product = product_of(doc)
+    message = (UsdLifecycleStart if product else LifecycleStart)(
+        **(product.model_dump() if product else {}), consent_id=doc["consent_id"], expires_at=doc["expires_at"])
     try:
         deps.queue.send(LIFECYCLE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
     except Exception as e:
@@ -186,17 +206,33 @@ def schedule_lifecycle(deps: Deps, doc: dict[str, Any]) -> None:
         raise
 
 
+def _product(payload: Mapping[str, Any]) -> UsdProduct | None:
+    fields = {k: payload[k] for k in UsdProduct.model_fields if k in payload}
+    if not fields and "requested_amount_cents" not in payload:
+        return None
+    if "requested_amount_krw" in payload:
+        raise ValueError("USD activities cannot use KRW principal")
+    return UsdProduct.model_validate(fields)
+
+
 def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
+    product = _product(payload)
+    meta = product.model_dump() if product else {}
     scopes = list(CONSENT_SCOPES)
-    grant = deps.mock.create_consent(payload["applicant_id"], scopes, CONSENT_PURPOSE, CONSENT_TTL_DAYS)
+    purpose = "Working capital loan assessment" if product else CONSENT_PURPOSE
+    grant = deps.mock.create_consent(payload["applicant_id"], scopes, purpose, CONSENT_TTL_DAYS,
+                                     **({"product": product} if product else {}))
+    if product_of(grant) != product:
+        raise ValueError("Origination consent product mismatch")
     consent_id = grant["consent_id"]
     doc = {
+        **meta,
         "id": consent_id,
         "consent_id": consent_id,
         "application_id": payload["application_id"],
         "applicant_id": payload["applicant_id"],
         "scopes": scopes,
-        "purpose": CONSENT_PURPOSE,
+        "purpose": purpose,
         "granted_at": deps.clock().isoformat(),
         "expires_at": grant["expires_at"],
         "status": "granted",
@@ -209,6 +245,7 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         doc["event_error"] = "servicebus_disabled"
     else:
         message = {
+            **meta,
             "type": EVENT_CONSENT_GRANTED,
             "consent_id": consent_id,
             "application_id": payload["application_id"],
@@ -221,28 +258,58 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001 - 알림 실패가 동의 자체를 무효로 하지 않는다
             doc["event_error"] = f"{type(e).__name__}: {e}"[:300]
     schedule_lifecycle(deps, doc)
-    return {"consent_id": consent_id, "token": grant["token"], "scopes": scopes, "expires_at": grant["expires_at"]}
+    return {**meta, "consent_id": consent_id, "token": grant["token"], "scopes": scopes, "expires_at": grant["expires_at"]}
 
 
 class ConsentEnded(RuntimeError):
     """데이터 조립 중 동의가 끝났다(철회·만료). 방금 쓴 원천 데이터를 지우고 여정을 멈춘다."""
 
 
+def put_consent_raw(deps: Deps, cid: str, name: str, value: Any) -> None:
+    container = raw_container(cid)
+
+    def begin(doc: dict) -> None:
+        if doc.get("status") != "granted":
+            raise ConsentEnded(cid)
+        doc["raw_write_count"] = doc.get("raw_write_count", 0) + 1
+        doc["raw_repair_generation"] = doc.get("raw_repair_generation", 0) + 1
+
+    if update_doc(deps.store, "consents", cid, cid, begin) is None:
+        raise ConsentEnded(cid)
+    try:
+        deps.raw.put_json(container, name, value)
+    except Exception:
+        _drop_if_consent_ended(deps, cid, container)
+        raise
+
+    def acknowledge(doc: dict) -> bool | None:
+        if doc.get("status") != "granted":
+            return False
+        doc["raw_write_count"] -= 1
+
+    doc = update_doc(deps.store, "consents", cid, cid, acknowledge)
+    if not doc or doc.get("status") != "granted":
+        _drop_if_consent_ended(deps, cid, container)
+        raise ConsentEnded(cid)
+
+
 def assemble_data(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     consent_id = payload["consent_id"]
+    product = _product(payload)
     result = assemble(
         payload["application_id"],
         scopes=payload["scopes"],
         token=payload["token"],
         api=deps.mock,
         pseudonym_key=deps.pseudonym_key,
-        runner=deps.agents,
+        runner=None if product else deps.agents,
         model=deps.model,
+        product=product,
     )
     container = raw_container(consent_id)
-    for source, raw in result.data.items():
-        deps.raw.put_json(container, f"{source}.json", raw)
     _remember_foundry(deps, consent_id, [result.conversation_id] if result.conversation_id else [], [])
+    for source, raw in result.data.items():
+        put_consent_raw(deps, consent_id, f"{source}.json", raw)
     _drop_if_consent_ended(deps, consent_id, container)
     return result.report
 
@@ -252,57 +319,89 @@ def _drop_if_consent_ended(deps: Deps, consent_id: str, container: str) -> None:
     consent = deps.store.read("consents", consent_id, consent_id)
     if consent is None or consent.get("status") not in ENDED_CONSENT:
         return
-    try:
-        outcome = "deleted" if deps.raw.delete_container(container) else "absent"
-    except Exception:  # noqa: BLE001 - 실패도 기록으로 남긴다
-        outcome = "failed"
-    entry = {"kind": "raw_container", "target": container, "outcome": outcome, "at": deps.clock().isoformat()}
-    update_doc(deps.store, "consents", consent_id, consent_id, lambda c: c.setdefault("late_cleanup", []).append(entry))
+    from journey.consent import start_raw_repair
+
+    start_raw_repair(deps, consent_id, container)
     raise ConsentEnded(f"데이터 조립 중 동의가 끝났습니다: {consent_id}")
 
 
-def _remember_foundry(
-    deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]]
-) -> None:
-    """동의 만료·철회 때 삭제할 Foundry 대화·컨테이너를 동의 문서에 남긴다.
+class _TargetResult(Protocol):
+    conversations: list[str]
 
-    삭제가 이미 끝난 동의(늦게 끝난 에이전트 실행)면 바로 지우고 late_cleanup에 기록한다.
-    """
-    if not conversations and not containers:
+
+_Result = TypeVar("_Result", bound=_TargetResult)
+
+
+def run_consent_agent(
+    deps: Deps, consent_id: str, agent: Callable[..., _Result], ctx: Any, **settings: str,
+) -> _Result:
+    """Fence this delivery before I/O; a later delivery can resolve only its own fence."""
+    if deps.agents is None:
+        return agent(ctx, runner=None, **settings)
+    run_id = uuid4().hex
+
+    def begin(doc: dict) -> None:
+        if doc.get("status") != "granted":
+            raise ConsentEnded(consent_id)
+        doc.setdefault("assessment_runs", []).append(run_id)
+
+    if update_doc(deps.store, "consents", consent_id, consent_id, begin) is None:
+        raise ConsentEnded(consent_id)
+    complete: bool | None = None
+
+    def checkpoint(conversations: list[str], containers: list[dict[str, Any]], enumerated: bool) -> None:
+        nonlocal complete
+        complete = enumerated and complete is not False
+        _remember_foundry(deps, consent_id, conversations, containers, run_id=run_id, complete=complete, final=False)
+
+    result = agent(ctx, runner=deps.agents, checkpoint=checkpoint, **settings)
+    # No finally: an interrupted producer may have created unreported targets.
+    _remember_foundry(deps, consent_id, result.conversations, getattr(result, "containers", []),
+                      run_id=run_id, complete=complete is True)
+    return result
+
+
+def _remember_foundry(
+    deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]], *,
+    run_id: str | None = None, complete: bool = False, final: bool = True,
+) -> None:
+    """Register known targets; only a fully enumerated, stopped producer may release its fence."""
+    if not conversations and not containers and run_id is None:
         return
 
-    def mutate(consent: dict[str, Any]) -> None:
-        if consent.get("status") in ENDED_CONSENT:
-            consent.setdefault("late_cleanup", []).extend(_cleanup_now(deps, conversations, containers))
-            return
+    def mutate(consent: dict[str, Any]) -> bool | None:
         known = consent.setdefault("foundry_conversations", [])
+        saved = consent.setdefault("foundry_containers", [])
+        before = len(known) + len(saved)
         known.extend(c for c in conversations if c not in known)
-        consent.setdefault("foundry_containers", []).extend(containers)
+        ids = {c["id"] for c in saved}
+        for c in containers:
+            if c["id"] not in ids:
+                saved.append(c)
+                ids.add(c["id"])
+        runs = consent.get("assessment_runs", [])
+        if run_id in runs and complete and (final or consent.get("status") in ENDED_CONSENT):
+            runs.remove(run_id)
+        elif before == len(known) + len(saved):
+            return False
+        if consent.get("status") in ENDED_CONSENT:
+            notices = consent.get("notices", [])
+            prior = [n for n in notices if n["kind"] == "deletion"]
+            if prior:
+                consent.setdefault("superseded_deletion_notices", []).extend(prior)
+                consent["notices"] = [n for n in notices if n["kind"] != "deletion"]
+            consent.update(foundry_repair_pending=True, deletion_complete=False,
+                           foundry_generation=consent.get("foundry_generation", 0) + 1)
 
-    update_doc(deps.store, "consents", consent_id, consent_id, mutate)
-
-
-def _cleanup_now(
-    deps: Deps, conversations: list[str], containers: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    at, out = deps.clock().isoformat(), []
-    for cid in conversations:
-        outcome = "failed"
-        if deps.agents is not None:
-            try:
-                outcome = str(deps.agents.delete_conversation(cid))  # type: ignore[attr-defined]
-            except Exception:  # noqa: BLE001
-                outcome = "failed"
-        out.append({"kind": "conversation", "target": cid, "outcome": outcome, "at": at})
-    for c in containers:
-        deleted = bool(c.get("deleted"))
-        if not deleted and deps.agents is not None:
-            try:
-                deleted = bool(deps.agents.delete_container(c["id"]))
-            except Exception:  # noqa: BLE001
-                deleted = False
-        out.append({"kind": "container", "target": c["id"], "outcome": "deleted" if deleted else "failed", "at": at})
-    return out
+    doc = update_doc(deps.store, "consents", consent_id, consent_id, mutate)
+    if doc is None and run_id:
+        raise ConsentEnded(consent_id)
+    if doc and doc.get("status") in ENDED_CONSENT:
+        if doc.get("foundry_repair_pending"):
+            from journey.consent import repair_foundry
+            repair_foundry(deps, doc)
+        if run_id:
+            raise ConsentEnded(consent_id)
 
 
 def _load(deps: Deps, consent_id: str) -> tuple[ApplicantProfile, list[Transaction], list[TaxFiling]]:
@@ -365,17 +464,33 @@ def _semantic(
 
 
 def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
-    profile, txns, filings = _load(deps, payload["consent_id"])
-    pg, pg_flags = _load_pg(deps, payload["consent_id"])
-    store, store_flags = _load_marketplace(deps, payload["consent_id"])
-    classification, overrides, labels = _semantic(deps, profile, txns, payload["consent_id"])
-    result = compute_underwriting(
+    product = _product(payload)
+    cid = payload["consent_id"]
+    if product:
+        container = raw_container(cid)
+        def read(source):
+            return deps.raw.get_json(container, f"{source}.json")
+        profile = UsdProfile.model_validate(read("profile"))
+        txns = _USD_TRANSACTIONS.validate_python(read("transactions"))
+        filings = _USD_FILINGS.validate_python(read("tax") or [])
+        pg = _USD_PG.validate_python(read("pg") or [])
+        market = read("marketplace")
+        store = None if market is None else UsdMarketplace.model_validate(market)
+        pg_flags, store_flags = [], []
+        classification, overrides, labels = None, {}, {}
+    else:
+        profile, txns, filings = _load(deps, cid)
+        pg, pg_flags = _load_pg(deps, cid)
+        store, store_flags = _load_marketplace(deps, cid)
+        classification, overrides, labels = _semantic(deps, profile, txns, cid)
+    amount_key = "requested_amount_cents" if product else "requested_amount_krw"
+    result = (compute_usd_underwriting if product else compute_underwriting)(
         payload["application_id"],
         profile,
         txns,
         filings,
         as_of=date.fromisoformat(payload["as_of"]),
-        requested_amount_krw=payload["requested_amount_krw"],
+        **{amount_key: payload[amount_key]},
         requested_tenor_months=payload["requested_tenor_months"],
         overrides=overrides,
         semantic_labels=labels,
@@ -384,13 +499,14 @@ def underwrite(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     )
     as_of = date.fromisoformat(payload["as_of"])
     return {
+        **(product.model_dump() if product else {}),
         "features": result.features.model_dump(mode="json"),
         "signals": result.signals,
         "flags": [*result.flags, *pg_flags, *store_flags],
         "monthly": result.monthly,
         "expense_breakdown": result.expense_breakdown,
         "expense_monthly": result.expense_monthly,
-        "settlement_profile": settlement_for(txns, overrides, as_of, profile.industry),
+        "settlement_profile": None if product else settlement_for(txns, overrides, as_of, profile.industry),
         "classification": classification,
         "category_overrides": {k: v.value for k, v in overrides.items()},
         "pg_ledger": result.pg_ledger,
@@ -405,8 +521,18 @@ def evaluate_policy(deps: Deps, features: dict[str, Any]) -> dict[str, Any]:
 def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     if deps.agents is None:
         return {"assessment": None, "flags": [FLAG_ASSESSMENT_UNAVAILABLE], "record": {"error": "agents_disabled"}}
-    profile, txns, _ = _load(deps, payload["consent_id"])
     uw = payload["underwriting"]
+    product = _product(uw)
+    if product != _product(uw["features"]) or product != _product(payload["policy"]):
+        raise ValueError("Mismatched assessment evidence")
+    if _product(payload) not in (None, product):
+        raise ValueError("Mismatched assessment request")
+    if product:
+        container = raw_container(payload["consent_id"])
+        profile = UsdProfile.model_validate(deps.raw.get_json(container, "profile.json"))
+        txns = _USD_TRANSACTIONS.validate_python(deps.raw.get_json(container, "transactions.json"))
+    else:
+        profile, txns, _ = _load(deps, payload["consent_id"])
     overrides = uw.get("category_overrides") or {}
     ctx = UnderwritingContext(
         application_id=payload["application_id"],
@@ -422,8 +548,8 @@ def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         settlement=uw.get("pg_ledger"),
         marketplace=uw.get("marketplace"),
     )
-    result = assess(ctx, runner=deps.agents, analyst_model=deps.analyst_model, reviewer_model=deps.reviewer_model)
-    _remember_foundry(deps, payload["consent_id"], result.conversations, result.containers)
+    result = run_consent_agent(deps, payload["consent_id"], assess, ctx,
+                               analyst_model=deps.analyst_model, reviewer_model=deps.reviewer_model)
     return {
         "assessment": result.assessment.model_dump(mode="json") if result.assessment else None,
         "flags": result.flags,
@@ -437,6 +563,33 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     profile = deps.raw.get_json(raw_container(payload["consent_id"]), "profile.json")
     if profile is None:
         raise RuntimeError(f"원천 프로필 없음: {payload['consent_id']}")
+    product = product_of(payload)
+    uw = payload["underwriting"]
+    if product != product_of(profile) or product != product_of(uw["features"]):
+        raise ValueError("Registration sources do not match the loan product")
+    if product:
+        application = deps.store.read("applications", loan_id, loan_id) or {}
+        decision = application.get("officer_decision") or {}
+        if (application.get("status") != "approved" or product_of(application) != product
+                or product_of(decision) != product or decision.get("decision") != "approve"
+                or not decision.get("officer_id") or decision.get("at") != payload["decided_at"]
+                or decision.get("amount_cents") != payload["amount_cents"]
+                or application["applicant_id"] != payload["applicant_id"]
+                or application["requested_tenor_months"] != payload["tenor_months"]
+                or (application.get("consent") or {}).get("consent_id") != payload["consent_id"]):
+            raise ValueError("Loan registration does not match saved officer approval")
+        validate_usd_evidence(uw)
+        parsed = UsdProfile.model_validate(profile)
+        if (payload["decision"] != "approve" or parsed.applicant_id != payload["applicant_id"]
+                or uw["features"]["application_id"] != loan_id):
+            raise ValueError("Invalid approved loan registration")
+        usd_installments(date.fromisoformat(payload["decided_at"][:10]), payload["amount_cents"], payload["tenor_months"])
+        terms = {**product.model_dump(), "amount_cents": payload["amount_cents"], "baseline": usd_baseline(uw)}
+    else:
+        parsed = ApplicantProfile.model_validate(profile)
+        terms = {"amount_krw": payload["amount_krw"], "baseline": Baseline.from_underwriting(
+            uw, installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
+        ).to_dict()}
     deps.store.create_if_absent(
         LOANS_CONTAINER,
         {
@@ -444,20 +597,23 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
             "loan_id": loan_id,
             "application_id": loan_id,
             "applicant_id": payload["applicant_id"],
-            "industry": ApplicantProfile.model_validate(profile).industry,
+            "industry": parsed.industry,
             "underwriting_consent_id": payload["consent_id"],
             "decision": payload["decision"],
-            "amount_krw": payload["amount_krw"],
+            **terms,
             "tenor_months": payload["tenor_months"],
             "approved_at": payload["decided_at"],
-            "baseline": Baseline.from_underwriting(
-                payload["underwriting"],
-                installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
-            ).to_dict(),
             "monitoring": None,
             "updated_at": deps.clock().isoformat(),
         },
     )
+    saved = deps.store.read(LOANS_CONTAINER, loan_id, loan_id)
+    if not saved or product != product_of(saved) or (product and any((
+        saved["amount_cents"] != payload["amount_cents"], saved["tenor_months"] != payload["tenor_months"],
+        saved["applicant_id"] != payload["applicant_id"], saved["underwriting_consent_id"] != payload["consent_id"],
+        saved["approved_at"] != payload["decided_at"],
+    ))):
+        raise ValueError("Conflicting loan registration")
     return {"loan_id": loan_id}
 
 

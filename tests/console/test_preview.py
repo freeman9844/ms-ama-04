@@ -7,7 +7,7 @@ from consolepreview.fixtures import build_deps
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(create_app(build_deps()), follow_redirects=False)
+    return TestClient(create_app(build_deps()), follow_redirects=False, cookies={"ama_locale_v2": "ko"})
 
 
 @pytest.mark.parametrize("path", [

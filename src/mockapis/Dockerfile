@@ -1,4 +1,4 @@
-# Mock 마이데이터·국세청·PG API. 동의 레지스트리가 메모리에 있으므로 복제본 1개로 운영합니다.
+# Mock MyData, tax and PG API. Replicas share the private grant authority.
 # 빌드 컨텍스트는 저장소 루트입니다: az acr build -f src/mockapis/Dockerfile .
 FROM mcr.microsoft.com/azurelinux/base/python:3.12
 RUN python3 -m venv /opt/venv

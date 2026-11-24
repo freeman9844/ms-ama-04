@@ -21,6 +21,7 @@
 {# 값+단위 표시. unit: none=건수, "krw"=원, "krw10k"=만 원(영문은 원으로 풀어 씀), "times"=회, 그 밖은 문자열을 그대로 붙인다. #}
 {% macro amount(value, unit=none) -%}
 {%- if unit is none -%}{{ _("%(n)s건", n=value) }}
+{%- elif unit == "usd_cents" -%}{{ value|round|int|usd_cents }}
 {%- elif unit == "krw" -%}{{ _("%(n)s원", n="{:,.0f}".format(value)) }}
 {%- elif unit == "krw10k" -%}{% if locale() == "en" %}₩{{ "{:,.0f}".format(value * 10000) }}{% else %}{{ _("%(n)s만 원", n=value) }}{% endif %}
 {%- elif unit == "times" -%}{{ _("%(n)s회", n=value) }}
@@ -69,7 +70,7 @@
 
 {% macro line_overlay(l, label, color="purple", axis=true, unit="") -%}
 {% for d in l.segments %}<path class="line stroke-{{ color }}" d="{{ d }}" pathLength="100"></path>{% endfor %}
-{% for p in l.points %}<circle class="dot fill-{{ 'red' if p.negative else color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {% if unit %}{{ amount(p.value, unit) if unit == "krw" else "{:,.0f}".format(p.value) ~ unit }}{% else %}{{ p.value }}{% endif %}</title></circle>{% endfor %}
+{% for p in l.points %}<circle class="dot fill-{{ 'red' if p.negative else color }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ label }} {% if unit %}{{ amount(p.value, unit) if unit in ("usd_cents", "krw") else "{:,.0f}".format(p.value) ~ unit }}{% else %}{{ p.value }}{% endif %}</title></circle>{% endfor %}
 {% if axis %}{% for t in l.ticks %}<text class="axis-label" x="{{ l.x + 6 }}" y="{{ t.y + 4 }}">{{ t.text }}</text>{% endfor %}{% endif %}
 {%- endmacro %}
 
@@ -78,7 +79,7 @@
   {% for t in s.ticks %}<line class="gridline" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"></line><text class="axis-label" x="{{ s.x0 - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.text }}</text>{% endfor %}
   <line class="ref stroke-red" x1="{{ s.x0 }}" x2="{{ s.x1 }}" y1="{{ s.zero_y }}" y2="{{ s.zero_y }}"><title>{{ amount(0, unit) }}</title></line>
   {% for d in s.segments %}<path class="line stroke-purple" d="{{ d }}" pathLength="100"></path>{% endfor %}
-  {% for p in s.points %}<circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"><title>{{ p.label }} {{ amount(p.value, unit) if unit == "krw" else "{:,.0f}".format(p.value) ~ unit }}</title></circle>{% endfor %}
+  {% for p in s.points %}<circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"><title>{{ p.label }} {{ amount(p.value, unit) if unit in ("usd_cents", "krw") else "{:,.0f}".format(p.value) ~ unit }}</title></circle>{% endfor %}
   {% for lb in s.labels %}<text class="axis-label" x="{{ lb.x }}" y="{{ s.label_y }}" text-anchor="middle">{{ lb.text }}</text>{% endfor %}
 </svg>
 {%- endmacro %}

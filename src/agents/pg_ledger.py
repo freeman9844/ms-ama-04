@@ -9,8 +9,11 @@
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
+from typing import NamedTuple
 
-from shared.contracts import PgSettlement, Transaction
+from shared.contracts import USD_V1, PgSettlement, Transaction, UsdTransaction
+from shared.sellers import USD_CHANNEL_NAMES
+from shared.usd_source import UsdSettlement
 from shared.krcalendar import add_business_days
 
 MATCH_BUSINESS_DAYS = 3
@@ -57,7 +60,23 @@ def _trend_pp(rates: Sequence[float]) -> float | None:
     return value + 0.0  # -0.0을 0.0으로 정규화한다.
 
 
-def _advance_pairs(unmatched: Sequence[PgSettlement], candidates: Sequence[Transaction]) -> dict[int, dict]:
+class _Payout(NamedTuple):
+    settled_on: date
+    platform: str
+    net: int
+    gross: int
+    fee: int
+    deduction: int
+
+
+class _Deposit(NamedTuple):
+    txn_id: str
+    booked_on: date
+    platform: str | None
+    amount: int
+
+
+def _advance_pairs(unmatched: Sequence[_Payout], candidates: Sequence[_Deposit], unit: str) -> dict[int, dict]:
     """미매칭 정산을 settled_on 오름차순으로 돌며 조건을 만족하는 가장 이른 미사용 입금과 짝짓는다(한 입금은 한 번만).
 
     반환은 정산 객체(id(s))를 키로 하는 매칭 결과 dict다.
@@ -70,14 +89,14 @@ def _advance_pairs(unmatched: Sequence[PgSettlement], candidates: Sequence[Trans
         hit = next(
             (t for t in candidates
              if t.txn_id not in used and earliest <= t.booked_on <= s.settled_on
-             and lo_ratio * s.net_krw <= t.amount_krw <= hi_ratio * s.net_krw),
+             and lo_ratio * s.net <= t.amount <= hi_ratio * s.net),
             None,
         )
         if hit is not None:
             used.add(hit.txn_id)
             pairs[id(s)] = {
                 "booked_on": hit.booked_on.isoformat(),
-                "amount_krw": hit.amount_krw,
+                f"amount_{unit}": hit.amount,
                 "lead_days": (s.settled_on - hit.booked_on).days,
             }
     return pairs
@@ -89,57 +108,76 @@ def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[T
     pg_advance_share, platforms[{platform,gross_krw,share,unpaid_krw,lag_days}],
     monthly_take_rate[{month,rate,fee_rate,offset_rate}], unmatched_count,
     unmatched[{settled_on,platform,net_krw,advance}](최근 10건, advance는 {booked_on,amount_krw,lead_days} 또는 None)."""
+    rows = [_Payout(s.settled_on, s.platform, s.net_krw, s.gross_krw, s.fee_krw, s.deduction_krw) for s in settlements]
+    deposits = [_Deposit(t.txn_id, t.booked_on, _platform_of(t), t.amount_krw) for t in transactions if t.amount_krw > 0]
+    return _summary(rows, deposits, as_of, "krw", PLATFORM_LAG_DAYS)
+
+
+def usd_ledger_summary(settlements: Sequence[UsdSettlement], transactions: Sequence[Transaction | UsdTransaction],
+                       as_of: date) -> dict:
+    rows = [_Payout(s.settled_on, s.platform_code, s.net_cents, s.gross_cents, s.fee_cents, s.deduction_cents)
+            for s in settlements]
+    def platform(t):
+        return t.platform_code or next((code for code, label in USD_CHANNEL_NAMES.items()
+                                        if label.casefold() in t.description.casefold()), None)
+    deposits = [_Deposit(t.txn_id, t.booked_on, platform(t), t.amount_cents) for t in transactions
+                if isinstance(t, UsdTransaction) and t.amount_cents > 0]
+    return {**USD_V1.model_dump(), **_summary(rows, deposits, as_of, "cents",
+                                              {"naver_smart_store": 7, "coupang": 28, "own_store": 3, "11st": 17})}
+
+
+def _summary(settlements, transactions, as_of, unit, lag_days):
     start, end = _month_start(as_of, WINDOW_MONTHS), _month_start(as_of)
     rows = sorted(
         (s for s in settlements
          if start <= s.settled_on < end and add_business_days(s.settled_on, MATCH_BUSINESS_DAYS) < as_of),
-        key=lambda s: (s.settled_on, s.platform, s.net_krw),
+        key=lambda s: (s.settled_on, s.platform, s.net),
     )
     if not rows:
         return {"available": False}
-    deposits = sorted((t for t in transactions if t.amount_krw > 0 and _platform_of(t)),
+    deposits = sorted((t for t in transactions if t.platform),
                       key=lambda t: (t.booked_on, t.txn_id))
     used: set[str] = set()
-    unmatched: list[PgSettlement] = []
+    unmatched: list[_Payout] = []
     for s in rows:
         last = add_business_days(s.settled_on, MATCH_BUSINESS_DAYS)
-        hit = next((t for t in deposits if t.txn_id not in used and _platform_of(t) == s.platform
-                    and s.settled_on <= t.booked_on <= last and t.amount_krw == s.net_krw), None)
+        hit = next((t for t in deposits if t.txn_id not in used and t.platform == s.platform
+                    and s.settled_on <= t.booked_on <= last and t.amount == s.net), None)
         if hit is None:
             unmatched.append(s)
         else:
             used.add(hit.txn_id)
     advance_candidates = sorted(
-        (t for t in transactions if t.amount_krw > 0 and _platform_of(t) is None and t.txn_id not in used),
+        (t for t in transactions if t.platform is None and t.txn_id not in used),
         key=lambda t: (t.booked_on, t.txn_id),
     )
-    advance_pairs = _advance_pairs(unmatched, advance_candidates)
-    unmatched_total = sum(s.net_krw for s in unmatched)
-    target = sum(s.net_krw for s in rows)
+    advance_pairs = _advance_pairs(unmatched, advance_candidates, unit)
+    unmatched_total = sum(s.net for s in unmatched)
+    target = sum(s.net for s in rows)
     gross: dict[str, int] = defaultdict(int)
     unpaid: dict[str, int] = defaultdict(int)
     by_month: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
     for s in rows:
-        gross[s.platform] += s.gross_krw
+        gross[s.platform] += s.gross
         m = by_month[s.settled_on.strftime("%Y-%m")]
-        m[0] += s.gross_krw
-        m[1] += s.fee_krw
-        m[2] += s.deduction_krw
+        m[0] += s.gross
+        m[1] += s.fee
+        m[2] += s.deduction
     for s in unmatched:
-        unpaid[s.platform] += s.net_krw
+        unpaid[s.platform] += s.net
     total = sum(gross.values())
     shares = {p: g / total for p, g in gross.items()} if total else {}
     monthly_raw = [(k, v[1] / v[0], v[2] / v[0]) for k, v in sorted(by_month.items()) if v[0] > 0]
-    known_gross = sum(g for p, g in gross.items() if p in PLATFORM_LAG_DAYS)
+    known_gross = sum(g for p, g in gross.items() if p in lag_days)
     cash_conversion_days = (
-        round(sum(g * PLATFORM_LAG_DAYS[p] for p, g in gross.items() if p in PLATFORM_LAG_DAYS) / known_gross, 1)
+        round(sum(g * lag_days[p] for p, g in gross.items() if p in lag_days) / known_gross, 1)
         if known_gross > 0 else None
     )
     return {
         "available": True,
         "period": {"from": start.isoformat(), "to": end.isoformat()},
         "settlement_count": len(rows),
-        "pg_reconciliation_ratio": round(1 - sum(s.net_krw for s in unmatched) / target, 3) if target > 0 else None,
+        "pg_reconciliation_ratio": round(1 - unmatched_total / target, 3) if target > 0 else None,
         "pg_top_platform_share": round(max(shares.values()), 3) if shares else None,
         "pg_hhi": round(sum(v * v for v in shares.values()), 3) if shares else None,
         "pg_take_rate_trend_pp": _trend_pp([fee + off for _, fee, off in monthly_raw]),
@@ -147,16 +185,16 @@ def ledger_summary(settlements: Sequence[PgSettlement], transactions: Sequence[T
         "pg_cash_conversion_days": cash_conversion_days,
         "pg_advance_suspected_count": len(advance_pairs),
         "pg_advance_share": (
-            round(sum(s.net_krw for s in unmatched if id(s) in advance_pairs) / unmatched_total, 3)
+            round(sum(s.net for s in unmatched if id(s) in advance_pairs) / unmatched_total, 3)
             if unmatched_total else None
         ),
-        "platforms": [{"platform": p, "gross_krw": g, "share": round(shares[p], 3), "unpaid_krw": unpaid[p],
-                      "lag_days": PLATFORM_LAG_DAYS.get(p)}
+        "platforms": [{"platform": p, f"gross_{unit}": g, "share": round(shares[p], 3) if total else None,
+                       f"unpaid_{unit}": unpaid[p], "lag_days": lag_days.get(p)}
                       for p, g in sorted(gross.items(), key=lambda kv: (-kv[1], kv[0]))],
         "monthly_take_rate": [{"month": k, "rate": round(fee + off, 4), "fee_rate": round(fee, 4),
                                "offset_rate": round(off, 4)} for k, fee, off in monthly_raw],
         "unmatched_count": len(unmatched),
-        "unmatched": [{"settled_on": s.settled_on.isoformat(), "platform": s.platform, "net_krw": s.net_krw,
+        "unmatched": [{"settled_on": s.settled_on.isoformat(), "platform": s.platform, f"net_{unit}": s.net,
                       "advance": advance_pairs.get(id(s))}
                       for s in sorted(unmatched, key=lambda s: s.settled_on, reverse=True)[:UNMATCHED_LIMIT]],
     }

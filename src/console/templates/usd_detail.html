@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_seller.html" as sl %}
+{% set d = v.doc %}
+{% set usd = true %}
+{% macro reason_value(field, value) -%}
+{% if (field or "").endswith("_cents") %}{{ (value|int if value is float and value.is_integer() else value)|usd_cents }}{% else %}{{ value }}{% endif %}
+{%- endmacro %}
+{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="3;url={{ watch_url }}">{% elif in_progress %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block main %}
+<h1>{{ sl.applicant(d.applicant_id, user.can_restore, true) }}</h1>
+<p>{{ d.application_id }} · {{ d.status|status_label }}</p>
+{% if d.received_at %}<p>{{ _("접수") }} · {{ d.received_at|kst }} KST</p>{% endif %}
+{% if d.monitoring %}<a href="/loans/{{ d.application_id|path }}">{{ _("사후 모니터링") }}</a>{% endif %}
+<div class="grid-2">
+  <section class="card"><h2>{{ _("신청 금액") }}</h2><strong>{{ d.requested_amount_cents|usd_cents }}</strong> · {{ _("%(n)s개월", n=d.requested_tenor_months) }}</section>
+  <section class="card"><h2>{{ _("정책 판정") }}</h2>{{ (v.policy or {}).decision|policy_label }} · {{ _("정책 한도") }} {{ v.max_amount_cents|usd_cents }}</section>
+</div>
+{% if d.error %}<p class="error" role="alert">{{ d.error.stage }} · {{ d.error.message }}</p>{% endif %}
+{% if v.policy %}<section class="card"><h2>{{ _("정책 판정") }} · {{ v.policy.rules_version }}</h2>
+<p>{{ _("금리 구간") }}: {{ v.policy.rate_band or "—" }}</p>
+{% for r in v.policy.reason_codes %}<p>{{ r.code }} · {{ r.message }}
+{% if r.observed is number %} · {{ _("관측값") }} {{ reason_value(r.field, r.observed) }}{% endif %}
+{% if r.threshold is number %} · {{ _("기준") }} {{ reason_value(r.field, r.threshold) }}{% endif %}</p>{% endfor %}
+</section>{% endif %}
+<section class="card"><h2>{{ _("월별 매출과 지출") }} (USD)</h2>
+{% set months = (d.underwriting or {}).monthly or [] %}
+{% if months %}
+<table><thead><tr><th>{{ _("월") }}</th><th>{{ _("매출") }}</th><th>{{ _("운영비") }}</th><th>{{ _("기존 상환") }}</th></tr></thead>
+<tbody>{% for m in months %}<tr><th>{{ m.month }}</th><td>{{ m.revenue_cents|usd_cents }}
+<meter min="0" max="{{ months|map(attribute='revenue_cents')|max or 1 }}" value="{{ m.revenue_cents }}" title="{{ m.month }} · {{ m.revenue_cents|usd_cents }}"></meter></td>
+<td>{{ m.operating_out_cents|usd_cents }}</td><td>{{ m.debt_service_cents|usd_cents }}</td></tr>{% endfor %}</tbody></table>
+{% else %}<p>{{ _("월별 자료가 없습니다.") }}</p>{% endif %}</section>
+{% set uw = d.underwriting or {} %}
+{% if v.features %}<details><summary>{{ _("전체 현금흐름 지표") }}</summary>
+<table>{% for key, value in v.features|dictsort if value is number %}<tr><th>M:{{ key }}</th><td>{{ value|usd_cents if key.endswith("_cents") else value }}</td></tr>{% endfor %}</table>
+</details>{% endif %}
+<section class="card"><h2>{{ _("마켓 판매 성과") }}</h2>
+{% if uw.marketplace and uw.marketplace.available %}
+<table><thead><tr><th>{{ _("플랫폼") }}</th><th>{{ _("평점") }}</th><th>{{ _("리뷰 수") }}</th><th>{{ _("정산 예정금") }} (USD)</th></tr></thead>
+<tbody>{% for row in uw.marketplace.platforms %}<tr><td>{{ row.platform|channel }}</td><td>{{ row.rating }}</td><td>{{ row.review_count }}</td><td>{{ row.pending_settlement_cents|usd_cents }}</td></tr>{% endfor %}</tbody></table>
+{% for row in uw.marketplace.penalties %}<p>{{ row.occurred_on }} · {{ row.platform|channel }} · {{ row.kind }}</p>{% endfor %}
+{% else %}<p>{{ _("자료 없음") }}</p>{% endif %}</section>
+<section class="card"><h2>{{ _("정산 대사") }}</h2>
+{% if uw.pg_ledger and uw.pg_ledger.available %}
+<p>{{ _("정산금 계좌 입금 비율") }} · {{ uw.pg_ledger.pg_reconciliation_ratio|pct }}</p>
+{% for row in uw.pg_ledger.unmatched %}<p>{{ row.settled_on }} · {{ row.platform|channel }} · {{ row.net_cents|usd_cents }}</p>{% endfor %}
+{% else %}<p>{{ _("자료 없음") }}</p>{% endif %}</section>
+<section class="card"><h2>{{ _("에이전트 의견") }}</h2>
+<p>{{ v.opinion_state|recommendation_label }}</p>
+{% if v.assessment %}<p>{{ v.assessment.summary }}</p>
+{% for claim in v.claims %}<p>{{ claim.text }} · {% for id, value in claim.evidence %}{{ id }}: {{ value|usd_cents if id.endswith('_cents') else value }} {% endfor %}</p>{% endfor %}
+{% for check in v.officer_checks or [] %}<p>{{ check.text }}{% for id, value in check.evidence %} · {{ id }}: {{ value|usd_cents if id.endswith('_cents') else value }}{% endfor %}</p>{% endfor %}
+{% for cf in v.assessment.counterfactuals %}<p>{{ cf.metric_id }} · {{ cf.explanation }}</p>{% endfor %}
+{% for txn in v.transactions %}<p>{{ txn.booked_on }} · {{ txn.description }} · {{ txn.amount_cents|usd_cents }}</p>{% endfor %}
+{% endif %}</section>
+<section class="card"><h2>{{ _("심사역 결정") }}</h2>{% include "_decision.html" %}</section>
+{% include "_officer_chat.html" %}
+{% include "_consents.html" %}
+{% endblock %}

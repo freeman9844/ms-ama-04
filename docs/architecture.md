@@ -93,7 +93,7 @@ flowchart TB
 | Application Gateway WAF v2 | `snet-appgw`, 공용 IP `pip-agw-*`(DNS 레이블), WAF_v2 자동 확장 0–2 | HTTPS 종단(Key Vault 자체 서명 인증서), HTTP→HTTPS 영구 리디렉션, WAF 정책(Prevention, OWASP DRS 2.1, `allowOperatorOnly`), 백엔드 HTTPS·`/healthz` 프로브 | 없음 | 사용자 할당 ID `id-appgw-*`(Key Vault Secrets User) | `infra/modules/appgw.bicep`, `src/ops/appgw_cert.py` |
 | Journey Orchestrator | Azure Functions Flex Consumption `FC1`(`snet-functions`) | 신청 건별 상태 그래프, HITL 대기, 재시도·보상, 단계 계약 검증, 계량 | Cosmos, Blob, 큐, (활성 시) Service Bus | Managed Identity(`id-orch`) | `src/orchestrator/function_app.py`, `src/orchestrator/journey/` |
 | Policy Engine | Container Apps internal `cae-int` | 버전드 YAML 규칙으로 자격·한도·금리 구간 판정, reason code 반환(순수 함수) | 없음 | Managed Identity(`id-apps`), 환경 내부 ingress(`internal: true`) | `src/policy/app.py`, `src/policy/engine.py`, `src/policy/rules.py` |
-| Mock API | Container Apps internal `cae-int`(복제본 1) | 외부 데이터 제공자 대역. 동의 발급·철회(HMAC 서명 토큰), 셀러 합성 원천 데이터(채널별 정산 주기·수수료·매입·급여·세금 일정, 정산 원장과 계좌 입금을 따로 만들어 시점 차이·광고비 상계·선정산 양도를 반영) 제공, 범위·만료 동의 토큰 검증, 대출 후 흐름 재생, 장애 주입(`FAULT_MODE`) | 합성 데이터(시드로 프로세스 내 결정적 생성), 동의 레지스트리(메모리) | Managed Identity(`id-apps`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
+| Mock API | Container Apps internal `cae-int`(복제본 1) | 합성 원천 데이터 제공, 동의 발급·철회, 토큰 범위·만료·활성 상태 확인, 대출 후 흐름 재생과 장애 주입(`FAULT_MODE`) | 합성 데이터(시드로 생성), Blob `consent-authority`(ID별 상태) | Managed Identity(`id-mockapi`), 환경 내부 ingress, `MOCK_CONSENT_SECRET` | `src/mockapis/app.py`, `src/mockapis/consent.py`, `src/mockapis/postloan.py` |
 | 에이전트(8종) | Foundry Agent Service(standard setup, capability host) | 단계 안 자율 판단. 사내 도구는 오케스트레이터가 실행(function tool) | 도구 경유 | Managed Identity(`id-orch`) → `Azure AI User`/`Cognitive Services OpenAI User` | `src/agents/` |
 | AI 게이트웨이 | API Management Developer, 내부 VNet 모드(`snet-apim`) | 에이전트별 TPM 한도, 콘텐츠 안전(Prompt Shields), 토큰 지표(agent·model) | 없음(본문 미기록) | 에이전트별 구독 키(Foundry 연결) → APIM MI로 Foundry 호출 | `infra/modules/apim.bicep`, `infra/modules/foundry/gateway-connections.bicep`, `src/agents/gateway.py` |
 | AI Search | Azure AI Search Basic + PE | Foundry 벡터 저장소 연결(지식 인덱스) | 인덱스 | System-assigned MI, `publicNetworkAccess: disabled` | `infra/modules/search.bicep` |
@@ -117,7 +117,7 @@ Mock API는 우리 시스템 구성요소가 아니라 **외부 기관의 대역
 | `/pg/settlements`, `/pg/flow` | PG사(카드·간편결제 정산, 대출 후 정산·주문) | PG사 정산 API |
 | `/admin/faults`, `FAULT_MODE` | 제공기관 장애(503 전부·원천별 첫 요청) | 없음(시연·장애 시나리오 전용) |
 
-동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 Mock API의 메모리 레지스트리로, 외부 기관 내부를 흉내 낸 것이라 영속화하지 않았다. 토큰은 HMAC 서명과 만료를 스스로 담아 재시작 뒤에도 유효하지만 철회 목록은 사라진다. 그래서 복제본을 1개로 고정하고, 재시작 뒤에도 형식이 맞는 동의 ID면 철회를 받아 그 ID의 토큰을 거절한다(`revoked`로 기록, [ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md)).
+동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 전용 Blob 컨테이너 `consent-authority`에 동의 ID와 상태만 보관한다. 토큰의 HMAC 서명·만료·범위가 맞아도 매 접근 시 `active`를 확인하지 못하면 원천을 반환하지 않는다. 철회는 `revoked` 저장 후 응답하며 재시작·복제본 전환으로 되돌아가지 않는다. [전환 절차](runbook/usd-cutover.md), [ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md).
 > 상위 Spec 대비: Spec §2.3은 Service Bus Premium을 상시 가정하지만, 비용 때문에 평상시 pause(네임스페이스 삭제)한다. 이때 `SERVICEBUS_FQDN`이 비어 트리거를 등록하지 않고, `src/orchestrator/journey/monitoring.py`의 `handle_replay`가 `monitoring-replay` 큐로 같은 처리를 인라인 수행한다.
 
 ## 네트워크

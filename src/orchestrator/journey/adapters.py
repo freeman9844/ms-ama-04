@@ -28,7 +28,7 @@ from journey.activities import (
 )
 from journey.circuit import CircuitBreaker
 from journey.models import KST
-from shared.contracts import PolicyDecision
+from shared.contracts import PolicyDecision, UsdPolicyDecision, UsdProduct
 
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
@@ -52,21 +52,23 @@ class HttpMockApi:
     def __init__(self, base_url: str = "", *, client: httpx.Client | None = None, timeout: float = 30.0) -> None:
         self._client = _http(base_url, client, timeout)
 
-    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int) -> dict[str, Any]:
+    def create_consent(self, applicant_id: str, scopes: list[str], purpose: str, ttl_days: int,
+                       *, product: UsdProduct | None = None) -> dict[str, Any]:
         r = self._client.post(
             "/consents",
-            json={"applicant_id": applicant_id, "scopes": scopes, "purpose": purpose, "ttl_days": ttl_days},
+            json={"applicant_id": applicant_id, "scopes": scopes, "purpose": purpose, "ttl_days": ttl_days,
+                  **(product.model_dump() if product else {})},
         )
         r.raise_for_status()
         return r.json()
 
     def revoke(self, consent_id: str) -> str:
-        """Mock 레지스트리는 인메모리라 재시작 뒤에는 404(absent)일 수 있다."""
+        """The API acknowledges a well-formed revoke only after persisting its tombstone."""
         r = self._client.post(f"/consents/{consent_id}/revoke")
         if r.status_code == 404:
             return "absent"
         r.raise_for_status()
-        return "revoked"
+        return "revoked" if r.status_code == 204 else "unacknowledged"
 
     def fetch(self, source: str, token: str, params: Mapping[str, str | int] | None = None) -> Any:
         try:
@@ -113,7 +115,8 @@ class HttpPolicyApi:
             b.failure() if r.status_code >= 500 else b.success()
         if r.status_code != 200:
             raise PolicyUnavailable(f"HTTP {r.status_code} {r.text[:200]}")
-        return PolicyDecision.model_validate(r.json()).model_dump(mode="json")
+        model = UsdPolicyDecision if features.get("product_version") == "usd-v1" else PolicyDecision
+        return model.model_validate(r.json()).model_dump(mode="json")
 
 
 class CosmosStore:
@@ -132,6 +135,26 @@ class CosmosStore:
 
     def upsert(self, container: str, document: dict[str, Any]) -> None:
         self._db.get_container_client(container).upsert_item(document)
+
+    def pending_raw_repairs(self) -> list[str]:
+        return list(self._db.get_container_client("consents").query_items(
+            "SELECT VALUE c.id FROM c WHERE c.foundry_repair_pending = true OR c.deletion_notice_pending = true OR c.raw_repair_pending = true OR "
+            "(c.raw_write_count > 0 AND c.status IN ('revoked', 'expired'))", enable_cross_partition_query=True))
+
+    def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]:
+        loans = self._db.get_container_client("loans").query_items(
+            "SELECT VALUE c.id FROM c WHERE c.applicant_id=@borrower",
+            parameters=[{"name": "@borrower", "value": borrower}], enable_cross_partition_query=True)
+        alerts = self._db.get_container_client("alerts")
+        slots = []
+        for loan_id in loans:
+            slots.extend(alerts.query_items(
+                'SELECT VALUE {"loan_id": c.loan_id, "ref": s["ref"], "alert_id": s.alert_id, '
+                '"by": s["by"], "on": s["on"]} '
+                'FROM c JOIN s IN c.contacts '
+                """WHERE STARTSWITH(c.id, 'contacts-') AND s.status='sent' AND s["on"] BETWEEN @lo AND @hi""",
+                parameters=[{"name": "@lo", "value": lo}, {"name": "@hi", "value": hi}], partition_key=loan_id))
+        return slots
 
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None:
         from azure.cosmos.exceptions import CosmosResourceNotFoundError
@@ -178,14 +201,12 @@ class BlobRawStore:
 
         self._svc = BlobServiceClient(account_url, credential=credential)
 
-    def put_json(self, container: str, name: str, value: Any) -> None:
-        from azure.core.exceptions import ResourceExistsError
+    def open_container(self, container: str) -> None:
+        # Only a fresh grant provisions its unique namespace, before it becomes discoverable.
+        self._svc.get_container_client(container).create_container()
 
+    def put_json(self, container: str, name: str, value: Any) -> None:
         client = self._svc.get_container_client(container)
-        try:
-            client.create_container()
-        except ResourceExistsError:
-            pass
         client.upload_blob(name, json.dumps(value, ensure_ascii=False).encode(), overwrite=True)
 
     def get_json(self, container: str, name: str) -> Any | None:

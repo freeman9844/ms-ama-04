@@ -10,6 +10,8 @@ grounding 검사는 이 카탈로그에 있는 ID·값만 인정한다.
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from shared.product_context import product_of, validate_usd_evidence
+
 MONTHLY_FIELDS = ("revenue", "operating_out", "debt_service", "owner_draw")
 
 
@@ -26,12 +28,21 @@ def build_catalog(
     catalog: dict[str, int | float] = {}
     for source in (features, signals):
         catalog.update({f"M:{k}": v for k, v in source.items() if _numeric(v)})
-    mean = sum(r["revenue"] for r in monthly) / len(monthly) if monthly else 0
+    product = product_of(features)
+    if product != product_of(policy):
+        raise ValueError("Policy and feature products differ")
+    if product:
+        validate_usd_evidence((features, signals, monthly, policy))
+    suffix = "_cents" if product else ""
+    revenue = f"revenue{suffix}"
+    mean = sum(r[revenue] for r in monthly) / len(monthly) if monthly else 0
     for row in monthly:
         for name in MONTHLY_FIELDS:
+            name += suffix
             catalog[f"S:{row['month']}:{name}"] = row[name]
-        catalog[f"S:{row['month']}:index"] = round(row["revenue"] / mean, 3) if mean > 0 else 0.0
-    catalog["P:max_amount_krw"] = policy["max_amount_krw"]
+        catalog[f"S:{row['month']}:index"] = round(row[revenue] / mean, 3) if mean > 0 else 0.0
+    limit = "max_amount_cents" if product else "max_amount_krw"
+    catalog[f"P:{limit}"] = policy[limit]
     for reason in policy.get("reason_codes", ()):
         for name in ("observed", "threshold"):
             if _numeric(reason.get(name)):

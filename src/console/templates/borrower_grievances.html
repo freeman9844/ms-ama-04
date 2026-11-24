@@ -8,7 +8,7 @@
 <p class="note">{{ _("결정이 난 신청에 이의를 제기할 수 있습니다. 심사역이 판단 기록을 다시 보고 원결정 유지 또는 재심사로 회신합니다.") }}</p>
 {% set decided = applications|selectattr("officer_decision")|list %}
 {% if decided %}
-<form method="post" action="/borrower/{{ applicant_id|path }}/grievances" class="decision">
+<form method="post" action="{{ prefix }}/borrower/{{ applicant_id|path }}/grievances" class="decision">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label>{{ _("신청") }} <select name="application_id">{% for a in decided %}<option value="{{ a.application_id }}"{% if form and form.application_id == a.application_id %} selected{% endif %}>{{ a.application_id }} · {{ a.status|status_label }}</option>{% endfor %}</select></label>
   <label>{{ _("이의 내용(1000자 이내)") }} <textarea name="text" rows="4" maxlength="1000">{{ form.text if form else "" }}</textarea></label>
@@ -23,7 +23,7 @@
   <p class="quote">{{ g.text|mt_ref(g.application_id) }}</p>
   {% if g|archived_reply %}
   <p>{{ _("과거 심사 의견을 참조한 회신은 감사 기록에 보관합니다.") }}</p>
-  {% if g.decision %}<p>{{ g.decision.outcome|outcome_label }}{% if g.decision.new_decision %} · {{ g.decision.new_decision|decision_label }} {{ g.decision.amount_krw|krw }}{% endif %}</p>{% endif %}
+  {% if g.decision %}<p>{{ g.decision.outcome|outcome_label }}{% if g.decision.new_decision %} · {{ g.decision.new_decision|decision_label }} {{ g.decision.amount_cents|usd_cents if g.product_version == 'usd-v1' else g.decision.amount_krw|krw }}{% endif %}</p>{% endif %}
   {% elif g.reply %}<details open><summary>{{ _("회신") }}: {{ g.reply.title|mt(g.application_id) }}</summary><p class="notice">{{ g.reply.body|mt_ref(g.application_id) }}</p></details>{% endif %}
 </article>
 {% endfor %}

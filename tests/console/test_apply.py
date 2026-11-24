@@ -16,7 +16,7 @@ VALID = {
     "consent_account": "on",
     "consent_tax": "on",
     "consent_pg": "on",
-    "requested_amount_krw": "7,000,000",
+    "requested_amount_usd": "7,000.00",
     "requested_tenor_months": "6",
 }
 
@@ -29,8 +29,8 @@ def env(make_doc, raw, key):
     ])
     queue = FakeQueue()
     deps = ConsoleDeps(store=store, raw=raw, queue=queue, pseudonym_key=key,
-                       new_application_id=lambda: "app-20261104-c0ffee", clock=lambda: NOW)
-    return TestClient(create_app(deps), follow_redirects=False), store, queue
+                       usd_origination_enabled=True, new_application_id=lambda: "app-20261104-c0ffee", clock=lambda: NOW)
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"}), store, queue
 
 
 def token(client, headers=CUSTOMER):
@@ -54,7 +54,7 @@ def test_apply_page_needs_login_but_no_console_role(env):
     for name in ("consent_account", "consent_tax", "consent_pg"):
         assert f'name="{name}"' in html
     assert "운전자금 대출 심사" in html and "90일" in html
-    assert "성수데일리룩 · 스마트스토어·쿠팡·자사몰 · 패션의류" in html
+    assert "Seongsu Daily Look" in html
     assert '<script src="/static/apply.js"></script>' in html
     assert "사후 모니터링" not in html
 
@@ -94,7 +94,7 @@ def test_status_page_opens_menu_of_its_applicant_and_points_declined_to_grievanc
     store.docs["app-cust"]["status"] = "declined"
     html = client.get("/apply/app-cust", headers=CUSTOMER).text
     applicant = store.docs["app-cust"]["applicant_id"]
-    assert f'<li class="n-status active"><a href="/borrower/{applicant}">' in html
+    assert f'<li class="n-status active"><a href="/legacy/borrower/{applicant}">' in html
     assert "이의제기 메뉴" in html and "고객센터" not in html
 
 
@@ -107,7 +107,7 @@ def test_valid_application_is_enqueued_as_customer(env):
     assert name == START_QUEUE
     assert message["source"] == "customer"
     assert message["applicant_id"] == "seller-dailylook-01"
-    assert message["requested_amount_krw"] == 7_000_000
+    assert message["requested_amount_cents"] == 700000
     assert message["requested_tenor_months"] == 6
 
 
@@ -128,10 +128,10 @@ def test_consent_value_other_than_on_is_not_consent(env):
 
 
 @pytest.mark.parametrize(("fields", "code"), [
-    ({"requested_amount_krw": "499999"}, "amount_invalid"),
-    ({"requested_amount_krw": "10000001"}, "amount_invalid"),
-    ({"requested_amount_krw": "-5000000"}, "amount_invalid"),
-    ({"requested_amount_krw": "오백만"}, "amount_invalid"),
+    ({"requested_amount_usd": "99.99"}, "amount_invalid"),
+    ({"requested_amount_usd": "10000.01"}, "amount_invalid"),
+    ({"requested_amount_usd": "-5000000"}, "amount_invalid"),
+    ({"requested_amount_usd": "오백만"}, "amount_invalid"),
     ({"requested_tenor_months": "2"}, "tenor_invalid"),
     ({"requested_tenor_months": "7"}, "tenor_invalid"),
     ({"requested_tenor_months": "12"}, "tenor_invalid"),
@@ -149,9 +149,9 @@ def test_out_of_range_input_is_rejected_and_form_kept(env, fields, code):
 
 def test_boundary_amounts_are_accepted(env):
     client, _, queue = env
-    assert apply(client, requested_amount_krw="500000").status_code == 303
-    assert apply(client, requested_amount_krw="10,000,000", requested_tenor_months="3").status_code == 303
-    assert [m["requested_amount_krw"] for _, m in queue.sent] == [500_000, 10_000_000]
+    assert apply(client, requested_amount_usd="100").status_code == 303
+    assert apply(client, requested_amount_usd="10,000", requested_tenor_months="3").status_code == 303
+    assert [m["requested_amount_cents"] for _, m in queue.sent] == [10000, 1000000]
     assert [m["requested_tenor_months"] for _, m in queue.sent] == [6, 3]
 
 
@@ -277,7 +277,7 @@ def test_waiting_hero_has_no_amount(env):
 def test_progress_steps_in_english(env):
     client, store, _ = env
     store.docs["app-cust"]["status"] = "awaiting_officer"
-    html = client.get("/apply/app-cust", headers={**CUSTOMER, "Cookie": "lang=en"}).text
+    html = client.get("/apply/app-cust", headers={**CUSTOMER, "Cookie": "ama_locale_v2=en"}).text
     assert 'aria-current="step">Officer review</li>' in html
     for korean in ("데이터 심사", "심사역 검토", "접수"):
         assert f">{korean}</li>" not in html

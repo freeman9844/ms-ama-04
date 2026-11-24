@@ -5,13 +5,13 @@
 {% block main %}
 <h1>{{ _("신청 현황") }}</h1>
 {% if rows %}{% set latest = rows[0] %}
-{{ hero(latest.s, latest.application_id, applicant_id|seller_label, latest.amount_krw, latest.tenor) }}
+{{ hero(latest.s, latest.application_id, applicant_id|usd_seller if usd else applicant_id|seller_label, latest.amount, latest.tenor, usd) }}
 <table>
   <thead><tr><th>{{ _("신청번호") }}</th><th>{{ _("접수일") }}</th><th>{{ _("신청 금액") }}</th><th>{{ _("상태") }}</th></tr></thead>
   <tbody>{% for r in rows %}
 <tr><td>{% if r.link %}<a href="/apply/{{ r.application_id|path }}">{{ r.application_id }}</a>{% else %}{{ r.application_id }}{% endif %}</td>
-<td>{{ r.received_on }}</td><td>{{ r.amount_krw|krw if r.amount_krw else "—" }}</td>
-<td><span class="apply-status s-{{ r.s.tone }}">{{ r.s.label }}</span>{% if r.s.approved %} · {% if r.s.amount_krw is not none %}{{ _("승인 금액") }} {{ r.s.amount_krw|krw }}{% else %}{{ _("승인 금액 미확인") }}{% endif %}{% endif %}</td></tr>
+<td>{{ r.received_on }}</td><td>{{ r.amount|usd_cents if usd else r.amount|krw }}</td>
+<td><span class="apply-status s-{{ r.s.tone }}">{{ r.s.label }}</span>{% if r.s.approved %} · {% if r.s.amount_cents is not none or r.s.amount_krw is not none %}{{ _("승인 금액") }} {{ r.s.amount_cents|usd_cents if usd else r.s.amount_krw|krw }}{% else %}{{ _("승인 금액 미확인") }}{% endif %}{% endif %}</td></tr>
 {% endfor %}</tbody>
 </table>
 {% else %}

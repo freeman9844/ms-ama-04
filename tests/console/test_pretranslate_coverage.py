@@ -28,7 +28,7 @@ from shared.pseudonymize import Pseudonymizer
 from tests.console.test_i18n import CUSTOMER_PAGES, EN_PAGES
 
 PAGES = [*EN_PAGES, *CUSTOMER_PAGES]
-EN_HEADERS = {"Cookie": "lang=en"}
+EN_HEADERS = {"Cookie": "ama_locale_v2=en"}
 
 # 콘솔 코드가 조립해 저장 문서에 그대로 없는 문구(문구 → 이유). 문서 경로에서 온 문구는 ALLOWLIST에 더한다.
 COMPOSED: dict[str, str] = {
@@ -51,7 +51,7 @@ BLOBS = {
 }
 SYN_PAGES = [
     f"/applications/{APP}", f"/loans/{APP}", f"/grievances/{APP}/grv-syn-pending", f"/grievances/{APP}/grv-syn-done",
-    f"/borrower/{APPLICANT}/notices", f"/borrower/{APPLICANT}/consents", f"/borrower/{APPLICANT}/grievances",
+    f"/legacy/borrower/{APPLICANT}/notices", f"/legacy/borrower/{APPLICANT}/consents", f"/legacy/borrower/{APPLICANT}/grievances",
 ]
 
 
@@ -182,7 +182,7 @@ class SyntheticPrivacy(fixtures.EmptyPrivacy):
     def __init__(self, consents, grievances):
         self.consents, self.grievances = consents, grievances
 
-    def consents_for_applicant(self, applicant_id):
+    def consents_for_applicant(self, applicant_id, *, legacy: bool = False):
         return [c for c in self.consents if c["applicant_id"] == applicant_id]
 
     def consents_for_application(self, application_id):
@@ -191,10 +191,10 @@ class SyntheticPrivacy(fixtures.EmptyPrivacy):
     def get_consent(self, consent_id):
         return next((c for c in self.consents if c["id"] == consent_id), None)
 
-    def list_grievances(self, limit):
+    def list_grievances(self, limit, *, legacy: bool = False):
         return self.grievances[:limit]
 
-    def grievances_for_applicant(self, applicant_id):
+    def grievances_for_applicant(self, applicant_id, *, legacy: bool = False):
         return [g for g in self.grievances if g["applicant_id"] == applicant_id]
 
     def get_grievance(self, application_id, grievance_id):
@@ -364,7 +364,7 @@ def test_synthetic_pages_wait_for_browser_translation_without_stored_ones(synthe
     assert _pending(_render(deps, {}, page))
 
 
-@pytest.mark.parametrize("page", [f"/applications/{APP}", f"/loans/{APP}", f"/borrower/{APPLICANT}/notices"])
+@pytest.mark.parametrize("page", [f"/applications/{APP}", f"/loans/{APP}", f"/legacy/borrower/{APPLICANT}/notices"])
 def test_entity_masking_must_agree_between_trigger_and_console(synthetic_world, page):
     # 트리거의 원천이 없으면 번역하지 않는다. 유효한 원천을 읽은 화면에서만 즉시 번역할 수 있다.
     deps, documents, _ = synthetic_world

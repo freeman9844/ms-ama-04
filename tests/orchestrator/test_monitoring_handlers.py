@@ -89,6 +89,9 @@ class MemoryQueue:
 
 
 class MemoryRaw:
+    def open_container(self, container):
+        pass
+
     def __init__(self):
         self.blobs = {}
 
@@ -213,6 +216,16 @@ def mock_app():
 
 
 class RegistrationStore(MemoryStore):
+    def pending_raw_repairs(self):
+        return [i for (c, i), d in self.docs.items() if c == "consents" and (d.get("deletion_notice_pending") or d.get("raw_repair_pending")
+                or d.get("raw_write_count") and d.get("status") in ("revoked", "expired"))]
+
+    def prior_contact_slots(self, borrower, lo, hi):
+        ids = {i for (c, i), d in self.docs.items() if c == LOANS and d.get("applicant_id") == borrower}
+        return [dict(loan_id=d["loan_id"], **{k: s[k] for k in ("ref", "alert_id", "by", "on") if k in s})
+                for (c, _), d in self.docs.items() if c == ALERTS and d.get("loan_id") in ids
+                for s in d.get("contacts", []) if s["status"] == "sent" and lo <= s["on"] <= hi]
+
     def create_if_absent(self, container, document):
         key = (container, document["id"])
         self.docs.setdefault(key, deepcopy(document))
@@ -329,6 +342,452 @@ def officer_contacts(deps, replay_id):
 
 def loan(deps):
     return deps.store.read(LOANS, LOAN, LOAN)
+
+
+def test_contact_cap_across_currencies(mock_app):
+    deps = make_deps(mock_app)
+    from shared.contracts import USD_V1
+    borrower = "same-borrower"
+    deps.store.upsert(LOANS, dict(id="old", applicant_id=borrower))
+    deps.store.upsert(ALERTS, dict(id="contacts-old", loan_id="old", contacts=[
+        dict(ref=f"old-{i}", by="officer", on="2026-11-02", status="sent") for i in range(7)]))
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id=borrower))
+    contact = dict(ref="new", by="reminder", on="2026-11-03", status="sent")
+    assert hasattr(monitoring_module, "_reserve_contact")
+    monitoring_module._reserve_contact(deps, LOAN, contact)
+    assert (contact["status"], contact["reason"]) == ("deferred", "weekly_limit")
+
+
+def test_cross_loan_slot_race_and_recovery_expose_no_case_or_amount(mock_app, monkeypatch):
+    from shared.contracts import USD_V1
+    deps = make_deps(mock_app)
+    deps.store.upsert(LOANS, dict(id="legacy", applicant_id="same"))
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id="same"))
+    def send(lid, ref):
+        entry = dict(ref=ref, by="officer", on="2026-11-02", status="sent")
+        monitoring_module._reserve_contact(deps, lid, entry)
+        return entry["status"]
+    for i in range(6):
+        assert send("legacy", str(i)) == "sent"
+    real = deps.store.replace_batch
+    def contend(*args):
+        monkeypatch.setattr(deps.store, "replace_batch", real)
+        assert send(LOAN, "rc-usd-i1-b49999") == "sent"
+        return real(*args)
+    monkeypatch.setattr(deps.store, "replace_batch", contend)
+    assert send("legacy", "last-slot") == "deferred"
+    assert send(LOAN, "rc-usd-i1-b49999") == "sent"  # retry of the winning slot
+    records = [doc for (c, k), doc in deps.store.docs.items() if k.startswith("cap-")]
+    assert records and "b49999" not in str(records)
+
+
+def test_pre_ref_receipts_count_once_across_currencies(mock_app):
+    from shared.contracts import USD_V1
+
+    deps = make_deps(mock_app)
+    borrower = "seller-bakery-20"
+    deps.store.upsert(LOANS, dict(id="old", applicant_id=borrower))
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id=borrower))
+    old = dict(alert_id="ew-one", by="agent", on="2026-11-02", at=NOW.isoformat(),
+               status="sent", script_id="payment_reminder", reason=None)
+    # One repeated historical receipt, plus five distinct modern receipts; the identical
+    # string in the modern ref namespace denotes a different contact.
+    current = [{k: v for k, v in old.items() if k != "alert_id"} | {"ref": ref}
+               for ref in ("ew-one", "r2", "r3", "r4", "r5")]
+    deps.store.upsert(ALERTS, dict(id="contacts-history", loan_id="old", contacts=[old, old, *current]))
+    def attempt(ref):
+        contact = dict(ref=ref, by="officer", on=old["on"], status="sent")
+        monitoring_module._reserve_contact(deps, LOAN, contact)
+        return contact
+    assert attempt("seventh")["status"] == "sent"
+    assert attempt("seventh")["status"] == "sent"  # Redelivery consumes no additional slot.
+    assert attempt("eighth")["reason"] == "weekly_limit"
+
+
+@pytest.mark.parametrize("filename", ["flow.json", "pg_flow.json"])
+@pytest.mark.parametrize("end_before_put", [True, False])
+def test_replay_stops_if_raw_write_follows_deletion_proof(mock_app, monkeypatch, filename, end_before_put):
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put = deps.raw.put_json
+    ended = []
+    def end_during_write(container, name, value):
+        if not end_before_put:
+            put(container, name, value)
+        if name == filename:
+            cid = container.removeprefix("consent-")
+            reason, trigger = ("revoked", "revoke") if end_before_put else ("expired", "timer")
+            result = delete_consent_data(deps, dict(consent_id=cid, reason=reason, trigger=trigger,
+                                                    requested_by="test"))
+            assert result["complete"] and deps.raw.manifest(container) is None
+            ended.append(cid)
+        if end_before_put:
+            put(container, name, value)
+    monkeypatch.setattr(deps.raw, "put_json", end_during_write)
+    assert replay(deps) is None
+    cid, = ended
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert deps.raw.manifest(f"consent-{cid}") is None
+    assert deps.store.read("consents", cid, cid)["late_cleanup"][-1]["outcome"] == (
+        "deleted" if end_before_put else "absent")
+    assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+
+
+@pytest.mark.parametrize("filename", ["flow.json", "pg_flow.json"])
+def test_late_raw_cleanup_recovered_by_timer(mock_app, monkeypatch, filename):
+    import function_app
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data, send_consent_notice
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put, delete = deps.raw.put_json, deps.raw.delete_container
+    failures, original = [], {}
+
+    def revoke_then_write(container, name, value):
+        if name == filename:
+            cid = container.removeprefix("consent-")
+            delete_consent_data(deps, dict(consent_id=cid, reason="revoked", trigger="revoke", requested_by="test"))
+            send_consent_notice(deps, dict(consent_id=cid, kind="deletion"))
+            original.update(deps.store.read(PROOFS_CONTAINER, cid, cid))
+            failures.extend(["unavailable", "not_deleted"])
+            monkeypatch.setattr(deps.mock, "revoke", lambda *_: pytest.fail("repeated registry deletion"))
+        put(container, name, value)
+
+    def intermittent(container):
+        if failures:
+            if failures.pop(0) == "unavailable":
+                raise OSError("storage unavailable")
+            return True  # Accepted but the blob is still visible.
+        return delete(container)
+
+    monkeypatch.setattr(deps.raw, "put_json", revoke_then_write)
+    monkeypatch.setattr(deps.raw, "delete_container", intermittent)
+    assert replay(deps) is None
+    cid = original["id"]
+    def proof():
+        return deps.store.read(PROOFS_CONTAINER, cid, cid)
+    def consent():
+        return deps.store.read("consents", cid, cid)
+    assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+    assert not proof()["complete"] and not consent()["deletion_complete"]
+    assert not next(i for i in proof()["items"] if i["kind"] == "raw_container")["verified"]
+    events = list(deps.events.sent)
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    function_app.repair_consent_deletions(None)
+    assert not proof()["complete"] and not consent()["deletion_complete"]
+    assert deps.raw.manifest(f"consent-{cid}")
+    replace_doc = deps.store.replace
+    def interrupt_checkpoint(container, doc, etag):
+        if container == "consents" and doc.get("deletion_complete"):
+            raise OSError("crash after proof checkpoint")
+        return replace_doc(container, doc, etag)
+    with monkeypatch.context() as m:
+        m.setattr(deps.store, "replace", interrupt_checkpoint)
+        function_app.repair_consent_deletions(None)
+    assert proof()["complete"] and not consent()["deletion_complete"]
+    monkeypatch.setattr(deps.raw, "delete_container", lambda *_: pytest.fail("repeated verified deletion"))
+    function_app.repair_consent_deletions(None)
+    assert proof()["complete"] and consent()["deletion_complete"]
+    assert deps.raw.manifest(f"consent-{cid}") is None
+    repaired = proof()
+    function_app.repair_consent_deletions(None)
+    assert proof() == repaired and repaired["manifest"] == original["manifest"]
+    assert [n["kind"] for n in consent()["notices"]] == ["deletion"]
+    assert deps.events.sent == events and loan(deps)["monitoring"]["status"] == "stopped"
+
+
+def test_repair_marker_stops_replay_if_proof_checkpoint_is_unavailable(mock_app, monkeypatch):
+    import function_app
+    from types import SimpleNamespace
+    from console.adapters import CosmosPrivacy
+    from journey.consent import PROOFS_CONTAINER, delete_consent_data, send_consent_notice
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put, replace_doc = deps.raw.put_json, deps.store.replace
+    def fail_proof(container, doc, etag):
+        if container == PROOFS_CONTAINER:
+            raise OSError("checkpoint unavailable")
+        return replace_doc(container, doc, etag)
+    def revoke_then_write(container, name, value):
+        cid = container.removeprefix("consent-")
+        delete_consent_data(deps, dict(consent_id=cid, reason="revoked", trigger="revoke", requested_by="test"))
+        monkeypatch.setattr(deps.store, "replace", fail_proof)
+        put(container, name, value)
+    monkeypatch.setattr(deps.raw, "put_json", revoke_then_write)
+    assert replay(deps) is None
+    cid = loan(deps)["monitoring"]["consent_id"]
+    assert loan(deps)["monitoring"]["status"] == "stopped" and not flows(deps.events)
+    assert not deps.store.read("consents", cid, cid)["deletion_complete"]
+    assert deps.raw.manifest(f"consent-{cid}")
+    def reader(container):
+        return SimpleNamespace(read_item=lambda item, partition_key: deps.store.read(container, item, partition_key))
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert not CosmosPrivacy(reader("consents"), reader(PROOFS_CONTAINER), None).get_proof(cid)["complete"]
+    with pytest.raises(LookupError):
+        send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
+    monkeypatch.setattr(deps.store, "replace", replace_doc)
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    function_app.repair_consent_deletions(None)
+    assert deps.store.read(PROOFS_CONTAINER, cid, cid)["complete"]
+    assert deps.store.read("consents", cid, cid)["deletion_complete"]
+    assert not deps.raw.manifest(f"consent-{cid}")
+
+
+@pytest.mark.parametrize("filename", ["flow.json", "pg_flow.json"])
+def test_failed_write_intent_never_uploads(mock_app, monkeypatch, filename):
+    deps = make_deps(mock_app, events=Outbox())
+    approved_loan(deps)
+    fetch, replace_doc = deps.mock.fetch, deps.store.replace
+    def fail_after_fetch(source, token, terms):
+        value = fetch(source, token, terms)
+        if source + ".json" == filename:
+            def fail_marker(container, doc, etag):
+                if container == "consents":
+                    raise OSError("intent unavailable")
+                return replace_doc(container, doc, etag)
+            monkeypatch.setattr(deps.store, "replace", fail_marker)
+        return value
+    monkeypatch.setattr(deps.mock, "fetch", fail_after_fetch)
+    with pytest.raises(OSError, match="intent unavailable"):
+        replay(deps)
+    assert not any(name == filename for _, name in deps.raw.blobs)
+    assert not flows(deps.events)
+
+
+def test_abandoned_upload_keeps_intent_until_ended_cleanup(mock_app, monkeypatch):
+    import function_app
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw
+
+    deps = replace(make_deps(mock_app, events=Outbox()), raw=DeletableRaw())
+    approved_loan(deps)
+    put = deps.raw.put_json
+    class WorkerLost(BaseException):
+        pass
+    def die_after_upload(container, name, value):
+        put(container, name, value)
+        raise WorkerLost()
+    monkeypatch.setattr(deps.raw, "put_json", die_after_upload)
+    with pytest.raises(WorkerLost):
+        replay(deps)
+    container, = [c for c, n in deps.raw.blobs if n == "flow.json"]
+    cid = container.removeprefix("consent-")
+    def consent():
+        return deps.store.read("consents", cid, cid)
+    assert consent().get("raw_write_count") == 1
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    function_app.repair_consent_deletions(None)
+    assert deps.raw.manifest(container) and consent()["raw_write_count"] == 1
+    assert delete_consent_data(deps, dict(consent_id=cid, reason="revoked", trigger="revoke",
+                                         requested_by="test"))["complete"]
+    assert not deps.raw.manifest(container) and not consent().get("raw_write_count")
+
+
+@pytest.mark.parametrize("source_name,code", [("pg_flow", "invalid_usd_pg_flow"), ("flow", "invalid_account_flow"),
+                                              ("rejected", "account_flow_unavailable")])
+def test_invalid_usd_flow_never_exposes_source_values(mock_app, monkeypatch, caplog, source_name, code):
+    from shared.contracts import USD_V1
+
+    deps = make_deps(mock_app, events=Outbox())
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, application_id=LOAN, applicant_id="seller-bakery-20",
+                                  baseline={"avg_weekly_revenue_cents": 120000, "cash_buffer_days": 12},
+                                  industry="Food", decision="approve",
+                                  underwriting_consent_id="prior", amount_cents=500000, tenor_months=6))
+    fetch = deps.mock.fetch
+    sentinel = "SYNTHETIC-PRIVATE-PG-VALUE"
+    def corrupt(source, token, terms):
+        if source == "flow" and source_name == "rejected":
+            from agents.data_assembly import SourceError
+            raise SourceError(422, sentinel)
+        if source == source_name:
+            return {**USD_V1.model_dump(), "orders": sentinel, "settlements": []} if source == "pg_flow" else [sentinel]
+        return fetch(source, token, terms)
+    monkeypatch.setattr(deps.mock, "fetch", corrupt)
+    with pytest.raises(ValueError) as exc:
+        replay(deps, **USD_V1.model_dump())
+    mon = loan(deps)["monitoring"]
+    assert sentinel not in caplog.text and sentinel not in json.dumps(mon)
+    assert str(exc.value) == code and exc.value.__context__ is None
+    assert mon["status"] == "failed" and code in mon["error"] and not flows(deps.events)
+    from console.app import create_app
+    from consolepreview.fixtures import build_deps
+    ui = build_deps()
+    ui.monitoring.loans[LOAN] = loan(deps)
+    page = TestClient(create_app(ui)).get(f"/loans/{LOAN}")
+    assert page.status_code == 200 and code in page.text and sentinel not in page.text
+
+
+def test_usd_worker_partial_redelivery_and_late_payoff(mock_app):
+    from agents.repayment import usd_schedule
+    from shared.contracts import USD_V1, UsdTransaction
+    from shared.repayment import USD_DEBIT
+    deps, meta = make_deps(mock_app), USD_V1.model_dump()
+    led = usd_schedule(AS_OF, 150001, 3)
+    doc = dict(meta, id=LOAN, applicant_id="borrower", monitoring={"alert_ids": [], "replay_id": "rp-usd"},
+               repayment=led)
+    deps.store.upsert(LOANS, doc)
+    item = led["schedule"][0]
+    due = date.fromisoformat(item["due_on"])
+    penny = UsdTransaction(**meta, txn_id="one", loan_id=LOAN, scheduled_item_key="i1", amount_cents=-1,
+                           balance_after_cents=50000, booked_on=due, description=USD_DEBIT, txn_type_code="AUTO_DEBIT")
+    def post(txns, day):
+        monitoring_module._repayment_week(deps, LOAN, "rp-usd", doc, txns, day, day, 5, {})
+    post([penny], due)
+    cid = item["case_id"]
+    assert (item["paid_cents"], item["balance_cents"], item["status"]) == (1, 49999, "partial")
+    snapshot = deepcopy(doc)
+    post([penny], due)
+    assert doc == snapshot
+    later = due + timedelta(days=1)
+    post([penny.model_copy(update=dict(txn_id="rest", booked_on=later, amount_cents=-49999,
+                                       scheduled_item_key=None))], later)
+    assert (item["paid_cents"], item["balance_cents"], item["status"]) == (50000, 0, "paid")
+    assert deps.store.read(ALERTS, cid, LOAN)["status"] == "paid"
+    assert monitoring_module.run_collections(deps, LOAN, cid) is None
+
+
+def test_usd_final_week_resolved_before_hold_does_not_publish_week_fourteen(mock_app):
+    from shared.contracts import USD_V1
+    deps = make_deps(mock_app, events=Outbox())
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, monitoring=dict(status="replaying",
+        processed_week=13, replay_id="rp-final", weeks=[{"case_id": "rc-final"}])))
+    deps.store.upsert(ALERTS, dict(id="rc-final", loan_id=LOAN, status="rejected", proposal={"status": "rejected"}))
+    monitoring_module._continue(deps, LOAN, "rp-final", 13, "rc-final")
+    assert not deps.events.sent and loan(deps)["monitoring"]["status"] == "completed"
+
+
+class EnglishHigh:
+    def run(self, spec, input_text, handlers):
+        if spec.name != EW_AGENT:
+            raise RuntimeError("Offline collections fallback")
+        base = handlers["get_baseline"]({})
+        cause = next(iter(base["cause_candidates"]), {})
+        evidence = cause.get("evidence_ids") or [f"W:{base['current_week']}:revenue_vs_expected"]
+        out = handlers["raise_alert"](dict(severity="high", summary="Receipts are under pressure.",
+            check_action="Check available funds.", recommended_action="contact_borrower",
+            primary_cause=cause.get("cause", ""), secondary_causes=[], signals=[dict(
+                kind="inflow_drop", text="Check recent receipts.", metric_ids=evidence, txn_ids=[])]))
+        assert out["accepted"], out
+        return AgentRun(spec.name, "1", "offline", spec.output_model.model_validate(
+            dict(decision="alert", reason="Review the payment schedule.")), [], 1, 1)
+
+
+@pytest.mark.parametrize("seller,stress,high", [("seller-bakery-20", False, False),
+    ("seller-dailylook-01", True, False), ("seller-dailylook-01", True, True)])
+def test_usd_officer_to_servicing(run_journey, seller, stress, high):
+    import asyncio
+    from functools import partial
+    from unittest.mock import AsyncMock
+    from journey.activities import ACTIVITIES
+    from journey.adapters import HttpPolicyApi
+    from journey.entry import handle_decision, handle_start
+    from policy.app import create_app
+    from policy.rules import load_rules
+    from shared.contracts import USD_V1
+    from shared.product_context import validate_usd_evidence
+
+    day = date(2026, 11, 24)
+    sellers = build_demo_cases(day)
+    outbox = Outbox()
+    now = NOW.replace(day=day.day)
+    deps = make_deps(create_mock_app(sellers, SECRET, lambda: now, flows=FlowStore(sellers, day)), outbox)
+    deps = replace(deps, policy=HttpPolicyApi(client=TestClient(create_app(load_rules()))), clock=lambda: now)
+    meta = USD_V1.model_dump()
+    acts = {k: partial(f, deps) for k, f in ACTIVITIES.items()}
+    acts["assess_credit"] = lambda _: {"assessment": {"review": {"passed": True}}}
+    decision = dict(meta, decision="approve", amount_cents=500000, officer_id="test-officer")
+    durable = AsyncMock()
+    durable.get_status.return_value = None
+    durable.start_new.return_value = LOAN
+    request = dict(meta, application_id=LOAN, applicant_id=seller, requested_amount_cents=500000,
+                   requested_tenor_months=6)
+    assert asyncio.run(handle_start(durable, json.dumps(request))) == LOAN
+    durable.get_status.return_value = type("Running", (), {"runtime_status": "Running"})()
+    assert asyncio.run(handle_decision(durable, json.dumps(dict(application_id=LOAN, decision=decision))))
+    result, ctx = run_journey(durable.start_new.call_args.args[2], acts, [("event", {**decision, "currency": "KRW"}),
+                              ("event", durable.raise_event.call_args.args[2])], start=now)
+    assert result["status"] == "approved" and len(ctx.saved[-1]["decision_attempts"]) == 1
+    assert loan(deps)["amount_cents"] == 500000
+    registration = ctx.called("register_monitoring")[0].input
+    assert register_monitoring(deps, registration) == {"loan_id": LOAN}
+    with pytest.raises(ValueError, match="registration"):
+        register_monitoring(deps, registration | {"amount_cents": 499999})
+    saved = deps.store.read("applications", LOAN, LOAN)
+    deps.store.upsert("applications", {**saved, "officer_decision": None, "status": "awaiting_officer"})
+    with pytest.raises(ValueError, match="approval"):
+        register_monitoring(deps, registration)
+    deps.store.upsert("applications", saved)
+    assert replay(deps) is None and loan(deps)["monitoring"] is None
+    if stress and not high:
+        deps.store.upsert(LOANS, dict(id="legacy-usd-peer", applicant_id=seller))
+        deps.store.upsert(ALERTS, dict(id="contacts-old", loan_id="legacy-usd-peer", contacts=[
+            dict(ref=f"old-{i}", by="officer", on="2027-02-18", status="sent") for i in range(7)]))
+    started = replay(deps, **meta)
+    rid = started["replay_id"]
+    if high:
+        deps = replace(deps, agents=EnglishHigh())
+    pump(deps, outbox)
+    if high:
+        mon = loan(deps)["monitoring"]
+        assert mon["status"] == "awaiting_customer" and mon["paused_week"] < 13
+        offer = loan(deps)["repayment"]["offer"]
+        assert handle_restructure_decision(deps, json.dumps(dict(meta, loan_id=LOAN, kind="plan_choice",
+                                                                  offer_id=offer["offer_id"], option="split")))
+        change = loan(deps)["repayment"]["plan_change"]
+        assert loan(deps)["monitoring"]["holds"] == ["plan_change"]
+        assert sum(i["amount_cents"] for i in change["items"]) == 83333
+        assert handle_restructure_decision(deps, json.dumps(dict(meta, loan_id=LOAN, kind="plan_change",
+                                        change_id=change["change_id"], decision="approve", officer_id="officer")))
+        assert replay(deps, action="resume", replay_id=rid, **meta)
+        pump(deps, outbox)
+    if stress:
+        mon = loan(deps)["monitoring"]
+        assert (mon["status"], mon["holds"]) == ("paused", ["collections_proposal"])
+        assert mon["alert_ids"]
+        assert not officer_contacts(deps, rid)
+        if not high:
+            assert mon["paused_week"] == 13
+            assert cases(deps)[0]["proposal"]["evidence"]["amount_cents"] == 83333
+            assert cases(deps)[0]["proposal"]["evidence"]["contacts_7d"] == 7
+        while (mon := loan(deps)["monitoring"])["status"] == "paused":
+            assert decide_collections(deps, mon["pause_case_id"], **meta)
+            assert replay(deps, action="resume", replay_id=rid, **meta)
+            pump(deps, outbox)
+        assert officer_contacts(deps, rid)
+        if not high:
+            assert officer_contacts(deps, rid)[0]["reason"] == "weekly_limit"
+    doc = loan(deps)
+    assert doc["monitoring"]["status"] == "completed"
+    assert [w["week"] for w in doc["monitoring"]["weeks"]] == list(range(1, 14))
+    assert len(doc["monitoring"]["weeks"][0]["projection"]["path"]) == 28
+    if not high:
+        assert sum(i.get("paid_cents", 0) for i in doc["repayment"]["schedule"]) == 83333 * (2 if stress else 3)
+    else:
+        assert len(doc["repayment"]["plan_history"]) == 1
+        history = doc["repayment"]["plan_history"][0]
+        assert sum(i["amount_cents"] for i in history["after"]) == sum(i["amount_cents"] for i in history["before"])
+        assert all(c.get("text", "").isascii() for c in contacts(deps, rid))
+    assert all(m["currency"] == "USD" for t, m, *_ in outbox.sent if t in (TOPIC_FLOW, TOPIC_REPAYMENT, TOPIC_ALERT))
+    validate_usd_evidence([doc, *cases(deps), *alerts(deps)])
+    assert handle_flow_update(deps, outbox.bodies(TOPIC_FLOW)[0]) is None
+    assert doc["repayment"] == loan(deps)["repayment"]
+    if not stress:
+        class WrongLoanFeed:
+            def __getattr__(self, key):
+                return getattr(deps.mock, key)
+            def fetch(self, source, token, params):
+                rows = deps.mock.fetch(source, token, params)
+                if source == "flow":
+                    return [dict(r, loan_id="another") if r.get("loan_id") else r for r in rows]
+                return rows
+        with pytest.raises(ValueError, match="loan"):
+            monitoring_module.start_replay(replace(deps, mock=WrongLoanFeed()), LOAN)
 
 
 def alerts(deps):
@@ -455,6 +914,129 @@ def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_ap
     short = next(w["week"] for w in mon["weeks"] if "projected_shortfall" in w["new_triggers"])
     broke = next(w["week"] for w in mon["weeks"] if w["row"]["end_balance"] < 0)
     assert short < broke
+
+
+@pytest.mark.parametrize("change", ["withdrawal", "replacement", "unchanged"])
+def test_manual_resume_rechecks_after_acceptance_before_publishing(mock_app, monkeypatch, change):
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    pump(deps, outbox)
+    settle_holds(deps)
+    published = len(flows(outbox))
+    resume = monitoring_module.resume_replay
+
+    def interleave(*args):
+        accepted = resume(*args)
+        current = loan(deps)
+        mon = current["monitoring"]
+        assert accepted["from_week"] == 6 and mon["status"] == "replaying"
+        if change == "withdrawal":
+            delete_consent_data(deps, end(mon["consent_id"]))
+        elif change == "replacement":
+            mon.update(replay_id="replacement", processed_week=0)
+            deps.store.upsert(LOANS, current)
+        return accepted
+
+    monkeypatch.setattr(monitoring_module, "resume_replay", interleave)
+    assert replay(deps, action="resume", replay_id=rid)["from_week"] == 6
+    new_weeks = [m[1]["week"] for m in flows(outbox)[published:]]
+    if change == "unchanged":
+        assert new_weeks == [6]
+        assert handle_flow_update(deps, outbox.bodies(TOPIC_FLOW)[-1])["week"] == 6
+    else:
+        assert not new_weeks
+        mon = loan(deps)["monitoring"]
+        assert (mon["replay_id"], mon["status"]) == (
+            (rid, "stopped") if change == "withdrawal" else ("replacement", "replaying"))
+
+
+@pytest.mark.parametrize("fault", ["guard", "stop", "send_accepted", "processed_before_retry"])
+def test_resume_queue_redelivery_recovers_only_its_pending_week(mock_app, monkeypatch, fault):
+    import azure.functions as func
+    import function_app
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    rid = replay(deps)["replay_id"]
+    pump(deps, outbox)
+    settle_holds(deps)
+    monkeypatch.setattr(function_app, "deps", lambda: deps)
+    def deliver(mid="original", replay_id=rid, **fields):
+        body = json.dumps(dict(loan_id=LOAN, action="resume", replay_id=replay_id, **fields))
+        function_app.monitoring_replay(func.QueueMessage(id=mid, body=body))
+
+    resume = monitoring_module.resume_replay
+    before = len(flows(outbox))
+    with monkeypatch.context() as patch:
+        def accepted(*args, **kwargs):
+            result = resume(*args, **kwargs)
+            assert result["from_week"] == 6
+            if fault == "stop":
+                delete_consent_data(deps, end(loan(deps)["monitoring"]["consent_id"]))
+                patch.setattr(deps.store, "replace", lambda *_: False)
+            elif fault == "guard":
+                read = deps.store.read
+                def unavailable(container, *args):
+                    if container == "consents":
+                        raise TimeoutError("guard unavailable")
+                    return read(container, *args)
+                patch.setattr(deps.store, "read", unavailable)
+            else:
+                publish = outbox.publish
+                def lost_ack(*args, **kwargs):
+                    publish(*args, **kwargs)
+                    raise TimeoutError("send acknowledgement lost")
+                patch.setattr(outbox, "publish", lost_ack)
+            return result
+        patch.setattr(monitoring_module, "resume_replay", accepted)
+        with pytest.raises((RuntimeError, TimeoutError)):
+            deliver()
+
+    ambiguous = fault in ("send_accepted", "processed_before_retry")
+    assert len(flows(outbox)) == before + ambiguous
+    deliver("fresh-click")
+    deliver(replay_id="rp-stale")
+    deliver(paused_week=4)
+    assert len(flows(outbox)) == before + ambiguous
+    assert loan(deps)["monitoring"]["status"] == "replaying"
+    if fault == "processed_before_retry":
+        assert handle_flow_update(deps, outbox.bodies(TOPIC_FLOW)[-1])["week"] == 6
+        published = len(flows(outbox))
+        deliver()
+        assert len(flows(outbox)) == published and loan(deps)["monitoring"]["processed_week"] == 6
+        return
+    deliver()
+    if fault == "stop":
+        assert loan(deps)["monitoring"]["status"] == "stopped"
+        assert len(flows(outbox)) == before
+        return
+    events = flows(outbox)[before:]
+    assert len(events) == 1 + ambiguous
+    assert all(m[2:] == (f"flow.updated:{LOAN}:{rid}:6", LOAN) for m in events)
+    for i, event in enumerate(events):
+        result = handle_flow_update(deps, json.dumps(event[1]))
+        if i == 0:
+            assert result["week"] == 6
+        else:
+            assert result is None
+    mon = loan(deps)["monitoring"]
+    assert [w["week"] for w in mon["weeks"]].count(6) == len(mon["resumed_at"]) == 1
+    # A late dequeue of the accepted command cannot accept a different pause.
+    current = loan(deps)
+    current["monitoring"].update(status="awaiting_resume", paused_week=6)
+    deps.store.upsert(LOANS, current)
+    count = len(flows(outbox))
+    deliver()
+    deliver("late-click", paused_week=5)
+    assert len(flows(outbox)) == count and loan(deps)["monitoring"]["status"] == "awaiting_resume"
 
 
 def test_servicebus_replay_publishes_ordered_session_messages(mock_app):
@@ -603,10 +1185,10 @@ def test_failure_after_claim_is_recorded_and_not_blocking(mock_app):
             raise RuntimeError("mock flow down")
 
     broken = replace(deps, mock=FlowDown(deps.mock))
-    with pytest.raises(RuntimeError, match="mock flow down"):
+    with pytest.raises(ValueError, match="account_flow_unavailable"):
         replay(broken)
     mon = loan(deps)["monitoring"]
-    assert mon["status"] == "failed" and "mock flow down" in mon["error"]
+    assert mon["status"] == "failed" and "account_flow_unavailable" in mon["error"]
     assert replay(deps)["replay_id"] != mon["replay_id"]  # failed는 가드에 걸리지 않는다
 
 
@@ -1209,12 +1791,259 @@ def missed_without_agents(mock_app, **fields):
     return deps, replay_id, cases(deps)[0]
 
 
+@pytest.mark.parametrize("producer", [EW_AGENT, COLLECTIONS_AGENT])
+@pytest.mark.parametrize("confirmed", [False, True])
+def test_monitoring_withdrawal_during_remote_call(mock_app, producer, confirmed, caplog):
+    from agents.runtime import AgentError
+    from journey.consent import IncompleteDeletion, delete_consent_data, send_consent_notice
+    from tests.orchestrator.test_consent_lifecycle import FoundryRunner, MemoryRaw as DeletableRaw, end
+
+    deps = missing_first_due(replace(make_deps(mock_app), raw=DeletableRaw()))
+    approved_loan(deps)
+
+    class Withdrawing(FoundryRunner):
+        def run(self, spec, text, handlers):
+            if spec.name != producer:
+                return ScriptedAgents().run(spec, text, handlers)
+            cid = loan(deps)["monitoring"]["consent_id"]
+            with pytest.raises(IncompleteDeletion):
+                delete_consent_data(worker, end(cid))
+            with pytest.raises(LookupError):
+                send_consent_notice(worker, {"consent_id": cid, "kind": "deletion"})
+            if not confirmed:
+                raise AgentError("synthetic-private-error", "conv_partial", ("known_partial",))
+            return ScriptedAgents().run(spec, text, handlers)
+
+    worker = replace(deps, agents=Withdrawing())
+    replay(worker)
+    assert loan(deps)["monitoring"]["status"] == "stopped"
+    cid = loan(deps)["monitoring"]["consent_id"]
+    proof = deps.store.read("deletion_proofs", cid, cid)
+    assert proof["complete"] is confirmed and proof["event_published"] is False
+    notice = {"consent_id": cid, "kind": "deletion"}
+    if confirmed:
+        assert send_consent_notice(deps, notice)["kind"] == "deletion"
+    else:
+        assert {"conv_partial", "known_partial"} <= {i["target"] for i in proof["items"] if i["verified"]}
+        with pytest.raises(LookupError):
+            send_consent_notice(deps, notice)
+    assert "synthetic-private-error" not in caplog.text
+
+
+@pytest.mark.parametrize("producer", [EW_AGENT, COLLECTIONS_AGENT])
+@pytest.mark.parametrize("timing", ["during", "before", "replacement", "conflict"])
+def test_service_bus_withdrawal_stops_only_matching_delivery(mock_app, monkeypatch, producer, timing):
+    from agents.runtime import AgentError
+    from journey.activities import Conflict
+    from journey.consent import IncompleteDeletion, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import FoundryRunner, MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    replay_id = replay(deps)["replay_id"]
+    cid = loan(deps)["monitoring"]["consent_id"]
+    if producer == COLLECTIONS_AGENT:
+        pump(deps, outbox, topics=(TOPIC_FLOW,))
+    topic, deliver = ((TOPIC_FLOW, handle_flow_update) if producer == EW_AGENT
+                      else (TOPIC_REPAYMENT, handle_repayment_updated))
+    calls = []
+
+    class Withdrawing(FoundryRunner):
+        def run(self, spec, text, handlers):
+            assert spec.name == producer
+            calls.append(spec.name)
+            with pytest.raises(IncompleteDeletion):
+                delete_consent_data(worker, end(cid))
+            raise AgentError("synthetic-private-error", "conv_partial")
+
+    worker = replace(deps, agents=Withdrawing())
+    def forbid_raw(*args):
+        pytest.fail("A terminal/stale delivery must not access deleted raw data")
+
+    replace_doc = deps.store.replace
+    def race(container, doc, etag):
+        if container == LOANS and doc["monitoring"].get("status") == "stopped":
+            if timing == "conflict":
+                return False
+            if timing == "replacement":
+                newer = loan(deps)
+                newer["monitoring"].update(replay_id="replacement", consent_id="fresh-grant")
+                deps.store.upsert(LOANS, newer)
+                return False
+        return replace_doc(container, doc, etag)
+
+    if timing == "before":
+        delete_consent_data(deps, end(cid))
+        monkeypatch.setattr(deps.raw, "get_json", forbid_raw)
+    monkeypatch.setattr(deps.store, "replace", race)
+    conflicts = 0
+    for _ in range(WEEKS):
+        body = outbox.bodies(topic)[-1]
+        published = len(flows(outbox))
+        if timing == "conflict":
+            try:
+                result = deliver(worker, body)
+            except Conflict:
+                conflicts += 1
+                assert calls and loan(deps)["monitoring"]["status"] == "replaying"
+                monkeypatch.setattr(deps.store, "replace", replace_doc)
+                monkeypatch.setattr(deps.raw, "get_json", forbid_raw)
+                result = deliver(worker, body)
+        else:
+            result = deliver(worker, body)
+        if calls or timing == "before":
+            break
+    assert result is None and len(flows(outbox)) == published
+    monkeypatch.setattr(deps.raw, "get_json", forbid_raw)
+    assert deliver(worker, body) is None and len(flows(outbox)) == published
+    mon = loan(deps)["monitoring"]
+    assert calls == ([] if timing == "before" else [producer])
+    assert conflicts == int(timing == "conflict")
+    if timing == "replacement":
+        assert (mon["replay_id"], mon["status"]) == ("replacement", "replaying")
+    else:
+        assert (mon["replay_id"], mon["status"], mon["error"]) == (replay_id, "stopped", "monitoring_consent_ended")
+
+
+@pytest.mark.parametrize("change", ["underwriting", "monitoring", "replacement", "read_failure", "missing"])
+def test_next_week_checks_fresh_replay_and_both_grants_after_agentless_work(mock_app, monkeypatch, change):
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = replace(make_deps(mock_app, events=outbox), raw=DeletableRaw())
+    approved_loan(deps)
+    replay(deps)
+    body, = outbox.bodies(TOPIC_FLOW)
+    after_week = monitoring_module._after_week
+    def interleave(*args):
+        decision = after_week(*args)
+        assert decision == "next"
+        current = loan(deps)
+        mon = current["monitoring"]
+        assert mon["processed_week"] == 1
+        if change == "replacement":
+            mon.update(replay_id="replacement", processed_week=0)
+            deps.store.upsert(LOANS, current)
+        elif change in ("read_failure", "missing"):
+            read = deps.store.read
+            def fail(container, key, partition):
+                if container == "consents":
+                    if change == "missing":
+                        return None
+                    raise TimeoutError("synthetic checkpoint outage")
+                return read(container, key, partition)
+            monkeypatch.setattr(deps.store, "read", fail)
+        else:
+            cid = current["underwriting_consent_id"] if change == "underwriting" else mon["consent_id"]
+            delete_consent_data(deps, end(cid))
+        return decision
+    monkeypatch.setattr(monitoring_module, "_after_week", interleave)
+    if change in ("read_failure", "missing"):
+        with pytest.raises(TimeoutError if change == "read_failure" else RuntimeError):
+            handle_flow_update(deps, body)
+    else:
+        handle_flow_update(deps, body)
+    assert outbox.bodies(TOPIC_FLOW) == [body]
+    assert loan(deps)["monitoring"]["status"] == ("stopped" if change in ("underwriting", "monitoring") else "replaying")
+
+
+@pytest.mark.parametrize("status", ["failed", "completed"])
+@pytest.mark.parametrize("race", [False, True])
+def test_withdrawal_cannot_overwrite_terminal_repayment_delivery(mock_app, monkeypatch, status, race):
+    from journey.consent import delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import MemoryRaw as DeletableRaw, end
+
+    outbox = Outbox()
+    deps = missing_first_due(replace(make_deps(mock_app, events=outbox), raw=DeletableRaw()))
+    approved_loan(deps)
+    replay(deps)
+    pump(deps, outbox, topics=(TOPIC_FLOW,))
+    body, = outbox.bodies(TOPIC_REPAYMENT)
+    delete_consent_data(deps, end(loan(deps)["monitoring"]["consent_id"]))
+    def terminal():
+        current = loan(deps)
+        current["monitoring"].update(status=status, error="original_result")
+        deps.store.upsert(LOANS, current)
+    if race:
+        replace_doc = deps.store.replace
+        def raced(container, doc, etag):
+            if container == LOANS:
+                monkeypatch.setattr(deps.store, "replace", replace_doc)
+                terminal()
+            return replace_doc(container, doc, etag)
+        monkeypatch.setattr(deps.store, "replace", raced)
+    else:
+        terminal()
+    monkeypatch.setattr(deps.raw, "get_json", lambda *_: pytest.fail("Read deleted raw data"))
+    before = len(outbox.sent)
+    for _ in range(2):
+        assert handle_repayment_updated(deps, body) is None
+        mon = loan(deps)["monitoring"]
+        assert (mon["status"], mon["error"]) == (status, "original_result")
+    assert len(outbox.sent) == before
+
+
+def test_collections_crash_and_redelivery_cannot_certify_first_attempt(mock_app, monkeypatch):
+    from journey.activities import Conflict
+    from journey.consent import IncompleteDeletion, delete_consent_data
+    from tests.orchestrator.test_consent_lifecycle import FoundryRunner, MemoryRaw as DeletableRaw, end
+
+    deps, _, case = missed_without_agents(mock_app, raw=DeletableRaw())
+    # Deliver the case as it stood before a proposal was saved.
+    deps.store.upsert(ALERTS, dict(case, collections=None, status="open"))
+    cid = loan(deps)["monitoring"]["consent_id"]
+    calls = []
+
+    class LostWorker(BaseException):
+        pass
+
+    class Interrupted(FoundryRunner):
+        def run(self, *args):
+            calls.append(True)
+            if len(calls) == 1:
+                raise LostWorker
+            return ScriptedAgents().run(*args)
+
+    worker = replace(deps, agents=Interrupted())
+    def deliver():
+        return monitoring_module.run_collections(worker, LOAN, case["id"])
+
+    with monkeypatch.context() as m:
+        m.setattr(deps.store, "replace", lambda *args: False)
+        with pytest.raises(Conflict):
+            deliver()
+    assert not calls
+    with pytest.raises(LostWorker):
+        deliver()
+    assert deliver() and deliver() is None
+    with pytest.raises(IncompleteDeletion):
+        delete_consent_data(worker, end(cid))
+
+
 def test_missed_payment_creates_proposal_and_pauses_without_contact(mock_app):
     deps = missing_first_due(make_deps(mock_app)); approved_loan(deps); replay(deps)
     case, mon = cases(deps)[0], loan(deps)["monitoring"]
     assert case["status"] == "proposal_pending" and case["proposal"]["text"]
     assert mon["status"] == "paused" and mon["holds"] == ["collections_proposal"]
     assert not [c for c in contacts(deps, mon["replay_id"]) if c["by"] in ("agent", "fallback", "officer")]
+
+
+@pytest.mark.parametrize("live,accepted", [(70000, False), (70001, True)])
+def test_usd_collection_worker_rechecks_live_cent_balance(mock_app, live, accepted):
+    from shared.contracts import USD_V1
+    deps, meta = make_deps(mock_app), USD_V1.model_dump()
+    cid, rid = "rc-rp-1-i1", "rp-1"
+    deps.store.upsert(LOANS, dict(meta, id=LOAN, applicant_id="same", monitoring=dict(replay_id=rid, processed_week=0),
+        repayment={"schedule": [dict(case_id=cid, status="missed", balance_cents=live, due_on="2026-11-02")]}))
+    deps.store.upsert(ALERTS, dict(meta, id=cid, case_id=cid, loan_id=LOAN, replay_id=rid,
+        kind="repayment_case", week=1, missed_count=1, status="proposal_pending",
+        installment={"no": 1, "due_on": "2026-11-02", "amount_cents": 70001},
+        proposal=dict(status="pending_officer", script_id="missed_payment", evidence=dict(meta, amount_cents=70001))))
+    text = "Your balance is $700.01."
+    assert decide_collections(deps, cid, "modify", text=text, **meta) is accepted
+    assert [c["text"] for c in officer_contacts(deps, rid)] == ([text] if accepted else [])
 
 
 def test_approve_sends_exact_text_and_awaits_resume(mock_app):

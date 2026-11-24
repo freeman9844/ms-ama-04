@@ -3,9 +3,13 @@
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from console.i18n import _
 from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
+from shared.money import RequestedUsdCents, parse_usd_cents
 
+_USD_PRINCIPAL = TypeAdapter(RequestedUsdCents)
 MIN_AMOUNT_KRW = 500_000
 MAX_AMOUNT_KRW = 10_000_000
 CONSENT_FIELDS = ("consent_account", "consent_tax", "consent_pg")
@@ -19,7 +23,7 @@ CONSENT_ITEMS = (
 APPLY_ERRORS = {
     "consent_required": "데이터 3종에 모두 동의해야 신청할 수 있습니다.",
     "applicant_invalid": "신청 사업자를 목록에서 골라야 합니다.",
-    "amount_invalid": "신청 금액은 50만~1,000만 원 사이로 입력해야 합니다.",
+    "amount_invalid": "신청 금액은 USD 100~10,000 범위에서 소수 둘째 자리까지 입력하세요.",
     "tenor_invalid": f"대출 기간은 {MIN_TENOR_MONTHS}~{MAX_TENOR_MONTHS}개월로 입력해야 합니다.",
 }
 
@@ -39,6 +43,7 @@ class CustomerStatus:
     amount_krw: int | None = None
     approved: bool = False
     stopped: bool = False
+    amount_cents: int | None = None
 
 
 def _interrupted_step(doc: dict[str, Any]) -> int | None:
@@ -62,7 +67,7 @@ def customer_status(doc: dict[str, Any] | None) -> CustomerStatus:
     if status in {"approved", "conditionally_approved"}:
         decision = doc.get("officer_decision") or {}
         return CustomerStatus(_("승인"), "good", _("대출이 승인되었습니다."), False, 3,
-                              amount_krw=decision.get("amount_krw"), approved=True)
+                              amount_krw=decision.get("amount_krw"), amount_cents=decision.get("amount_cents"), approved=True)
     if status == "declined":
         return CustomerStatus(_("거절"), "bad", _("이번 신청은 승인되지 않았습니다. 결정에 이의가 있으면 내 대출 관리의 이의제기 메뉴에서 제기해 주세요."), False, 3)
     if status in _REVIEWING or status is None:
@@ -71,6 +76,10 @@ def customer_status(doc: dict[str, Any] | None) -> CustomerStatus:
     if status == "withdrawn":
         return CustomerStatus(_("동의 철회로 종료"), "bad", _("데이터 이용 동의가 철회되어 심사를 마쳤습니다."), False, step, stopped=True)
     return CustomerStatus(_("처리 종료"), "bad", _("신청 처리가 끝났습니다. 자세한 내용은 고객센터로 문의해 주세요."), False, step, stopped=True)
+
+
+def parse_requested_usd_cents(text: str) -> int:
+    return _USD_PRINCIPAL.validate_python(parse_usd_cents(text))
 
 
 def validate_apply(form: dict[str, str], applicants: tuple[str, ...]) -> str | None:
@@ -84,8 +93,11 @@ def validate_request(form: dict[str, str], applicants: tuple[str, ...]) -> str |
     """신청인·금액·기간 오류 코드. 고객 신청(/apply)과 콘솔 신규 신청이 같은 기준을 쓴다."""
     if form.get("applicant_id", "").strip() not in applicants:
         return "applicant_invalid"
-    amount = _digits(form.get("requested_amount_krw", ""))
-    if amount is None or not MIN_AMOUNT_KRW <= amount <= MAX_AMOUNT_KRW:
+    if {"product_version", "currency", "language", "requested_amount_cents", "requested_amount_krw"} & form.keys():
+        return "amount_invalid"
+    try:
+        parse_requested_usd_cents(form.get("requested_amount_usd", ""))
+    except ValueError:
         return "amount_invalid"
     tenor = _digits(form.get("requested_tenor_months", ""))
     if tenor is None or not MIN_TENOR_MONTHS <= tenor <= MAX_TENOR_MONTHS:

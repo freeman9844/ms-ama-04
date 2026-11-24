@@ -41,14 +41,14 @@ class FakeOps:
         self.data = runs
         self.asked = []
 
-    def runs(self):
+    def runs(self, *, legacy: bool = False):
         return list(self.data)
 
-    def by_run(self, run_id):
+    def by_run(self, run_id, *, legacy: bool = False):
         self.asked.append(run_id)
         return self.data[run_id]
 
-    def recent(self, limit):
+    def recent(self, limit, *, legacy: bool = False):
         self.asked.append(("recent", limit))
         return [d for run in self.data.values() for d in run][:limit]
 
@@ -61,7 +61,7 @@ def skewed():
 
 def client(ops, key=b"k" * 32):
     deps = ConsoleDeps(store=None, raw=None, queue=None, pseudonym_key=key, ops=ops)
-    return TestClient(create_app(deps), follow_redirects=False)
+    return TestClient(create_app(deps), follow_redirects=False, cookies={"ama_locale_v2": "ko"})
 
 
 def test_sorted_runs_newest_first_and_default_is_latest_load():
@@ -108,9 +108,12 @@ def test_ops_page_selects_run_and_rejects_unknown():
 
 def test_ops_page_without_runs_explains_how_to_load():
     ops = FakeOps({})
-    html = client(ops).get("/ops", headers=AUDITOR_H).text
+    c = client(ops)
+    html = c.get("/legacy/ops", headers=AUDITOR_H).text
     assert "측정 실행이 없습니다" in html and "python -m ops load" in html and "선택한 범위에 신청이 없습니다" in html
-    assert ops.asked == [("recent", 100)]
+    usd = c.get("/ops", headers=AUDITOR_H).text
+    assert "선택한 범위에 신청이 없습니다" in usd and "python -m ops load" not in usd
+    assert ops.asked == [("recent", 100), ("recent", 100)]
 
 
 def test_ops_page_offers_recent_first_and_reads_recent_scope():

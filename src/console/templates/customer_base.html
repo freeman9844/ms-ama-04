@@ -10,10 +10,10 @@
 {% set mt_on = mt_enabled and csrf and locale() == "en" %}<body{% if mt_on %} data-mt-csrf="{{ csrf }}"{% endif %}>
 <div class="shell customer-shell">
 <aside class="sidebar">
-  <a class="brand" href="/borrower"><svg class="logo-mark" aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3182f6"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#logo-g)"/><text x="16" y="22" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">A</text></svg>AMA Lending <small>{{ _("고객 콘솔") }}</small></a>
+  <a class="brand" href="{{ prefix }}/borrower"><svg class="logo-mark" aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3182f6"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#logo-g)"/><text x="16" y="22" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">A</text></svg>AMA Lending <small>{{ _("고객 콘솔") }}</small></a>
   <nav aria-label="{{ _('고객 메뉴') }}">
     <ul>
-      {% if applicant_id %}{% set base = "/borrower/" ~ (applicant_id|path) %}
+      {% if applicant_id %}{% set base = prefix|default("") ~ "/borrower/" ~ (applicant_id|path) %}
       <li class="n-apply{% if nav == 'apply' %} active{% endif %}"><a href="/apply?applicant_id={{ applicant_id|urlencode }}">{{ _("대출 신청") }}</a></li>
       <li class="n-status{% if nav == 'status' %} active{% endif %}"><a href="{{ base }}">{{ _("신청 현황") }}</a></li>
       <li class="n-plans{% if nav == 'plans' %} active{% endif %}"><a href="{{ base }}/plans">{{ _("상환 플랜") }}</a></li>
@@ -21,13 +21,14 @@
       <li class="n-consents{% if nav == 'consents' %} active{% endif %}"><a href="{{ base }}/consents">{{ _("동의 관리") }}</a></li>
       <li class="n-grievances{% if nav == 'grievances' %} active{% endif %}"><a href="{{ base }}/grievances">{{ _("이의제기") }}</a></li>
       {% else %}
-      <li class="n-status{% if nav == 'select' %} active{% endif %}"><a href="/borrower">{{ _("사업자 선택") }}</a></li>
+      <li class="n-status{% if nav == 'select' %} active{% endif %}"><a href="{{ prefix }}/borrower">{{ _("사업자 선택") }}</a></li>
       {% endif %}
     </ul>
   </nav>
   <div class="who">
-    {% if applicant_id %}<span class="who-name">{{ applicant_id|seller_label }}</span>
-    <a href="/borrower">{{ _("고객 변경") }}</a>{% else %}<span>{{ _("고객을 선택하면 메뉴가 열립니다.") }}</span>{% endif %}
+    {% if applicant_id %}<span class="who-name">{{ applicant_id|seller_label if prefix else applicant_id|usd_seller }}</span>
+    <a href="{{ prefix }}/borrower">{{ _("고객 변경") }}</a>{% else %}<span>{{ _("고객을 선택하면 메뉴가 열립니다.") }}</span>{% endif %}
+    <a href="/legacy/borrower{% if applicant_id %}/{{ applicant_id|path }}{% endif %}">{{ _("이전 기록 (KRW)") }}</a>
     {% include "_lang.html" %}
   </div>
 </aside>

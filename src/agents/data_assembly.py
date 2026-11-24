@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
+from shared.contracts import UsdProduct, UsdTransaction
+from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 from shared.pseudonymize import Pseudonymizer
 
 AGENT_NAME = "data-assembly"
@@ -43,8 +45,15 @@ _ADAPTERS: dict[str, TypeAdapter[Any]] = {
     "pg": TypeAdapter(list[PgSettlement]),
     "marketplace": TypeAdapter(MarketplaceStore),
 }
+_USD_ADAPTERS = {
+    "profile": TypeAdapter(UsdProfile), "transactions": TypeAdapter(list[UsdTransaction]),
+    "tax": TypeAdapter(list[UsdTaxFiling]), "pg": TypeAdapter(list[UsdSettlement]),
+    "marketplace": TypeAdapter(UsdMarketplace),
+}
 _UNUSUAL = re.compile(r"[\[\]{}<>]|지시|무시|승인|ignore|system|instruction", re.IGNORECASE)
 _PAYROLL = re.compile(r"^급여\s+(\S+)$")
+_EN_PERSON = re.compile(r"^(?:payroll|salary|owner (?:draw|transfer|withdrawal))[:\s-]+(?:to\s+)?(.+)$", re.I)
+_EN_SUPPLIER = re.compile(r"^(.+?) inventory(?: purchase)?$", re.I)
 _OWNER = re.compile(r"^(\S+)\s+개인이체$")
 _NO_RETRY = ("consent_rejected", "invalid_payload")
 
@@ -209,7 +218,7 @@ def _summarize(source: str, parsed: Any) -> dict[str, Any]:
         "count": len(parsed),
         "first_date": dates[0].isoformat() if dates else None,
         "last_date": dates[-1].isoformat() if dates else None,
-        "platforms": sorted({s.platform for s in parsed}),
+        "platforms": sorted({s.platform_code if isinstance(s, UsdSettlement) else s.platform for s in parsed}),
     }
 
 
@@ -223,7 +232,7 @@ def _mask(value: Any, p: Pseudonymizer) -> Any:
     return value
 
 
-def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Transaction]) -> dict[str, str]:
+def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Transaction | UsdTransaction]) -> dict[str, str]:
     """상호·대표자·사업자번호와 적요 속 직원·대표자 이름을 가명 대상(값 → 종류)으로 모은다."""
     entities: dict[str, str] = {}
     if profile is not None:
@@ -232,13 +241,17 @@ def case_entities(profile: ApplicantProfile | None, transactions: Sequence[Trans
         entities[profile.business_reg_no] = "BIZNO"
     for t in transactions:
         match = _PAYROLL.match(t.description) or _OWNER.match(t.description)
+        if isinstance(t, UsdTransaction):
+            match = _EN_PERSON.match(t.description) or match
+            if supplier := _EN_SUPPLIER.match(t.description):
+                entities.setdefault(supplier[1], "BIZNAME")
         if match:
             entities.setdefault(match.group(1), "PERSON")
     return entities
 
 
 def build_pseudonymizer(
-    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction]
+    key: bytes, profile: ApplicantProfile | None, transactions: Sequence[Transaction | UsdTransaction]
 ) -> Pseudonymizer:
     return Pseudonymizer(key, case_entities(profile, transactions))
 
@@ -246,7 +259,9 @@ def build_pseudonymizer(
 class AssemblySession:
     """원천별 수집 상태. 도구 핸들러(fetch_source)와 안전망이 같은 세션을 쓴다."""
 
-    def __init__(self, api: SourceApi, token: str, scopes: Collection[str], pseudonym_key: bytes) -> None:
+    def __init__(self, api: SourceApi, token: str, scopes: Collection[str], pseudonym_key: bytes,
+                 product: UsdProduct | None = None) -> None:
+        self._adapters = _USD_ADAPTERS if product is not None else _ADAPTERS
         self._api = api
         self._token = token
         self._scopes = frozenset(scopes)
@@ -291,7 +306,7 @@ class AssemblySession:
             self.last_error[source] = "unavailable"
             return {"error": "unavailable", "retryable": self.can_retry(source)}
         try:
-            parsed = _ADAPTERS[source].validate_json(json.dumps(raw))
+            parsed = self._adapters[source].validate_json(json.dumps(raw))
         except (ValidationError, TypeError, ValueError):
             self.last_error[source] = "invalid_payload"
             return {"error": "invalid_payload", "retryable": False}
@@ -341,8 +356,9 @@ def assemble(
     pseudonym_key: bytes,
     runner: AgentRunner | None = None,
     model: str = DEFAULT_MODEL,
+    product: UsdProduct | None = None,
 ) -> AssemblyResult:
-    session = AssemblySession(api, token, scopes, pseudonym_key)
+    session = AssemblySession(api, token, scopes, pseudonym_key, product)
     flags: list[str] = []
     agent_record = assessment = agent_error = conversation_id = None
 
@@ -367,6 +383,11 @@ def assemble(
     for source in SOURCES:
         while session.consented(source) and source not in session.data and session.can_retry(source):
             session.fetch(source, "safety_net")
+
+    if product is not None:
+        invalid = [source for source, error in session.last_error.items() if error == "invalid_payload"]
+        if invalid:
+            raise ValueError(f"Invalid {product.product_version} source payload: {', '.join(invalid)}")
 
     missing = [s for s in SOURCES if s not in session.data and (session.consented(s) or s in REQUIRED)]
     status = "complete" if all(s in session.data for s in REQUIRED) else "incomplete"

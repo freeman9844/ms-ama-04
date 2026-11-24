@@ -31,6 +31,28 @@ def test_build_schedule():
                                   "reminder_status": None, "txn_id": None, "case_id": None}
 
 
+def test_usd_fifo_cent_and_remainder():
+    from agents import repayment
+    from shared.contracts import USD_V1, UsdTransaction
+
+    assert hasattr(repayment, "usd_schedule")
+    ledger = repayment.usd_schedule(START, 150001, 3)
+    items = ledger["schedule"]
+    assert [s["amount_cents"] for s in items] == [50000, 50000, 50001]
+    due = date.fromisoformat(items[1]["due_on"])
+    penny = UsdTransaction(**USD_V1.model_dump(), txn_id="penny", loan_id="A", amount_cents=-1,
+                           balance_after_cents=42, booked_on=due, description="AMALend loan repayment",
+                           txn_type_code="AUTO_DEBIT")
+    events = partial(repayment_events, items, lo=due, hi=due, installment_cents=50000, loan_id="A")
+    foreign = penny.model_copy(update={"txn_id": "other", "loan_id": "B"})
+    penny = penny.model_copy(update={"description": "Scheduled payment", "scheduled_item_key": "i2"})
+    allocations = events([foreign, penny, penny]).allocations
+    assert list(allocations) == ["i1"]
+    assert items[0]["amount_cents"] - sum(a["amount_cents"] for a in allocations["i1"]) == 49999
+    items[0].update(paid_cents=1, status="partial", allocations=allocations["i1"])
+    assert events([penny]).allocations == {}
+
+
 def test_reminder_on():
     assert reminder_on(date(2026, 12, 2)) == date(2026, 11, 29)
     assert EARLY_REMINDER_DAYS == 5 and early_reminder_on(date(2026, 12, 2)) == date(2026, 11, 27)

@@ -12,14 +12,15 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import ValidationError, TypeAdapter
 
 from agents.data_assembly import build_pseudonymizer
 from agents.notices import grievance_facts, write_grievance_reply
 from agents.pretranslate import load_case_raw
 from journey.activities import Deps, update_doc
-from journey.models import GrievanceDecision, GrievanceSubmission
-from journey.validation import validate_rereview_decision
+from journey.models import GrievanceDecision, GrievanceSubmission, UsdGrievanceDecision, UsdGrievanceSubmission
+from shared.product_context import product_of
+from journey.validation import validate_rereview_decision, usd_rereview_error
 from shared.opinions import opinion_state, published_opinion
 
 log = logging.getLogger("journey.grievance")
@@ -28,20 +29,28 @@ TOPIC_GRIEVANCE = "grievance"
 EVENT_GRIEVANCE_SUBMITTED = "grievance.submitted"
 PENDING = "pending_officer"
 RESOLVED = {"uphold": "resolved_upheld", "rereview": "resolved_rereviewed"}
+_SUBMISSION = TypeAdapter(GrievanceSubmission | UsdGrievanceSubmission)
+_DECISION = TypeAdapter(GrievanceDecision | UsdGrievanceDecision)
 
 
 def _snapshot(application: dict[str, Any]) -> dict[str, Any]:
     policy, assessment = application.get("policy"), application.get("assessment")
-    published = published_opinion(assessment, application.get("requested_amount_krw"))
+    product = product_of(application)
+    meta = product.model_dump() if product else {}
+    if policy and product_of(policy) != product:
+        raise ValueError("Grievance and policy products differ")
+    unit = "cents" if product else "krw"
+    published = published_opinion(assessment, application.get(f"requested_amount_{unit}"))
     if published is not None:
         visible = {k: published[k] for k in ("schema_version", "recommendation", "review", "summary", "counterfactuals")
                    if k in published}
     else:
         visible = {"schema_version": "1"} if opinion_state(assessment) == "legacy" else None
     return {
+        **meta,
         "status": application.get("status"),
         "policy": (
-            {k: policy.get(k) for k in ("decision", "max_amount_krw", "rate_band", "reason_codes", "rules_version")}
+            {**meta, **{k: policy.get(k) for k in ("decision", f"max_amount_{unit}", "rate_band", "reason_codes", "rules_version")}}
             if policy
             else None
         ),
@@ -68,7 +77,7 @@ def _reason_mask(deps: Deps, grievance: dict[str, Any]) -> Callable[[str], str] 
 def handle_grievance(deps: Deps, body: str) -> str:
     """created | duplicate | unknown(신청·차주 불일치) | not_decided(결정 전) | invalid."""
     try:
-        msg = GrievanceSubmission.model_validate_json(body)
+        msg = _SUBMISSION.validate_json(body)
     except ValidationError as e:
         log.warning("잘못된 이의제기 메시지 폐기: %s", e.errors(include_input=False)[:3])
         return "invalid"
@@ -80,7 +89,12 @@ def handle_grievance(deps: Deps, body: str) -> str:
         return "unknown"
     if not application.get("officer_decision"):
         return "not_decided"
+    product = product_of(application)
+    if product != product_of(msg.model_dump()):
+        return "invalid"
+    meta = product.model_dump() if product else {}
     doc: dict[str, Any] = {
+        **meta,
         "id": msg.grievance_id,
         "grievance_id": msg.grievance_id,
         "application_id": msg.application_id,
@@ -100,7 +114,7 @@ def handle_grievance(deps: Deps, body: str) -> str:
         doc["event_error"] = "servicebus_disabled"
     else:
         # 이의 내용은 개인정보가 섞일 수 있어 이벤트에 넣지 않는다.
-        message = {"type": EVENT_GRIEVANCE_SUBMITTED, "grievance_id": msg.grievance_id, "application_id": msg.application_id}
+        message = {**meta, "type": EVENT_GRIEVANCE_SUBMITTED, "grievance_id": msg.grievance_id, "application_id": msg.application_id}
         try:
             deps.events.publish(TOPIC_GRIEVANCE, message, f"{EVENT_GRIEVANCE_SUBMITTED}:{msg.grievance_id}")
             doc["event_published"] = True
@@ -113,7 +127,7 @@ def handle_grievance(deps: Deps, body: str) -> str:
 def handle_grievance_decision(deps: Deps, body: str) -> str:
     """resolved | rejected(정책 밖 재심사) | ignored(이미 처리됨) | unknown | invalid."""
     try:
-        msg = GrievanceDecision.model_validate_json(body)
+        msg = _DECISION.validate_json(body)
     except ValidationError as e:
         log.warning("잘못된 이의 처리 메시지 폐기: %s", e.errors(include_input=False)[:3])
         return "invalid"
@@ -124,15 +138,16 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
         return "ignored"
     at = deps.clock().isoformat()
     record = current["record"]
+    product = product_of(current)
+    if product != product_of(msg.model_dump()) or product != product_of(record):
+        return "invalid"
     if msg.outcome == "rereview":
-        proposed = {
-            "decision": msg.new_decision,
-            "officer_id": msg.officer_id,
-            "amount_krw": msg.amount_krw,
-            "conditions": msg.conditions,
-            "reason": msg.reason,
-        }
-        _, error = validate_rereview_decision(proposed, record["policy"])
+        if isinstance(msg, UsdGrievanceDecision):
+            error = usd_rereview_error(msg, record.get("policy") or {})
+        else:
+            proposed = {"decision": msg.new_decision, "officer_id": msg.officer_id, "amount_krw": msg.amount_krw,
+                        "conditions": msg.conditions, "reason": msg.reason}
+            _, error = validate_rereview_decision(proposed, record["policy"])
         if error:
             attempt = {"at": at, "error": error, "payload": msg.model_dump(mode="json")}
 
@@ -145,7 +160,7 @@ def handle_grievance_decision(deps: Deps, body: str) -> str:
             update_doc(deps.store, GRIEVANCES_CONTAINER, msg.grievance_id, msg.application_id, reject)
             return "rejected"
     decision = {**msg.model_dump(mode="json", exclude={"grievance_id", "application_id"}), "at": at}
-    mask = _reason_mask(deps, current) if deps.agents is not None else None
+    mask = _reason_mask(deps, current) if not product and deps.agents is not None else None
     reply = write_grievance_reply(grievance_facts(record, decision), runner=deps.agents, model=deps.grievance_model, mask=mask)
     resolved = False
 

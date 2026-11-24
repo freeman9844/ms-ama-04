@@ -25,6 +25,7 @@ param consoleIp string
 param consoleAuthEnabled bool
 @description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
 param consoleDemoRole string
+param usdOriginationEnabled bool = false
 @description('운영 경보 수신 이메일. 비면 Action Group 없이 포털 경보만 남깁니다.')
 param opsAlertEmail string = ''
 @description('true면 운영 LLM 호출을 APIM AI 게이트웨이로 보냅니다(AI_GATEWAY=apim). false면 직접 호출(롤백).')
@@ -150,6 +151,7 @@ module identities 'modules/identities.bicep' = {
     names: {
       orchestrator: names.idOrchestrator
       apps: names.idApps
+      mockapi: 'id-mockapi-${environmentName}'
       smoke: names.idSmoke
       console: names.idConsole
       eval: names.idEval
@@ -253,7 +255,7 @@ module stFunc 'modules/storage.bicep' = {
       { groupId: 'queue', zoneId: zoneId[queueZone] }
       { groupId: 'table', zoneId: zoneId[tableZone] }
     ]
-    containers: [ 'deploymentpackage' ]
+    containers: [ 'deploymentpackage', 'consent-authority' ]
     queues: [
       'applications-start', 'officer-decisions', 'monitoring-replay', 'restructure-decisions'
       'consent-lifecycle', 'consent-commands', 'grievances', 'grievance-decisions'
@@ -444,6 +446,7 @@ module acr 'modules/acr.bicep' = {
     zoneId: zoneId['privatelink.azurecr.io']
     roleAssignments: concat([
       { principalId: identities.outputs.appsPrincipalId, roleId: role.acrPull, principalType: sp }
+      { principalId: identities.outputs.mockapiPrincipalId, roleId: role.acrPull, principalType: sp }
       { principalId: identities.outputs.consolePrincipalId, roleId: role.acrPull, principalType: sp }
       { principalId: identities.outputs.evalPrincipalId, roleId: role.acrPull, principalType: sp }
       { principalId: identities.outputs.opsPrincipalId, roleId: role.acrPull, principalType: sp }
@@ -514,6 +517,15 @@ module mockSecretGuard 'modules/require-secret.bicep' = if (!empty(mockapiImage)
   params: { value: mockConsentSecret }
 }
 
+module mockAuthorityAccess 'modules/blob-container-role.bicep' = {
+  name: 'mock-authority-access'
+  params: {
+    storageName: stFunc.outputs.name
+    containerName: 'consent-authority'
+    roleAssignments: [ { principalId: identities.outputs.mockapiPrincipalId, roleId: role.blobContributor, principalType: sp } ]
+  }
+}
+
 module caMockapi 'modules/container-app.bicep' = {
   name: 'ca-mockapi'
   params: {
@@ -522,13 +534,14 @@ module caMockapi 'modules/container-app.bicep' = {
     tags: tags
     serviceName: 'mockapi'
     environmentId: acaInt.outputs.id
-    identityId: identities.outputs.appsId
-    identityClientId: identities.outputs.appsClientId
+    identityId: identities.outputs.mockapiId
+    identityClientId: identities.outputs.mockapiClientId
     registryServer: acr.outputs.loginServer
     image: mockapiImage
+    envVars: [ { name: 'MOCK_AUTHORITY_URL', value: 'https://${names.stFunc}.blob.${storageSuffix}/consent-authority' } ]
     secretEnv: { MOCK_CONSENT_SECRET: mockConsentSecret }
   }
-  dependsOn: [ mockSecretGuard ]
+  dependsOn: [ mockSecretGuard, mockAuthorityAccess ]
 }
 
 output POLICY_APP_NAME string = caPolicy.outputs.name
@@ -633,6 +646,7 @@ module caConsole 'modules/container-app.bicep' = {
       { name: 'AI_GATEWAY', value: gatewaySettings.AI_GATEWAY }
       { name: 'AI_GATEWAY_URL', value: gatewaySettings.AI_GATEWAY_URL }
       { name: 'CHAT_MODEL', value: 'gpt-6-luna' }
+      { name: 'USD_ORIGINATION_ENABLED', value: usdOriginationEnabled ? 'true' : 'false' }
     ], consoleAuthEnabled ? [] : [
       { name: 'CONSOLE_AUTH_MODE', value: 'demo' }
       { name: 'CONSOLE_DEMO_ROLE', value: consoleDemoRole }

@@ -11,6 +11,23 @@ from shared.contracts import Transaction
 AS_OF = date(2026, 11, 2)
 
 
+def test_usd_forecast_does_not_repeat_initial_stock_purchase_or_surplus_sweeps():
+    from agents.forecast import project_usd
+    from mockapis.demo import FlowStore
+
+    start = date(2026, 11, 24)
+    store = FlowStore(build_demo_cases(start), start)
+    flow = store.usd_flow("seller-bakery-20", "loan-bakery", 500000, 83333, 6)
+    first_week = [t for t in flow.transactions if t.booked_on <= date(2026, 11, 30)]
+    due = date(2026, 12, 24)
+    path = project_usd(first_week, start, date(2026, 11, 30), {due: 83333})["path"]
+    # Its ordinary business covers the payment. The opening inventory purchase happened once;
+    # a transfer of surplus to the owner is not a fixed bill that can overdraw this account.
+    assert min(p["balance_cents"] for p in path) > 0
+    payment = next(p for p in path if p["date"] == due.isoformat())
+    assert payment["before_payment_cents"] - payment["balance_cents"] == 83333
+
+
 @pytest.fixture(scope="module")
 def cafe():
     return build_demo_cases(AS_OF)["seller-dailylook-01"]

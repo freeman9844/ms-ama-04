@@ -9,10 +9,12 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from agents.data_assembly import build_pseudonymizer
+from agents.pretranslate import load_case_raw
 from agents.evidence import build_catalog
 from console.i18n import _
 from console.officer_chat import policy_trace
-from shared.contracts import ApplicantProfile, Transaction
+from shared.contracts import ApplicantProfile, Transaction, UsdTransaction
+from shared.product_context import product_of
 from shared.opinions import opinion_state, published_opinion
 
 DECIDABLE = frozenset({"awaiting_officer", "escalated"})
@@ -25,7 +27,7 @@ class RawStore(Protocol):
 @dataclass(frozen=True)
 class RawData:
     profile: ApplicantProfile
-    transactions: list[Transaction]
+    transactions: list[Transaction | UsdTransaction]
 
 
 def raw_container(consent_id: str) -> str:
@@ -34,15 +36,8 @@ def raw_container(consent_id: str) -> str:
 
 
 def load_raw(store: RawStore, doc: Mapping[str, Any]) -> RawData | None:
-    consent = doc.get("consent") or {}
-    if not consent.get("consent_id"):
-        return None
-    container = raw_container(consent["consent_id"])
-    profile = store.get_json(container, "profile.json")
-    txns = store.get_json(container, "transactions.json")
-    if profile is None or txns is None:
-        return None
-    return RawData(ApplicantProfile.model_validate(profile), [Transaction.model_validate(t) for t in txns])
+    raw = load_case_raw("applications", doc, store, lambda *_: None)
+    return RawData(*raw) if raw else None
 
 
 def _map_strings(value: Any, fn: Callable[[str], str]) -> Any:
@@ -87,7 +82,8 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         else {}
     )
     state = opinion_state(doc.get("assessment"))
-    assessment = _map_strings(published_opinion(doc.get("assessment"), doc.get("requested_amount_krw")), model_text)
+    unit = "cents" if product_of(doc) else "krw"
+    assessment = _map_strings(published_opinion(doc.get("assessment"), doc.get(f"requested_amount_{unit}")), model_text)
     display_doc = {k: v for k, v in doc.items() if k not in ("assessment", "assessment_run")}
     if (error := doc.get("error")) and error.get("stage") in ("assess", "assess_credit"):
         display_doc["error"] = {"stage": error["stage"], "message": _("의견 없음")}
@@ -114,7 +110,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         {
             "txn_id": t.txn_id,
             "booked_on": t.booked_on.isoformat(),
-            "amount_krw": t.amount_krw,
+            f"amount_{unit}": getattr(t, f"amount_{unit}"),
             "description": raw_text(t.description),
         }
         for t in (raw.transactions if raw else ())
@@ -131,7 +127,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "features": uw.get("features") or {},
         "policy": policy,
         "decidable": doc.get("status") in DECIDABLE,
-        "max_amount_krw": (policy or {}).get("max_amount_krw"),
+        f"max_amount_{unit}": (policy or {}).get(f"max_amount_{unit}"),
         "policy_blocked": (policy or {}).get("decision") not in ("eligible", "refer"),
         "policy_compare": _policy_compare(policy),
         "substitutions": _substitutions(policy, uw.get("features"), doc.get("received_at")),
