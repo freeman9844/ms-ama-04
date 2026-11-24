@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from shared.contracts import Transaction
+from shared.contracts import USD_V1, Transaction, UsdTransaction
 from shared.product_context import product_of
-from shared.repayment import LENDER_DEBIT, REMINDER_DAYS, due_dates
+from shared.repayment import LENDER_DEBIT, REMINDER_DAYS, USD_DEBIT, due_dates, usd_installments
 
 EARLY_REMINDER_DAYS = 5  # 조기경보 1단계 뒤 상환일 5일 전 추가 안내
 
@@ -31,6 +31,14 @@ def reminder_on(due: date) -> date:
     return due - timedelta(days=REMINDER_DAYS)
 
 
+def usd_schedule(start: date, principal: int, months: int) -> dict[str, Any]:
+    dues = usd_installments(start, principal, months)
+    return {**USD_V1.model_dump(), "installment_cents": dues[0][1], "schedule": [
+        dict(no=n, due_on=d.isoformat(), amount_cents=a, paid_cents=0, balance_cents=a,
+             status="scheduled", reminded_on=None, reminder_status=None, txn_id=None, case_id=None)
+        for n, (d, a) in enumerate(dues, 1)]}
+
+
 def early_reminder_on(due: date) -> date:
     return due - timedelta(days=EARLY_REMINDER_DAYS)
 
@@ -41,7 +49,7 @@ def item_key(item: Mapping[str, Any]) -> str:
 
 
 def item_amount(item: Mapping[str, Any], installment_krw: int) -> int:
-    return item.get("amount_krw") or installment_krw
+    return item["amount_cents"] if "amount_cents" in item else item.get("amount_krw") or installment_krw
 
 
 def current_quoted_installment(loan: Mapping[str, Any], case: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -68,7 +76,10 @@ def current_quoted_installment(loan: Mapping[str, Any], case: Mapping[str, Any])
     return item
 
 
-def repayment_debit(t: Transaction, loan_id: str | None) -> bool:
+def repayment_debit(t: Transaction | UsdTransaction, loan_id: str | None) -> bool:
+    if isinstance(t, UsdTransaction):
+        return bool(loan_id and t.loan_id == loan_id and t.amount_cents < 0
+                    and t.txn_type_code == "AUTO_DEBIT" and (t.scheduled_item_key or t.description == USD_DEBIT))
     return t.loan_id in (None, loan_id) and t.description == LENDER_DEBIT and t.amount_krw < 0
 
 
@@ -83,12 +94,13 @@ class RepaymentWeek:
 
 def week_events(
     schedule: Sequence[Mapping[str, Any]],
-    txns: Sequence[Transaction],
+    txns: Sequence[Transaction | UsdTransaction],
     lo: date,
     hi: date,
     early_from: date | None = None,
     *,
-    installment_krw: int,
+    installment_krw: int | None = None,
+    installment_cents: int | None = None,
     loan_id: str,
 ) -> RepaymentWeek:
     """이번 주(lo~hi) 3일 전 안내·납부·미납 회차 키. early_from(조기경보 1단계 날짜)이 있으면
@@ -97,17 +109,23 @@ def week_events(
     early: list[str] = []
     paid: list[tuple[str, str]] = []
     missed: list[str] = []
+    usd = installment_cents is not None
+    if (usd == (installment_krw is not None) or any(isinstance(t, UsdTransaction) != usd for t in txns)
+            or any(("amount_cents" in s) != usd for s in schedule)):
+        raise ValueError("Repayment units do not match")
+    amount_key, paid_key = ("amount_cents", "paid_cents") if usd else ("amount_krw", "paid_krw")
+    installment = installment_cents if usd else installment_krw
     ordered = sorted(schedule, key=lambda s: (s["due_on"], s["no"], s.get("part") or 0))
     used = {a["txn_id"] for s in schedule for a in s.get("allocations", ())}
     used.update(s["txn_id"] for s in schedule if s.get("txn_id"))
-    remaining = {item_key(s): item_amount(s, installment_krw) - s.get("paid_krw", 0)
+    remaining = {item_key(s): item_amount(s, installment) - s.get(paid_key, 0)
                  for s in ordered if s["status"] in ("scheduled", "partial", "missed")}
     allocations: dict[str, list[dict[str, Any]]] = {}
     for t in sorted(txns, key=lambda t: (t.booked_on, t.txn_id)):
         if not lo <= t.booked_on <= hi or t.txn_id in used or not repayment_debit(t, loan_id):
             continue
         used.add(t.txn_id)
-        funds = -t.amount_krw
+        funds = -getattr(t, amount_key)
         for item in ordered:
             if not funds or item["due_on"] > t.booked_on.isoformat():
                 break
@@ -115,7 +133,7 @@ def week_events(
             applied = min(remaining.get(key, 0), funds)
             if applied > 0:
                 allocations.setdefault(key, []).append({
-                    "txn_id": t.txn_id, "booked_on": t.booked_on.isoformat(), "amount_krw": applied,
+                    "txn_id": t.txn_id, "booked_on": t.booked_on.isoformat(), amount_key: applied,
                 })
                 remaining[key] -= applied
                 funds -= applied

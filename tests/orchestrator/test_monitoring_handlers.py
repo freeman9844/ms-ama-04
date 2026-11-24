@@ -213,6 +213,12 @@ def mock_app():
 
 
 class RegistrationStore(MemoryStore):
+    def prior_contact_slots(self, borrower, lo, hi):
+        ids = {i for (c, i), d in self.docs.items() if c == LOANS and d.get("applicant_id") == borrower}
+        return [dict(loan_id=d["loan_id"], ref=s["ref"], by=s["by"], on=s["on"])
+                for (c, _), d in self.docs.items() if c == ALERTS and d.get("loan_id") in ids
+                for s in d.get("contacts", []) if s["status"] == "sent" and lo <= s["on"] <= hi]
+
     def create_if_absent(self, container, document):
         key = (container, document["id"])
         self.docs.setdefault(key, deepcopy(document))
@@ -329,6 +335,210 @@ def officer_contacts(deps, replay_id):
 
 def loan(deps):
     return deps.store.read(LOANS, LOAN, LOAN)
+
+
+def test_contact_cap_across_currencies(mock_app):
+    deps = make_deps(mock_app)
+    from shared.contracts import USD_V1
+    borrower = "same-borrower"
+    deps.store.upsert(LOANS, dict(id="old", applicant_id=borrower))
+    deps.store.upsert(ALERTS, dict(id="contacts-old", loan_id="old", contacts=[
+        dict(ref=f"old-{i}", by="officer", on="2026-11-02", status="sent") for i in range(7)]))
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id=borrower))
+    contact = dict(ref="new", by="reminder", on="2026-11-03", status="sent")
+    assert hasattr(monitoring_module, "_reserve_contact")
+    monitoring_module._reserve_contact(deps, LOAN, contact)
+    assert (contact["status"], contact["reason"]) == ("deferred", "weekly_limit")
+
+
+def test_cross_loan_slot_race_and_recovery_expose_no_case_or_amount(mock_app, monkeypatch):
+    from shared.contracts import USD_V1
+    deps = make_deps(mock_app)
+    deps.store.upsert(LOANS, dict(id="legacy", applicant_id="same"))
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id="same"))
+    def send(lid, ref):
+        entry = dict(ref=ref, by="officer", on="2026-11-02", status="sent")
+        monitoring_module._reserve_contact(deps, lid, entry)
+        return entry["status"]
+    for i in range(6):
+        assert send("legacy", str(i)) == "sent"
+    real = deps.store.replace_batch
+    def contend(*args):
+        monkeypatch.setattr(deps.store, "replace_batch", real)
+        assert send(LOAN, "rc-usd-i1-b49999") == "sent"
+        return real(*args)
+    monkeypatch.setattr(deps.store, "replace_batch", contend)
+    assert send("legacy", "last-slot") == "deferred"
+    assert send(LOAN, "rc-usd-i1-b49999") == "sent"  # retry of the winning slot
+    records = [doc for (c, k), doc in deps.store.docs.items() if k.startswith("cap-")]
+    assert records and "b49999" not in str(records)
+
+
+def test_usd_worker_partial_redelivery_and_late_payoff(mock_app):
+    from agents.repayment import usd_schedule
+    from shared.contracts import USD_V1, UsdTransaction
+    from shared.repayment import USD_DEBIT
+    deps, meta = make_deps(mock_app), USD_V1.model_dump()
+    led = usd_schedule(AS_OF, 150001, 3)
+    doc = dict(meta, id=LOAN, applicant_id="borrower", monitoring={"alert_ids": [], "replay_id": "rp-usd"},
+               repayment=led)
+    deps.store.upsert(LOANS, doc)
+    item = led["schedule"][0]
+    due = date.fromisoformat(item["due_on"])
+    penny = UsdTransaction(**meta, txn_id="one", loan_id=LOAN, scheduled_item_key="i1", amount_cents=-1,
+                           balance_after_cents=50000, booked_on=due, description=USD_DEBIT, txn_type_code="AUTO_DEBIT")
+    def post(txns, day):
+        monitoring_module._repayment_week(deps, LOAN, "rp-usd", doc, txns, day, day, 5, {})
+    post([penny], due)
+    cid = item["case_id"]
+    assert (item["paid_cents"], item["balance_cents"], item["status"]) == (1, 49999, "partial")
+    snapshot = deepcopy(doc)
+    post([penny], due)
+    assert doc == snapshot
+    later = due + timedelta(days=1)
+    post([penny.model_copy(update=dict(txn_id="rest", booked_on=later, amount_cents=-49999,
+                                       scheduled_item_key=None))], later)
+    assert (item["paid_cents"], item["balance_cents"], item["status"]) == (50000, 0, "paid")
+    assert deps.store.read(ALERTS, cid, LOAN)["status"] == "paid"
+    assert monitoring_module.run_collections(deps, LOAN, cid) is None
+
+
+def test_usd_final_week_resolved_before_hold_does_not_publish_week_fourteen(mock_app):
+    from shared.contracts import USD_V1
+    deps = make_deps(mock_app, events=Outbox())
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, monitoring=dict(status="replaying",
+        processed_week=13, replay_id="rp-final", weeks=[{"case_id": "rc-final"}])))
+    deps.store.upsert(ALERTS, dict(id="rc-final", loan_id=LOAN, status="rejected", proposal={"status": "rejected"}))
+    monitoring_module._continue(deps, LOAN, "rp-final", 13, "rc-final")
+    assert not deps.events.sent and loan(deps)["monitoring"]["status"] == "completed"
+
+
+class EnglishHigh:
+    def run(self, spec, input_text, handlers):
+        if spec.name != EW_AGENT:
+            raise RuntimeError("Offline collections fallback")
+        base = handlers["get_baseline"]({})
+        cause = next(iter(base["cause_candidates"]), {})
+        evidence = cause.get("evidence_ids") or [f"W:{base['current_week']}:revenue_vs_expected"]
+        out = handlers["raise_alert"](dict(severity="high", summary="Receipts are under pressure.",
+            check_action="Check available funds.", recommended_action="contact_borrower",
+            primary_cause=cause.get("cause", ""), secondary_causes=[], signals=[dict(
+                kind="inflow_drop", text="Check recent receipts.", metric_ids=evidence, txn_ids=[])]))
+        assert out["accepted"], out
+        return AgentRun(spec.name, "1", "offline", spec.output_model.model_validate(
+            dict(decision="alert", reason="Review the payment schedule.")), [], 1, 1)
+
+
+@pytest.mark.parametrize("seller,stress,high", [("seller-bakery-20", False, False),
+    ("seller-dailylook-01", True, False), ("seller-dailylook-01", True, True)])
+def test_usd_officer_to_servicing(run_journey, seller, stress, high):
+    import asyncio
+    from functools import partial
+    from unittest.mock import AsyncMock
+    from journey.activities import ACTIVITIES
+    from journey.adapters import HttpPolicyApi
+    from journey.entry import handle_decision, handle_start
+    from policy.app import create_app
+    from policy.rules import load_rules
+    from shared.contracts import USD_V1
+    from shared.product_context import validate_usd_evidence
+
+    day = date(2026, 11, 24)
+    sellers = build_demo_cases(day)
+    outbox = Outbox()
+    now = NOW.replace(day=day.day)
+    deps = make_deps(create_mock_app(sellers, SECRET, lambda: now, flows=FlowStore(sellers, day)), outbox)
+    deps = replace(deps, policy=HttpPolicyApi(client=TestClient(create_app(load_rules()))), clock=lambda: now)
+    meta = USD_V1.model_dump()
+    acts = {k: partial(f, deps) for k, f in ACTIVITIES.items()}
+    acts["assess_credit"] = lambda _: {"assessment": {"review": {"passed": True}}}
+    decision = dict(meta, decision="approve", amount_cents=500000, officer_id="test-officer")
+    durable = AsyncMock()
+    durable.get_status.return_value = None
+    durable.start_new.return_value = LOAN
+    request = dict(meta, application_id=LOAN, applicant_id=seller, requested_amount_cents=500000,
+                   requested_tenor_months=6)
+    assert asyncio.run(handle_start(durable, json.dumps(request))) == LOAN
+    durable.get_status.return_value = type("Running", (), {"runtime_status": "Running"})()
+    assert asyncio.run(handle_decision(durable, json.dumps(dict(application_id=LOAN, decision=decision))))
+    result, ctx = run_journey(durable.start_new.call_args.args[2], acts, [("event", {**decision, "currency": "KRW"}),
+                              ("event", durable.raise_event.call_args.args[2])], start=now)
+    assert result["status"] == "approved" and len(ctx.saved[-1]["decision_attempts"]) == 1
+    assert loan(deps)["amount_cents"] == 500000
+    registration = ctx.called("register_monitoring")[0].input
+    assert register_monitoring(deps, registration) == {"loan_id": LOAN}
+    with pytest.raises(ValueError, match="registration"):
+        register_monitoring(deps, registration | {"amount_cents": 499999})
+    saved = deps.store.read("applications", LOAN, LOAN)
+    deps.store.upsert("applications", {**saved, "officer_decision": None, "status": "awaiting_officer"})
+    with pytest.raises(ValueError, match="approval"):
+        register_monitoring(deps, registration)
+    deps.store.upsert("applications", saved)
+    assert replay(deps) is None and loan(deps)["monitoring"] is None
+    if stress and not high:
+        deps.store.upsert(LOANS, dict(id="legacy-usd-peer", applicant_id=seller))
+        deps.store.upsert(ALERTS, dict(id="contacts-old", loan_id="legacy-usd-peer", contacts=[
+            dict(ref=f"old-{i}", by="officer", on="2027-02-18", status="sent") for i in range(7)]))
+    started = replay(deps, **meta)
+    rid = started["replay_id"]
+    if high:
+        deps = replace(deps, agents=EnglishHigh())
+    pump(deps, outbox)
+    if high:
+        mon = loan(deps)["monitoring"]
+        assert mon["status"] == "awaiting_customer" and mon["paused_week"] < 13
+        offer = loan(deps)["repayment"]["offer"]
+        assert handle_restructure_decision(deps, json.dumps(dict(meta, loan_id=LOAN, kind="plan_choice",
+                                                                  offer_id=offer["offer_id"], option="split")))
+        change = loan(deps)["repayment"]["plan_change"]
+        assert loan(deps)["monitoring"]["holds"] == ["plan_change"]
+        assert sum(i["amount_cents"] for i in change["items"]) == 83333
+        assert handle_restructure_decision(deps, json.dumps(dict(meta, loan_id=LOAN, kind="plan_change",
+                                        change_id=change["change_id"], decision="approve", officer_id="officer")))
+        assert replay(deps, action="resume", replay_id=rid, **meta)
+        pump(deps, outbox)
+    if stress:
+        mon = loan(deps)["monitoring"]
+        assert (mon["status"], mon["holds"]) == ("paused", ["collections_proposal"])
+        assert mon["alert_ids"]
+        assert not officer_contacts(deps, rid)
+        if not high:
+            assert mon["paused_week"] == 13
+            assert cases(deps)[0]["proposal"]["evidence"]["amount_cents"] == 83333
+            assert cases(deps)[0]["proposal"]["evidence"]["contacts_7d"] == 7
+        while (mon := loan(deps)["monitoring"])["status"] == "paused":
+            assert decide_collections(deps, mon["pause_case_id"], **meta)
+            assert replay(deps, action="resume", replay_id=rid, **meta)
+            pump(deps, outbox)
+        assert officer_contacts(deps, rid)
+        if not high:
+            assert officer_contacts(deps, rid)[0]["reason"] == "weekly_limit"
+    doc = loan(deps)
+    assert doc["monitoring"]["status"] == "completed"
+    assert [w["week"] for w in doc["monitoring"]["weeks"]] == list(range(1, 14))
+    assert len(doc["monitoring"]["weeks"][0]["projection"]["path"]) == 28
+    if not high:
+        assert sum(i.get("paid_cents", 0) for i in doc["repayment"]["schedule"]) == 83333 * (2 if stress else 3)
+    else:
+        assert len(doc["repayment"]["plan_history"]) == 1
+        history = doc["repayment"]["plan_history"][0]
+        assert sum(i["amount_cents"] for i in history["after"]) == sum(i["amount_cents"] for i in history["before"])
+        assert all(c.get("text", "").isascii() for c in contacts(deps, rid))
+    assert all(m["currency"] == "USD" for t, m, *_ in outbox.sent if t in (TOPIC_FLOW, TOPIC_REPAYMENT, TOPIC_ALERT))
+    validate_usd_evidence([doc, *cases(deps), *alerts(deps)])
+    assert handle_flow_update(deps, outbox.bodies(TOPIC_FLOW)[0]) is None
+    assert doc["repayment"] == loan(deps)["repayment"]
+    if not stress:
+        class WrongLoanFeed:
+            def __getattr__(self, key):
+                return getattr(deps.mock, key)
+            def fetch(self, source, token, params):
+                rows = deps.mock.fetch(source, token, params)
+                if source == "flow":
+                    return [dict(r, loan_id="another") if r.get("loan_id") else r for r in rows]
+                return rows
+        with pytest.raises(ValueError, match="loan"):
+            monitoring_module.start_replay(replace(deps, mock=WrongLoanFeed()), LOAN)
 
 
 def alerts(deps):
@@ -1222,14 +1432,14 @@ def test_usd_collection_worker_rechecks_live_cent_balance(mock_app, live, accept
     from shared.contracts import USD_V1
     deps, meta = make_deps(mock_app), USD_V1.model_dump()
     cid, rid = "rc-rp-1-i1", "rp-1"
-    deps.store.upsert(LOANS, dict(meta, id=LOAN, monitoring=dict(replay_id=rid, processed_week=0),
+    deps.store.upsert(LOANS, dict(meta, id=LOAN, applicant_id="same", monitoring=dict(replay_id=rid, processed_week=0),
         repayment={"schedule": [dict(case_id=cid, status="missed", balance_cents=live, due_on="2026-11-02")]}))
     deps.store.upsert(ALERTS, dict(meta, id=cid, case_id=cid, loan_id=LOAN, replay_id=rid,
         kind="repayment_case", week=1, missed_count=1, status="proposal_pending",
         installment={"no": 1, "due_on": "2026-11-02", "amount_cents": 70001},
         proposal=dict(status="pending_officer", script_id="missed_payment", evidence=dict(meta, amount_cents=70001))))
     text = "Your balance is $700.01."
-    assert decide_collections(deps, cid, "modify", text=text) is accepted
+    assert decide_collections(deps, cid, "modify", text=text, **meta) is accepted
     assert [c["text"] for c in officer_contacts(deps, rid)] == ([text] if accepted else [])
 
 

@@ -136,6 +136,20 @@ class CosmosStore:
     def upsert(self, container: str, document: dict[str, Any]) -> None:
         self._db.get_container_client(container).upsert_item(document)
 
+    def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]:
+        loans = self._db.get_container_client("loans").query_items(
+            "SELECT VALUE c.id FROM c WHERE c.applicant_id=@borrower",
+            parameters=[{"name": "@borrower", "value": borrower}], enable_cross_partition_query=True)
+        alerts = self._db.get_container_client("alerts")
+        slots = []
+        for loan_id in loans:
+            slots.extend(alerts.query_items(
+                'SELECT VALUE {"loan_id": c.loan_id, "ref": s["ref"], "by": s["by"], "on": s["on"]} '
+                'FROM c JOIN s IN c.contacts '
+                """WHERE STARTSWITH(c.id, 'contacts-') AND s.status='sent' AND s["on"] BETWEEN @lo AND @hi""",
+                parameters=[{"name": "@lo", "value": lo}, {"name": "@hi", "value": hi}], partition_key=loan_id))
+        return slots
+
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None:
         from azure.cosmos.exceptions import CosmosResourceNotFoundError
 

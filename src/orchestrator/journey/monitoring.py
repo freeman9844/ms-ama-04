@@ -16,6 +16,8 @@ awaiting_resume에서 resume·stop 요청을 기다린다. 미납이면 추심 �
 Service Bus가 꺼져 있으면(deps.events is None) handle_replay가 같은 처리를 순서대로 직접 한다.
 """
 
+import hashlib
+import json
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -23,19 +25,24 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from agents.collections import CollectionsContext, RepaymentCase, act, build_proposal, fair_check, remind, settle_proposal
+from agents.collections import MAX_CONTACTS_PER_7_DAYS, CollectionsContext, RepaymentCase, act, build_proposal, fair_check, remind, settle_proposal
 from agents.data_assembly import build_pseudonymizer
 from agents.early_warning import EwContext, investigate
 from agents.pretranslate import load_case_raw
+from agents.usd_monitoring import observe_usd
+from shared.contracts import UsdProduct
+from shared.money import format_usd
+from shared.usd_source import UsdPgFlow, UsdProfile
 from shared.product_context import product_of
 from agents.escalation import TEMPLATES, auto_contact, next_stage, plan_link, sim_now, stage_message
 from agents.features import monthly_installment
 from agents.ledger_monitor import LedgerBaseline, ledger_baseline, observe, platform_weeks
 from agents.monitoring import WEEKS, Baseline, categorize, due_check, projection, week_window
-from agents.repayment import build_schedule, current_quoted_installment, early_reminder_on, item_amount, item_key, reminder_on, week_events
+from agents.repayment import build_schedule, current_quoted_installment, early_reminder_on, item_amount, item_key, reminder_on, usd_schedule, week_events
 from agents.repayment_plan import AmbiguousScheduledDebit, apply_change, apply_plan, main_platform, payout_days, plan_options
 from journey.activities import (
     _TRANSACTIONS,
+    _USD_TRANSACTIONS,
     ENDED_CONSENT,
     Deps,
     _remember_foundry,
@@ -57,6 +64,7 @@ from journey.models import (
     PlanDecision,
     REPLAY_HELD,
     RepaymentUpdated,
+    UsdRepaymentUpdated,
     ReplayRequest,
     RestructureDecision,
     replay_held,
@@ -73,19 +81,45 @@ class OutOfOrder(RuntimeError):
     """앞 주차가 처리되지 않았다. 메시지를 되돌려 재시도하게 한다."""
 
 
-def _stored_flow(deps: Deps, consent_id: str) -> list[Transaction]:
+def _meta(record):
+    product = product_of(record)
+    return product.model_dump() if product else {}
+
+
+def _installment(ledger):
+    return ledger["installment_cents"] if "installment_cents" in ledger else ledger["installment_krw"]
+
+
+def _command(deps, body, model):
+    raw = json.loads(body)
+    if not isinstance(raw, dict):
+        raise ValueError("Expected command object")
+    product = product_of(raw)
+    fields = {k: v for k, v in raw.items() if k not in UsdProduct.model_fields}
+    if product and model is RepaymentUpdated:
+        msg = UsdRepaymentUpdated.model_validate(raw)
+    else:
+        msg = model.validate_python(fields) if model is OFFICER_MESSAGE else model.model_validate(fields)
+    loan = deps.store.read(LOANS, msg.loan_id, msg.loan_id)
+    if loan and product != product_of(loan):
+        raise ValueError("Command does not match loan product")
+    return msg
+
+
+def _stored_flow(deps: Deps, consent_id: str, usd=False) -> list[Transaction]:
     flow = deps.raw.get_json(raw_container(consent_id), "flow.json")
     if flow is None:
         raise RuntimeError(f"사후 흐름 없음: {consent_id}")
-    return _TRANSACTIONS.validate_python(flow)
+    return (_USD_TRANSACTIONS if usd else _TRANSACTIONS).validate_python(flow)
 
 
 def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, list[Transaction], Any]:
     """심사 프로필, 승인된 상환 플랜 변경(plan_history)을 덧씌운 사후 흐름, 가명화기(원본 흐름으로 만든다)."""
-    profile = ApplicantProfile.model_validate(
+    usd = bool(product_of(loan))
+    profile = (UsdProfile if usd else ApplicantProfile).model_validate(
         deps.raw.get_json(raw_container(loan["underwriting_consent_id"]), "profile.json")
     )
-    txns = _stored_flow(deps, loan["monitoring"]["consent_id"])
+    txns = _stored_flow(deps, loan["monitoring"]["consent_id"], usd)
     history = (loan.get("repayment") or {}).get("plan_history") or []
     return profile, apply_plan(txns, history, loan_id=loan["id"]), build_pseudonymizer(deps.pseudonym_key, profile, txns).mask
 
@@ -96,8 +130,10 @@ def _collect_pg_flow(
     """사후 PG 원장을 받아 원본 그대로 저장한다. 실패하면 경고만 남기고 계좌 데이터만으로 재생한다."""
     try:
         raw = deps.mock.fetch("pg_flow", token, terms)
-        pg = PgFlow.model_validate(raw)
+        pg = (UsdPgFlow if "amount_cents" in terms else PgFlow).model_validate(raw)
     except Exception as e:
+        if "amount_cents" in terms and isinstance(e, ValidationError):
+            raise
         log.warning("사후 PG 원장 수집 실패(계좌 데이터로 계속): %s %s", loan_id, f"{type(e).__name__}: {e}"[:200])
         return None
     deps.raw.put_json(raw_container(consent_id), "pg_flow.json", raw)
@@ -173,17 +209,23 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         return None
     try:
         scopes = list(MONITORING_SCOPES)
-        grant = deps.mock.create_consent(loan["applicant_id"], scopes, MONITORING_PURPOSE, CONSENT_TTL_DAYS)
+        product = product_of(loan)
+        purpose = "Post-loan monitoring" if product else MONITORING_PURPOSE
+        grant = deps.mock.create_consent(loan["applicant_id"], scopes, purpose, CONSENT_TTL_DAYS,
+                                         **({"product": product} if product else {}))
+        if product != product_of(grant):
+            raise ValueError("Monitoring consent product mismatch")
         consent_id = grant["consent_id"]
         schedule_lifecycle(
             deps,
             {
                 "id": consent_id,
+                **_meta(loan),
                 "consent_id": consent_id,
                 "application_id": loan_id,
                 "applicant_id": loan["applicant_id"],
                 "scopes": scopes,
-                "purpose": MONITORING_PURPOSE,
+                "purpose": purpose,
                 "granted_at": now,
                 "expires_at": grant["expires_at"],
                 "status": "granted",
@@ -191,14 +233,19 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
                 "foundry_conversations": [],
             },
         )
-        terms = {
+        terms = ({"loan_id": loan_id, "amount_cents": loan["amount_cents"], "tenor_months": loan["tenor_months"],
+                  "installment_cents": loan["amount_cents"] // loan["tenor_months"]} if product else {
             "amount_krw": loan["amount_krw"],
             "installment_krw": round(monthly_installment(loan["amount_krw"], loan["tenor_months"])),
-        }
+        })
         flow = deps.mock.fetch("flow", grant["token"], terms)
-        txns = _TRANSACTIONS.validate_python(flow)
+        txns = (_USD_TRANSACTIONS if product else _TRANSACTIONS).validate_python(flow)
         if not txns:
             raise RuntimeError(f"사후 흐름이 비어 있다: {loan_id}")
+        if product:
+            credits = [t.amount_cents for t in txns if t.loan_id and t.txn_type_code == "TRANSFER_IN"]
+            if credits != [loan["amount_cents"]] or any(t.loan_id not in (None, loan_id) for t in txns):
+                raise ValueError("Source flow does not match the approved loan")
         deps.raw.put_json(raw_container(consent_id), "flow.json", flow)
         flow_start = min(t.booked_on for t in txns)
         pg = _collect_pg_flow(deps, grant["token"], terms, consent_id, loan_id)
@@ -206,10 +253,11 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
             consent_id=consent_id,
             flow_start=flow_start.isoformat(),
             pg="ok" if pg is not None else "missing",
-            ledger_baseline=_ledger_baseline(deps, loan, pg, flow_start),
+            ledger_baseline=None if product else _ledger_baseline(deps, loan, pg, flow_start),
         )
         # 재생마다 원장을 새로 만든다(이전 재생의 납부·미납 판정을 지운다). 상환액은 Mock에 넘긴 값과 같아야 한다.
-        loan["repayment"] = build_schedule(flow_start, WEEKS * 7, terms["installment_krw"])
+        loan["repayment"] = (usd_schedule(flow_start, loan["amount_cents"], loan["tenor_months"]) if product
+                             else build_schedule(flow_start, WEEKS * 7, terms["installment_krw"]))
         deps.store.upsert(LOANS, loan)
     except Exception as e:
         # 선점한 문서가 replaying으로 남으면 30분(REPLAY_GUARD) 동안 콘솔·큐가 막힌다. 실패를 기록하고 원래 예외를 다시 던진다
@@ -223,15 +271,15 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
 
 def handle_replay(deps: Deps, body: str) -> dict[str, Any] | None:
     try:
-        req = ReplayRequest.model_validate_json(body)
-    except ValidationError as e:
-        log.warning("잘못된 재생 요청 폐기: %s", e.errors(include_input=False)[:3])
+        req = _command(deps, body, ReplayRequest)
+    except ValueError:
+        log.warning("Invalid replay request")
         return None
     if req.action == "stop":
         return stop_replay(deps, req.loan_id, req.replay_id)  # type: ignore[arg-type]
     if req.action == "resume":
         resumed = resume_replay(deps, req.loan_id, req.replay_id)  # type: ignore[arg-type]
-        if resumed is not None:
+        if resumed is not None and resumed["from_week"] <= WEEKS:
             _run_weeks(deps, req.loan_id, resumed["replay_id"], resumed["from_week"])
         return resumed
     started = start_replay(deps, req.loan_id)
@@ -285,7 +333,8 @@ def resume_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | 
         if not deps.store.replace(LOANS, loan, loan.get("_etag")):
             log.warning("동시 요청으로 재생 종료 기록 실패: %s", loan_id)
         return None
-    mon.update(status="replaying", started_at=now, resumed_at=[*mon.get("resumed_at", []), now])
+    mon.update(status="completed" if mon["paused_week"] == WEEKS else "replaying",
+               started_at=now, resumed_at=[*mon.get("resumed_at", []), now])
     loan["updated_at"] = now
     if not deps.store.replace(LOANS, loan, loan.get("_etag")):
         log.warning("동시 재개 요청 무시: %s", loan_id)
@@ -309,7 +358,8 @@ def stop_replay(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any] | No
 def _publish_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> None:
     message = FlowUpdated(type=TOPIC_FLOW, loan_id=loan_id, replay_id=replay_id, week=week)
     deps.events.publish(  # type: ignore[union-attr]
-        TOPIC_FLOW, message.model_dump(mode="json"), f"{TOPIC_FLOW}:{loan_id}:{replay_id}:{week}", session_id=loan_id
+        TOPIC_FLOW, {**message.model_dump(mode="json"), **_meta(deps.store.read(LOANS, loan_id, loan_id))},
+        f"{TOPIC_FLOW}:{loan_id}:{replay_id}:{week}", session_id=loan_id
     )
 
 
@@ -368,6 +418,12 @@ def _after_week(deps: Deps, loan_id: str, replay_id: str, week: int, case_id: st
             return "waiting"  # Other repayment.updated deliveries for this week have not finished.
         holds = _case_holds(loan, cases)
         if not holds:
+            if week == WEEKS:
+                mon.update(status="completed")
+                loan["updated_at"] = deps.clock().isoformat()
+                if deps.store.replace(LOANS, loan, loan.get("_etag")):
+                    return "done"
+                continue
             return "next"
         mon.update(status=held_status(holds), paused_week=week, pause_case_id=ids[0] if ids else None,
                    pause_case_ids=ids if len(ids) > 1 else [], holds=holds)
@@ -434,31 +490,39 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     start = date.fromisoformat(mon["flow_start"])
     lo, hi = week_window(start, week)
     visible = [t for t in txns if t.booked_on <= hi]
-    classification, overrides, _ = _semantic(
-        deps, profile, [t for t in visible if t.booked_on >= lo], mon["consent_id"]
-    )
-    mon["overrides"].update({k: v.value for k, v in overrides.items()})
-    baseline = Baseline.from_dict(loan["baseline"])
-    cats = categorize(visible, mon["overrides"])
-    pg, lb = _ledger(deps, loan)
-    obs = observe(visible, cats, start, week, baseline, pg, lb)
-    rows, triggers = obs.rows, list(obs.triggers)
     due_amounts = _due_list(loan)
-    proj = projection(rows, visible, cats, baseline, installment_due=due_amounts)
-    if led := loan.get("repayment"):
-        fields = due_check(proj, led["schedule"], led["installment_krw"], hi)
-        rows[-1].update(fields)
-        if "due_balance" in fields:
-            due_total = (due_amounts or {}).get(date.fromisoformat(fields["next_due_on"]), 0)
-            if fields["due_balance"] < due_total:
-                triggers.append("due_shortfall")
+    if product_of(loan):
+        raw = deps.raw.get_json(raw_container(mon["consent_id"]), "pg_flow.json")
+        pg = UsdPgFlow.model_validate(raw) if raw is not None else None
+        baseline, classification, lb = loan["baseline"], None, None
+        rows, triggers, candidates, cats, proj = observe_usd(loan, visible, pg, week, due_amounts)
+        pg_weeks = [{k: r[k] for k in ("week", "order_gross_cents", "settle_net_cents")} for r in rows] if pg else None
+    else:
+        classification, overrides, _ = _semantic(
+            deps, profile, [t for t in visible if t.booked_on >= lo], mon["consent_id"]
+        )
+        mon["overrides"].update({k: v.value for k, v in overrides.items()})
+        baseline = Baseline.from_dict(loan["baseline"])
+        cats = categorize(visible, mon["overrides"])
+        pg, lb = _ledger(deps, loan)
+        obs = observe(visible, cats, start, week, baseline, pg, lb)
+        rows, triggers, candidates = obs.rows, list(obs.triggers), obs.candidates
+        pg_weeks = platform_weeks(pg, start, 1, week)
+        proj = projection(rows, visible, cats, baseline, installment_due=due_amounts)
+        if led := loan.get("repayment"):
+            fields = due_check(proj, led["schedule"], led["installment_krw"], hi)
+            rows[-1].update(fields)
+            if "due_balance" in fields:
+                due_total = (due_amounts or {}).get(date.fromisoformat(fields["next_due_on"]), 0)
+                if fields["due_balance"] < due_total:
+                    triggers.append("due_shortfall")
     new = [t for t in triggers if t not in mon["seen_triggers"]]
     entry: dict[str, Any] = {
         "week": week,
         "row": rows[-1],
         "triggers": triggers,
         "new_triggers": new,
-        "candidates": [c.to_dict() for c in obs.candidates],
+        "candidates": [c.to_dict() for c in candidates],
         "classification": (classification or {}).get("metrics") or (classification or {}).get("error"),
         "projection": proj,
         "investigation": None,
@@ -490,8 +554,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             mask=mask,
             terms=({**product.model_dump(), "amount_cents": loan["amount_cents"], "tenor_months": loan["tenor_months"]}
                    if (product := product_of(loan)) else {"amount_krw": loan["amount_krw"], "tenor_months": loan["tenor_months"]}),
-            candidates=obs.candidates,
-            pg_weeks=platform_weeks(pg, start, 1, week),
+            candidates=candidates,
+            pg_weeks=pg_weeks,
             ledger_baseline=lb,
         )
         result = investigate(ctx, runner=deps.agents, model=deps.ew_model)
@@ -518,7 +582,7 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     _repayment_week(deps, loan_id, replay_id, loan, visible, lo, hi, week, entry)
     mon["processed_week"] = week
     mon["weeks"].append(entry)
-    if week == WEEKS:
+    if week == WEEKS and not (product_of(loan) and (_week_cases(entry) or pending_holds(loan, None))):
         mon["status"] = "completed"
     loan["updated_at"] = deps.clock().isoformat()
     deps.store.upsert(LOANS, loan)
@@ -566,20 +630,22 @@ def _escalate(
             escalation["stage2"] = {"alert_id": alert_id, "on": hi.isoformat(), "status": "skipped", "reason": "no_options"}
             return
     item = upcoming[0]
-    amount = item_amount(item, led["installment_krw"])
+    usd = bool(product_of(loan))
+    amount = item_amount(item, _installment(led))
     # 고객에게 음수 잔고나 상환액 이상의 잔고("부족")를 금액으로 보이지 않는다. 그때는 금액 없는 문구를 쓴다.
-    balance = row.get("due_balance")
+    balance = row.get("due_balance_cents" if usd else "due_balance")
     if balance is None or balance < 0 or balance >= amount:
         balance = None
     script_id, text = stage_message(
         stage, due_on=date.fromisoformat(item["due_on"]), amount=amount, balance=balance,
-        link=plan_link(loan["applicant_id"]),
+        link=plan_link(loan["applicant_id"]), usd=usd,
     )
     ref = f"{replay_id}-s{stage}"
     contacts = _contacts_doc(deps, loan_id, replay_id)
     sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "early_warning"), None)
     if sent is None:
         sent = auto_contact(ref, script_id, text, contacts["contacts"], hi)
+        _reserve_contact(deps, loan_id, sent)
         contacts["contacts"].append(sent)
         _save_contacts(deps, contacts)
     escalation[f"stage{stage}"] = {
@@ -601,9 +667,18 @@ def _plan_options(loan: dict[str, Any], hi: date, pg: PgFlow | None, lb: LedgerB
     """셀프 상환 플랜 옵션. 지급일은 이번 주 끝까지 공개된 것만 쓴다."""
     led, mon = loan["repayment"], loan["monitoring"]
     flow_end = date.fromisoformat(mon["flow_start"]) + timedelta(days=WEEKS * 7 - 1)
+    if isinstance(pg, UsdPgFlow):
+        totals = {}
+        for s in pg.settlements:
+            if s.settled_on < date.fromisoformat(mon["flow_start"]):
+                totals[s.platform_code] = totals.get(s.platform_code, 0) + s.net_cents
+        platform = max(sorted(totals), key=totals.get) if totals else None
+        payouts = sorted({s.settled_on for s in pg.settlements if s.platform_code == platform
+                          and s.settled_on <= hi and s.net_cents > 0})
+    else:
+        payouts = payout_days(pg, main_platform(lb), hi)
     return plan_options(
-        led["schedule"], led["installment_krw"], after=hi, flow_end=flow_end,
-        payouts=payout_days(pg, main_platform(lb), hi),
+        led["schedule"], _installment(led), after=hi, flow_end=flow_end, payouts=payouts,
     )
 
 
@@ -616,7 +691,7 @@ def _due_list(loan: dict[str, Any]) -> dict[date, int] | None:
     for s in led["schedule"]:
         if s["status"] == "scheduled":
             d = date.fromisoformat(s["due_on"])
-            out[d] = out.get(d, 0) + item_amount(s, led["installment_krw"])
+            out[d] = out.get(d, 0) + item_amount(s, _installment(led))
     return out
 
 
@@ -661,7 +736,7 @@ def _adjust_case(deps: Deps, loan_id: str, case_id: str, balance: int) -> bool:
                 proposal.update(contact=None, delivery_blocked="stale_quote")
         unsent = (doc["status"] in ("open", "proposal_pending", "superseded", "paid")
                   or bool((proposal or {}).get("delivery_blocked")))
-        doc["balance_krw"] = balance
+        doc["balance_cents" if product_of(doc) else "balance_krw"] = balance
         if unsent:
             status = "superseded" if balance else "paid"
             if doc["status"] != "restructure_pending":
@@ -690,8 +765,12 @@ def _repayment_week(
         return
     stage1 = (loan["monitoring"].get("escalation") or {}).get("stage1")
     early_from = date.fromisoformat(stage1["on"]) if isinstance(stage1, dict) else None
+    usd = bool(product_of(loan))
+    unit = "cents" if usd else "krw"
+    amount_key, paid_key, balance_key = (f"{k}_{unit}" for k in ("amount", "paid", "balance"))
+    installment = _installment(led)
     ev = week_events(led["schedule"], visible, lo, hi, early_from=early_from,
-                     installment_krw=led["installment_krw"], loan_id=loan_id)
+                     **{f"installment_{unit}": installment}, loan_id=loan_id)
     by_key = {item_key(s): s for s in led["schedule"]}
     early, regular = _due_reminders(led["schedule"], ev, lo, early_from)
     if early or regular:
@@ -702,18 +781,23 @@ def _repayment_week(
             ref = f"{_reminder_ref(replay_id, item)}-e"
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "early_reminder"), None)
             if sent is None:
-                text = TEMPLATES["early_reminder"].format(
+                text = (f"An automatic payment of {format_usd(item_amount(item, installment))} is scheduled "
+                        f"for {item['due_on']}. Please check your available balance." if usd else TEMPLATES["early_reminder"].format(
                     due_on=item["due_on"], amount=f"{item_amount(item, led['installment_krw']):,}원"
-                )
+                ))
                 sent = remind(ref, contacts["contacts"], on, sim_now(on), script_id="early_reminder",
                               by="early_reminder", text=text)
+                _reserve_contact(deps, loan_id, sent)
                 contacts["contacts"].append(sent)
             item.update(early_reminded_on=sent["on"], early_reminder_status=sent["status"])
         for key, on in regular:
             item, ref = by_key[key], _reminder_ref(replay_id, by_key[key])
             sent = next((c for c in contacts["contacts"] if c.get("ref") == ref and c.get("by") == "reminder"), None)
             if sent is None:
-                sent = remind(ref, contacts["contacts"], on, sim_now(on))
+                sent = remind(ref, contacts["contacts"], on, sim_now(on), text=(
+                    f"Your payment of {format_usd(item_amount(item, installment))} is due on {item['due_on']}."
+                    if usd else None))
+                _reserve_contact(deps, loan_id, sent)
                 contacts["contacts"].append(sent)
             item.update(reminded_on=sent["on"], reminder_status=sent["status"])
         _save_contacts(deps, contacts)
@@ -721,9 +805,9 @@ def _repayment_week(
     for key, allocations in ev.allocations.items():
         item = by_key[key]
         item.setdefault("allocations", []).extend(allocations)
-        paid = item.get("paid_krw", 0) + sum(a["amount_krw"] for a in allocations)
-        balance = item_amount(item, led["installment_krw"]) - paid
-        item.update(paid_krw=paid, balance_krw=balance, status="partial" if balance else "paid",
+        paid = item.get(paid_key, 0) + sum(a[amount_key] for a in allocations)
+        balance = item_amount(item, installment) - paid
+        item.update({paid_key: paid, balance_key: balance}, status="partial" if balance else "paid",
                     txn_id=allocations[-1]["txn_id"])
         if item.get("case_id") and _adjust_case(deps, loan_id, item["case_id"], balance):
             open_cases.append(key)
@@ -738,9 +822,9 @@ def _repayment_week(
         )
         if item.get("case_id"):
             # A different ID binds officer decisions (including queued retries) to this quote.
-            case_id += f"-b{item['balance_krw']}"
+            case_id += f"-b{item[balance_key]}"
         if item["status"] == "scheduled":
-            item.update(status="missed", paid_krw=0, balance_krw=item_amount(item, led["installment_krw"]))
+            item.update({paid_key: 0, balance_key: item_amount(item, installment)}, status="missed")
         item["case_id"] = case_id
         mon.setdefault("case_ids", []).append(case_id)
         entry.setdefault("case_ids", []).append(case_id)
@@ -768,14 +852,15 @@ def _repayment_week(
             {
                 "id": case_id,
                 "kind": "repayment_case",
+                **_meta(loan),
                 "case_id": case_id,
                 "loan_id": loan_id,
                 "replay_id": replay_id,
                 "week": week,
                 "as_of": contact_on,
                 "installment": {"no": item["no"], "due_on": item["due_on"],
-                                "amount_krw": item["balance_krw"]},
-                "balance_krw": item["balance_krw"],
+                                amount_key: item[balance_key]},
+                balance_key: item[balance_key],
                 "missed_count": sum(by_key[k]["due_on"] <= contact_on for k in missed_keys),
                 "recent_alert": recent,
                 "status": "open",
@@ -796,6 +881,7 @@ def _repayment_week(
 
 def _publish_alert(deps: Deps, loan_id: str, alert_id: str) -> None:
     message = AlertRaised(type=TOPIC_ALERT, loan_id=loan_id, alert_id=alert_id).model_dump(mode="json")
+    message.update(_meta(deps.store.read(ALERTS, alert_id, loan_id)))
     try:
         deps.events.publish(TOPIC_ALERT, message, f"{TOPIC_ALERT}:{alert_id}", session_id=loan_id)  # type: ignore[union-attr]
     except Exception as e:  # noqa: BLE001 - 주차 처리는 끝났다. 경보는 콘솔에 남고 발행 실패를 기록한다
@@ -810,8 +896,10 @@ def _publish_case(deps: Deps, loan_id: str, case_id: str) -> bool:
         return False
     if case.get("collections") is not None or case.get("event_published"):
         return True
-    message = RepaymentUpdated(type=TOPIC_REPAYMENT, loan_id=loan_id, case_id=case_id,
-                               balance_krw=case.get("balance_krw", case["installment"]["amount_krw"])).model_dump(mode="json")
+    fields = dict(type=TOPIC_REPAYMENT, loan_id=loan_id, case_id=case_id)
+    message = (UsdRepaymentUpdated(**_meta(case), **fields, balance_cents=case["balance_cents"])
+               if product_of(case) else RepaymentUpdated(
+                   **fields, balance_krw=case.get("balance_krw", case["installment"]["amount_krw"]))).model_dump(mode="json")
     try:
         deps.events.publish(TOPIC_REPAYMENT, message, f"{TOPIC_REPAYMENT}:{case_id}", session_id=loan_id)  # type: ignore[union-attr]
     except Exception as e:  # noqa: BLE001 - 추심 건은 남고 발행 실패를 기록한다. 주차 핸들러가 직접 잇는다
@@ -833,8 +921,8 @@ def _mark_publish_failed(deps: Deps, loan_id: str, doc_id: str, e: Exception) ->
 
 def handle_flow_update(deps: Deps, body: str) -> dict[str, Any] | None:
     try:
-        msg = FlowUpdated.model_validate_json(body)
-    except ValidationError:
+        msg = _command(deps, body, FlowUpdated)
+    except ValueError:
         log.info("flow.updated 형식이 아닌 메시지 무시(스모크 등)")
         return None
     entry = process_week(deps, msg.loan_id, msg.replay_id, msg.week)
@@ -859,7 +947,47 @@ def _week_entry(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[str
 
 def _contacts_doc(deps: Deps, loan_id: str, replay_id: str) -> dict[str, Any]:
     cid = f"contacts-{replay_id}"
-    return deps.store.read(ALERTS, cid, loan_id) or {"id": cid, "loan_id": loan_id, "replay_id": replay_id, "contacts": []}
+    return deps.store.read(ALERTS, cid, loan_id) or {
+        **_meta(deps.store.read(LOANS, loan_id, loan_id)), "id": cid, "loan_id": loan_id, "replay_id": replay_id,
+        "contacts": []}
+
+
+def _reserve_contact(deps, loan_id, entry):
+    """Reserve before delivery: conflicting loans cannot both consume the last slot.
+
+    A failed subsequent loan write may temporarily overcount, never permit an extra send.
+    Only identities and dates (not messages, balances or currency) cross loan partitions.
+    """
+    if entry["status"] != "sent":
+        return
+    borrower = deps.store.read(LOANS, loan_id, loan_id)["applicant_id"]
+    partition = "cap-" + hashlib.sha256(borrower.encode()).hexdigest()
+    def identity(item):
+        return hashlib.sha256(json.dumps([item[k] for k in ("loan_id", "ref", "by", "on")]).encode()).hexdigest()
+
+    slot = identity(dict(entry, loan_id=loan_id))
+    on = date.fromisoformat(entry["on"])
+    ends = [on + timedelta(days=i) for i in range(7)]
+    for _ in range(WRITE_ATTEMPTS):
+        writes, prior = [], None
+        for end in ends:
+            key = f"{partition}:{end}"
+            doc = deps.store.read(ALERTS, key, partition)
+            if doc is None:
+                if prior is None:
+                    prior = deps.store.prior_contact_slots(borrower, (on - timedelta(days=6)).isoformat(),
+                                                           ends[-1].isoformat())
+                doc = dict(id=key, loan_id=partition, slots=sorted({identity(s) for s in prior if
+                           (end - timedelta(days=6)).isoformat() <= s["on"] <= end.isoformat()}))
+            if slot not in doc["slots"]:
+                if len(doc["slots"]) >= MAX_CONTACTS_PER_7_DAYS:
+                    entry.update(status="deferred", reason="weekly_limit")
+                    return
+                doc["slots"].append(slot)
+                writes.append(doc)
+        if not writes or deps.store.replace_batch(ALERTS, partition, writes):
+            return
+    raise RuntimeError("Borrower contact reservation conflict")
 
 
 def _save_contacts(deps: Deps, contacts: dict[str, Any]) -> None:
@@ -887,11 +1015,14 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
     else:
         _, _, mask = _mask_and_flow(deps, loan)
     case, now = RepaymentCase.from_doc(doc), deps.clock()
-    ctx = CollectionsContext(case=case, contacts=contacts, now=now, mask=mask)
+    count = len(deps.store.prior_contact_slots(loan["applicant_id"], (case.contact_on - timedelta(days=6)).isoformat(),
+                                              case.contact_on.isoformat()))
+    ctx = CollectionsContext(case=case, contacts=contacts, now=now, mask=mask, borrower_contacts_7d=count)
     result = act(ctx, runner=deps.agents, model=deps.collections_model)
     _remember_foundry(deps, loan["monitoring"]["consent_id"], result.conversations, [])
     escalation = [c for c in contacts if c.get("by") == "early_warning"]
-    doc["proposal"] = build_proposal(case, result.draft or {}, contacts, now, escalation, mask)
+    doc["proposal"] = build_proposal(case, result.draft or {}, contacts, now, escalation, mask,
+                                     borrower_contacts_7d=count)
     doc["collections"] = {
         "decision": result.decision,
         "reason": result.reason,
@@ -908,8 +1039,8 @@ def run_collections(deps: Deps, loan_id: str, case_id: str) -> dict[str, Any] | 
 
 def handle_repayment_updated(deps: Deps, body: str) -> dict[str, Any] | None:
     try:
-        msg = RepaymentUpdated.model_validate_json(body)
-    except ValidationError:
+        msg = _command(deps, body, RepaymentUpdated)
+    except ValueError:
         log.info("repayment.updated 형식이 아닌 메시지 무시")
         return None
     result = run_collections(deps, msg.loan_id, msg.case_id)
@@ -922,9 +1053,9 @@ def handle_repayment_updated(deps: Deps, body: str) -> dict[str, Any] | None:
 def handle_restructure_decision(deps: Deps, body: str) -> bool:
     """restructure-decisions 큐 메시지를 kind별로 처리한다. 반영했으면 True, 버렸으면(중복·형식 오류 등) False."""
     try:
-        msg = OFFICER_MESSAGE.validate_json(body)
-    except ValidationError as e:
-        log.warning("잘못된 결정 메시지 폐기: %s", e.errors(include_input=False)[:3])
+        msg = _command(deps, body, OFFICER_MESSAGE)
+    except ValueError:
+        log.warning("Invalid servicing decision")
         return False
     if isinstance(msg, RestructureDecision):
         return _decide_restructure(deps, msg)
@@ -1039,20 +1170,21 @@ def _decide_plan(deps: Deps, msg: PlanDecision) -> bool:
                    for s in gone) or any(date.fromisoformat(i["due_on"]) < applied_from for i in change["items"]):
                 log.warning("공개됐거나 판정된 회차라 플랜 변경을 반영할 수 없음: %s", msg.change_id)
                 return False
+            key = "amount_cents" if product_of(loan) else "amount_krw"
             entry = {
                 "change_id": change["change_id"],
                 "option": change["option"],
                 "applied_from": applied_from.isoformat(),
-                "before": [{"key": item_key(s), "due_on": s["due_on"], "amount_krw": item_amount(s, led["installment_krw"])}
+                "before": [{"key": item_key(s), "due_on": s["due_on"], key: item_amount(s, _installment(led))}
                            for s in gone],  # type: ignore[union-attr]
-                "after": [{"key": item_key(i), "due_on": i["due_on"], "amount_krw": i["amount_krw"]}
+                "after": [{"key": item_key(i), "due_on": i["due_on"], key: i[key]}
                           for i in change["items"]],
                 "officer_id": msg.officer_id,
                 "decided_at": now,
             }
             history = [*(led.get("plan_history") or ()), entry]
             try:
-                apply_plan(_stored_flow(deps, mon["consent_id"]), history, loan_id=msg.loan_id)
+                apply_plan(_stored_flow(deps, mon["consent_id"], bool(product_of(loan))), history, loan_id=msg.loan_id)
             except AmbiguousScheduledDebit as exc:
                 blocked = True
                 if change.get("validation_error") == str(exc):
@@ -1196,6 +1328,9 @@ def _append_contact(deps: Deps, loan_id: str, case_id: str) -> None:
                 updated.update(status="deferred", reason=reason)
                 if case["status"] == "contacted":
                     case["status"] = "deferred"
+            _reserve_contact(deps, loan_id, updated)
+            if updated["status"] == "deferred" and case["status"] == "contacted":
+                case["status"] = "deferred"
             contact = case["proposal"]["contact"] = updated
         doc["contacts"].append(contact)
         # _adjust_case also replaces the case before saving the loan balance. Whichever

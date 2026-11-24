@@ -123,16 +123,23 @@ class UsdStartRequest(_StartRequest, UsdProduct):
     requested_tenor_months: int = Field(strict=True, ge=MIN_TENOR_MONTHS, le=MAX_TENOR_MONTHS)
 
 
-class OfficerDecision(BaseModel):
+class _Decision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: Literal["approve", "conditional", "decline"]
     officer_id: str = Field(min_length=1)
-    amount_krw: int | None = Field(default=None, gt=0)
     conditions: list[str] = Field(default_factory=list)
     reason: str = ""
     # 정책 판정이 거절이거나 결과가 없는 건을 심사역이 확인 후 승인할 때만 True(감사 기록용).
     policy_override: bool = False
+
+
+class OfficerDecision(_Decision):
+    amount_krw: int | None = Field(default=None, gt=0)
+
+
+class UsdOfficerDecision(_Decision, UsdProduct):
+    amount_cents: RequestedUsdCents | None = None
 
 
 class OfficerMessage(BaseModel):
@@ -182,7 +189,7 @@ class AlertRaised(BaseModel):
     alert_id: str = Field(min_length=1, max_length=128)
 
 
-class RepaymentUpdated(BaseModel):
+class _RepaymentUpdated(BaseModel):
     """repayment.updated 토픽 메시지(세션 = loan_id). 상환일 미납으로 추심 건이 열렸다."""
 
     model_config = ConfigDict(extra="forbid")
@@ -190,7 +197,14 @@ class RepaymentUpdated(BaseModel):
     type: Literal["repayment.updated"]
     loan_id: str = Field(pattern=LOAN_ID_PATTERN)
     case_id: str = Field(min_length=1, max_length=128)
+
+
+class RepaymentUpdated(_RepaymentUpdated):
     balance_krw: int | None = Field(default=None, ge=0)
+
+
+class UsdRepaymentUpdated(_RepaymentUpdated, UsdProduct):
+    balance_cents: int = Field(strict=True, ge=0)
 
 
 class RestructureDecision(BaseModel):

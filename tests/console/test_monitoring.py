@@ -519,6 +519,7 @@ def test_usd_proposal_only_queues_worker_accepted_text(usd_proposal):
         assert r.status_code == 422 and balance in r.text and not queue.sent
     assert client.post(PROPOSAL_PATH, data={**form, "text": balance}, headers=OFFICER).status_code == 202
     assert queue.sent[0][1]["text"] == balance
+    assert queue.sent[0][1].get("currency") == "USD"
 
 
 @pytest.mark.parametrize("decision", ["approve", "modify"])

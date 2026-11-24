@@ -14,7 +14,7 @@ from typing import Any
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE
 from journey.metering import METER_KEY, TAGS_KEY, failed_record, step_records
 from journey.models import KST, WITHDRAWN_EVENT, StartRequest, Status
-from journey.validation import validate_officer_decision
+from journey.validation import parse_start_request, validate_officer_decision
 from shared.segments import segment_of
 from shared.product_context import product_of
 
@@ -88,12 +88,18 @@ def _metered(doc: dict[str, Any], step: str, result: Any, started: datetime, end
     return clean
 
 
+def _principal(req):
+    if product := product_of(req.model_dump()):
+        return {**product.model_dump(), "requested_amount_cents": req.requested_amount_cents}
+    return {"requested_amount_krw": req.requested_amount_krw}
+
+
 def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
     return {
         "id": req.application_id,
         "application_id": req.application_id,
         "applicant_id": req.applicant_id,
-        "requested_amount_krw": req.requested_amount_krw,
+        **_principal(req),
         "requested_tenor_months": req.requested_tenor_months,
         "received_at": received.isoformat(),
         "submitted_at": req.submitted_at.isoformat() if req.submitted_at else None,
@@ -122,7 +128,9 @@ def _new_document(req: StartRequest, received: datetime) -> dict[str, Any]:
 
 
 def journey(ctx: Any, retry: Any) -> Steps:
-    req = StartRequest.model_validate(_json(ctx.get_input()))
+    req = parse_start_request(_json(ctx.get_input()))
+    product = product_of(req.model_dump())
+    meta = product.model_dump() if product else {}
     doc = _new_document(req, _now(ctx))
     yield from _advance(ctx, retry, doc, Status.RECEIVED)
 
@@ -131,7 +139,7 @@ def journey(ctx: Any, retry: Any) -> Steps:
     try:
         consent = yield ctx.call_activity_with_retry(
             "request_consent", retry,
-            _tagged({"application_id": req.application_id, "applicant_id": req.applicant_id}, tags),
+            _tagged({**meta, "application_id": req.application_id, "applicant_id": req.applicant_id}, tags),
         )
     except Exception as e:  # noqa: BLE001 - 활동 실패는 문서에 기록하고 종료한다
         doc["steps"].append(failed_record("consent", started, _now(ctx), e))
@@ -151,6 +159,7 @@ def journey(ctx: Any, retry: Any) -> Steps:
                     "application_id": req.application_id,
                     "consent_id": consent["consent_id"],
                     "token": consent["token"],
+                    **meta,
                     "scopes": consent["scopes"],
                 },
                 tags,
@@ -178,7 +187,7 @@ def journey(ctx: Any, retry: Any) -> Steps:
                         "application_id": req.application_id,
                         "consent_id": consent["consent_id"],
                         "as_of": doc["as_of"],
-                        "requested_amount_krw": req.requested_amount_krw,
+                        **_principal(req),
                         "requested_tenor_months": req.requested_tenor_months,
                     },
                     tags,
@@ -293,7 +302,7 @@ def _await_officer(ctx: Any, retry: Any, doc: dict[str, Any], sla_hours: float, 
         if winner is event:
             timer.cancel()
             payload = _json(event.result)
-            decision, error = validate_officer_decision(payload, doc["policy"])
+            decision, error = validate_officer_decision(payload, doc["policy"], usd=bool(product_of(doc)))
             at = _now(ctx).isoformat()
             if error:
                 recorded = payload if isinstance(payload, dict) else {"raw": str(payload)[:200]}
@@ -328,7 +337,9 @@ def _register_monitoring(ctx: Any, retry: Any, doc: dict[str, Any]) -> Steps:
                 "applicant_id": doc["applicant_id"],
                 "consent_id": doc["consent"]["consent_id"],
                 "decision": decision["decision"],
-                "amount_krw": decision.get("amount_krw") or doc["requested_amount_krw"],
+                **({**product.model_dump(), "amount_cents": decision["amount_cents"]}
+                   if (product := product_of(doc)) else
+                   {"amount_krw": decision.get("amount_krw") or doc["requested_amount_krw"]}),
                 "tenor_months": doc["requested_tenor_months"],
                 "decided_at": decision["at"],
                 "underwriting": {

@@ -18,8 +18,8 @@ from typing import Any
 
 from agents.classify import Category
 from agents.settlement import expected_payouts
-from shared.contracts import Transaction
-from shared.krcalendar import month_add, next_business_day
+from shared.contracts import Transaction, UsdTransaction
+from shared.krcalendar import is_business_day, month_add, next_business_day
 
 HORIZON_DAYS = 28
 ATTAINMENT_WEEKS = 4
@@ -186,3 +186,19 @@ def summarize(projection: Mapping[str, Any] | None) -> dict[str, Any]:
     low = min(path, key=lambda p: p["balance"])
     short = next((p["date"] for p in path if p["balance"] < 0), None)
     return {"projected_min_balance": low["balance"], "projected_min_date": low["date"], "shortfall_date": short}
+
+
+def project_usd(visible: Sequence[UsdTransaction], start: date, hi: date, dues: Mapping[date, int]) -> dict[str, Any]:
+    """Average observed business-day net, excluding this loan's principal and repayments."""
+    lo = max(start, hi - timedelta(days=HORIZON_DAYS - 1))
+    days = sum(is_business_day(lo + timedelta(days=i)) for i in range((hi - lo).days + 1))
+    daily = sum(t.amount_cents for t in visible if lo <= t.booked_on <= hi and not t.loan_id) // max(days, 1)
+    balance = visible[-1].balance_after_cents
+    path = []
+    for n in range(1, HORIZON_DAYS + 1):
+        d = hi + timedelta(days=n)
+        before = balance + (daily if is_business_day(d) else 0)
+        balance = before - dues.get(d, 0)
+        path.append({"date": d.isoformat(), "balance_cents": balance,
+                     "before_payment_cents": before, "installment_cents": dues.get(d, 0)})
+    return {"start_balance_cents": visible[-1].balance_after_cents, "path": path}

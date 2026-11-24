@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from journey.models import OfficerDecision, StartRequest, UsdGrievanceDecision, UsdStartRequest
+from journey.models import OfficerDecision, StartRequest, UsdGrievanceDecision, UsdOfficerDecision, UsdStartRequest
 from shared.product_context import product_of
 
 # 상품 최대 한도(`src/policy/rulesets/v4.yaml`의 product.max_amount_krw). 테스트가 값 일치를 확인한다.
@@ -29,10 +29,12 @@ def parse_start_request(raw: dict[str, Any]) -> StartRequest | UsdStartRequest:
 
 
 def validate_officer_decision(
-    raw: Any, policy: dict[str, Any] | None
-) -> tuple[OfficerDecision | None, str | None]:
+    raw: Any, policy: dict[str, Any] | None, *, usd: bool = False
+) -> tuple[OfficerDecision | UsdOfficerDecision | None, str | None]:
     try:
-        d = OfficerDecision.model_validate(raw)
+        d = (UsdOfficerDecision if usd else OfficerDecision).model_validate(raw)
+        if usd and policy is not None and product_of(policy) != product_of(d.model_dump()):
+            return None, "invalid_payload"
     except ValidationError:
         return None, "invalid_payload"
     if d.decision == "conditional":
@@ -41,11 +43,17 @@ def validate_officer_decision(
         d = d.model_copy(update={"policy_override": False})
         return (d, None) if d.reason.strip() else (None, "reason_required")
     if policy is None or policy.get("decision") not in ("eligible", "refer"):
-        return _validate_override(d)
+        if not usd:
+            return _validate_override(d)
+        if not d.policy_override or not d.reason.strip() or d.amount_cents is None:
+            return None, ("override_required" if not d.policy_override else
+                          "reason_required" if not d.reason.strip() else "amount_required")
+        return d, None
     d = d.model_copy(update={"policy_override": False})
-    if d.amount_krw is None:
+    amount = d.amount_cents if usd else d.amount_krw
+    if amount is None:
         return None, "amount_required"
-    if d.amount_krw > int(policy.get("max_amount_krw") or 0):
+    if amount > int(policy.get("max_amount_cents" if usd else "max_amount_krw") or 0):
         return None, "amount_exceeds_policy"
     if policy["decision"] == "refer" and not d.reason.strip():
         return None, "reason_required"

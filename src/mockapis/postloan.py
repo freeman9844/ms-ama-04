@@ -109,7 +109,7 @@ class UsdPostLoanFlow:
 
 
 def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str, amount_cents: int,
-                          installment_cents: int) -> UsdPostLoanFlow:
+                          installment_cents: int, tenor_months: int | None = None) -> UsdPostLoanFlow:
     if (not loan_id or type(amount_cents) is not int or not MIN_REQUEST_CENTS <= amount_cents <= MAX_REQUEST_CENTS
             or type(installment_cents) is not int or not 0 < installment_cents <= amount_cents):
         raise ValueError("Invalid USD loan terms")
@@ -120,6 +120,12 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
     seller_id = case.profile.applicant_id
     slump = seller_id == "seller-dailylook-01"
     installments = {day: (i, installment_cents) for i, day in enumerate(due_dates(start, POSTLOAN_DAYS), 1)}
+    if tenor_months is not None:
+        from shared.repayment import usd_installments
+        dues = usd_installments(start, amount_cents, tenor_months)
+        if dues[0][1] != installment_cents:
+            raise ValueError("Installment does not match loan terms")
+        installments = {day: (i, a) for i, (day, a) in enumerate(dues, 1)}
     books = simulate_usd(USD_SELLERS[seller_id], f"{seller_id}:{loan_id}", start, end, seed,
                          case.transactions[-1].balance_after_cents, pending=case.pending,
                          slump_on=start+timedelta(weeks=3) if slump else None,

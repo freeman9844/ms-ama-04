@@ -85,6 +85,8 @@ def drive(ctx, orchestrator=None):
             ctx.calls.append(yielded)
             if yielded.name == "save_document":
                 ctx.saved.append(yielded.input["document"])
+                if save := ctx.activities.get("save_document"):
+                    save(yielded.input)
                 continue
             try:
                 value = ctx.activities[yielded.name](yielded.input)
@@ -109,8 +111,8 @@ def drive(ctx, orchestrator=None):
 
 @pytest.fixture
 def run_journey():
-    def run(payload, activities, outcomes=()):
-        ctx = FakeContext(payload, activities, outcomes)
+    def run(payload, activities, outcomes=(), *, start=START):
+        ctx = FakeContext(payload, activities, outcomes, start=start)
         return drive(ctx), ctx
 
     return run

@@ -119,12 +119,13 @@ class FlowStore:
             return None
         return generate_usd_case(applicant_id, self._as_of, self._seeds[applicant_id])
 
-    def _usd_flow(self, applicant_id: str, loan_id: str, amount_cents: int, installment_cents: int):
+    def _usd_flow(self, applicant_id: str, loan_id: str, amount_cents: int, installment_cents: int, tenor_months=None):
         case = self.usd_case(applicant_id)
         if case is None:
             return None
         return generate_usd_postloan(case, self._start, self._seeds[applicant_id] + POSTLOAN_SEED_OFFSET,
-                                     loan_id=loan_id, amount_cents=amount_cents, installment_cents=installment_cents)
+                                     loan_id=loan_id, amount_cents=amount_cents, installment_cents=installment_cents,
+                                     tenor_months=tenor_months)
 
     def _build(self, applicant_id: str, loan: LoanTerms | None) -> PostLoanFlow:
         case = self._cases[applicant_id]

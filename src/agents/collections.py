@@ -281,6 +281,7 @@ class CollectionsContext:
     contacts: Sequence[Mapping[str, Any]]
     now: datetime
     mask: Callable[[str], str]
+    borrower_contacts_7d: int | None = None
     draft: dict[str, Any] | None = field(default=None, init=False)
 
     def get_case(self, _: dict[str, Any]) -> dict[str, Any]:
@@ -310,7 +311,7 @@ class CollectionsContext:
         on = self.case.contact_on
         since = on - timedelta(days=6)
         recent = [c for c in self.contacts if since <= date.fromisoformat(c["on"]) <= on]
-        sent = _sent_in_window(self.contacts, on)
+        sent = self.borrower_contacts_7d if self.borrower_contacts_7d is not None else _sent_in_window(self.contacts, on)
         return {
             "recent": [{k: c.get(k) for k in ("on", "script_id", "status", "reason")} for c in recent[-10:]],
             "remaining_this_week": max(0, MAX_CONTACTS_PER_7_DAYS - sent),
@@ -435,6 +436,7 @@ def build_proposal(
     now: datetime,
     escalation: Sequence[Mapping[str, Any]],
     mask: Callable[[str], str],
+    *, borrower_contacts_7d: int | None = None,
 ) -> dict[str, Any]:
     """심사역 승인용 제안서(스펙 §7.2). 실제로 보낼 문구·판단 근거·정책 확인 결과를 LLM 없이 조립한다."""
     script_id = str(draft.get("script_id"))
@@ -453,7 +455,7 @@ def build_proposal(
             "summary": mask(str(alert.get("summary") or "")),
             "check_action": mask(str(check_action)) if check_action is not None else None,
         }
-    sent_7d = _sent_in_window(contacts, case.contact_on)
+    sent_7d = borrower_contacts_7d if borrower_contacts_7d is not None else _sent_in_window(contacts, case.contact_on)
     local = now.astimezone(KST)
     in_hours = _in_contact_hours(now)
     hours = f"{CONTACT_HOURS[0]:02d}:00~{CONTACT_HOURS[1]:02d}:00"

@@ -3,9 +3,9 @@
 import logging
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from journey.models import OfficerMessage, StartRequest
+from journey.models import OfficerMessage, StartRequest, UsdStartRequest
 from journey.orchestration import EVENT_OFFICER_DECISION, ORCHESTRATOR
 from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
 
@@ -24,7 +24,7 @@ def should_start(status: str | None) -> bool:
 
 async def handle_start(client: Any, body: str) -> str | None:
     try:
-        req = StartRequest.model_validate_json(body)
+        req = TypeAdapter(StartRequest | UsdStartRequest).validate_json(body)
     except ValidationError as e:
         log.warning("잘못된 신청 메시지 폐기: %s", e.errors(include_input=False)[:3])
         return None

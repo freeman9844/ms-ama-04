@@ -19,9 +19,12 @@ from agents.pg_ledger import FLAG_PG_LEDGER_UNAVAILABLE
 from agents.translator import TRANSLATE_MODEL
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
+from agents.usd_monitoring import usd_baseline
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.contracts import UsdProduct, UsdTransaction
+from shared.product_context import product_of, validate_usd_evidence
+from shared.repayment import usd_installments
 from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 
 CONTAINERS = ("applications", "consents")
@@ -53,6 +56,7 @@ class DocumentStore(Protocol):
 
     def upsert(self, container: str, document: dict[str, Any]) -> None: ...
     def read(self, container: str, item_id: str, partition_key: str) -> dict[str, Any] | None: ...
+    def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]: ...
     def replace(self, container: str, document: dict[str, Any], etag: str | None) -> bool:
         """etag가 같을 때만 교체한다. 다른 쓰기가 끼어들었으면 False."""
         ...
@@ -487,6 +491,33 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     profile = deps.raw.get_json(raw_container(payload["consent_id"]), "profile.json")
     if profile is None:
         raise RuntimeError(f"원천 프로필 없음: {payload['consent_id']}")
+    product = product_of(payload)
+    uw = payload["underwriting"]
+    if product != product_of(profile) or product != product_of(uw["features"]):
+        raise ValueError("Registration sources do not match the loan product")
+    if product:
+        application = deps.store.read("applications", loan_id, loan_id) or {}
+        decision = application.get("officer_decision") or {}
+        if (application.get("status") != "approved" or product_of(application) != product
+                or product_of(decision) != product or decision.get("decision") != "approve"
+                or not decision.get("officer_id") or decision.get("at") != payload["decided_at"]
+                or decision.get("amount_cents") != payload["amount_cents"]
+                or application["applicant_id"] != payload["applicant_id"]
+                or application["requested_tenor_months"] != payload["tenor_months"]
+                or (application.get("consent") or {}).get("consent_id") != payload["consent_id"]):
+            raise ValueError("Loan registration does not match saved officer approval")
+        validate_usd_evidence(uw)
+        parsed = UsdProfile.model_validate(profile)
+        if (payload["decision"] != "approve" or parsed.applicant_id != payload["applicant_id"]
+                or uw["features"]["application_id"] != loan_id):
+            raise ValueError("Invalid approved loan registration")
+        usd_installments(date.fromisoformat(payload["decided_at"][:10]), payload["amount_cents"], payload["tenor_months"])
+        terms = {**product.model_dump(), "amount_cents": payload["amount_cents"], "baseline": usd_baseline(uw)}
+    else:
+        parsed = ApplicantProfile.model_validate(profile)
+        terms = {"amount_krw": payload["amount_krw"], "baseline": Baseline.from_underwriting(
+            uw, installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
+        ).to_dict()}
     deps.store.create_if_absent(
         LOANS_CONTAINER,
         {
@@ -494,20 +525,23 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
             "loan_id": loan_id,
             "application_id": loan_id,
             "applicant_id": payload["applicant_id"],
-            "industry": ApplicantProfile.model_validate(profile).industry,
+            "industry": parsed.industry,
             "underwriting_consent_id": payload["consent_id"],
             "decision": payload["decision"],
-            "amount_krw": payload["amount_krw"],
+            **terms,
             "tenor_months": payload["tenor_months"],
             "approved_at": payload["decided_at"],
-            "baseline": Baseline.from_underwriting(
-                payload["underwriting"],
-                installment_krw=round(monthly_installment(payload["amount_krw"], payload["tenor_months"])),
-            ).to_dict(),
             "monitoring": None,
             "updated_at": deps.clock().isoformat(),
         },
     )
+    saved = deps.store.read(LOANS_CONTAINER, loan_id, loan_id)
+    if not saved or product != product_of(saved) or (product and any((
+        saved["amount_cents"] != payload["amount_cents"], saved["tenor_months"] != payload["tenor_months"],
+        saved["applicant_id"] != payload["applicant_id"], saved["underwriting_consent_id"] != payload["consent_id"],
+        saved["approved_at"] != payload["decided_at"],
+    ))):
+        raise ValueError("Conflicting loan registration")
     return {"loan_id": loan_id}
 
 

@@ -802,6 +802,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         user = viewer(request)
         return loan_page(user, loan_or_404(loan_id), request=request)
 
+    def queue_servicing(queue, loan, message, **options):
+        data = message.model_dump(mode="json", **options)
+        if product := product_of(loan):
+            data.update(product.model_dump())
+        deps.queue.send(queue, data)
+
     @app.post("/loans/{loan_id}/replay", response_class=HTMLResponse)
     def replay(loan_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
         user = posted.user
@@ -811,7 +817,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if replay_held(loan.get("monitoring")):
             return loan_page(user, loan, 409, error=_("대기 중인 결정과 재개 확인이 끝나야 새 재생을 시작할 수 있습니다."))
         # 기본값(action=start)은 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
-        deps.queue.send(REPLAY_QUEUE, ReplayRequest(loan_id=loan["id"]).model_dump(mode="json", exclude_defaults=True))
+        queue_servicing(REPLAY_QUEUE, loan, ReplayRequest(loan_id=loan["id"]), exclude_defaults=True)
         return loan_sent(user, loan, _("사후 13주 재생 요청을 큐에 보냈습니다. 주차별 처리가 끝나면 경보가 표시됩니다."))
 
     @app.post("/loans/{loan_id}/replay/{action}", response_class=HTMLResponse)
@@ -824,7 +830,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if mon.get("status") != "awaiting_resume":
             return loan_page(user, loan, 409, error=_("재개 확인을 기다리는 재생이 없습니다."))
         message = ReplayRequest(loan_id=loan["id"], action=action, replay_id=mon["replay_id"])
-        deps.queue.send(REPLAY_QUEUE, message.model_dump(mode="json"))
+        queue_servicing(REPLAY_QUEUE, loan, message)
         weeks_left = WEEKS - (mon.get("paused_week") or 0)
         text = (_("남은 %(n)s주 재생을 이어서 요청했습니다.", n=weeks_left) if action == "resume"
                 else _("남은 재생을 종료하도록 요청했습니다."))
@@ -853,7 +859,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         if not reason:
             return loan_page(user, loan, 422, alerts=alerts, error=_("사유를 입력해야 합니다."))
         # kind(기본값 restructure)는 빼서 보낸다: 배포 순서와 관계없이 이전 오케스트레이터(extra=forbid)도 받는다.
-        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
+        queue_servicing(RESTRUCTURE_QUEUE, loan, message, exclude_defaults=True)
         return loan_sent(
             user, loan, _("재조정 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision),
             note=_("결정이 반영되면 대출 화면에서 재생을 이어갈지 선택하세요.") if replay_held(loan.get("monitoring")) else None,
@@ -900,7 +906,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             )
         except ValidationError:
             return loan_page(user, loan, 422, alerts=alerts, error=_("추심 결정 형식이 올바르지 않습니다."))
-        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        queue_servicing(RESTRUCTURE_QUEUE, loan, message)
         return loan_sent(user, loan, _("추심 제안 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision),
                          note=held_note(loan), alerts=alerts)
 
@@ -923,7 +929,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return loan_page(user, loan, 422, error=_("플랜 변경 결정 형식이 올바르지 않습니다."))
         if message.decision == "decline" and not reason:
             return loan_page(user, loan, 422, error=_("반려 사유를 입력해야 합니다."))
-        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        queue_servicing(RESTRUCTURE_QUEUE, loan, message)
         return loan_sent(user, loan, _("플랜 변경 결정(%(decision)s)을 큐에 보냈습니다.", decision=message.decision), note=held_note(loan))
 
     @app.post("/loans/{loan_id}/offer/expire", response_class=HTMLResponse)
@@ -936,7 +942,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return loan_page(user, loan, 409, error=_("고객 응답을 기다리는 플랜 제안이 없습니다."))
         message = OfferExpire(kind="offer_expire", loan_id=loan["id"], offer_id=offer["offer_id"],
                               officer_id=user.user_id)
-        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        queue_servicing(RESTRUCTURE_QUEUE, loan, message)
         return loan_sent(user, loan, _("고객 응답 없이 계속하도록 플랜 제안 만료를 큐에 보냈습니다."), note=held_note(loan))
 
     # ── 동의 수명주기·이의제기(P5b) ──
@@ -1116,7 +1122,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             message = PlanChoice(kind="plan_choice", loan_id=loan["id"], offer_id=offer["offer_id"], option=option)
         except ValidationError:
             return borrower_page(user, applicant_id, "plans", 422, error=_("제안에 없는 플랜입니다."))
-        deps.queue.send(RESTRUCTURE_QUEUE, message.model_dump(mode="json"))
+        queue_servicing(RESTRUCTURE_QUEUE, loan, message)
         label = i18n.label(PLAN_OPTION_LABELS, message.option)
         text = (_("플랜(%(label)s)을 선택했습니다. 지금 일정대로 상환합니다.", label=label) if message.option == "keep"
                 else _("플랜(%(label)s)을 선택했습니다. 심사역이 확인하면 결과가 상환 플랜 메뉴에 표시됩니다.", label=label))
