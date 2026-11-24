@@ -44,6 +44,21 @@ class ScriptedReview:
         return AgentRun(spec.name, "1", "offline-" + spec.name, spec.output_model.model_validate(output), [], 1, 1)
 
 
+def test_native_decline_with_principal_rejected_at_queue_and_projection():
+    from shared.contracts import USD_V1
+    from opsmetrics.projection import project
+    from opsmetrics.insights import decision_funnel
+    from journey.validation import validate_officer_decision
+
+    bad = dict(USD_V1.model_dump(), decision="decline", reason="Reviewed.", officer_id="officer", amount_cents=500000)
+    durable = AsyncMock()
+    durable.get_status.return_value = SimpleNamespace(runtime_status="Running")
+    assert not asyncio.run(handle_decision(durable, json.dumps(dict(application_id="app-1", decision=bad))))
+    assert validate_officer_decision(bad, None, usd=True)[0] is None
+    row = project(dict(USD_V1.model_dump(), officer_decision=bad))
+    assert row["approved_amount_cents"] is None and decision_funnel([row])["overrides"]["approved"] == 0
+
+
 @pytest.mark.parametrize("seller,policy,codes,decision", [
     ("seller-bakery-20", "eligible", [], "approve"),
     ("seller-petfood-07", "ineligible", ["R003"], "decline"),

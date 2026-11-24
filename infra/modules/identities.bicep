@@ -21,6 +21,12 @@ resource smoke 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   tags: tags
 }
 
+resource mockapi 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: names.mockapi
+  location: location
+  tags: tags
+}
+
 // 콘솔은 인터넷에 노출되므로 앱 ID와 분리해 읽기·큐 보내기 권한만 줍니다.
 resource console 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: names.console
@@ -55,6 +61,9 @@ output orchestratorClientId string = orchestrator.properties.clientId
 output appsId string = apps.id
 output appsPrincipalId string = apps.properties.principalId
 output appsClientId string = apps.properties.clientId
+output mockapiId string = mockapi.id
+output mockapiPrincipalId string = mockapi.properties.principalId
+output mockapiClientId string = mockapi.properties.clientId
 output smokeId string = smoke.id
 output smokePrincipalId string = smoke.properties.principalId
 output smokeClientId string = smoke.properties.clientId

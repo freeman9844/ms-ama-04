@@ -63,7 +63,7 @@ class HttpMockApi:
         return r.json()
 
     def revoke(self, consent_id: str) -> str:
-        """Mock 레지스트리는 인메모리라 재시작 뒤에는 404(absent)일 수 있다."""
+        """The API acknowledges a well-formed revoke only after persisting its tombstone."""
         r = self._client.post(f"/consents/{consent_id}/revoke")
         if r.status_code == 404:
             return "absent"
@@ -138,7 +138,7 @@ class CosmosStore:
 
     def pending_raw_repairs(self) -> list[str]:
         return list(self._db.get_container_client("consents").query_items(
-            "SELECT VALUE c.id FROM c WHERE c.deletion_notice_pending = true OR c.raw_repair_pending = true OR "
+            "SELECT VALUE c.id FROM c WHERE c.foundry_repair_pending = true OR c.deletion_notice_pending = true OR c.raw_repair_pending = true OR "
             "(c.raw_write_count > 0 AND c.status IN ('revoked', 'expired'))", enable_cross_partition_query=True))
 
     def prior_contact_slots(self, borrower: str, lo: str, hi: str) -> list[dict[str, str]]:

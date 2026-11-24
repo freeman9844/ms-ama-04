@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
-from journey.models import OfficerMessage, StartRequest, UsdStartRequest
+from journey.models import OfficerMessage, StartRequest, UsdOfficerDecision, UsdStartRequest
 from journey.orchestration import EVENT_OFFICER_DECISION, ORCHESTRATOR
 from shared.contracts import MAX_TENOR_MONTHS, MIN_TENOR_MONTHS
 
@@ -42,6 +42,8 @@ async def handle_start(client: Any, body: str) -> str | None:
 async def handle_decision(client: Any, body: str) -> bool:
     try:
         msg = OfficerMessage.model_validate_json(body)
+        if "product_version" in msg.decision:
+            UsdOfficerDecision.model_validate(msg.decision)
     except ValidationError as e:
         log.warning("잘못된 결정 메시지 폐기: %s", e.errors(include_input=False)[:3])
         return False

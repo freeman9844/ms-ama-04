@@ -512,6 +512,26 @@ def test_assess_credit_returns_assessment_and_records_foundry_artifacts(deps, mo
     assert doc["foundry_containers"] == [{"id": "cntr_1", "deleted": True}]
 
 
+def test_assessment_in_flight_blocks_deletion_notice(deps, monkeypatch):
+    from journey.consent import delete_consent_data, send_consent_notice, IncompleteDeletion
+    from tests.orchestrator.test_consent_lifecycle import MemoryStore as LifecycleStore, end
+    deps = with_deps(deps, store=LifecycleStore(), agents=UnderwritingRunner())
+    grant, payload = assess_input(with_deps(deps, agents=None))
+    cid = grant["consent_id"]
+    assess = activities.assess
+    def finish_after_revoke(*args, **kwargs):
+        with pytest.raises(IncompleteDeletion):
+            delete_consent_data(deps, end(cid))
+        with pytest.raises(LookupError):
+            send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
+        return assess(*args, **kwargs)
+    monkeypatch.setattr(activities, "assess", finish_after_revoke)
+    with pytest.raises(activities.ConsentEnded):
+        assess_credit(deps, payload)
+    proof = deps.store.read("deletion_proofs", cid, cid)
+    assert not proof["complete"] and any(i["target"] == "conv_1" for i in proof["items"])
+
+
 def test_assess_credit_without_agents_is_unavailable(deps):
     _, payload = assess_input(deps)
     result = assess_credit(deps, payload)
@@ -627,19 +647,22 @@ class CleanupRunner:
         self.deleted_containers.append(container_id)
         return True
 
+    def conversation_exists(self, conversation_id):
+        return False
+
 
 def test_remember_foundry_on_ended_consent_deletes_immediately(deps):
+    from tests.orchestrator.test_consent_lifecycle import MemoryStore as LifecycleStore
     runner = CleanupRunner()
-    d = with_deps(deps, agents=runner)
+    d = with_deps(deps, agents=runner, store=LifecycleStore())
     d.store.upsert("consents", {"id": "c1", "consent_id": "c1", "status": "revoked", "foundry_conversations": []})
     _remember_foundry(d, "c1", ["conv_late"], [{"id": "cntr_late", "deleted": False}])
     doc = d.store.read("consents", "c1", "c1")
     assert runner.deleted_conversations == ["conv_late"] and runner.deleted_containers == ["cntr_late"]
-    assert doc["foundry_conversations"] == []
-    assert doc["late_cleanup"] == [
-        {"kind": "conversation", "target": "conv_late", "outcome": "deleted", "at": NOW.isoformat()},
-        {"kind": "container", "target": "cntr_late", "outcome": "deleted", "at": NOW.isoformat()},
-    ]
+    proof = d.store.read("deletion_proofs", "c1", "c1")
+    assert doc["deletion_complete"] and proof["complete"]
+    assert {(i["kind"], i["target"]) for i in proof["items"] if i["verified"]} >= {
+        ("conversation", "conv_late"), ("container", "cntr_late")}
 
 
 def test_remember_foundry_on_live_consent_appends(deps):

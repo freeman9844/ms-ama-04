@@ -589,25 +589,38 @@ def test_abandoned_upload_keeps_intent_until_ended_cleanup(mock_app, monkeypatch
     assert not deps.raw.manifest(container) and not consent().get("raw_write_count")
 
 
-def test_invalid_usd_pg_flow_never_exposes_source_values(mock_app, monkeypatch, caplog):
+@pytest.mark.parametrize("source_name,code", [("pg_flow", "invalid_usd_pg_flow"), ("flow", "invalid_account_flow"),
+                                              ("rejected", "account_flow_unavailable")])
+def test_invalid_usd_flow_never_exposes_source_values(mock_app, monkeypatch, caplog, source_name, code):
     from shared.contracts import USD_V1
 
     deps = make_deps(mock_app, events=Outbox())
-    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, applicant_id="seller-bakery-20",
+    deps.store.upsert(LOANS, dict(USD_V1.model_dump(), id=LOAN, application_id=LOAN, applicant_id="seller-bakery-20",
+                                  baseline={"avg_weekly_revenue_cents": 120000, "cash_buffer_days": 12},
+                                  industry="Food", decision="approve",
                                   underwriting_consent_id="prior", amount_cents=500000, tenor_months=6))
     fetch = deps.mock.fetch
     sentinel = "SYNTHETIC-PRIVATE-PG-VALUE"
     def corrupt(source, token, terms):
-        if source == "pg_flow":
-            return {**USD_V1.model_dump(), "orders": sentinel, "settlements": []}
+        if source == "flow" and source_name == "rejected":
+            from agents.data_assembly import SourceError
+            raise SourceError(422, sentinel)
+        if source == source_name:
+            return {**USD_V1.model_dump(), "orders": sentinel, "settlements": []} if source == "pg_flow" else [sentinel]
         return fetch(source, token, terms)
     monkeypatch.setattr(deps.mock, "fetch", corrupt)
     with pytest.raises(ValueError) as exc:
         replay(deps, **USD_V1.model_dump())
     mon = loan(deps)["monitoring"]
     assert sentinel not in caplog.text and sentinel not in json.dumps(mon)
-    assert str(exc.value) == "invalid_usd_pg_flow" and exc.value.__context__ is None
-    assert mon["status"] == "failed" and "invalid_usd_pg_flow" in mon["error"] and not flows(deps.events)
+    assert str(exc.value) == code and exc.value.__context__ is None
+    assert mon["status"] == "failed" and code in mon["error"] and not flows(deps.events)
+    from console.app import create_app
+    from consolepreview.fixtures import build_deps
+    ui = build_deps()
+    ui.monitoring.loans[LOAN] = loan(deps)
+    page = TestClient(create_app(ui)).get(f"/loans/{LOAN}")
+    assert page.status_code == 200 and code in page.text and sentinel not in page.text
 
 
 def test_usd_worker_partial_redelivery_and_late_payoff(mock_app):
@@ -1049,10 +1062,10 @@ def test_failure_after_claim_is_recorded_and_not_blocking(mock_app):
             raise RuntimeError("mock flow down")
 
     broken = replace(deps, mock=FlowDown(deps.mock))
-    with pytest.raises(RuntimeError, match="mock flow down"):
+    with pytest.raises(ValueError, match="account_flow_unavailable"):
         replay(broken)
     mon = loan(deps)["monitoring"]
-    assert mon["status"] == "failed" and "mock flow down" in mon["error"]
+    assert mon["status"] == "failed" and "account_flow_unavailable" in mon["error"]
     assert replay(deps)["replay_id"] != mon["replay_id"]  # failed는 가드에 걸리지 않는다
 
 

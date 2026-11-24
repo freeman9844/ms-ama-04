@@ -135,10 +135,24 @@ and escalate; never unmask the public routes to run this test.
    totals and old direct links must match baseline; USD lists and KPIs exclude
    them before limit/aggregation. Confirm real roles, auditor masking and
    ownership/CSRF barriers, including after withdrawal; verify revoke and
-   deletion proof on disposable **copies only** for each contract. The mock
-   token revocation registry is in memory: verify active-token continuity and
-   continued rejection of revoked, unexpired tokens across revision changes.
-   If revocations cannot be preserved/restored before serving traffic, stop.
+   deletion proof on disposable **copies only** for each contract.
+   The mock API now requires a positive marker for each signed, unexpired,
+   in-scope token. IaC binds `MOCK_AUTHORITY_URL` to the primary private
+   `stfn…/consent-authority` Blob container. The mock's dedicated `id-mockapi`
+   identity has AcrPull on the registry and Blob Data Contributor **only on
+   this container**, not account-wide access or Cosmos rights. Verify effective
+   assignments, private DNS, read/write and denial outside this scope.
+   Before switching endpoints, isolate old revisions from all callers and
+   quiesce issuance/revocation while retaining commands for replay. The old
+   process-local registry cannot prove a token is still active after a restart.
+   Reconcile the old authority, stored grants, expiry and withdrawal history;
+   seed only individually verified live grant IDs with `active` bytes, using
+   create-only writes. Never overwrite a tombstone, infer active from a signature,
+   or import unresolved grants. If continuity cannot be proven, hold the switch
+   and arrange authorized re-consent, not a bypass. Preserve the same secret.
+   On isolated replicas including a fresh process, verify active access,
+   revoked-token denial without a second revoke, and denial on authority outage.
+   Do not restore a stale authority snapshot or route back to memory-only code.
 6. Require working private identity/network paths, Cosmos indexing and RU
    headroom, conditional writes/batches (contact cap across both currencies,
    ETag proof and grant tracking), queue consumption/poison monitoring,
@@ -147,7 +161,11 @@ and escalate; never unmask the public routes to run this test.
    Blob namespace absence and same-project Foundry cleanup: after a failed
    DELETE only authoritative GET 404 confirms container absence; forbidden,
    transport and server errors are **pending**, not success. Check repair and
-   notice reconciliation; old missing manifests/cleared markers cannot be
+   notice reconciliation. An assessment fence with no returned target IDs
+   (e.g. a worker lost during a remote run) is not proof of absence: keep
+   deletion incomplete until an authorized same-project inventory and target
+   reconciliation. Inspect old `late_cleanup` failures before rollout;
+   old missing manifests/cleared markers cannot be
    reconstructed by the timer. Escalate unresolved historical gaps. Check
    native English grounded review via the actual model/API and fallback paths
    in the isolated stage. Fail or lack of evidence on any check = keep closed.

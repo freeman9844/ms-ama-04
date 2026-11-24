@@ -1103,7 +1103,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             consent_id=consent_id, action="revoke", requested_by=f"borrower:{applicant_id}"[:64],
             application_id=doc.get("application_id"),
         )
-        deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
+        queue_servicing(CONSENT_COMMAND_QUEUE, doc, command)
         return customer_sent(user, applicant_id, "consents", _(
             "동의 %(id)s 철회를 요청했습니다. 원천 데이터 삭제가 끝나면 삭제 증명이 표시됩니다.", id=consent_id), legacy=not product_of(doc))
 
@@ -1171,7 +1171,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         command = ConsentCommand(
             consent_id=consent_id, action=action, requested_by=user.user_id, application_id=application_id
         )
-        deps.queue.send(CONSENT_COMMAND_QUEUE, command.model_dump(mode="json"))
+        queue_servicing(CONSENT_COMMAND_QUEUE, doc, command)
         return sent(user, _("동의 %(id)s에 '%(action)s' 명령을 보냈습니다.", id=consent_id, action=i18n.label(DEMO_ACTIONS, action)),
                     f"/applications/{quote(application_id, safe='')}", _("신청 상세로"))
 

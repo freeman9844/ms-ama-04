@@ -236,7 +236,10 @@ def test_reviewed_activity_uses_native_tools_and_masks_source_names():
             return AgentRun(spec.name, "1", "", output, [], 10, 1, ())
 
     ctx = context()
-    deps = SimpleNamespace(raw=SimpleNamespace(get_json=lambda _, k: source[k]), agents=Runner(), analyst_model="a",
+    from tests.orchestrator.test_activities import MemoryStore
+    store = MemoryStore()
+    store.upsert("consents", dict(id="c", status="granted", **META))
+    deps = SimpleNamespace(store=store, raw=SimpleNamespace(get_json=lambda _, k: source[k]), agents=Runner(), analyst_model="a",
                            reviewer_model="r", pseudonym_key=b"x"*32)
     res = assess_credit(deps, dict(application_id="app", consent_id="c", policy=ctx.policy,
         underwriting={**META, "features": ctx.features, "signals": {}, "monthly": [], "category_overrides": {txn.txn_id: "revenue"}}))

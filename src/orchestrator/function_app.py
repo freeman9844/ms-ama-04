@@ -103,7 +103,7 @@ def register_monitoring(payload: dict) -> dict:
 @app.queue_trigger(arg_name="msg", queue_name="consent-lifecycle", connection="AzureWebJobsStorage")
 @app.durable_client_input(client_name="client")
 async def consent_lifecycle_start(msg: func.QueueMessage, client: df.DurableOrchestrationClient) -> None:
-    await handle_lifecycle_start(client, msg.get_body().decode("utf-8"))
+    await handle_lifecycle_start(client, msg.get_body().decode("utf-8"), deps().store)
 
 
 @app.queue_trigger(arg_name="msg", queue_name="consent-commands", connection="AzureWebJobsStorage")

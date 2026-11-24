@@ -5,9 +5,10 @@ from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from mockapis.consent import ConsentError, ConsentRegistry, issue_token, verify_token
+from mockapis.consent import AuthorityUnavailable, ConsentError, ConsentRegistry, GrantAuthority, issue_token, verify_token
 from mockapis.demo import FlowStore
 from mockapis.postloan import LoanTerms, PostLoanFlow
 from mockapis.synth import SyntheticCase, UsdCase
@@ -68,11 +69,16 @@ def create_app(
     clock: Callable[[], datetime],
     flows: Mapping[str, PostLoanFlow] | FlowStore | None = None,
     fault: str = "none",
+    *, registry: GrantAuthority | None = None,
 ) -> FastAPI:
     if fault not in FAULT_MODES:
         raise ValueError(f"FAULT_MODE: {fault}")
     app = FastAPI(title="Mock MyData/Tax/PG API")
-    registry = ConsentRegistry()
+    registry = registry if registry is not None else ConsentRegistry()
+
+    @app.exception_handler(AuthorityUnavailable)
+    async def authority_unavailable(request, exc):
+        return JSONResponse({"detail": {"code": "unavailable"}}, status_code=503)
     state = {"fault": fault}
     # flaky: (동의, 경로)마다 첫 요청만 503
     seen: set[tuple[str, str]] = set()
@@ -84,7 +90,9 @@ def create_app(
             raise _error(401, "invalid")
         token = authorization.removeprefix("Bearer ")
         try:
-            grant = verify_token(token, secret, scope, clock(), registry.revoked_ids)
+            grant = verify_token(token, secret, scope, clock())
+            if not registry.active(grant.consent_id):
+                raise ConsentError("revoked")
         except ConsentError as exc:
             raise _error(403 if exc.code == "scope" else 401, exc.code) from None
         if state["fault"] == "flaky" and (grant.consent_id, path) not in seen:
@@ -230,3 +238,13 @@ def create_app(
         return Response(status_code=204)
 
     return app
+
+
+def demo_app(*, registry: GrantAuthority | None = None):
+    import os
+    from mockapis.demo import KST, build_demo_cases, build_load_cases, load_secret, resolve_as_of
+
+    as_of = resolve_as_of()
+    cases = {**build_demo_cases(as_of), **build_load_cases(as_of)}
+    return create_app(cases, load_secret(), lambda: datetime.now(KST), flows=FlowStore(cases, as_of),
+                      fault=os.environ.get("FAULT_MODE", "none"), registry=registry)

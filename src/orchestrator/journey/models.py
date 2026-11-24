@@ -141,6 +141,12 @@ class OfficerDecision(_Decision):
 class UsdOfficerDecision(_Decision, UsdProduct):
     amount_cents: RequestedUsdCents | None = None
 
+    @model_validator(mode="after")
+    def no_declined_principal(self):
+        if self.decision == "decline" and self.amount_cents is not None:
+            raise ValueError("A declined application has no approved principal")
+        return self
+
 
 class OfficerMessage(BaseModel):
     """officer-decisions 큐 메시지."""
@@ -317,6 +323,14 @@ class ConsentCommand(BaseModel):
     action: Literal["revoke", "expire_now", "remind_now"]
     requested_by: str = Field(min_length=1, max_length=64)
     application_id: str | None = Field(default=None, pattern=APPLICATION_ID_PATTERN)
+
+
+class UsdConsentCommand(ConsentCommand, UsdProduct):
+    pass
+
+
+class UsdLifecycleStart(LifecycleStart, UsdProduct):
+    pass
 
 
 class GrievanceSubmission(BaseModel):

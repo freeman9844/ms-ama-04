@@ -75,7 +75,8 @@ def test_container_apps_are_vnet_only_single_replica(closed):
         app = closed.one(APP, name)
         props = app["properties"]
         assert props["environmentId"].endswith("/managedEnvironments/cae-int-amatest")
-        assert list(app["identity"]["userAssignedIdentities"])[0].endswith("/id-apps-amatest")
+        identity = "id-mockapi" if name == "ca-mockapi" else "id-apps"
+        assert list(app["identity"]["userAssignedIdentities"])[0].endswith(f"/{identity}-amatest")
         ingress = props["configuration"]["ingress"]
         assert ingress["external"] is True
         assert ingress["targetPort"] == 8000
@@ -119,6 +120,24 @@ def test_mock_consent_secret_required_for_real_image():
     assert param["type"] == "securestring" and param["minLength"] == 32
     assert "[resourceId('Microsoft.Resources/deployments', 'require-mock-consent-secret')]" in \
         modules["ca-mockapi"]["dependsOn"]
+
+
+def test_mock_authority_is_one_private_container(closed):
+    import re
+    env = _env(_container(closed, "ca-mockapi"))
+    account = closed.one("Microsoft.Storage/storageAccounts", "stfn")["name"]
+    assert env["MOCK_AUTHORITY_URL"]["value"] == f"https://{account}.blob.core.windows.net/consent-authority"
+    modules = _resources(_compile(INFRA / "resources.bicep"))
+    grants = {}
+    for module in modules:
+        params = module.get("properties", {}).get("parameters", {})
+        roles = re.findall(r"mockapiPrincipalId\.value.{0,80}?role'\)\.(\w+)", json.dumps(params))
+        if roles:
+            grants[module["name"]] = roles
+        if module["name"] == "mock-authority-access":
+            assert params["containerName"]["value"] == "consent-authority"
+            assert "storage-functions" in params["storageName"]["value"]
+    assert grants == {"mock-authority-access": ["blobContributor"], "acr": ["acrPull"]}
 
 
 def test_function_app_settings_point_to_runtime(closed, variant):

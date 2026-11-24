@@ -95,7 +95,7 @@ def test_resolve_as_of_uses_kst_date():
     assert resolve_as_of({}, now=utc_evening) == date(2026, 10, 1)
 
 
-def test_main_builds_app(monkeypatch):
+def test_main_builds_app(monkeypatch, authority_container):
     monkeypatch.setenv("MOCK_CONSENT_SECRET", "x" * 32)
     monkeypatch.setenv("MOCK_AS_OF", "2026-10-01")
     sys.modules.pop("mockapis.main", None)
@@ -132,7 +132,34 @@ def test_postloan_flows_cast_the_healthy_seller_in_four_different_causes():
 
 
 
-def test_main_serves_flow_for_load_applicant(monkeypatch):
+@pytest.fixture
+def authority_container(monkeypatch):
+    from types import ModuleType, SimpleNamespace
+    from unittest.mock import Mock
+
+    markers = {}
+
+    def upload_blob(name, data, *, overwrite=False):
+        assert overwrite or name not in markers
+        markers[name] = data
+
+    def download_blob(name):
+        if name not in markers:
+            raise KeyError(name)
+        return SimpleNamespace(readall=lambda: markers[name])
+
+    container = SimpleNamespace(upload_blob=upload_blob, download_blob=download_blob)
+    monkeypatch.setenv("MOCK_AUTHORITY_URL", "https://synthetic.invalid/consent-authority")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "synthetic")
+    for name in ("azure.storage", "azure.storage.blob", "azure.identity", "azure.core.exceptions"):
+        monkeypatch.setitem(sys.modules, name, ModuleType(name))
+    sys.modules["azure.core.exceptions"].ResourceNotFoundError = KeyError
+    sys.modules["azure.storage.blob"].ContainerClient = SimpleNamespace(from_container_url=lambda *a, **kw: container)
+    sys.modules["azure.identity"].ManagedIdentityCredential = Mock()
+    return container
+
+
+def test_main_serves_flow_for_load_applicant(monkeypatch, authority_container):
     """부하 신청을 심사역이 승인해도 사후 재생이 no_flow로 끊기지 않는다."""
     monkeypatch.setenv("MOCK_CONSENT_SECRET", "x" * 32)
     monkeypatch.setenv("MOCK_AS_OF", "2026-10-01")
@@ -143,6 +170,27 @@ def test_main_serves_flow_for_load_applicant(monkeypatch):
     token = r.json()["token"]
     flow = client.get("/mydata/flow", headers={"Authorization": f"Bearer {token}"})
     assert flow.status_code == 200 and flow.json()
+
+
+def test_revocations_survive_fresh_production_app(monkeypatch, authority_container):
+    monkeypatch.setenv("MOCK_CONSENT_SECRET", "x" * 32)
+    def replica():
+        sys.modules.pop("mockapis.main", None)
+        return TestClient(importlib.import_module("mockapis.main").app)
+    first = replica()
+    def grant():
+        return first.post("/consents", json={"applicant_id": "load-healthy-12", "scopes": ["account"],
+                                             "purpose": "synthetic"}).json()
+    dead, live = grant(), grant()
+    assert first.post(f"/consents/{dead['consent_id']}/revoke").status_code == 204
+    other = replica()
+    def read(g):
+        return other.get("/mydata/profile", headers={"Authorization": "Bearer " + g["token"]}).status_code
+    assert read(dead) == 401 and read(live) == 200
+    def unavailable(name):
+        raise OSError("synthetic outage")
+    monkeypatch.setattr(authority_container, "download_blob", unavailable)
+    assert read(live) == 503
 
 
 def test_demo_cases_unchanged():

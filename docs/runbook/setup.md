@@ -16,9 +16,12 @@ py -3.12 -m venv .venv
 
 ```powershell
 $env:MOCK_CONSENT_SECRET = "local-dev-secret-at-least-32-characters!!"
-.\.venv\Scripts\python -m uvicorn mockapis.main:app --port 8001
+.\.venv\Scripts\python -m uvicorn --factory mockapis.app:demo_app --port 8001
 .\.venv\Scripts\python -m uvicorn policy.main:app --port 8002
 ```
+
+The loopback demo uses process-local grants; restarting invalidates its tokens.
+The deployed `mockapis.main:app` instead requires a private durable grant authority.
 
 심사 콘솔 화면만 Azure 없이 확인할 때(합성 데이터, 결정·재생 버튼은 메모리에 기록만 함):
 

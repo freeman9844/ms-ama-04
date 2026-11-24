@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Protocol
+from uuid import uuid4
 
 from pydantic import TypeAdapter
 
@@ -20,7 +21,7 @@ from agents.translator import TRANSLATE_MODEL
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
 from agents.usd_monitoring import usd_baseline
-from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart
+from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart, UsdLifecycleStart
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.contracts import UsdProduct, UsdTransaction
 from shared.product_context import product_of, validate_usd_evidence
@@ -193,7 +194,9 @@ def schedule_lifecycle(deps: Deps, doc: dict[str, Any]) -> None:
         deps.store.upsert("consents", doc)
         return
     deps.store.upsert("consents", doc)
-    message = LifecycleStart(consent_id=doc["consent_id"], expires_at=doc["expires_at"])
+    product = product_of(doc)
+    message = (UsdLifecycleStart if product else LifecycleStart)(
+        **(product.model_dump() if product else {}), consent_id=doc["consent_id"], expires_at=doc["expires_at"])
     try:
         deps.queue.send(LIFECYCLE_QUEUE, message.model_dump(mode="json", exclude_defaults=True))
     except Exception as e:
@@ -219,6 +222,8 @@ def request_consent(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
     purpose = "Working capital loan assessment" if product else CONSENT_PURPOSE
     grant = deps.mock.create_consent(payload["applicant_id"], scopes, purpose, CONSENT_TTL_DAYS,
                                      **({"product": product} if product else {}))
+    if product_of(grant) != product:
+        raise ValueError("Origination consent product mismatch")
     consent_id = grant["consent_id"]
     doc = {
         **meta,
@@ -321,47 +326,43 @@ def _drop_if_consent_ended(deps: Deps, consent_id: str, container: str) -> None:
 
 
 def _remember_foundry(
-    deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]]
+    deps: Deps, consent_id: str, conversations: list[str], containers: list[dict[str, Any]], *, run_id: str | None = None
 ) -> None:
-    """동의 만료·철회 때 삭제할 Foundry 대화·컨테이너를 동의 문서에 남긴다.
-
-    삭제가 이미 끝난 동의(늦게 끝난 에이전트 실행)면 바로 지우고 late_cleanup에 기록한다.
-    """
-    if not conversations and not containers:
+    """Checkpoint targets and release the run fence together, before attempting any deletes."""
+    if not conversations and not containers and run_id is None:
         return
 
-    def mutate(consent: dict[str, Any]) -> None:
-        if consent.get("status") in ENDED_CONSENT:
-            consent.setdefault("late_cleanup", []).extend(_cleanup_now(deps, conversations, containers))
-            return
+    def mutate(consent: dict[str, Any]) -> bool | None:
         known = consent.setdefault("foundry_conversations", [])
+        saved = consent.setdefault("foundry_containers", [])
+        before = len(known) + len(saved)
         known.extend(c for c in conversations if c not in known)
-        consent.setdefault("foundry_containers", []).extend(containers)
+        ids = {c["id"] for c in saved}
+        for c in containers:
+            if c["id"] not in ids:
+                saved.append(c)
+                ids.add(c["id"])
+        runs = consent.get("assessment_runs", [])
+        if run_id in runs:
+            runs.remove(run_id)
+        elif before == len(known) + len(saved):
+            return False
+        if consent.get("status") in ENDED_CONSENT:
+            notices = consent.get("notices", [])
+            prior = [n for n in notices if n["kind"] == "deletion"]
+            if prior:
+                consent.setdefault("superseded_deletion_notices", []).extend(prior)
+                consent["notices"] = [n for n in notices if n["kind"] != "deletion"]
+            consent.update(foundry_repair_pending=True, deletion_complete=False,
+                           foundry_generation=consent.get("foundry_generation", 0) + 1)
 
-    update_doc(deps.store, "consents", consent_id, consent_id, mutate)
-
-
-def _cleanup_now(
-    deps: Deps, conversations: list[str], containers: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    at, out = deps.clock().isoformat(), []
-    for cid in conversations:
-        outcome = "failed"
-        if deps.agents is not None:
-            try:
-                outcome = str(deps.agents.delete_conversation(cid))  # type: ignore[attr-defined]
-            except Exception:  # noqa: BLE001
-                outcome = "failed"
-        out.append({"kind": "conversation", "target": cid, "outcome": outcome, "at": at})
-    for c in containers:
-        deleted = bool(c.get("deleted"))
-        if not deleted and deps.agents is not None:
-            try:
-                deleted = bool(deps.agents.delete_container(c["id"]))
-            except Exception:  # noqa: BLE001
-                deleted = False
-        out.append({"kind": "container", "target": c["id"], "outcome": "deleted" if deleted else "failed", "at": at})
-    return out
+    doc = update_doc(deps.store, "consents", consent_id, consent_id, mutate)
+    if doc and doc.get("status") in ENDED_CONSENT:
+        if doc.get("foundry_repair_pending"):
+            from journey.consent import repair_foundry
+            repair_foundry(deps, doc)
+        if run_id:
+            raise ConsentEnded(consent_id)
 
 
 def _load(deps: Deps, consent_id: str) -> tuple[ApplicantProfile, list[Transaction], list[TaxFiling]]:
@@ -508,8 +509,17 @@ def assess_credit(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
         settlement=uw.get("pg_ledger"),
         marketplace=uw.get("marketplace"),
     )
+    run_id = uuid4().hex
+
+    def fence(doc: dict) -> None:
+        if doc.get("status") != "granted":
+            raise ConsentEnded(payload["consent_id"])
+        doc.setdefault("assessment_runs", []).append(run_id)
+
+    if update_doc(deps.store, "consents", payload["consent_id"], payload["consent_id"], fence) is None:
+        raise ConsentEnded(payload["consent_id"])
     result = assess(ctx, runner=deps.agents, analyst_model=deps.analyst_model, reviewer_model=deps.reviewer_model)
-    _remember_foundry(deps, payload["consent_id"], result.conversations, result.containers)
+    _remember_foundry(deps, payload["consent_id"], result.conversations, result.containers, run_id=run_id)
     return {
         "assessment": result.assessment.model_dump(mode="json") if result.assessment else None,
         "flags": result.flags,

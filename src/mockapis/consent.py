@@ -1,4 +1,4 @@
-"""Mock MyData 동의: HMAC 서명 토큰과 인메모리 동의 레지스트리."""
+"""Signed grants; the deployed service also requires a durable active marker."""
 
 import base64
 import hashlib
@@ -6,6 +6,7 @@ import hmac
 import re
 import uuid
 from collections.abc import Collection, Iterable
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -72,13 +73,7 @@ def verify_token(
     return grant
 
 
-class ConsentRegistry:
-    """동의 원장(인메모리). P2 이후 Cosmos DB 동의 레지스트리로 대체된다."""
-
-    def __init__(self) -> None:
-        self._grants: dict[str, ConsentGrant] = {}
-        self._revoked: set[str] = set()
-
+class GrantAuthority(ABC):
     def grant(
         self,
         applicant_id: str,
@@ -99,8 +94,31 @@ class ConsentRegistry:
             granted_at=now,
             expires_at=now + ttl,
         )
-        self._grants[g.consent_id] = g
+        self.record(g)
         return g
+
+    @abstractmethod
+    def record(self, grant: ConsentGrant) -> None: ...
+
+    @abstractmethod
+    def active(self, consent_id: str) -> bool: ...
+
+    @abstractmethod
+    def revoke(self, consent_id: str) -> bool: ...
+
+
+class ConsentRegistry(GrantAuthority):
+    """Process-local authority for synthetic, embedded API callers."""
+
+    def __init__(self) -> None:
+        self._grants: dict[str, ConsentGrant] = {}
+        self._revoked: set[str] = set()
+
+    def record(self, grant: ConsentGrant) -> None:
+        self._grants[grant.consent_id] = grant
+
+    def active(self, consent_id: str) -> bool:
+        return consent_id in self._grants and consent_id not in self._revoked
 
     def get(self, consent_id: str) -> ConsentGrant | None:
         return self._grants.get(consent_id)
@@ -116,3 +134,38 @@ class ConsentRegistry:
     @property
     def revoked_ids(self) -> frozenset[str]:
         return frozenset(self._revoked)
+
+
+class AuthorityUnavailable(RuntimeError):
+    pass
+
+
+class BlobConsentRegistry(GrantAuthority):
+    """Only opaque grant IDs and state bytes are stored. Reads use the primary, without a cache."""
+
+    def __init__(self, container):
+        self.container = container
+
+    def _write(self, cid: str, state: bytes, *, overwrite: bool) -> None:
+        try:
+            self.container.upload_blob(cid, state, overwrite=overwrite)
+        except Exception:
+            raise AuthorityUnavailable() from None
+
+    def record(self, grant: ConsentGrant) -> None:
+        self._write(grant.consent_id, b"active", overwrite=False)
+
+    def active(self, consent_id: str) -> bool:
+        from azure.core.exceptions import ResourceNotFoundError
+        try:
+            return self.container.download_blob(consent_id).readall() == b"active"
+        except ResourceNotFoundError:
+            return False
+        except Exception:
+            raise AuthorityUnavailable() from None
+
+    def revoke(self, consent_id: str) -> bool:
+        if not _CONSENT_ID.fullmatch(consent_id):
+            return False
+        self._write(consent_id, b"revoked", overwrite=True)
+        return True

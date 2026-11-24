@@ -109,11 +109,27 @@ def _command(deps, body, model):
     return msg
 
 
+def _account_flow(flow, usd):
+    try:
+        return (_USD_TRANSACTIONS if usd else _TRANSACTIONS).validate_python(flow)
+    except ValidationError:
+        pass
+    raise ValueError("invalid_account_flow")
+
+
+def _fetch_account_flow(deps, token, terms):
+    try:
+        return deps.mock.fetch("flow", token, terms)
+    except Exception:
+        pass  # Transport and validation errors can contain the rejected body.
+    raise ValueError("account_flow_unavailable")
+
+
 def _stored_flow(deps: Deps, consent_id: str, usd=False) -> list[Transaction]:
     flow = deps.raw.get_json(raw_container(consent_id), "flow.json")
     if flow is None:
         raise RuntimeError(f"사후 흐름 없음: {consent_id}")
-    return (_USD_TRANSACTIONS if usd else _TRANSACTIONS).validate_python(flow)
+    return _account_flow(flow, usd)
 
 
 def _mask_and_flow(deps: Deps, loan: dict[str, Any]) -> tuple[ApplicantProfile, list[Transaction], Any]:
@@ -153,7 +169,7 @@ def _ledger_baseline(
     if pg is None:
         return None
     prior = deps.raw.get_json(raw_container(loan["underwriting_consent_id"]), "transactions.json") or []
-    lb = ledger_baseline(pg, flow_start, loan["industry"], _TRANSACTIONS.validate_python(prior))
+    lb = ledger_baseline(pg, flow_start, loan["industry"], _account_flow(prior, False))
     return lb.to_dict() if lb is not None else None
 
 
@@ -244,8 +260,8 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
             "amount_krw": loan["amount_krw"],
             "installment_krw": round(monthly_installment(loan["amount_krw"], loan["tenor_months"])),
         })
-        flow = deps.mock.fetch("flow", grant["token"], terms)
-        txns = (_USD_TRANSACTIONS if product else _TRANSACTIONS).validate_python(flow)
+        flow = _fetch_account_flow(deps, grant["token"], terms)
+        txns = _account_flow(flow, product)
         if not txns:
             raise RuntimeError(f"사후 흐름이 비어 있다: {loan_id}")
         if product:

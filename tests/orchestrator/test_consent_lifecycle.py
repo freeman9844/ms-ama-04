@@ -274,11 +274,16 @@ def test_cutover_revoke_and_prove_each_portfolio(run_orchestrator, enabled):
         durable = AsyncMock()
         durable.get_status.return_value = None
         assert queue == "consent-commands"
+        tags = {} if prefix else USD_V1.model_dump()
+        for message in (msg, next(s for q, s in worker.queue.sent if s["consent_id"] == cid)):
+            assert all(message.get(k) == tags.get(k) for k in USD_V1.model_dump())
         assert asyncio.run(handle_consent_command(durable, json.dumps(msg), worker.store)) == "started"
         activities = {k: partial(f, worker) for k, f in CONSENT_ACTIVITIES.items()}
         result, _ = run_orchestrator(consent_lifecycle, durable.start_new.await_args.args[-1], activities)
         assert result["reason"] == "revoked" and result["status"] == "deleted"
         proof = worker.store.read(PROOFS_CONTAINER, cid, cid)
+        event = worker.events.sent[-1][1]
+        assert event["type"] == "consent.revoked" and all(event.get(k) == tags.get(k) for k in USD_V1.model_dump())
         assert proof["complete"] and proof["manifest"] and all(i["verified"] for i in proof["items"])
         assert worker.raw.manifest(f"consent-{cid}") is None
         assert mock_client.get("/mydata/profile", headers={"Authorization": "Bearer " + bearer}).status_code == 401
@@ -301,6 +306,48 @@ def test_unverified_foundry_deletion_is_recorded_and_raises(mock_client):
         delete_consent_data(deps, end(cid, "expired"))
     proof = deps.store.read(PROOFS_CONTAINER, cid, cid)
     assert proof["attempts"] == 2 and proof["reason"] == "revoked"  # 처음 끝난 사유를 유지한다
+
+
+def test_late_foundry_target_invalidates_and_repairs_proof(mock_client, monkeypatch):
+    from console.adapters import CosmosPrivacy
+    deps = make_deps(mock_client, FoundryRunner())
+    cid = granted(deps, conversations=())["consent_id"]
+    assert delete_consent_data(deps, end(cid))["complete"]
+    send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
+    def reader(container):
+        return SimpleNamespace(read_item=lambda item, partition_key: deps.store.read(container, item, partition_key))
+    privacy = CosmosPrivacy(reader("consents"), reader(PROOFS_CONTAINER), None)
+    def current():
+        return privacy.get_proof(cid)["complete"]
+    deps.agents.exists = True
+    _remember_foundry(deps, cid, ["late"], [])
+    assert not current()
+    assert not [n for n in privacy.get_consent(cid)["notices"] if n["kind"] == "deletion"]
+    with pytest.raises(LookupError):
+        send_consent_notice(deps, {"consent_id": cid, "kind": "deletion"})
+    cosmos = repair_scan(deps.store, cid)
+    monkeypatch.setattr(deps.store, "pending_raw_repairs", cosmos.pending_raw_repairs, raising=False)
+    assert cosmos.pending_raw_repairs() == [cid]
+    deps.agents.exists = False
+    sweep_raw_repairs(deps)
+    assert current()
+    _remember_foundry(deps, cid, ["late"], [])
+    assert current() and deps.agents.deleted_conversations.count("late") == 2
+    assert any(i["target"] == "late" and i["verified"] for i in deps.store.read(PROOFS_CONTAINER, cid, cid)["items"])
+    sweep_raw_repairs(deps)
+    sweep_raw_repairs(deps)
+    assert len([n for n in privacy.get_consent(cid)["notices"] if n["kind"] == "deletion"]) == 1
+    assert not cosmos.pending_raw_repairs()
+
+
+def test_origination_does_not_use_wrong_product_grant(mock_client, monkeypatch):
+    from shared.contracts import USD_V1
+    deps = make_deps(mock_client)
+    create = deps.mock.create_consent
+    monkeypatch.setattr(deps.mock, "create_consent", lambda *a, **kw: create(*a))
+    with pytest.raises(ValueError):
+        request_consent(deps, dict(USD_V1.model_dump(), application_id="app-1", applicant_id="seller-bakery-20"))
+    assert not deps.store.docs and not deps.queue.sent and not deps.events.sent
 
 
 def test_deletion_without_agents_is_incomplete_only_when_foundry_items_exist(mock_client):
@@ -498,6 +545,7 @@ def test_lifecycle_start_starts_once():
 def test_command_raises_event_and_withdraws_running_journey(status):
     client = FakeClient({"consent-c-1": status, "app-1": "Running"})
     store = MemoryStore()
+    store.upsert("consents", {"id": "c-1", "application_id": "app-1"})
     assert asyncio.run(handle_consent_command(client, command(application_id="app-1"), store)) == "raised"
     assert client.raised == [
         ("consent-c-1", "revoke", {"requested_by": "borrower:a"}),
@@ -507,8 +555,10 @@ def test_command_raises_event_and_withdraws_running_journey(status):
 
 def test_command_does_not_withdraw_finished_journey_or_on_other_actions():
     client = FakeClient({"consent-c-1": "Running", "app-1": "Completed"})
-    asyncio.run(handle_consent_command(client, command(application_id="app-1"), MemoryStore()))
-    asyncio.run(handle_consent_command(client, command(action="remind_now", application_id="app-1"), MemoryStore()))
+    store = MemoryStore()
+    store.upsert("consents", {"id": "c-1", "application_id": "app-1"})
+    asyncio.run(handle_consent_command(client, command(application_id="app-1"), store))
+    asyncio.run(handle_consent_command(client, command(action="remind_now", application_id="app-1"), store))
     assert [r[1] for r in client.raised] == ["revoke", "remind_now"]
 
 
@@ -527,7 +577,7 @@ def test_command_without_lifecycle_backfills_from_consent_doc():
 def test_command_after_failed_deletion_restarts_lifecycle_to_retry(ended, initial):
     store = MemoryStore()
     store.upsert("consents", {"id": "c-1", "consent_id": "c-1", "expires_at": EXPIRES.isoformat(), "status": ended,
-                              "deletion_complete": False})
+                              "application_id": "app-1", "deletion_complete": False})
     client = FakeClient({"consent-c-1": "Completed", "app-1": "Running"})
     cmd = command(action="remind_now", requested_by="officer", application_id="app-1")
     assert asyncio.run(handle_consent_command(client, cmd, store)) == "retried"
@@ -546,6 +596,26 @@ def test_command_for_unknown_completed_or_invalid_is_dropped():
     assert asyncio.run(handle_consent_command(done, command(application_id="app-1"), MemoryStore())) == "ignored"
     assert not done.raised and not done.started
     assert asyncio.run(handle_consent_command(FakeClient(), command(action="extend"), MemoryStore())) == "invalid"
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_lifecycle_and_command_dispatch_only_for_matching_stored_contract(native):
+    from shared.contracts import USD_V1
+    store = MemoryStore()
+    tags = USD_V1.model_dump()
+    store.upsert("consents", dict(tags if native else {}, id="c-1", application_id="app-1", expires_at=EXPIRES.isoformat()))
+    correct, wrong = (tags, {}) if native else ({}, tags)
+    client = FakeClient()
+    def start(meta):
+        return asyncio.run(handle_lifecycle_start(client, json.dumps(dict(meta, consent_id="c-1",
+                                  expires_at=EXPIRES.isoformat())), store))
+    assert start(wrong) is None and start(correct) == "consent-c-1"
+    client.statuses["consent-c-1"] = "Running"
+    assert asyncio.run(handle_consent_command(client, command(**wrong), store)) == "invalid"
+    assert asyncio.run(handle_consent_command(client, command(**correct, application_id="other"), store)) == "invalid"
+    assert not client.raised
+    assert asyncio.run(handle_consent_command(client, command(**correct), store)) == "raised"
+    assert client.raised[-1][2] == dict(correct, requested_by="borrower:a")
 
 
 class PendingDeleteRaw(MemoryRaw):
@@ -796,22 +866,26 @@ def test_repair_resumes_lifecycle_generation_without_restore_flag(mock_client, m
     assert any(m["type"] == "consent.revoked" for _, m, _ in deps.events.sent) is other_verified
 
 
+def repair_scan(store, cid):
+    def query(sql, enable_cross_partition_query):
+        doc = store.read("consents", cid, cid)
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE c (id,status,raw_write_count,raw_repair_pending,deletion_notice_pending,foundry_repair_pending)")
+            db.execute("INSERT INTO c VALUES (?,?,?,?,?,?)", [doc.get(k) for k in
+                       ("id", "status", "raw_write_count", "raw_repair_pending", "deletion_notice_pending", "foundry_repair_pending")])
+            return [r[0] for r in db.execute(sql.replace("SELECT VALUE", "SELECT"))]
+
+    cosmos = CosmosStore.__new__(CosmosStore)
+    cosmos._db = SimpleNamespace(get_container_client=lambda _: SimpleNamespace(query_items=query))
+    return cosmos
+
+
 def test_sweep_rediscovers_failed_notice_without_repeating_deletion(mock_client, monkeypatch):
     deps = make_deps(mock_client, FoundryRunner())
     cid = granted(deps)["consent_id"]
     doc = deps.store.read("consents", cid, cid)
     deps.store.upsert("consents", dict(doc, status="revoked", raw_write_count=1, deletion_request=end(cid)))
-
-    def query(sql, enable_cross_partition_query):
-        doc = deps.store.read("consents", cid, cid)
-        with sqlite3.connect(":memory:") as db:
-            db.execute("CREATE TABLE c (id,status,raw_write_count,raw_repair_pending,deletion_notice_pending)")
-            db.execute("INSERT INTO c VALUES (?,?,?,?,?)", [doc.get(k) for k in
-                       ("id", "status", "raw_write_count", "raw_repair_pending", "deletion_notice_pending")])
-            return [r[0] for r in db.execute(sql.replace("SELECT VALUE", "SELECT"))]
-
-    cosmos = CosmosStore.__new__(CosmosStore)
-    cosmos._db = SimpleNamespace(get_container_client=lambda _: SimpleNamespace(query_items=query))
+    cosmos = repair_scan(deps.store, cid)
     monkeypatch.setattr(deps.store, "pending_raw_repairs", cosmos.pending_raw_repairs, raising=False)
     replace_doc = deps.store.replace
 
