@@ -68,7 +68,10 @@ jobs/scripts/direct access before calling the gate closed.
    totals and old direct links must match baseline; USD lists and KPIs exclude
    them before limit/aggregation. Confirm real roles, auditor masking and
    ownership/CSRF barriers, including after withdrawal; verify revoke and
-   deletion proof on disposable **copies only** for each contract.
+   deletion proof on disposable **copies only** for each contract. The mock
+   token revocation registry is in memory: verify active-token continuity and
+   continued rejection of revoked, unexpired tokens across revision changes.
+   If revocations cannot be preserved/restored before serving traffic, stop.
 6. Require working private identity/network paths, Cosmos indexing and RU
    headroom, conditional writes/batches (contact cap across both currencies,
    ETag proof and grant tracking), queue consumption/poison monitoring,

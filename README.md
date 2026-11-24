@@ -53,6 +53,7 @@ azd env get-value APPGW_FQDN              # 콘솔 주소: https://<APPGW_FQDN>/
 | [사고 리더십 초안](docs/thought-leadership.md) | 구축·측정에서 얻은 7가지 설계 원칙과 체크리스트(발행 전 초안, 영역 D) |
 | [환경 준비](docs/runbook/setup.md) | 로컬 개발, Azure 준비, 최초 배포, 데모 모드 |
 | [배포](docs/runbook/deploy.md) | 배포 창, 구성요소별 배포, 운영자 IP 변경 대응 |
+| [USD 전환 승인 절차](docs/runbook/usd-cutover.md) | 신규 접수 기본 차단, 소비자 교체·검증 및 롤백 |
 | [운영](docs/runbook/operate.md) | 일시 정지·재개, smoke, 평가, 운영 지표·장애 주입, 비용 관리 |
 | [문제 해결](docs/runbook/troubleshooting.md) | 증상별 원인과 대응 |
 | [운영 실행 기록](docs/runbook/deploy-history.md) | P2~App Gateway WAF 배포·실측 원문 기록(이전 README 본문 보존) |
