@@ -73,6 +73,27 @@ def test_usd_seller_paths(seller, outcome, codes):
     assert "_krw" not in str(uw) and "_krw" not in decision.model_dump_json()
 
 
+@cache
+def krw_cases():
+    return demo.build_demo_cases(AS_OF)
+
+
+@pytest.mark.parametrize("seller", [a for a, *_ in demo.DEMO_APPLICANTS])
+def test_usd_policy_outcome_mirrors_the_krw_archetype(seller):
+    """Same seller, same v4 rules: the USD books must carry the KRW risk archetype into the policy decision.
+
+    KRW reasons must all reappear in USD; USD may add a borderline one (cable-13's R106 depends on the KRW as-of day).
+    """
+    k = krw_cases()[seller]
+    krw = explain(features.compute_underwriting(
+        "app-krw", k.profile, k.transactions, k.tax_filings, as_of=AS_OF, requested_amount_krw=5_000_000,
+        requested_tenor_months=6, pg_settlements=k.pg_settlements, marketplace=k.marketplace,
+    ).features, rules_for_version("2026.11-v4")).decision
+    usd = explain(underwrite(case_for(seller)).features, rules_for_version("usd-v1")).decision
+    assert usd.decision == krw.decision
+    assert {r.code for r in krw.reason_codes} <= {r.code for r in usd.reason_codes}
+
+
 def test_usd_exact_match_and_currency_isolation():
     case = case_for(BAKERY)
     s = next(s for s in case.pg_settlements if s.settled_on.month == 10 and s.settled_on.year == AS_OF.year)

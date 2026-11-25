@@ -97,15 +97,18 @@ def generate_usd_case(applicant_id: str, as_of: date, seed: int) -> UsdCase:
     meta = USD_V1.model_dump()
     start = date(*month_add(as_of.year, as_of.month, -seller.history_months), 1)
     opening = 3 * seller.weekly_sales_cents
-    books = simulate_usd(seller, applicant_id, start, as_of - timedelta(days=1), seed, opening)
+    books = simulate_usd(seller, applicant_id, start, as_of - timedelta(days=1), seed, opening,
+                         stress_from=as_of - timedelta(days=STRESS_DAYS) if seller.risk == "stressed" else None,
+                         advance_from=as_of - timedelta(days=ASSIGNED_DAYS) if seller.risk == "assigned" else None)
     profile = UsdProfile(**meta, applicant_id=applicant_id, business_name=seller.business_name,
                          representative_name=seller.representative, industry=seller.industry, region=seller.region,
-                         business_age_months=38, business_reg_no=business_reg_no(random.Random(seed)))
+                         business_age_months=seller.business_age_months,
+                         business_reg_no=business_reg_no(random.Random(seed)))
     platforms = []
     for code, _ in seller.channel_percent:
         recent = [o for o in books.orders if o.platform_code == code and o.order_on >= as_of - timedelta(days=90)]
         platforms.append(UsdStorePlatform(**meta, platform_code=code, opened_on=as_of-timedelta(days=790),
-                                          rating=4.8, review_count=len(recent)*3,
+                                          rating=seller.rating, review_count=len(recent)*3,
                                           gross_90d_cents=sum(o.gross_cents for o in recent),
                                           return_90d_cents=sum(o.returns_cents for o in recent), cancel_90d_cents=0,
                                           pending_settlement_cents=sum(s.net_cents for s in books.pending
