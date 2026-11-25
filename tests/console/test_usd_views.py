@@ -523,6 +523,21 @@ def test_usd_forecast_shows_recorded_due_day_cashflows_not_krw_assumptions():
     assert not re.search(r'Expected shortfall date</div>\s*<div class="kpi-value">None', sparse)
 
 
+def test_usd_forecast_keeps_undated_payment_off_the_timeline():
+    deps = fixtures.build_deps()
+    path = [{"date": "2026-11-10", "balance_cents": 13000},
+            {"balance_cents": -7200, "before_payment_cents": 0, "installment_cents": 7200}]
+    deps.monitoring.loans["risk"] = dict(
+        USD, id="risk", application_id="risk", applicant_id=SELLER, amount_cents=500000, tenor_months=6,
+        decision="approve", baseline={"avg_weekly_revenue_cents": 28200, "cash_buffer_days": 12},
+        monitoring={"processed_week": 1, "weeks": [{"week": 1, "row": {"week": 1}, "projection": {"path": path}}]})
+    response = TestClient(create_app(deps)).get("/loans/risk?lang=en")
+    assert response.status_code == 200
+    forecast = response.text.split("4-week balance forecast", 1)[1].split("</section>", 1)[0]
+    assert re.findall(r"<circle[^>]*><title>(.*?)</title></circle>", forecast) == ["11-10 $130"]
+    assert "<td>—</td><td>$0</td><td>$72</td>" in forecast
+
+
 def test_borrower_portfolios_find_applications_before_consent_exists():
     legacy = dict(id="old-case", application_id="old-case", applicant_id=SELLER, requested_amount_krw=5000000,
                   status="approved", source="customer", officer_decision={"amount_krw": 4500000})

@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% set nav = "ops" %}
 {% macro gap(value) -%}{{ value|num ~ "%p" if value is number else "—" }}{%- endmacro %}
+{% macro cost_value(amount) -%}{{ amount|usd if amount is not none else _("단가 미확인") }}{%- endmacro %}
+{% macro cost_scope(amount, unpriced) -%}
+{%- if unpriced -%}{{ _("단가 확인분만") ~ " · " if amount is not none else "" }}{{ _("단가 미확인 %(n)s회", n=unpriced) }}{%- endif -%}
+{%- endmacro %}
 {% import "_charts.html" as ch %}
 {% block title %}{{ _("운영 지표") }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
 {% block main %}
@@ -36,11 +40,14 @@
 <p class="ops-alert">{{ _("공정성 경보: %(axis)s 전액 승인 권고율 격차 %(gap)s &gt; 임계값 %(threshold)s. 원형 통제 최대 격차: %(controlled)s.", axis=AXIS_LABELS.get(axis, axis), gap=gap(s.fairness.axes[axis].gap_pp), threshold=gap(s.fairness.threshold_pp), controlled=gap(s.fairness.axes[axis].controlled.max_pp)) }}</p>
 {% endfor %}
 
+{% set latency_status = _("측정 전") if s.latency.p95_min is none else _("충족") if s.latency.met else _("미충족") %}
+{% set per_app = cost_value(s.ai_cost.per_application_usd) %}
+{% set scope_note = cost_scope(s.ai_cost.per_application_usd, s.ai_cost.unpriced_calls) %}
 <div class="grid-4">
-  {{ ch.gauge(ui.latency, _("접수 → 심사역 대기 p95"), _("%(n)s분", n=s.latency.p95_min|num) if s.latency.p95_min is not none else s.latency.p95_min|num, _("목표 ≤ %(n)s분", n=s.latency.target_min|num(0)) ~ " · " ~ (_("충족") if s.latency.met else _("미충족")), ui.latency_tone) }}
+  {{ ch.gauge(ui.latency, _("접수 → 심사역 대기 p95"), _("%(n)s분", n=s.latency.p95_min|num) if s.latency.p95_min is not none else s.latency.p95_min|num, _("목표 ≤ %(n)s분", n=s.latency.target_min|num(0)) ~ " · " ~ latency_status, ui.latency_tone) }}
   {{ ch.gauge(ui.success, _("에이전트 단계 성공률"), s.agent_success.rate|pct, _("목표 %(v)s", v=s.agent_success.target|pct), ui.success_tone) }}
   {{ ch.kpi(_("측정 표본"), _("%(n)s건", n=s.latency.n), _("표본 부족(20건 미만)") if s.latency.insufficient else _("p50 %(p50)s분 · 최대 %(max)s분", p50=s.latency.p50_min|num, max=s.latency.max_min|num), "neutral" if s.latency.insufficient else "blue") }}
-  {{ ch.kpi(_("AI 비용(건당)"), s.ai_cost.per_application_usd|usd, _("캐시 할인 미반영"), "purple") }}
+  {{ ch.kpi(_("AI 비용(건당)"), per_app, (scope_note ~ " · " if scope_note else "") ~ _("캐시 할인 미반영"), "purple") }}
 </div>
 
 <div class="grid-4">
@@ -95,6 +102,7 @@
 <div class="grid-2">
 <section class="card">
 <h2>{{ _("AI 비용") }} <small>{{ _("모델별·단계별, 캐시 할인 미반영") }}</small></h2>
+{% if scope_note %}<p class="note">{{ scope_note }}</p>{% endif %}
 <h3>{{ _("모델별") }}</h3>
 <div class="chart-row">
 {{ ch.donut(ui.model_cost, _("모델별 AI 비용"), "USD") }}
@@ -106,13 +114,13 @@
 <table>
   <thead><tr><th>{{ _("모델") }}</th><th>{{ _("호출") }}</th><th>{{ _("입력 토큰") }}</th><th>{{ _("출력 토큰") }}</th><th>{{ _("비용") }}</th></tr></thead>
   <tbody>
-  {% for name, m in s.ai_cost.by_model|dictsort %}<tr><td>{{ name }}</td><td>{{ m.calls }}</td><td>{{ "{:,}".format(m.input_tokens) }}</td><td>{{ "{:,}".format(m.output_tokens) }}</td><td>{{ m.cost_usd|usd if m.cost_usd is not none else _("단가 미확인") }}</td></tr>{% endfor %}
+  {% for name, m in s.ai_cost.by_model|dictsort %}<tr><td>{{ name }}</td><td>{{ m.calls }}</td><td>{{ "{:,}".format(m.input_tokens) }}</td><td>{{ "{:,}".format(m.output_tokens) }}</td><td>{{ cost_value(m.cost_usd) }}</td></tr>{% endfor %}
   </tbody>
 </table>
 <table>
   <thead><tr><th>{{ _("단계") }}</th><th>{{ _("호출") }}</th><th>{{ _("입력 토큰") }}</th><th>{{ _("출력 토큰") }}</th><th>{{ _("비용") }}</th></tr></thead>
   <tbody>
-  {% for name, m in s.ai_cost.by_step.items() %}<tr><td>{{ STEP_LABELS.get(name, name) }}</td><td>{{ m.calls }}</td><td>{{ "{:,}".format(m.input_tokens) }}</td><td>{{ "{:,}".format(m.output_tokens) }}</td><td>{{ m.cost_usd|usd }}{% if m.unpriced_calls %} · {{ _("단가 미확인 %(n)s회", n=m.unpriced_calls) }}{% endif %}</td></tr>{% endfor %}
+  {% for name, m in s.ai_cost.by_step.items() %}<tr><td>{{ STEP_LABELS.get(name, name) }}</td><td>{{ m.calls }}</td><td>{{ "{:,}".format(m.input_tokens) }}</td><td>{{ "{:,}".format(m.output_tokens) }}</td><td>{{ cost_value(m.cost_usd) }}{% if m.unpriced_calls %} · {{ cost_scope(m.cost_usd, m.unpriced_calls) }}{% endif %}</td></tr>{% endfor %}
   </tbody>
 </table>
 </details>
@@ -140,10 +148,10 @@
 <h2>SLO</h2>
 <details><summary>{{ _("SLO 상세") }}</summary>
 <table class="kv">
-  <tr><th>{{ _("접수 → 심사역 대기 p50 / p95 / 최대(분)") }}</th><td>{{ s.latency.p50_min|num }} / {{ s.latency.p95_min|num }} / {{ s.latency.max_min|num }} ({{ _("목표 p95 ≤ %(n)s분", n=s.latency.target_min|num(0)) }}, {{ _("충족") if s.latency.met else _("미충족") }})</td></tr>
+  <tr><th>{{ _("접수 → 심사역 대기 p50 / p95 / 최대(분)") }}</th><td>{{ s.latency.p50_min|num }} / {{ s.latency.p95_min|num }} / {{ s.latency.max_min|num }} ({{ _("목표 p95 ≤ %(n)s분", n=s.latency.target_min|num(0)) }}, {{ latency_status }})</td></tr>
   <tr><th>{{ _("측정 표본") }}</th><td>{{ _("%(n)s건", n=s.latency.n) }}{% if s.latency.insufficient %} · {{ _("표본 부족(20건 미만)") }}{% endif %}{% if s.latency.unreached %} · {{ _("미도달 %(n)s건", n=s.latency.unreached) }}{% endif %}{% if s.latency.received_only %} · {{ _("접수 시각 기준 %(n)s건", n=s.latency.received_only) }}{% endif %}</td></tr>
   <tr><th>{{ _("에이전트 단계 성공률") }}</th><td>{{ s.agent_success.rate|pct }} ({{ _("목표 %(v)s", v=s.agent_success.target|pct) }}, ok {{ s.agent_success.ok }} · degraded {{ s.agent_success.degraded }} · failed {{ s.agent_success.failed }})</td></tr>
-  <tr><th>{{ _("AI 비용(건당, 캐시 할인 미반영)") }}</th><td>{{ s.ai_cost.per_application_usd|usd }}{% if s.ai_cost.unpriced_calls %} · {{ _("단가 미확인 호출 %(n)s회 제외", n=s.ai_cost.unpriced_calls) }}{% endif %}</td></tr>
+  <tr><th>{{ _("AI 비용(건당, 캐시 할인 미반영)") }}</th><td>{{ per_app }}{% if scope_note %} · {{ scope_note }}{% endif %}</td></tr>
 </table>
 </details>
 </section>

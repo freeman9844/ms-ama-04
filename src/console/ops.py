@@ -49,6 +49,12 @@ def scope_docs(store: OpsStore, selected: str, *, legacy: bool = False) -> list[
 def ops_view(docs: list[dict[str, Any]]) -> dict[str, Any]:
     summary = summarize(docs, load_prices(), gap_pp=gap_pp_from_env())
     summary["basis"] = _(summary["basis"])
+    cost = summary["ai_cost"]
+    if not any(m["calls"] and m["cost_usd"] is not None for m in cost["by_model"].values()):
+        cost["per_application_usd"] = None
+    for step in cost["by_step"].values():
+        if step["calls"] == step["unpriced_calls"]:
+            step["cost_usd"] = None
     for axis, a in summary["fairness"]["axes"].items():
         groups = [v for v in a["values"].values() if not v["insufficient"]]
         if sum(v["approve_rate"] is not None for v in groups) < 2:

@@ -657,6 +657,8 @@ def _forecast(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[
     attainment = None if usd else p.get("attainment")
     path = p.get("path") or []
     suffix = "_cents" if usd else ""
+    dated_balances = [(day[5:], d.get("balance" + suffix)) for d in path
+                      if isinstance(day := d.get("date"), str) and day]
     return {
         "week": latest.get("week"),
         "start_balance": p.get("start_balance" + suffix),
@@ -665,8 +667,7 @@ def _forecast(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[
         "min_date": r.get("projected_min_date"),
         "shortfall_date": r.get("shortfall_date"),
         "shortfall_known": "shortfall_date" in r,
-        "chart": charts.signed_line([(d["date"][5:], d.get("balance" + suffix)) for d in path],
-                                    tick_fmt=usd_tick if usd else man, **FORECAST_CHART),
+        "chart": charts.signed_line(dated_balances, tick_fmt=usd_tick if usd else man, **FORECAST_CHART),
         "payments": [d for d in path if d.get("installment_cents")] if usd else [],
         "totals": [(_(label), totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items()
                    if k in totals],
@@ -718,8 +719,9 @@ def ops_insights(s: Mapping[str, Any], step_labels: Mapping[str, str]) -> dict[s
               if charts.is_num(v.get("cost_usd"))]
     model_donut = charts.donut([(m, c, MODEL_COLORS[i % len(MODEL_COLORS)]) for i, (m, c) in enumerate(priced)])
     model_donut["total"] = round(model_donut["total"], 4)
-    step_cost = charts.hbars([(_(step_labels.get(k, k)), round(v.get("cost_usd") or 0.0, 4), "purple")
-                              for k, v in (cost.get("by_step") or {}).items()], width=480, label_w=120)
+    step_cost = charts.hbars([(_(step_labels.get(k, k)), round(v["cost_usd"], 4), "purple")
+                              for k, v in (cost.get("by_step") or {}).items() if charts.is_num(v.get("cost_usd"))],
+                             width=480, label_w=120)
     reasons = charts.hbars([(r["key"], r["count"], "amber" if r["key"].startswith("R1") else "red")
                             for r in s.get("reason_codes") or []], width=480, label_w=72)
     flags = charts.hbars([(i18n.label(FLAG_LABELS, f["key"]), f["count"], "orange") for f in s.get("flags") or []],

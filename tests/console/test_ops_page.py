@@ -3,6 +3,7 @@ import json
 import re
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from console.app import ConsoleDeps, create_app
@@ -107,6 +108,35 @@ def test_ops_distinguishes_missing_comparisons_from_measured_zero():
     region = next(h for h in headings if "Region" in h)
     assert industry.count("0.0%p") == 2  # Two comparable groups, no load archetypes.
     assert "0.0%p" not in region  # All applications are from the same region.
+
+
+@pytest.mark.parametrize("minutes,status", [(None, "Not measured yet"), (0, "met"), (11, "not met")])
+def test_latency_target_status_uses_measured_samples(minutes, status):
+    doc = projected(0, "Food", "approve")
+    doc["timeline"] = [] if minutes is None else [
+        {"status": "awaiting_officer", "at": (T0 + timedelta(minutes=minutes)).isoformat()}]
+    html = client(FakeOps({"demo": [doc]})).get("/ops?lang=en", headers=AUDITOR_H).text
+    assert f"Target ≤ 10 min · {status}</div>" in html
+    assert f"target p95 ≤ 10 min, {status})</td>" in html
+
+
+@pytest.mark.parametrize("usage,expected,partial", [
+    ([("decision-1", 1000, 100)], "Price unknown", False),
+    ([("gpt-5.4-mini", 1000, 100), ("decision-1", 1000, 100)], "$0.0012", True),
+    ([("gpt-5.4-mini", 0, 0)], "$0.0000", False),
+])
+def test_ai_cost_distinguishes_unpriced_partial_and_measured_zero(usage, expected, partial):
+    doc = projected(0, "Food", "approve")
+    doc["steps"][0]["usage"] = [dict(model=m, calls=1, input_tokens=i, output_tokens=o) for m, i, o in usage]
+    html = client(FakeOps({"demo": [doc]})).get("/ops?lang=en", headers=AUDITOR_H).text
+    kpi = html.split('class="kpi-label">AI cost (per application)</div>', 1)[1].split("</div>\n</div>", 1)[0]
+    slo = html.split("<th>AI cost (per application, excluding cache discounts)</th>", 1)[1].split("</tr>", 1)[0]
+    step = html.split("<tr><td>Underwriting metrics</td>", 1)[1].split("</tr>", 1)[0]
+    for block in (kpi, slo, step):
+        assert expected in block
+        assert ("Priced calls only" in block) == partial
+    if expected == "Price unknown":
+        assert "$0.0000" not in html and 'aria-label="AI cost by step"' not in html
 
 
 def test_ops_page_selects_run_and_rejects_unknown():

@@ -322,7 +322,7 @@
 {{ ch.legend([(_("전망 잔고"), "purple"), ("< $0.00 USD" if usd else _("0원 아래"), "red")]) }}
 {% if f.payments %}<table>
   <thead><tr><th>{{ _("상환일") }}</th><th>{{ _("상환 직전 예상 잔고") }}</th><th>{{ _("예정 상환액") }}</th></tr></thead>
-  <tbody>{% for d in f.payments %}<tr><td>{{ d.date }}</td><td>{{ d.before_payment_cents|usd_cents }}</td><td>{{ d.installment_cents|usd_cents }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for d in f.payments %}<tr><td>{{ d.get("date") or "—" }}</td><td>{{ d.before_payment_cents|usd_cents }}</td><td>{{ d.installment_cents|usd_cents }}</td></tr>{% endfor %}</tbody>
 </table>{% endif %}
 {% if f.totals %}<table>
   <thead><tr><th>{{ _("28일 합계") }}</th><th>{{ _("금액") }}</th></tr></thead>
