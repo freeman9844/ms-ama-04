@@ -604,6 +604,25 @@ def test_uphold_decision_is_sent_with_principal(env):
         "reason": "정책 한도", "new_decision": None, "amount_krw": None, "conditions": []})]
 
 
+def test_usd_grievance_shows_snapshot_units_and_limit_beside_input(env):
+    from shared.contracts import USD_V1
+    client, _, privacy = env
+    g = privacy.grievances[("app-2", "grv-abc123")]
+    g.update(USD_V1.model_dump())
+    g["record"] = {"policy": dict(USD_V1.model_dump(), decision="ineligible", max_amount_cents=0, reason_codes=[
+        {"code": "R900", "field": "max_amount_cents", "observed": 0.0, "threshold": 10000.0},
+        {"code": "R108", "field": "pg_reconciliation_ratio", "observed": 0.68, "threshold": 0.9}]),
+        "assessment": {"schema_version": "2", "recommendation": "decline", "review": {"passed": True},
+                       "counterfactuals": [{"metric_id": "M:avg_monthly_inflow_cents", "current": 4500,
+                                            "target": 10000, "explanation": "More settled receipts."},
+                                           {"metric_id": "P:R900:observed", "current": 0.0, "target": 10000.0,
+                                            "explanation": "The limit is below the product minimum."}]}}
+    html = client.get("/grievances/app-2/grv-abc123?lang=en", headers=OFFICER).text
+    assert re.search(r"<label>[^<]*\$0[^<]*<input name=\"amount_usd\"", html)
+    assert "<td>$0</td><td>$100</td>" in html and "<td>0.68</td><td>0.9</td>" in html
+    assert "M:avg_monthly_inflow_cents: $45 → $100" in html and "P:R900:observed: $0 → $100" in html
+
+
 def test_rereview_is_validated_against_recorded_policy(env):
     client, queue, _ = env
     path = "/grievances/app-2/grv-abc123"

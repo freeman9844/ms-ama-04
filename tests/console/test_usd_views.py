@@ -493,6 +493,36 @@ def test_usd_loan_repayment_and_chart_are_native():
     assert "₩" not in html
 
 
+def test_usd_forecast_shows_recorded_due_day_cashflows_not_krw_assumptions():
+    deps = fixtures.build_deps()
+    loan = dict(USD, id="risk", application_id="risk", applicant_id=SELLER, amount_cents=500000,
+                tenor_months=6, decision="approve", baseline={"avg_weekly_revenue_cents": 28200,
+                "cash_buffer_days": 12}, monitoring={"processed_week": 1, "weeks": [{"week": 1,
+                "row": {"week": 1, "expected_revenue_cents": 28200, "revenue_cents": 14500,
+                        "revenue_vs_expected": None, "projected_min_balance_cents": -7200,
+                        "projected_min_date": "2026-11-11", "shortfall_date": "2026-11-11"},
+                "projection": {"start_balance_cents": 31100, "path": [
+                    {"date": "2026-11-10", "balance_cents": 13000, "before_payment_cents": 13000, "installment_cents": 0},
+                    {"date": "2026-11-11", "balance_cents": -7200, "before_payment_cents": 0, "installment_cents": 7200},
+                    {"date": "2026-11-12", "balance_cents": 7000, "before_payment_cents": 10000, "installment_cents": 3000}]}}]})
+    deps.monitoring.loans["risk"] = loan
+    client = TestClient(create_app(deps))
+    html = client.get("/loans/risk?lang=en").text
+    forecast = html.split("4-week balance forecast", 1)[1].split("</section>", 1)[0]
+    assert all(s in forecast for s in ("$311", "-$72", "11-10 $130", "11-12 $70"))
+    assert re.search(r"2026-11-11</td>\s*<td>\$0</td>\s*<td>\$72</td>", forecast)
+    assert re.search(r"2026-11-12</td>\s*<td>\$100</td>\s*<td>\$30</td>", forecast)
+    assert all(s not in forecast for s in ("Last 4 weeks attainment", "28-day total", "₩", ">0%</"))
+    assert "Actual vs expected inflow by week" in html and "$145" in html and "$282" in html
+    assert "Cash buffer (days, right axis)" not in html and "<td>None</td>" not in html
+    week = loan["monitoring"]["weeks"][0]
+    del week["row"]["shortfall_date"]
+    del week["projection"]["path"][1]["before_payment_cents"]
+    sparse = client.get("/loans/risk?lang=en").text.split("4-week balance forecast", 1)[1].split("</section>", 1)[0]
+    assert re.search(r"2026-11-11</td>\s*<td>-</td>\s*<td>\$72</td>", sparse)
+    assert not re.search(r'Expected shortfall date</div>\s*<div class="kpi-value">None', sparse)
+
+
 def test_borrower_portfolios_find_applications_before_consent_exists():
     legacy = dict(id="old-case", application_id="old-case", applicant_id=SELLER, requested_amount_krw=5000000,
                   status="approved", source="customer", officer_decision={"amount_krw": 4500000})

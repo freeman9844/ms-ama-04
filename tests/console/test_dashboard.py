@@ -373,6 +373,15 @@ def test_loan_summary_forecast_uses_latest_projection():
     assert s["forecast"]["week"] == 1 and s["expected_chart"] is None
 
 
+def test_unrecorded_attainment_is_not_zero():
+    w = week(1, 20.0)
+    w["projection"] = {"start_balance": 1000}
+    view = {"loan": {}, "weeks": [w], "monitoring": {}, "alerts": []}
+    assert dashboard.loan_summary(view)["forecast"]["attainment_pct"] is None
+    w["projection"]["attainment"] = 0
+    assert dashboard.loan_summary(view)["forecast"]["attainment_pct"] == 0
+
+
 def test_ops_summary_gauges_steps_and_fairness():
     seg = {"assessed": 5, "insufficient": False}
     industry_values = {

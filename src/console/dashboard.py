@@ -603,10 +603,10 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "min_buffer_week": min_week,
         "baseline_buffer": baseline.get("cash_buffer_days"),
         "chart": chart,
-        "line": charts.line([b for _week, b in buffers], **LOAN_CHART) if groups else None,
+        "line": charts.line([b for _week, b in buffers], **LOAN_CHART) if numeric else None,
         "markers": markers,
-        "legend": [(_("매출"), "blue"), (_("트리거 주"), "red"), (_("기준 주매출"), "neutral"),
-                   (_("현금 버퍼(일, 오른쪽 축)"), "purple")],
+        "legend": [(_("매출"), "blue"), (_("트리거 주"), "red"), (_("기준 주매출"), "neutral")] +
+                  ([(_("현금 버퍼(일, 오른쪽 축)"), "purple")] if numeric else []),
         "alert_followups": followups,
         "alert_steps": {a.get("alert_id"): alert_steps(a, followups.get(a.get("alert_id"), ())) for a in alerts},
         "case_steps": {c.get("case_id"): case_steps(c) for c in view.get("cases") or ()},
@@ -653,17 +653,21 @@ def _forecast(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[
     if latest is None:
         return None
     p, r = latest["projection"], latest.get("row") or {}
-    totals = p.get("totals") or {}
+    totals = {} if usd else p.get("totals") or {}
+    attainment = None if usd else p.get("attainment")
+    path = p.get("path") or []
     suffix = "_cents" if usd else ""
     return {
         "week": latest.get("week"),
         "start_balance": p.get("start_balance" + suffix),
-        "attainment_pct": round(float(p.get("attainment") or 0) * 100, 1),
+        "attainment_pct": round(attainment * 100, 1) if charts.is_num(attainment) else None,
         "min_balance": r.get("projected_min_balance" + suffix),
         "min_date": r.get("projected_min_date"),
         "shortfall_date": r.get("shortfall_date"),
-        "chart": charts.signed_line([(d["date"][5:], d["balance" + suffix]) for d in p.get("path") or []],
+        "shortfall_known": "shortfall_date" in r,
+        "chart": charts.signed_line([(d["date"][5:], d.get("balance" + suffix)) for d in path],
                                     tick_fmt=usd_tick if usd else man, **FORECAST_CHART),
+        "payments": [d for d in path if d.get("installment_cents")] if usd else [],
         "totals": [(_(label), totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items()
                    if k in totals],
     }

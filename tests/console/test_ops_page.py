@@ -98,6 +98,17 @@ def test_small_groups_marked_insufficient():
     assert 'class="ops-alert"' not in html
 
 
+def test_ops_distinguishes_missing_comparisons_from_measured_zero():
+    docs = [dict(projected(i, "Food" if i < 5 else "Retail", "approve"), applicant_id=f"seller-{i}")
+            for i in range(10)]
+    html = client(FakeOps({"demo": docs})).get("/ops?lang=en", headers=AUDITOR_H).text
+    headings = re.findall(r'<div class="axis-block">\s*<h3>(.*?)</h3>', html, re.S)
+    industry = next(h for h in headings if "Industry" in h)
+    region = next(h for h in headings if "Region" in h)
+    assert industry.count("0.0%p") == 2  # Two comparable groups, no load archetypes.
+    assert "0.0%p" not in region  # All applications are from the same region.
+
+
 def test_ops_page_selects_run_and_rejects_unknown():
     ops = FakeOps({"load-20261102010000": skewed(), "fault-20261102030000": skewed()[:2]})
     c = client(ops)

@@ -26,7 +26,8 @@
 <p>{{ _("정책 판정 %(decision)s · 한도 %(limit)s · 금리 구간 %(band)s", decision=r.policy.decision, limit=r.policy.max_amount_cents|usd_cents if g.product_version == 'usd-v1' else r.policy.max_amount_krw|krw, band=r.policy.rate_band or "-") }} <small>{{ r.policy.rules_version }}</small></p>
 <table>
   <thead><tr><th>{{ _("코드") }}</th><th>{{ _("내용") }}</th><th>{{ _("관측값") }}</th><th>{{ _("기준") }}</th></tr></thead>
-  <tbody>{% for c in r.policy.reason_codes %}<tr><td>{{ c.code }}</td><td>{{ c.message|mt }}</td><td>{{ c.observed }}</td><td>{{ c.threshold }}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for c in r.policy.reason_codes or () %}{% set money = usd and (c.field or "").endswith("_cents") %}
+  <tr><td>{{ c.code }}</td><td>{{ c.message|mt }}</td><td>{{ c.observed|usd_tick if money else c.observed }}</td><td>{{ c.threshold|usd_tick if money else c.threshold }}</td></tr>{% endfor %}</tbody>
 </table>
 {% endif %}
 {% set opinion = r.assessment|published_opinion %}
@@ -34,7 +35,9 @@
 <p>{{ _("과거 의견 — 신청액 전액에 대한 권고가 아닙니다.") }}</p>
 {% elif opinion and opinion.counterfactuals %}
 <h3>{{ _("개선 조건(반사실)") }}</h3>
-<ul>{% for cf in opinion.counterfactuals %}<li>{{ cf.metric_id }}: {{ cf.current }} → {{ cf.target }} — {{ cf.explanation|mt }}</li>{% endfor %}</ul>
+{% set cents_ids = r.policy|policy_cents_ids if usd else () %}
+<ul>{% for cf in opinion.counterfactuals %}{% set money = usd and ((cf.metric_id or "").endswith("_cents") or cf.metric_id in cents_ids) %}
+<li>{{ cf.metric_id }}: {{ cf.current|usd_tick if money else cf.current }} → {{ cf.target|usd_tick if money else cf.target }} — {{ cf.explanation|mt }}</li>{% endfor %}</ul>
 {% endif %}
 </section>
 <section>
@@ -72,8 +75,8 @@
     {% for value, label in (("approve", pgettext("button", "승인")), ("decline", pgettext("button", "거절"))) %}
     <label><input type="radio" name="new_decision" value="{{ value }}"{% if nd == value %} checked{% endif %}> {{ label }}</label>
     {% endfor %}
-    {% if g.product_version == 'usd-v1' %}
-    <label>Amount (USD) <input name="amount_usd" inputmode="decimal" value="{{ form.amount_usd if form else '' }}"></label>
+    {% if usd %}
+    <label>{{ _("금액(USD, 한도 %(limit)s)", limit=r.policy.max_amount_cents|usd_cents) if r.policy else _("금액(USD)") }} <input name="amount_usd" inputmode="decimal" value="{{ form.amount_usd if form else '' }}"></label>
     {% else %}
     <label>{% if r.policy %}{{ _("금액(원, 한도 %(limit)s)", limit=r.policy.max_amount_krw|krw) }}{% else %}{{ _("금액(원)") }}{% endif %} <input name="amount_krw" inputmode="numeric" value="{{ form.amount_krw if form else '' }}"></label>
     {% endif %}

@@ -66,7 +66,7 @@ from console.monitoring import (
     loan_view,
 )
 from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
-from console.opinion import opinion_panel, review_history
+from console.opinion import opinion_panel, policy_cents_ids, review_history
 from console.ops import (
     AXIS_LABELS,
     RECENT_RUN,
@@ -263,6 +263,7 @@ def _templates() -> Environment:
     env.filters["krw"] = _krw
     env.filters["usd_cents"] = display_usd
     env.filters["usd_tick"] = usd_tick
+    env.filters["policy_cents_ids"] = policy_cents_ids
     env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "").removesuffix(".00") if type(cents) is int else ""
     env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s
     env.filters["channel"] = lambda s: USD_CHANNEL_NAMES.get(s, s)

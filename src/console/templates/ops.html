@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set nav = "ops" %}
+{% macro gap(value) -%}{{ value|num ~ "%p" if value is number else "—" }}{%- endmacro %}
 {% import "_charts.html" as ch %}
 {% block title %}{{ _("운영 지표") }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
 {% block main %}
@@ -32,7 +33,7 @@
 {% endif %}
 
 {% for axis in s.fairness.alerts %}
-<p class="ops-alert">{{ _("공정성 경보: %(axis)s 전액 승인 권고율 격차 %(gap)s%%p &gt; 임계값 %(threshold)s%%p. 원형 통제 최대 격차 %(controlled)s%%p를 함께 확인하세요.", axis=AXIS_LABELS.get(axis, axis), gap=s.fairness.axes[axis].gap_pp|num, threshold=s.fairness.threshold_pp|num, controlled=s.fairness.axes[axis].controlled.max_pp|num) }}</p>
+<p class="ops-alert">{{ _("공정성 경보: %(axis)s 전액 승인 권고율 격차 %(gap)s &gt; 임계값 %(threshold)s. 원형 통제 최대 격차: %(controlled)s.", axis=AXIS_LABELS.get(axis, axis), gap=gap(s.fairness.axes[axis].gap_pp), threshold=gap(s.fairness.threshold_pp), controlled=gap(s.fairness.axes[axis].controlled.max_pp)) }}</p>
 {% endfor %}
 
 <div class="grid-4">
@@ -171,7 +172,7 @@
 <div class="grid-2">
 {% for axis, a in s.fairness.axes.items() %}
 <div class="axis-block">
-<h3>{{ AXIS_LABELS.get(axis, axis) }} — {{ _("격차 %(gap)s%%p · eligible 격차 %(eligible)s%%p · 원형 통제 최대 %(controlled)s%%p", gap=a.gap_pp|num, eligible=a.eligible_gap_pp|num, controlled=a.controlled.max_pp|num) }}
+<h3>{{ AXIS_LABELS.get(axis, axis) }} — {{ _("격차 %(gap)s · eligible 격차 %(eligible)s · 원형 통제 최대 %(controlled)s", gap=gap(a.gap_pp), eligible=gap(a.eligible_gap_pp), controlled=gap(a.controlled.max_pp)) }}
 {% if a.policy_explained %}<small>{{ _("(규칙 R104로 설명되는 축, 경보 대상 아님)") }}</small>{% endif %}</h3>
 {% if ui.fairness[axis] %}{{ ch.columns(ui.fairness[axis], _("%(axis)s 전액 승인 권고율", axis=AXIS_LABELS.get(axis, axis))) }}{% endif %}
 <details><summary>{{ _("세그먼트 표") }}</summary>

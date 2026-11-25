@@ -280,6 +280,11 @@ def _officer_checks(view: Mapping[str, Any], cents_ids: frozenset[str]) -> dict[
     return {"state": "listed", "items": items, "verified": verified, "total": len(items)}
 
 
+def policy_cents_ids(policy: Mapping[str, Any] | None) -> frozenset[str]:
+    return frozenset(f"P:{r['code']}:{key}" for r in (policy or {}).get("reason_codes") or ()
+                     if (r.get("field") or "").endswith("_cents") for key in ("observed", "threshold"))
+
+
 def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
     assessment = view.get("assessment")
     if not assessment:
@@ -287,9 +292,7 @@ def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
     doc = view["doc"]
     policy = view.get("policy") or {}
     unit = "cents" if product_of(doc) else "krw"
-    cents_ids = frozenset(f"P:{r['code']}:{key}" for r in policy.get("reason_codes") or ()
-                          if unit == "cents" and (r.get("field") or "").endswith("_cents")
-                          for key in ("observed", "threshold"))
+    cents_ids = policy_cents_ids(policy) if unit == "cents" else frozenset()
     claims, counts = _claims(view.get("claims") or (), cents_ids, {t["txn_id"] for t in view.get("transactions") or ()})
     review = assessment.get("review") or {}
     usage = _usage(doc, assessment.get("models") or {})
