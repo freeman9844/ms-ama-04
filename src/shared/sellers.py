@@ -150,7 +150,7 @@ USD_SELLERS = {
     "seller-toyland-26": UsdSeller("Bucheon Toy Land", "Cha Minji", "Bucheon", "Toys", "Toy Korea",
                                    350_000, _GENERAL, cancel_rate=Decimal(".13")),
     "seller-vitamin-27": UsdSeller("Ilsan Vitamin House", "Baek Seungwoo", "Goyang", "Health", "Nature Health",
-                                   360_000, _GENERAL, risk="assigned", advance_label="Marketplace payout"),
+                                   360_000, _TWO_MARKETS, risk="assigned", advance_label="Marketplace payout"),
     "seller-golfgear-28": UsdSeller("Yongin Golf Gear", "Nam Kyungho", "Yongin", "Sports", "Golf Pro Supply",
                                     520_000, _RETAIL, offset_rise_days=90, offset_rise_rate=Decimal(".08")),
     "seller-popup-29": UsdSeller("Seongsu Popup Goods", "Jo Yerin", "Seoul", "Character goods", "Character Lab",

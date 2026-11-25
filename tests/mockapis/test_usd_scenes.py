@@ -213,7 +213,20 @@ MARGINS = {  # seller: [(feature, op, threshold)] - deciding features only, 10% 
     "seller-toyland-26": [("mkt_cancel_rate_90d", "gt", .08)],
     "seller-golfgear-28": [("pg_offset_rate_trend_pp", "gt", 3.0)],
     "seller-popup-29": [("revenue_volatility", "le", .5), ("pg_top_platform_share", "le", .8), ("dscr", "ge", 1.0)],
+    "seller-vitamin-27": [("pg_reconciliation_ratio", "lt", .9), ("pg_advance_suspected_count", "gt", 0),
+                          ("revenue_trend_ratio", "ge", .8)],
 }
+SCENE_SUBSTITUTIONS = {"seller-snackbox-22": "S003", "seller-campgear-23": "S004", "seller-teahouse-24": "S005"}
+
+
+def clears(field, op, v, t):
+    """10% away from the threshold. Ratings need 0.1; a fully reconciled ledger (1.0) clears any floor."""
+    low = op in ("lt", "le")
+    if field == "mkt_rating":
+        return v <= t - .1 if low else v >= t + .1
+    if field == "pg_reconciliation_ratio" and not low and v == 1.0:
+        return True
+    return (v <= t / 1.1 and (op != "lt" or v < t)) if low else (v >= t * 1.1 and (op != "gt" or v > t))
 
 
 @pytest.mark.parametrize("seller", sorted(MARGINS))
@@ -221,5 +234,13 @@ def test_scene_features_keep_ten_percent_margin(seller):
     f = underwrite_at(seller, AS_OF, SCENE_REQUEST_CENTS.get(seller, 500_000)).features
     for field, op, t in MARGINS[seller]:
         v = getattr(f, field)
-        ok = v <= t / 1.1 if op in ("lt", "le") else v >= t * 1.1
-        assert ok, (field, v, t)
+        assert clears(field, op, v, t), (field, v, t)
+
+
+@pytest.mark.parametrize("seller", sorted(SCENE_SUBSTITUTIONS))
+def test_scene_substitution_conditions_keep_margin(seller):
+    f = underwrite_at(seller, AS_OF, SCENE_REQUEST_CENTS.get(seller, 500_000)).features
+    sub = next(s for s in rules_for_version("usd-v2").substitutions if s.code == SCENE_SUBSTITUTIONS[seller])
+    for c in sub.when:
+        v = getattr(f, c.field)
+        assert clears(c.field, c.op, v, c.threshold), (sub.code, c.field, v, c.threshold)

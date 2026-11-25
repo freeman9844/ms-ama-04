@@ -544,7 +544,7 @@ git commit -m "feat(mockapis): diversify USD marketplace performance per platfor
   - `mockapis.demo.SCENE_REQUEST_CENTS: dict[str, int]`. popup만 1_000_000이고 나머지는 기본 500_000이다. 시나리오 실행기가 쓴다.
   - `build_usd_cases`는 기존 21개와 USD 전용 8개를 모두 만든다. `FlowStore._seeds`에도 넣는다.
 
-시작 값(제 판단). 장면 테스트가 기준이며, 수치는 맞을 때까지 조정할 수 있다. 아래 표는 조정을 마친 최종 값이다(Task 7 구현 시 `owner_floor_percent` 50→40, campgear `season_percent`를 키워 10% 여유 확보).
+시작 값(제 판단). 장면 테스트가 기준이며, 수치는 맞을 때까지 조정할 수 있다. 아래 표는 조정을 마친 최종 값이다(Task 7 구현 시 `owner_floor_percent` 50→40, campgear `season_percent`를 키워 10% 여유 확보. Fix round 1: vitamin 채널을 `_GENERAL`→`_TWO_MARKETS`로 바꿔 선정산 대상(쿠팡) 비중을 55%로 올렸다. 정산 대사율이 약 0.805로 R108 기준 0.9에서 10% 이상 떨어진다).
 
 | ID (시드) | 상호 / 업종 | 채널 | 주 매출(센트) | 레버 | 장면 |
 |---|---|---|---|---|---|
@@ -553,7 +553,7 @@ git commit -m "feat(mockapis): diversify USD marketplace performance per platfor
 | `seller-teahouse-24` (124) | Boseong Tea House / Food | `_GENERAL` | 300_000 | `tax_declared_percent=40` | O3 |
 | `seller-phonecase-25` (125) | Sinchon Phone Case / Electronics | `_TWO_MARKETS` | 200_000 | `history_months=4`, `business_age_months=8`, `market_months=7`, `rating=4.3` | O5 |
 | `seller-toyland-26` (126) | Bucheon Toy Land / Toys | `_GENERAL` | 350_000 | `cancel_rate=Decimal(".13")` | R1 |
-| `seller-vitamin-27` (127) | Ilsan Vitamin House / Health | `_GENERAL` | 360_000 | `risk="assigned"`, `advance_label="Marketplace payout"` | R2 |
+| `seller-vitamin-27` (127) | Ilsan Vitamin House / Health | `_TWO_MARKETS` | 360_000 | `risk="assigned"`, `advance_label="Marketplace payout"` | R2 |
 | `seller-golfgear-28` (128) | Yongin Golf Gear / Sports | `_RETAIL` | 520_000 | `offset_rise_days=90`, `offset_rise_rate=Decimal(".08")` | R3 |
 | `seller-popup-29` (129) | Seongsu Popup Goods / Character goods | coupang 70, naver 30 | 120_000 | `inventory_percent=30`, `growth_days=40`, `growth_percent=300` | O6 |
 
