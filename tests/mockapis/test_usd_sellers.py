@@ -174,6 +174,7 @@ def test_signed_consent_selects_source_and_flow_cache():
     flow = {"loan_id": "usd-loan", "amount_cents": 500000, "installment_cents": 84000}
     assert client.get("/mydata/flow", params=flow, headers=usd).json()[0]["amount_cents"] == 500000
     assert client.get("/pg/flow", params=flow, headers=usd).json()["orders"][0]["gross_cents"] > 0
+    assert "prior_year_orders" in client.get("/pg/flow", params=flow, headers=usd).json()
     assert client.get("/mydata/flow", params=flow, headers=krw).status_code == 422
     assert client.get("/pg/flow", params={"amount_krw": 500000, "installment_krw": 84000}, headers=usd).status_code == 422
     assert "amount_krw" in client.get("/mydata/transactions", headers=krw).json()[0]
@@ -239,8 +240,40 @@ def test_usd_only_seller_consent_is_usd_only():
     assert post("seller-unknown-99", True).status_code in (400, 404, 422)
 
 
+def test_advance_after_loan_diverts_top_platform_payouts():
+    case = case_for("seller-snackbox-22")
+    flow = postloan.generate_usd_postloan(case, AS_OF, 1001, loan_id="loan-usd", amount_cents=500_000,
+                                          installment_cents=84_000)
+    onset = flow.start + timedelta(days=14)
+    assert flow.scenario is postloan.FlowScenario.ADVANCE_AFTER_LOAN
+    naver_paid = [s for s in flow.pg_settlements if s.platform_code == "naver_smart_store" and s.settled_on >= onset]
+    assert naver_paid  # the ledger keeps them
+    assert not any(t.platform_code == "naver_smart_store" and t.booked_on >= onset for t in flow.transactions)
+    adv = [t for t in flow.transactions if t.description == "Marketplace payout"]
+    assert adv and all(t.platform_code is None and t.booked_on >= onset - timedelta(days=5) for t in adv)
+
+
+def test_prior_year_orders_cover_loan_period_shifted_one_year():
+    case = case_for("seller-campgear-23")
+    flow = postloan.generate_usd_postloan(case, AS_OF, 1001, loan_id="loan-usd", amount_cents=500_000,
+                                          installment_cents=84_000)
+    days = {o.order_on for o in flow.prior_year_orders}
+    assert min(days) >= flow.start - timedelta(days=21 + 364) and max(days) <= flow.end - timedelta(days=364)
+    dec = sum(o.gross_cents for o in flow.prior_year_orders if o.order_on.month == 12)
+    nov = sum(o.gross_cents for o in flow.prior_year_orders if o.order_on.month == 11)
+    assert dec < nov  # autumn peak, December off-season shows in last year's record
+
+
+def test_old_pg_flow_payload_without_prior_year_still_validates():
+    from shared.contracts import USD_V1
+    from shared.usd_source import UsdPgFlow
+    flow = UsdPgFlow(**USD_V1.model_dump(), settlements=(), orders=())
+    assert flow.prior_year_orders == ()
+
+
 @pytest.mark.parametrize("seller", ["seller-snackbox-22", "seller-campgear-23", "seller-popup-29"])
 def test_approved_scene_sellers_generate_stable_postloan(seller):
+    # "stable" here means the flow is complete, not that the cause is STABLE: snackbox runs ADVANCE_AFTER_LOAN.
     flow = demo.FlowStore(demo.build_demo_cases(AS_OF), AS_OF).usd_flow(seller, "loan", 500_000, 83_333, 6)
     assert flow is not None and len({t.booked_on.isocalendar()[1] for t in flow.transactions}) >= 13
     assert any(t.description == "AMALend loan repayment" for t in flow.transactions)

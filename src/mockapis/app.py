@@ -195,7 +195,8 @@ def create_app(
                              settlements=tuple(s for s in flow.pg_settlements
                                                if (not start or start <= s.settled_on) and (not end or s.settled_on <= end)),
                              orders=tuple(o for o in flow.orders
-                                          if (not start or start <= o.order_on) and (not end or o.order_on <= end)))
+                                          if (not start or start <= o.order_on) and (not end or o.order_on <= end)),
+                             prior_year_orders=flow.prior_year_orders)
         pg = flow.pg_flow()
         return PgFlow(
             settlements=tuple(

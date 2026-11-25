@@ -59,6 +59,7 @@ class UsdStorePlatform(UsdProduct):
 class UsdPgFlow(UsdProduct):
     settlements: tuple[UsdSettlement, ...]
     orders: tuple[UsdOrderDay, ...]
+    prior_year_orders: tuple[UsdOrderDay, ...] = ()  # default keeps old payloads valid
 
 
 class UsdMarketplace(UsdProduct):

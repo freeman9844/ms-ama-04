@@ -22,10 +22,12 @@ labels(정답 분류)·cause·default_on은 평가 전용이며 API로 노출하
 USD(usd-v1) 흐름은 `generate_usd_postloan`이 `simulate_usd` 훅으로 만든다(USD_POSTLOAN_SCENARIOS): 매출 부진(4주차 주문 1/4),
 정산 보류(주력 플랫폼 지급을 15~42일 보류 후 일괄 해제, held_cents·released_cents), 반품 급증(3~8주차 반품률 18%),
 비용 증가(3주차부터 정산 공제 8%). 탐지는 `agents.usd_monitoring.observe_usd`가 원장 임계값으로 한다.
+선지급 시나리오(ADVANCE_AFTER_LOAN, USD 전용): 3주차부터 주력 플랫폼 정산을 선지급 업체가 대신 받고 계좌에는 "Marketplace payout"
+입금으로만 남는다(정산 원장은 그대로). 흐름은 지난해 같은 시기 주문(`prior_year_orders`, 날짜는 원본 그대로, 364일을 더해 쓴다)도 싣는다.
 """
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 from enum import StrEnum
@@ -72,6 +74,10 @@ USD_RETURN_TO_DAY = 55
 USD_RETURN_SPIKE_RATE = Decimal(".18")
 USD_RETURN_CALM_RATE = Decimal(".06")
 USD_COST_DEDUCTION_RATE = Decimal(".08")  # 플랫폼 광고·풀필먼트 비용이 정산에서 공제된다
+USD_POSTLOAN_ADVANCE_DAY = 14  # 이 날부터 주력 플랫폼 정산을 선지급 업체가 가져간다
+USD_POSTLOAN_ADVANCE_LABEL = "Marketplace payout"  # 계좌에는 플랫폼 정산처럼 보이는 적요로 들어온다
+PRIOR_YEAR_DAYS = 364  # 52주: 요일이 같다
+PRIOR_YEAR_LEAD_DAYS = 21  # 지난해 같은 시점의 대출 전 3주도 함께 준다
 
 
 class FlowScenario(StrEnum):
@@ -80,6 +86,7 @@ class FlowScenario(StrEnum):
     SETTLEMENT_HOLD = "settlement_hold"
     RETURN_SPIKE = "return_spike"
     COST_SURGE = "cost_surge"
+    ADVANCE_AFTER_LOAN = "advance_after_loan"  # USD 전용
 
     @classmethod
     def _missing_(cls, value: object) -> "FlowScenario | None":
@@ -92,6 +99,7 @@ USD_POSTLOAN_SCENARIOS: dict[str, FlowScenario] = {
     "seller-gearstore-06": FlowScenario.SETTLEMENT_HOLD,
     "seller-linen-10": FlowScenario.RETURN_SPIKE,
     "seller-tangerine-15": FlowScenario.COST_SURGE,
+    "seller-snackbox-22": FlowScenario.ADVANCE_AFTER_LOAN,
 }
 
 
@@ -130,6 +138,8 @@ class UsdPostLoanFlow:
     transactions: tuple[UsdTransaction, ...]
     orders: tuple[UsdOrderDay, ...]
     pg_settlements: tuple[UsdSettlement, ...]
+    # Case orders from start - 21d - 364d to end - 364d, dates unshifted; consumers add 364 days.
+    prior_year_orders: tuple[UsdOrderDay, ...] = ()
 
 
 def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str, amount_cents: int,
@@ -151,15 +161,20 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
             raise ValueError("Installment does not match loan terms")
         installments = {day: (i, a) for i, (day, a) in enumerate(dues, 1)}
     seller = USD_SELLERS[seller_id]
+    if scenario is FlowScenario.ADVANCE_AFTER_LOAN:
+        seller = replace(seller, advance_label=USD_POSTLOAN_ADVANCE_LABEL)
     books = simulate_usd(seller, f"{seller_id}:{loan_id}", start, end, seed,
                          case.transactions[-1].balance_after_cents, pending=case.pending,
                          loan_id=loan_id, principal=amount_cents, installments=installments,
                          growth_from=start if seller.growth_days else None,
                          **_usd_scenario(scenario, seller, start))
     baseline = start - timedelta(days=PRE_LOAN_DAYS)
+    year = timedelta(days=PRIOR_YEAR_DAYS)
+    prior_from, prior_to = start - timedelta(days=PRIOR_YEAR_LEAD_DAYS) - year, end - year
     return UsdPostLoanFlow(start, end, scenario,
                            books.transactions, tuple(o for o in case.orders if baseline <= o.order_on < start) + books.orders,
-                           tuple(s for s in case.pg_settlements if baseline <= s.settled_on < start) + books.settlements)
+                           tuple(s for s in case.pg_settlements if baseline <= s.settled_on < start) + books.settlements,
+                           tuple(o for o in case.orders if prior_from <= o.order_on <= prior_to))
 
 
 def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
@@ -182,6 +197,8 @@ def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
         return {"return_rate": return_rate}
     if scenario is FlowScenario.COST_SURGE:
         return {"deduction_rate": lambda d: USD_COST_DEDUCTION_RATE if d >= onset else Decimal(0)}
+    if scenario is FlowScenario.ADVANCE_AFTER_LOAN:
+        return {"advance_from": start + timedelta(days=USD_POSTLOAN_ADVANCE_DAY)}
     return {}
 
 
