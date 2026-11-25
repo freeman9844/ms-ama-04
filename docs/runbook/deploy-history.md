@@ -1005,3 +1005,34 @@ python -m ops smoke
 - `2d17e53`의 오케스트레이터를 Functions에 ZIP 배포하고 평가 이미지를 `eval:20261119061840`으로 갱신했다. 콘솔 이미지는 바꾸지 않았다. 배포 창을 닫은 후 스모크 `job-smoke-qecrdzb` 성공과 심사 콘솔 `/loans` HTTP 200을 확인했다.
 - 합성 데이터 `underwriting` 평가 1회(`job-eval-x9w9ghx`): 검토자는 `gpt-5.6-luna`로 고정했다. 운영 분석가 `gpt-5.6-sol`은 11/11건에서 최종 근거 검사·독립 검토를 통과하고 정책과 일치했다. 비교 분석가 `gpt-5.6-luna`는 독립 검토 9/11건 통과로, 미통과 2건 중 1건은 최종 근거 검사도 실패했다. 전체 추정 비용은 $2.2719다.
 - [평가 보고서](../../eval/reports/job-eval-x9w9ghx/report.md) · [케이스별 결과](../../eval/reports/job-eval-x9w9ghx/summary.json) · [호출 지표](../../eval/reports/job-eval-x9w9ghx/calls.jsonl)
+
+## 2026-11-25 USD 정책 usd-v2 대체 규칙과 사후 이중 감시 배포
+
+- PR #7 머지 커밋 `328c1d1`을 `git archive`로 묶어 배포했다. 순서는 USD 신규 접수 차단(`USD_ORIGINATION_ENABLED=false`, `ca-console--0000056`) → 오케스트레이터 Functions ZIP(활성 배포 `d9b5b37d-e6be-424f-af2e-b79d86ee4f2a`, 직전 `76a8f022-f70b-42b7-be0b-9b77eb7e9ca5`) → 콘솔 `ca-console--0000057` → 모의 API `ca-mockapi--0000024` → 정책 `ca-policy--0000024` → 접수 재개(`ca-console--0000058`)다. 오케스트레이터와 정책은 같이 되돌려야 한다.
+- 이미지(ACR 태그 `pr7-328c1d1`): 콘솔 `sha256:f2bf1060f588f2f3136d20f60ed502e4696cfdccc0a302322ca28bb6214571b3`, 모의 API `sha256:cc9f98308a03548cd4b3414eeae9a43eb204121f0e96bb362de110c7ac82b22f`, 정책 `sha256:d741def661d28eb479693ae72428af49c73fc7fdc1da5ccdb77af12c8b0c3088`. 되돌릴 대상은 `ca-console--0000055`, `ca-mockapi--0000023`, `ca-policy--0000023`이다. 창을 닫은 후 ACR과 Function App 공용 접근이 Disabled인지, 외부 심사 콘솔 `/loans`가 HTTP 200인지 확인했다.
+- 심사 장면: 콘솔에서 8건을 90초 간격으로 신청하고 job-ops에서 담당자 결정을 진행했다. 괄호는 은행 기록만 본 판정(`cash_only`)이다.
+
+| 장면 | 셀러 | 신청 | 은행 기록만 | 최종(usd-v2) | 처리 |
+|---|---|---|---|---|---|
+| O1 | snackbox-22 | `app-20261125-5ea829` | 보류 R103 | 승인 가능, 대체 S003 | 승인 $5,000 |
+| O2 | campgear-23 | `app-20261125-a64c65` | 보류 R102 | 승인 가능, 대체 S004 | 승인 $5,000 |
+| O3 | teahouse-24 | `app-20261125-2db997` | 거절 R004 | 보류 S005, 한도 $5,000 | 담당자 대기 |
+| O5 | phonecase-25 | `app-20261125-cd78d3` | 거절 R001·R104 | 거절 R001·R104 | 담당자 대기 |
+| O6 | popup-29 | `app-20261125-18b2a8` | 승인 가능, 한도 $6,100 | 승인 가능, 한도 $7,900(D) | 승인 $7,900 |
+| R1 | toyland-26 | `app-20261126-64989a` | 승인 가능 | 보류 R111 | 담당자 대기 |
+| R2 | vitamin-27 | `app-20261126-c66727` | 승인 가능 | 보류 R108·R112 | 담당자 대기 |
+| R3 | golfgear-28 | `app-20261126-57e820` | 승인 가능 | 보류 R113 | 담당자 대기 |
+
+- snackbox 대출에는 `approval_basis` S003(`recon_ratio` 하한 0.95), campgear 대출에는 S004(`orders_vs_prior_year` 하한 0.75)가 기록됐다.
+- 사후 13주 재생은 한 건씩 돌렸다. 첫 경보 주차를 은행 기록만 본 감시 / 정산·마켓 데이터까지 본 감시 순서로 적는다.
+
+| 장면 | 대출 | 은행 기록만 | 전체 데이터 | 결과 |
+|---|---|---|---|---|
+| ① 승인 근거 붕괴 | snackbox `app-20261125-5ea829` | 없음 | 3주차 `basis_breach` | 3주차 경보, 원인 정산 양도(`settlement_assigned`) |
+| ② 먼저 잡기 | dailylook `app-20261124-803ef5` | 6주차 | 5주차 `sales_slump` | 핀 (6, 5)과 같음. 3회차 미납 사례는 담당자가 승인 |
+| ② 먼저 잡기 | gearstore `app-20261124-d96249` | 4주차 | 3주차 `settlement_hold` | 핀 (5, 3)과 은행 쪽 1주 차이. 운영 상환 일정·재생 시점이 오프라인 핀과 달라서다. 전체 감시가 먼저 잡는 결론은 같다 |
+| ② 먼저 잡기 | linen `app-20261125-baae81` | 없음 | 4주차 `return_spike` | 핀 (None, 4)과 같음 |
+| ③ 설명된 감소 | campgear `app-20261125-a64c65` | 8주차 `inflow_drop` | 없음 | 은행 기록만 보면 8~13주 6주 연속 경보, 전체 감시는 예정 정산으로 6주 모두 설명 |
+| 참고 | popup `app-20261125-18b2a8` | 없음 | 13주차 `projected_shortfall` | 장면 외 |
+
+- 장면 신청 시각을 거를 때는 KST(`+09:00`)로 비교해야 한다. 저장 시각이 KST 오프셋을 가지므로 UTC 문자열과 비교하면 이전 재생을 새 재생으로 잘못 본다.
