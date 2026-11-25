@@ -150,8 +150,8 @@ def test_pending_carries_masked_text_and_token_map(english):
     with page_scope(page):
         out = str(translate.mt_filters(machine, KEY)["mt"]("연락처 010-1234-5678"))
     token = next(iter(tokens(out)))
-    assert token.startswith("[[PHONE_") and "010-1234-5678" not in out.split(">")[0]
-    assert page.token_map() == {token: "010-1234-5678"}
+    assert token.startswith("[[PHONE_") and "010-1234-5678" not in _pending(out)[0]
+    assert json.loads(html.unescape(re.search(r'data-mt-restore="([^"]+)"', out)[1])) == {token: "010-1234-5678"}
     assert 'class="mt" data-mt="연락처 [[PHONE_' in out
 
 
@@ -177,8 +177,8 @@ def test_english_pages_leave_only_pending_machine_translation(mt, page):
     r = client.get(page, headers={"Cookie": "ama_locale_v2=en"})
     assert r.status_code == 200
     html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", r.text, flags=re.S)
-    html = re.sub(r'<span class="mt" data-mt="[^"]*">.*?</span>', " ", html, flags=re.S)
-    html = re.sub(r'[^<>]*<span class="mt-ref" data-mt="[^"]*"></span>', " ", html)  # 원문 + 영문 참고
+    html = re.sub(r'<span class="mt" data-mt="[^"]*"[^>]*>.*?</span>', " ", html, flags=re.S)
+    html = re.sub(r'[^<>]*<span class="mt-ref" data-mt="[^"]*"[^>]*></span>', " ", html)  # 원문 + 영문 참고
     html = re.sub(r'(title|data-mt|aria-label)="[^"]*"', "", html)
     html = html.replace(deps.demo_principal.name, " ").replace("한국어", " ")
     leftover = sorted({line.strip() for line in re.sub(r"<[^>]+>", "\n", html).splitlines() if HANGUL.search(line)})
@@ -358,17 +358,18 @@ def test_auditor_sees_tokens_in_stored_translation(make_doc, raw, key, mask):
     assert "[[BIZNAME_" not in officer
 
 
-def test_token_map_script_lists_only_pending_tokens(make_doc, raw, key):
+def test_restore_values_are_scoped_to_pending_text(make_doc, raw, key):
     from console.auth import CREDIT_OFFICER
 
     client, _, headers = _case_client(make_doc, raw, key, CREDIT_OFFICER)
     page = client.get("/applications/app-1", headers=headers).text
-    found = re.findall(r'<script type="application/json" class="mt-tokens">(.*?)</script>', page, flags=re.S)
-    assert len(found) == 1 and page.index("mt-tokens") < page.rindex("</body>")
-    token_map = json.loads(found[0])
-    pending = "".join(_pending(page))
-    assert token_map and set(token_map) <= tokens(pending)
-    assert "김대표" in token_map.values() or "빈스카페" in token_map.values()
+    found = re.findall(r'data-mt="([^"]*)" data-mt-restore="([^"]+)"', page)
+    values = []
+    for masked, encoded in found:
+        mapping = json.loads(html.unescape(encoded))
+        assert set(mapping) <= tokens(html.unescape(masked))
+        values.extend(mapping.values())
+    assert "김대표" in values or "빈스카페" in values
 
 
 def test_detail_masking_matches_orchestrator(make_doc, raw, key):
@@ -397,12 +398,12 @@ def test_unreadable_source_disables_pending_translation(make_doc, raw, key):
         filters = translate.mt_filters(machine, key)
         assert filters["mt"]("김대표 개인이체") == "김대표 개인이체"
         assert filters["mt_ref"]("김대표 개인이체") == "김대표 개인이체"
-    assert page.token_map() == {}
+    assert not page.requested
 
 
 def test_token_script_escapes_markup_characters():
-    from console.app import _token_script
+    from console.app import _grant_script
 
-    out = _token_script({"[[PERSON_x]]": "</script><b>&"})
-    assert "</script><b>" not in out.removeprefix('<script type="application/json" class="mt-tokens">')
+    out = _grant_script({"[[PERSON_x]]": "</script><b>&"})
+    assert "</script><b>" not in out
     assert json.loads(out.split(">", 1)[1].rsplit("</script>", 1)[0]) == {"[[PERSON_x]]": "</script><b>&"}

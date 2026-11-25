@@ -335,7 +335,7 @@ def test_usd_grievance_forms_deliver_both_commands_to_workers(raw, key):
     privacy.grievances[("app-2", gid)] = store.read("grievances", gid, "app-2")
     path = f"/grievances/app-2/{gid}"
     page = client.get(path, headers=OFFICER).text
-    assert 'name="amount_usd"' in page and "$800.00" in page and 'name="amount_krw"' not in page
+    assert 'name="amount_usd"' in page and "$800" in page and 'name="amount_krw"' not in page
     assert "Seongsu Daily Look" in page and "Seongsu Daily Look" in client.get("/grievances", headers=OFFICER).text
     fields = dict(outcome="rereview", new_decision="approve", reason="Recorded review.")
     for invalid in ("700.011", "800.01"):
@@ -465,6 +465,88 @@ def _translating(env):
 class BrokenRaw:
     def get_json(self, container, name):
         raise RuntimeError("blob down")
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+@pytest.mark.parametrize("source", ["available", "missing", "error"])
+@pytest.mark.parametrize("usd", [False, True], ids=["krw", "usd"])
+def test_grievance_original_reason_respects_case_visibility(env, raw, lang, source, usd):
+    from copy import deepcopy
+    from shared.contracts import USD_V1
+
+    client, deps = _translating(env)
+    g = deps.privacy.get_grievance("app-2", "grv-abc123")
+    app = deps.store.get("app-2")
+    app["consent"] = {"consent_id": "c-2"}
+    deps.privacy.consents["c-2"] = consent("c-2", "app-2")
+    profile = dict(raw.blobs["consent-c-1", "profile.json"], business_name="대전밀빵공방")
+    raw.blobs["consent-c-2", "profile.json"] = profile
+    raw.blobs["consent-c-2", "transactions.json"] = []
+    if usd:
+        tags = USD_V1.model_dump()
+        for record in (g, g["record"], profile, app):
+            record.update(tags)
+        del app["requested_amount_krw"]
+        app["requested_amount_cents"] = 499949
+        g["record"]["policy"] = dict(tags, decision="eligible", max_amount_cents=410000, reason_codes=[],
+                                     rules_version="usd-v1", rate_band="B")
+        g["record"]["officer_decision"] = dict(tags, decision="approve", amount_cents=400000, officer_id="oid-officer")
+    reason = "원결정 메모: 대전밀빵공방 / DAEJEON WHEAT BAKERY / 김대표 / 010-1234-5678"
+    g["record"]["officer_decision"].update(reason=reason, conditions=["비공개 조건"])
+    stored = deepcopy(g)
+    if source == "missing":
+        raw.blobs.clear()
+    elif source == "error":
+        deps.raw = BrokenRaw()
+    url = f"/grievances/app-2/grv-abc123?lang={lang}"
+    response = client.get(url, headers=AUDITOR_H)
+    assert response.status_code == 200
+    for private in ("대전밀빵공방", "daejeon wheat bakery", "김대표", "010-1234-5678", "비공개 조건"):
+        assert private not in response.text.casefold()
+    if source == "available":
+        assert re.search(r"원결정 메모: \[\[BIZNAME_\w+\]\] / \[\[BIZNAME_\w+\]\] / "
+                         r"\[\[PERSON_\w+\]\] / \[\[PHONE_", response.text)
+        if not usd and lang == "en":
+            assert any(text.startswith("원결정 메모: [[BIZNAME_") for text in _pending(response))
+    else:
+        assert "원결정 메모" not in response.text
+    assert reason in client.get(url, headers=OFFICER).text
+    assert g == stored
+
+
+def test_pending_grievance_translation_preserves_each_nodes_visibility(env, raw, tmp_path):
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    chrome = shutil.which("chromium") or shutil.which("google-chrome") or r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    if not Path(chrome).is_file():
+        pytest.skip("Chrome is required to check the translated DOM")
+    client, deps = _translating(env)
+    g = deps.privacy.get_grievance("app-2", "grv-abc123")
+    deps.store.get("app-2")["consent"] = {"consent_id": "c-2"}
+    deps.privacy.consents["c-2"] = consent("c-2", "app-2")
+    raw.blobs["consent-c-2", "profile.json"] = raw.blobs["consent-c-1", "profile.json"]
+    raw.blobs["consent-c-2", "transactions.json"] = []
+    g["text"] = g["record"]["officer_decision"]["reason"] = "김대표 확인 메모"
+    page = client.get("/grievances/app-2/grv-abc123?lang=en", headers=AUDITOR_H).text
+    token, = set(re.findall(r'data-mt="(\[\[PERSON_[a-f0-9]{10}\]\]) 확인 메모"', page))
+    mt_js = (Path(__file__).resolve().parents[2] / "src/console/static/mt.js").read_text(encoding="utf-8")
+    stub = """<script>
+window.fetch = async (_, o) => ({ok:true, json:async () => ({
+    translations: JSON.parse(o.body).texts.map(t => t.replace("확인 메모", "verified"))
+})});
+</script>"""
+    page = re.sub(r'<script\b[^>]*\bsrc="[^"]+"[^>]*></script>|<link\b[^>]*>', "", page)
+    page = page.replace("<head>", """<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'">""")
+    path = tmp_path / "grievance.html"
+    path.write_text(page.replace("</body>", stub + "<script>" + mt_js + "</script></body>"), encoding="utf-8")
+    rendered = subprocess.run([chrome, "--headless", "--disable-gpu", "--no-first-run",
+                               f"--user-data-dir={tmp_path / 'profile'}", "--dump-dom", path.as_uri()],
+                              capture_output=True, check=True, timeout=45).stdout.decode("utf-8")
+    translations = re.findall(r'<span class="mt-ref mt-done"[^>]*>([^<]*)</span>', rendered)
+    assert "김대표 verified" in translations
+    assert f"{token} verified" in translations
 
 
 def test_english_grievance_page_reads_stored_translations_of_its_application(env):
@@ -602,6 +684,25 @@ def test_uphold_decision_is_sent_with_principal(env):
     assert queue.sent == [("grievance-decisions", {
         "grievance_id": "grv-abc123", "application_id": "app-2", "outcome": "uphold", "officer_id": "oid-manager",
         "reason": "정책 한도", "new_decision": None, "amount_krw": None, "conditions": []})]
+
+
+def test_usd_grievance_shows_snapshot_units_and_limit_beside_input(env):
+    from shared.contracts import USD_V1
+    client, _, privacy = env
+    g = privacy.grievances[("app-2", "grv-abc123")]
+    g.update(USD_V1.model_dump())
+    g["record"] = {"policy": dict(USD_V1.model_dump(), decision="ineligible", max_amount_cents=0, reason_codes=[
+        {"code": "R900", "field": "max_amount_cents", "observed": 0.0, "threshold": 10000.0},
+        {"code": "R108", "field": "pg_reconciliation_ratio", "observed": 0.68, "threshold": 0.9}]),
+        "assessment": {"schema_version": "2", "recommendation": "decline", "review": {"passed": True},
+                       "counterfactuals": [{"metric_id": "M:avg_monthly_inflow_cents", "current": 4500,
+                                            "target": 10000, "explanation": "More settled receipts."},
+                                           {"metric_id": "P:R900:observed", "current": 0.0, "target": 10000.0,
+                                            "explanation": "The limit is below the product minimum."}]}}
+    html = client.get("/grievances/app-2/grv-abc123?lang=en", headers=OFFICER).text
+    assert re.search(r"<label>[^<]*\$0[^<]*<input name=\"amount_usd\"", html)
+    assert "<td>$0</td><td>$100</td>" in html and "<td>0.68</td><td>0.9</td>" in html
+    assert "M:avg_monthly_inflow_cents: $45 → $100" in html and "P:R900:observed: $0 → $100" in html
 
 
 def test_rereview_is_validated_against_recorded_policy(env):

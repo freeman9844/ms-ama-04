@@ -105,7 +105,7 @@ def test_four_seller_cutover(seller, policy, codes, decision):
         assert transactions and all("amount_cents" in t and t["description"].isascii() for t in transactions)
         ui.store.docs[app_id] = doc
         detail = client.get("/applications/" + app_id).text
-        assert "$5,000.00 USD" in detail and "Settlement reconciliation ratio" in detail
+        assert "$5000" in detail and "Settlement reconciliation ratio" in detail
         if decision is None:
             return None
         response = client.post(f"/applications/{app_id}/decision", data=dict(csrf=token(detail),
@@ -124,7 +124,7 @@ def test_four_seller_cutover(seller, policy, codes, decision):
     assert doc["status"] == {None: "awaiting_officer", "approve": "approved", "decline": "declined"}[decision]
     assert app_id in client.get("/").text and app_id not in client.get("/legacy").text
     assert ui.store.list_status_rows(legacy=True) == legacy_rows and "₩5,000,000" in client.get(archive).text
-    assert "$5,000.00 USD" in client.get("/apply/" + app_id).text
+    assert "$5000" in client.get("/apply/" + app_id).text
     loan = worker.store.read("loans", app_id, app_id)
     if decision != "approve":
         assert not loan and not (doc.get("officer_decision") or {}).get("amount_cents")

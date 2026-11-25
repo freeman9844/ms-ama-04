@@ -1,5 +1,11 @@
+import pytest
+
+from agents.evidence import build_catalog
+from console.assessment import assessment_panels
 from console.views import DECIDABLE, detail_view, load_raw, raw_container
 from journey.activities import raw_container as journey_raw_container
+from shared.contracts import UsdProduct
+from tests.console.test_assessment import usd_doc
 
 
 def test_raw_container_matches_orchestrator():
@@ -65,6 +71,31 @@ def test_early_stage_document_has_empty_sections(make_doc, key):
     assert view["assessment"] is None
     assert view["claims"] == [] and view["transactions"] == []
     assert view["decidable"] is False
+
+
+@pytest.mark.parametrize(("tags", "limit", "label"), [
+    ({"currency": "USD"}, 0, "$0"), ({"product_version": "usd-v1", "language": "en"}, 410000, "$4100"),
+])
+def test_partial_policy_tags_are_only_accepted_for_usd_display(key, tags, limit, label):
+    doc = usd_doc()
+    doc["policy"] = {k: v for k, v in doc["policy"].items() if k not in UsdProduct.model_fields}
+    doc["policy"].update(tags, max_amount_cents=limit)
+    v = detail_view(doc, None, key, restore=False)
+    assert v["max_amount_cents"] == limit and v["policy"] == doc["policy"]
+    p = assessment_panels(v)
+    assert label in p["summary"]["gauge_sub"] and p["limit"] is None and p["limit_note"]
+    assert {k for k in UsdProduct.model_fields if k in doc["policy"]} == tags.keys()
+    with pytest.raises(ValueError):
+        build_catalog(doc["underwriting"]["features"], {}, [], doc["policy"])
+
+
+@pytest.mark.parametrize("corruption", [{"currency": "KRW"}, {"currency": "USD", "max_amount_krw": 0}])
+def test_partial_policy_rejects_explicit_krw_even_without_underwriting(key, corruption):
+    doc = usd_doc()
+    doc.pop("underwriting")
+    doc["policy"] = {"max_amount_cents": 0, **corruption}
+    with pytest.raises(ValueError):
+        detail_view(doc, None, key, restore=False)
 
 
 def test_decidable_only_while_waiting_for_officer(make_doc, key):

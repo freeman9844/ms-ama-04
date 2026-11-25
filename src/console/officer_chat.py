@@ -16,8 +16,8 @@ from agents.features import ANNUAL_RATE
 from agents.officer_facts import reviewed_detail
 from policy.engine import LIMIT_UNIT_KRW, explain
 from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
-from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures
-from shared.product_context import product_of
+from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures, UsdPolicyDecision
+from shared.product_context import product_of, validate_usd_evidence
 
 SNAPSHOT_MAX_CHARS = 24_000
 QUESTION_MAX = 500
@@ -100,6 +100,11 @@ def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[di
         policy.get("decision"), policy.get(limit), policy.get("rate_band"), stored_codes
     ):
         return None, TRACE_NOTES["mismatch"]
+    if rules.version == "usd-v1" and (stored_cash := policy.get("cash_only")) is not None:
+        cash = d.cash_only
+        if (not isinstance(stored_cash, Mapping) or cash is None
+                or (cash.decision.value, cash.max_amount_cents) != (stored_cash.get("decision"), stored_cash.get(limit))):
+            return None, TRACE_NOTES["mismatch"]
     band = asdict(e.band)
     band["bands"] = [{"band": b, "min_dscr": m} for b, m in e.band.bands]
     return {"checks": [asdict(c) for c in e.checks], "limit": asdict(e.limit), "band": band,
@@ -117,18 +122,33 @@ def _amended_since(version: Any, received_at: Any) -> bool:
         return True
 
 
-def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, Any] | None:
+def verified_policy(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[str, Any] | None:
+    """One policy projection for the detail panel and chat; conflicting requests cannot share evidence."""
     if not isinstance(policy, Mapping):
         return None
+    product = product_of(doc)
+    requested = "requested_amount_cents" if product else "requested_amount_krw"
+    if isinstance(features, Mapping) and requested in features and features[requested] != doc.get(requested):
+        return None
     version = policy.get("rules_version")
-    limit = "max_amount_cents" if product_of(policy) else "max_amount_krw"
+    if product:
+        tags = product.model_dump().items()
+        records = (policy, policy.get("cash_only"))
+        if version != product.product_version or any(
+            not (tags <= record.items()) for record in records if isinstance(record, Mapping)
+        ):
+            return None
+    limit = "max_amount_cents" if product else "max_amount_krw"
     rules = rules_for_version(version)
     if rules is not None and (rules.version == "usd-v1") != (limit == "max_amount_cents"):
         raise ValueError("Policy and ruleset products differ")
     if rules is None:
         trace, note = None, TRACE_NOTES["unknown_version"]
-    elif _amended_since(version, received_at):
+    elif _amended_since(version, doc.get("received_at")):
         rules, trace, note = None, None, TRACE_NOTES["amended_version"]
+    elif (not isinstance(features, Mapping) or requested not in features or "rate_band" not in policy
+          or not isinstance(policy.get("reason_codes"), (list, tuple))):
+        trace, note = None, TRACE_NOTES["invalid_features"]
     else:
         trace, note = _trace(rules, policy, features)
     return {
@@ -144,9 +164,11 @@ def _policy(policy: Any, features: Any, received_at: Any = None) -> dict[str, An
     }
 
 
-def policy_trace(policy: Any, features: Any, received_at: Any = None) -> dict[str, Any] | None:
-    """정책 판정과 계산 과정(trace). 상세 화면의 셀러 데이터 대체 표도 이 결과를 쓴다."""
-    return _policy(policy, features, received_at)
+def policy_for_view(view: Mapping[str, Any]) -> dict[str, Any] | None:
+    if "verified_policy" in view:
+        return view["verified_policy"]
+    doc = view["doc"]
+    return verified_policy(doc, view.get("policy"), (doc.get("underwriting") or {}).get("features"))
 
 
 def _officer_checks(view: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -200,7 +222,24 @@ def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | 
     policy = view.get("policy")
     if ((features and product_of(features) != product) or (policy and product_of(policy) != product)):
         raise ValueError("Chat evidence does not match the application product")
+    checked = policy_for_view(view)
+    if policy is not None and checked is None:
+        raise ValueError("Policy evidence does not match the application")
     keys = [k + ("_cents" if product and k != "month" else "") for k in MONTHLY_KEYS]
+    if product:
+        # Revalidate originals at the model boundary; the display view may accept incomplete evidence.
+        UsdCashFlowFeatures.model_validate(features)
+        UsdPolicyDecision.model_validate(policy)
+        validate_usd_evidence((uw, policy, doc.get("officer_decision")))
+        if type((uw.get("signals") or {}).get("new_installment_cents")) is not int:
+            raise ValueError("Missing USD installment evidence")
+        rows = uw.get("monthly")
+        if features["months_of_history"] > 0 and not rows:
+            raise ValueError("Missing USD monthly history")
+        if not isinstance(rows, (list, tuple)) or not all(
+            isinstance(m, Mapping) and m.get("month") and all(type(m.get(k)) is int for k in keys[1:]) for m in rows
+        ):
+            raise ValueError("Incomplete USD monthly evidence")
     monthly = [{k: m.get(k) for k in keys} for m in uw.get("monthly") or () if isinstance(m, Mapping)]
     signals = uw.get("signals") or {}
     officer = doc.get("officer_decision")
@@ -220,7 +259,7 @@ def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | 
             "capacity": _capacity(monthly, signals.get(f"new_installment_{unit}"), bool(product)),
             "settlement": _settlement(uw.get("pg_ledger")),
         },
-        "policy": _policy(view.get("policy"), features, doc.get("received_at")),
+        "policy": checked,
         "agent_opinion": _opinion(view),
         "officer_decision": {"decision": officer.get("decision"), f"amount_{unit}": officer.get(f"amount_{unit}")}
         if isinstance(officer, Mapping) else None,

@@ -41,6 +41,8 @@ from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principa
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, parse_requested_usd_cents, validate_apply, validate_request
 from shared.portfolio import in_portfolio
 from console.dashboard import (
+    display_usd,
+    usd_tick,
     POLICY_DECISIONS,
     RECOMMENDATION_LABELS,
     detail_summary,
@@ -64,7 +66,7 @@ from console.monitoring import (
     loan_view,
 )
 from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
-from console.opinion import opinion_panel
+from console.opinion import opinion_panel, policy_cents_ids, review_history
 from console.ops import (
     AXIS_LABELS,
     RECENT_RUN,
@@ -80,7 +82,7 @@ from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console import translate
 from console.translate import MachineTranslation, PageTexts, catalog, data_label, mt_filters, page_scope, validate_texts
-from console.views import DECIDABLE, RawStore, detail_view, load_raw
+from console.views import DECIDABLE, RawStore, case_masker, decision_for_display, detail_view, load_raw
 from journey.models import (
     CONSENT_PURPOSE,
     CONSENT_TTL_DAYS,
@@ -101,7 +103,6 @@ from journey.models import (
     replay_held,
     replay_in_progress,
 )
-from agents.data_assembly import build_pseudonymizer
 from journey.validation import REREVIEW_ERRORS, usd_rereview_error, validate_officer_decision, validate_rereview_decision
 from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
@@ -259,8 +260,10 @@ def _templates() -> Environment:
     env.install_gettext_callables(gettext=i18n.gettext, ngettext=lambda s, p, n: i18n.gettext(s if n == 1 else p),
                                   pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
-    env.filters["usd_cents"] = lambda cents: f"{format_usd(cents)} USD" if type(cents) is int else "-"
-    env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "") if type(cents) is int else ""
+    env.filters["usd_cents"] = display_usd
+    env.filters["usd_tick"] = usd_tick
+    env.filters["policy_cents_ids"] = policy_cents_ids
+    env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "").removesuffix(".00") if type(cents) is int else ""
     env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s
     env.filters["channel"] = lambda s: USD_CHANNEL_NAMES.get(s, s)
     env.filters["kst"] = _kst
@@ -360,10 +363,9 @@ def _issue_text(issue: str) -> str:
     return _(issue)
 
 
-def _token_script(token_map: dict[str, Any], css: str = "mt-tokens") -> str:
-    """영문 화면의 토큰 지도. 브라우저가 번역 결과의 토큰을 같은 화면에서 평문으로 보이던 값으로 되돌린다."""
-    body = json.dumps(token_map, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f'<script type="application/json" class="{css}">{body}</script>'
+def _grant_script(grant: dict[str, Any]) -> str:
+    body = json.dumps(grant, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return f'<script type="application/json" class="mt-grant">{body}</script>'
 
 
 def create_app(deps: ConsoleDeps) -> FastAPI:
@@ -403,12 +405,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         page = texts or PageTexts(Pseudonymizer(deps.pseudonym_key), allow_pending=False)
         with page_scope(page):
             html = draw()
-        token_map = page.token_map()
-        script = _token_script(token_map) if token_map else ""
         if page.requested and user and page.scope:
             tickets = {t: translate.mt_ticket(deps.pseudonym_key, user.user_id, page.scope, t) for t in page.requested}
-            script += _token_script({"scope": page.scope, "tickets": tickets}, "mt-grant")
-        if script:
+            script = _grant_script({"scope": page.scope, "tickets": tickets})
             at = html.rfind("</body>")
             html = html + script if at < 0 else html[:at] + script + html[at:]
         return HTMLResponse(html, status_code=status_code)
@@ -503,18 +502,16 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def detail(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
         state = state_tag(doc)
         ctx.setdefault("decision_pending", decision_pending(doc["application_id"], state))
-        raw = (read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])[0] if i18n.current() != i18n.SOURCE
-               else load_raw(deps.raw, doc))
+        raw, _ = read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        if product_of(doc):
-            return render("usd_detail.html", user, status_code, v=view, in_progress=in_progress, state=state,
-                          consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
-                          **ctx)
-        return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"], translation_scope("applications", doc)),
+        usd = bool(product_of(doc))
+        texts = None if usd else page_texts(raw, doc["application_id"], translation_scope("applications", doc))
+        return render("detail.html", user, status_code, texts=texts, usd=usd,
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
-                      op=opinion_panel(view, doc.get("assessment_run")), in_progress=in_progress, state=state,
+                      op=opinion_panel(view), history=review_history(doc, published=bool(view["assessment"])),
+                      in_progress=in_progress, state=state,
                       consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
                       **ctx)
 
@@ -698,8 +695,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
         if not readable or (usd and raw is None):
             return _chat_error("failed", usd)
-        masker = (build_pseudonymizer(deps.pseudonym_key, raw.profile, raw.transactions) if raw is not None
-                  else Pseudonymizer(deps.pseudonym_key))
+        display_name = None if usd else seller_name(doc.get("applicant_id", ""))
+        masker = case_masker(raw, deps.pseudonym_key, display_name=display_name)
         translate = None
         if not usd and i18n.current() == "en":
             stored = await run_in_threadpool(stored_translations, application_id)
@@ -709,7 +706,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 translated = catalog(text) or page.stored_en(text)
                 return masker.mask(translated) if translated else None
 
-        snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
+        try:
+            snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
+        except ValueError:
+            return _chat_error("failed", usd)
         started = time.monotonic()
         result, answer = "ok", None
         try:
@@ -1220,20 +1220,26 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "grievance not found")
         return doc
 
-    def grievance_texts(doc: dict[str, Any]) -> PageTexts | None:
-        """이의 화면: 그 신청의 원천으로 가명처리한다."""
-        if i18n.current() == i18n.SOURCE:
-            return None
+    def grievance_page(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
         owner = doc["application_id"]
-        application, _ = read_raw(lambda: deps.store.get(owner), owner)
-        raw = read_raw(lambda: load_raw(deps.raw, application), owner)[0] if application else None
-        return page_texts(raw, owner, translation_scope("applications", application or {}))
+        record = doc.get("record") or {}
+        decision = record.get("officer_decision")
+        mask_decision = decision and not user.can_restore
+        texts = None
+        if mask_decision or i18n.current() != i18n.SOURCE:
+            application, _ = read_raw(lambda: deps.store.get(owner), owner)
+            raw = read_raw(lambda: load_raw(deps.raw, application), owner)[0] if application else None
+            texts = page_texts(raw, owner, translation_scope("applications", application or {}))
+            if mask_decision:
+                shown = decision_for_display(decision, case_masker(raw, deps.pseudonym_key).mask if raw else None)
+                doc = {**doc, "record": {**record, "officer_decision": shown}}
+        return render("grievance.html", user, status_code, texts=texts, g=doc, **ctx)
 
     @app.get("/grievances/{application_id}/{grievance_id}", response_class=HTMLResponse)
     def grievance(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
         user = viewer(request)
         doc = grievance_or_404(application_id, grievance_id)
-        return render("grievance.html", user, texts=grievance_texts(doc), g=doc)
+        return grievance_page(user, doc)
 
     @app.post("/grievances/{application_id}/{grievance_id}/decision", response_class=HTMLResponse)
     def grievance_decision(application_id: str, grievance_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
@@ -1247,8 +1253,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         product = product_of(doc)
 
         def invalid(message: str, code: str | None = None) -> HTMLResponse:
-            return render("grievance.html", user, 422, texts=grievance_texts(doc), g=doc, error=message,
-                          error_code=code, form=form)
+            return grievance_page(user, doc, 422, error=message, error_code=code, form=form)
 
         record = doc.get("record") or {}
         if product != product_of(record):

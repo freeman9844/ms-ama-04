@@ -8,9 +8,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from console import charts, i18n
-from console.assessment import RECOMMENDATION_TONES
-from console.dashboard import POLICY_DECISIONS, RECOMMENDATION_LABELS
+from console.assessment import RECOMMENDATION_TONES, claim_check
+from console.dashboard import POLICY_DECISIONS, RECOMMENDATION_LABELS, usd_tick
 from console.i18n import _
+from shared.product_context import product_of
 
 RECOMMENDATION_MEANINGS = {
     "approve": "현재 근거는 신청액 전액 승인을 지지합니다. 최종 결정은 심사역이 합니다.",
@@ -37,6 +38,8 @@ METRIC_LABELS = {
 }
 MONTHLY_LABELS = {"revenue": "매출", "operating_out": "운영비", "debt_service": "상환", "owner_draw": "대표자 인출",
                   "index": "매출 지수"}
+METRIC_LABELS.update({k.removesuffix("_krw") + "_cents": v for k, v in METRIC_LABELS.items() if k.endswith("_krw")})
+METRIC_LABELS["mkt_pending_settlement_cents"] = "순정산 예정금"
 KRW_MONTHLY = frozenset({"revenue", "operating_out", "debt_service", "owner_draw"})
 # 근거 출처: (키, 이름, 색). 표·도넛·범례가 같은 순서를 쓴다. 이름은 화면에 낼 때 번역한다.
 SOURCES = (("M", "현금흐름 지표", "blue"), ("S", "월별 흐름", "teal"), ("P", "정책 결과", "purple"),
@@ -57,7 +60,7 @@ def evidence_label(metric_id: str) -> str:
     if parts[0] == "M" and len(parts) == 2:
         return i18n.label(METRIC_LABELS, parts[1])
     if parts[0] == "S" and len(parts) == 3:
-        return f"{parts[1]} {i18n.label(MONTHLY_LABELS, parts[2])}"
+        return f"{parts[1]} {i18n.label(MONTHLY_LABELS, parts[2].removesuffix('_cents'))}"
     if parts[0] == "P" and len(parts) == 2:
         return i18n.label(METRIC_LABELS, parts[1])
     if parts[0] == "P" and len(parts) == 3:
@@ -67,10 +70,12 @@ def evidence_label(metric_id: str) -> str:
     return metric_id
 
 
-def evidence_value(metric_id: str, value: Any) -> str:
+def evidence_value(metric_id: str, value: Any, cents_ids: frozenset[str] = frozenset()) -> str:
     if not charts.is_num(value):
         return _("없음")
     field = metric_id.split(":")[-1]
+    if field.endswith("_cents") or metric_id in cents_ids:
+        return usd_tick(value)
     if field.endswith("_krw") or field in KRW_MONTHLY:
         return charts.won(value)
     return _num_text(value)
@@ -81,12 +86,11 @@ def _source(metric_id: str) -> str:
     return head if head in ("M", "S", "P") else "M"
 
 
-def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any], requested: Any) -> dict[str, Any]:
+def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any], requested: Any, limit: Any) -> dict[str, Any]:
     rec = assessment.get("recommendation") or ""
     decision = policy.get("decision")
     decision_label, decision_tone = POLICY_DECISIONS.get(decision, (decision or "판정 없음", "neutral"))
     aligned = rec in ALIGNED.get(decision, set())
-    limit = policy.get("max_amount_krw")
     if decision != "ineligible" and charts.is_num(requested) and charts.is_num(limit) and requested > limit:
         aligned = rec == "decline"
         relation = _("신청액이 정책 한도를 초과하므로 전액 승인이 불가능합니다.")
@@ -107,7 +111,8 @@ def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any], re
     }
 
 
-def _claims(claims: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _claims(claims: Sequence[Mapping[str, Any]], cents_ids: frozenset[str],
+            found_transactions: set[str]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     counts = {key: 0 for key, _label, _color in SOURCES}
     rows = []
     for i, c in enumerate(claims, start=1):
@@ -116,11 +121,12 @@ def _claims(claims: Sequence[Mapping[str, Any]]) -> tuple[list[dict[str, Any]], 
             missing = value is None
             counts["missing" if missing else _source(metric_id)] += 1
             evidence.append({"id": metric_id, "label": evidence_label(metric_id),
-                             "value": evidence_value(metric_id, value), "missing": missing})
+                             "value": evidence_value(metric_id, value, cents_ids), "missing": missing})
         txn_ids = list(c.get("txn_ids") or ())
-        counts["txn"] += len(txn_ids)
+        for txn_id in txn_ids:
+            counts["txn" if txn_id in found_transactions else "missing"] += 1
         rows.append({"n": i, "text": c.get("text", ""), "evidence": evidence, "txn_ids": txn_ids,
-                     "ok": not any(e["missing"] for e in evidence), "sources": len(evidence) + len(txn_ids)})
+                     **claim_check(c, found_transactions), "sources": len(evidence) + len(txn_ids)})
     return rows, counts
 
 
@@ -132,7 +138,7 @@ def _evidence_mix(counts: Mapping[str, int]) -> dict[str, Any] | None:
             "legend": [(label, color, _("%(n)s건", n=v)) for label, v, color in segments if v]}
 
 
-def _counterfactuals(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _counterfactuals(items: Sequence[Mapping[str, Any]], cents_ids: frozenset[str]) -> list[dict[str, Any]]:
     rows = []
     for cf in items:
         metric_id, cur, tgt = str(cf.get("metric_id") or ""), cf.get("current"), cf.get("target")
@@ -142,8 +148,9 @@ def _counterfactuals(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
             pct = delta / abs(cur) * 100 if cur else None
         rows.append({
             "label": evidence_label(metric_id), "id": metric_id,
-            "current": evidence_value(metric_id, cur), "target": evidence_value(metric_id, tgt),
-            "change": ("+" if delta and delta > 0 else "") + evidence_value(metric_id, delta) if delta is not None
+            "unit": "usd_cents" if metric_id.endswith("_cents") or metric_id in cents_ids else "",
+            "current": evidence_value(metric_id, cur, cents_ids), "target": evidence_value(metric_id, tgt, cents_ids),
+            "change": ("+" if delta and delta > 0 else "") + evidence_value(metric_id, delta, cents_ids) if delta is not None
             else "-",
             "pct": f"{pct:+.0f}%" if pct is not None else "-",
             "direction": _("올리기") if delta and delta > 0 else _("낮추기") if delta and delta < 0 else _("유지"),
@@ -152,11 +159,14 @@ def _counterfactuals(items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
     return rows
 
 
+def _issue_count(entry: Mapping[str, Any], key: str) -> int | None:
+    issues = entry.get(key)
+    return len(issues) if isinstance(issues, list) else None
+
+
 def _round(entry: Mapping[str, Any]) -> dict[str, Any]:
-    analyst = entry.get("analyst") if isinstance(entry.get("analyst"), Mapping) else {}
-    reviewer = entry.get("reviewer") if isinstance(entry.get("reviewer"), Mapping) else {}
-    grounding = list(entry.get("grounding_issues") or [])
-    review = list(entry.get("review_issues") or [])
+    grounding = _issue_count(entry, "grounding_issues")
+    review = _issue_count(entry, "review_issues")
     if entry.get("analyst_error"):
         outcome, tone = _("분석 실패"), "red"
     elif grounding:
@@ -165,35 +175,58 @@ def _round(entry: Mapping[str, Any]) -> dict[str, Any]:
         outcome, tone = _("검토 실패"), "red"
     elif review:
         outcome, tone = _("검토 지적"), "amber"
-    elif "reviewer" in entry:
+    elif entry.get("contract_issues"):
+        outcome, tone = _("형식 검증 실패"), "red"
+    elif review == 0 and isinstance(entry.get("reviewer"), Mapping) and grounding == 0:
         outcome, tone = _("통과"), "green"
     else:
         outcome, tone = "-", "neutral"
     reviewer_text = (_("건너뜀(근거 검사 미통과)") if grounding else _("실패") if entry.get("reviewer_error")
-                     else _("지적 %(n)s건", n=len(review)) if "reviewer" in entry else "-")
+                     else _("지적 %(n)s건", n=review) if review is not None else "-")
     return {
-        "n": entry.get("round"), "tools": len(analyst.get("tool_calls") or ()),
-        "tokens": int(analyst.get("total_tokens") or 0) + int(reviewer.get("total_tokens") or 0),
-        "grounding": len(grounding), "review": len(review), "reviewer": reviewer_text,
+        "n": entry["round"], "grounding": grounding, "review": review, "reviewer": reviewer_text,
         "outcome": outcome, "tone": tone,
     }
 
 
-def _loop(run: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    rounds = [r for r in (run or {}).get("rounds") or () if isinstance(r, Mapping)]
+def _last_assess_step(doc: Mapping[str, Any]) -> Mapping[str, Any]:
+    return next((s for s in reversed(doc.get("steps") or ()) if isinstance(s, Mapping) and s.get("step") == "assess"), {})
+
+
+def review_history(doc: Mapping[str, Any], *, published: bool) -> dict[str, Any] | None:
+    """Project only the last persisted run. Never pass drafts, tool arguments or issue text to the template."""
+    run = doc.get("assessment_run")
+    if not isinstance(run, Mapping):
+        return None
+    last = _last_assess_step(doc)
+    if not published and last.get("outcome") == "failed" and (code := last.get("detail")):
+        # A thrown retry leaves the preceding assessment_run in the document. A returned failure's
+        # step code is the leading safe token of record.error, or "error" for a non-ASCII message.
+        error = str(run.get("error") or "").lstrip()
+        if not (error.startswith(code) or (code == "error" and error and not error[0].isascii())):
+            return None
+    rounds = sorted((r for r in run.get("rounds") or ()
+                     if isinstance(r, Mapping) and type(r.get("round")) is int), key=lambda r: r["round"])
     if not rounds:
         return None
-    tools: dict[str, int] = {}
-    for r in rounds:
-        for call in ((r.get("analyst") or {}).get("tool_calls") or ()):
-            name = str((call or {}).get("name") or "")
-            tools[name] = tools.get(name, 0) + 1
-    tool_bars = [(i18n.label(TOOL_LABELS, n), c, "blue") for n, c in sorted(tools.items(), key=lambda kv: -kv[1])]
     rows = [_round(r) for r in rounds]
+    if not published:
+        return {"rows": rows}
+    tools: dict[str, int] = {}
+    for r, row in zip(rounds, rows, strict=True):
+        actors = [actor for key in ("analyst", "reviewer") if isinstance(actor := r.get(key), Mapping)]
+        tokens = [a.get("total_tokens") for a in actors]
+        row["tokens"] = sum(tokens) if tokens and all(type(t) is int for t in tokens) else None
+        calls = r["analyst"].get("tool_calls") if isinstance(r.get("analyst"), Mapping) else None
+        row["tools"] = len(calls) if isinstance(calls, list) else None
+        for call in calls or ():
+            if isinstance(call, Mapping) and isinstance(name := call.get("name"), str) and name in TOOL_LABELS:
+                tools[name] = tools.get(name, 0) + 1
+    tool_bars = [(i18n.label(TOOL_LABELS, n), c, "blue") for n, c in sorted(tools.items(), key=lambda kv: -kv[1])]
     groups = [(_("%(n)s라운드", n=r["n"]),
                [[("grounding", r["grounding"], "amber",
-                  _("%(n)s라운드 근거 검사 %(count)s건", n=r["n"], count=r["grounding"])),
-                 ("review", r["review"], "red", _("%(n)s라운드 검토 지적 %(count)s건", n=r["n"], count=r["review"]))]])
+                  _("%(n)s라운드 근거 검사 %(count)s건", n=r["n"], count=r["grounding"] if r["grounding"] is not None else "—")),
+                 ("review", r["review"], "red", _("%(n)s라운드 검토 지적 %(count)s건", n=r["n"], count=r["review"] if r["review"] is not None else "—"))]])
               for r in rows]
     return {
         "rows": rows,
@@ -204,9 +237,8 @@ def _loop(run: Mapping[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _usage(doc: Mapping[str, Any], models: Mapping[str, str]) -> dict[str, Any] | None:
-    step = next((s for s in reversed(doc.get("steps") or []) if isinstance(s, Mapping) and s.get("step") == "assess"),
-                None)
-    if step is None:
+    step = _last_assess_step(doc)
+    if not step:
         return None
     role_of = {m: r for r, m in models.items()}
     by_model: dict[str, dict[str, int]] = {}
@@ -231,7 +263,7 @@ def _usage(doc: Mapping[str, Any], models: Mapping[str, str]) -> dict[str, Any] 
 OFFICER_CHECK_STATUS = {True: ("ok", "검토 통과"), False: ("failed", "검토 미통과")}  # 문구는 화면에 낼 때 번역
 
 
-def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
+def _officer_checks(view: Mapping[str, Any], cents_ids: frozenset[str]) -> dict[str, Any]:
     """검토된 현행 의견의 확인 사항(생략과 빈 배열은 모두 확인 사항 없음)."""
     checks = view.get("officer_checks")
     if not checks:
@@ -240,7 +272,7 @@ def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
     for i, c in enumerate(checks, start=1):
         status, status_text = OFFICER_CHECK_STATUS.get(c.get("supported"), ("unknown", "검토 결과 없음"))
         status_text = _(status_text)
-        evidence = [{"label": evidence_label(m), "value": evidence_value(m, val), "missing": val is None}
+        evidence = [{"id": m, "label": evidence_label(m), "value": evidence_value(m, val, cents_ids), "missing": val is None}
                     for m, val in c.get("evidence") or ()]
         items.append({"n": i, "text": c.get("text", ""), "evidence": evidence, "status": status,
                       "status_text": status_text})
@@ -248,18 +280,25 @@ def _officer_checks(view: Mapping[str, Any]) -> dict[str, Any]:
     return {"state": "listed", "items": items, "verified": verified, "total": len(items)}
 
 
-def opinion_panel(view: Mapping[str, Any], run: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+def policy_cents_ids(policy: Mapping[str, Any] | None) -> frozenset[str]:
+    return frozenset(f"P:{r['code']}:{key}" for r in (policy or {}).get("reason_codes") or ()
+                     if (r.get("field") or "").endswith("_cents") for key in ("observed", "threshold"))
+
+
+def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
     assessment = view.get("assessment")
     if not assessment:
         return None
     doc = view["doc"]
     policy = view.get("policy") or {}
-    claims, counts = _claims(view.get("claims") or ())
+    unit = "cents" if product_of(doc) else "krw"
+    cents_ids = policy_cents_ids(policy) if unit == "cents" else frozenset()
+    claims, counts = _claims(view.get("claims") or (), cents_ids, {t["txn_id"] for t in view.get("transactions") or ()})
     review = assessment.get("review") or {}
     usage = _usage(doc, assessment.get("models") or {})
     ok = sum(1 for c in claims if c["ok"])
     return {
-        "recommendation": _recommendation(assessment, policy, doc.get("requested_amount_krw")),
+        "recommendation": _recommendation(assessment, policy, doc.get(f"requested_amount_{unit}"), policy.get(f"max_amount_{unit}")),
         "kpi": {
             "grounded": f"{ok}/{len(claims)}", "grounded_tone": "green" if claims and ok == len(claims) else "amber",
             "review": (_("통과") if review.get("passed") else _("미통과")) if review else "-",
@@ -271,9 +310,8 @@ def opinion_panel(view: Mapping[str, Any], run: Mapping[str, Any] | None = None)
         },
         "claims": claims,
         "mix": _evidence_mix(counts),
-        "counterfactuals": _counterfactuals(assessment.get("counterfactuals") or ()),
-        "loop": _loop(run),
+        "counterfactuals": _counterfactuals(assessment.get("counterfactuals") or (), cents_ids),
         "usage": usage,
         "models": assessment.get("models") or {},
-        "officer_checks": _officer_checks(view),
+        "officer_checks": _officer_checks(view, cents_ids),
     }

@@ -7,11 +7,13 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from agents.officer_chat import ChatAnswer
+from agents.officer_chat import ChatAnswer, OfficerChat
+from agents.officer_facts import evidence_menu
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.app import ConsoleDeps, create_app
 from console.auth import csrf_token
 from console.officer_chat import CHAT_SUGGESTIONS
+from tests.agents.test_officer_chat import FakeRunner, _run
 from tests.console.test_app import AUDITOR_H, NO_ROLE, OFFICER, FakeQueue, FakeStore
 
 
@@ -72,6 +74,22 @@ def test_chat_sends_no_pii_and_masks_officer_text_with_case_entities(make_doc, r
     assert "[[" in chat.calls[0][2] and "[[" in chat.calls[0][1][0]["text"]
 
 
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_chat_model_masks_only_this_cases_display_alias(make_doc, raw, key, lang):
+    raw.blobs["consent-c-1", "profile.json"]["business_name"] = "대전밀빵공방"
+    runner = FakeRunner(result=_run())
+    client = _client(make_doc, raw, key, OfficerChat(runner, "offline"))
+    client.cookies.set("ama_locale_v2", lang)
+    history = [{"role": "user", "text": "Compare Daejeon Wheat Bakery."},
+               {"role": "assistant", "text": "Checked DAEJEON WHEAT BAKERY."}]
+    response = _post(client, key, {"question": "Daejeon Wheat Bakery or Yeonnam Candle Works?", "history": history})
+    assert response.status_code == 200
+    payload = runner.calls[0][1]
+    assert "daejeon wheat bakery" not in json.dumps(payload).casefold()
+    assert "[[BIZNAME_" in payload["question"] and "Yeonnam Candle Works" in payload["question"]
+    assert len(payload["history"]) == 2 and all("[[BIZNAME_" in t["text"] for t in payload["history"])
+
+
 def test_chat_refuses_when_raw_cannot_be_read(make_doc, key):
     class Broken:
         def get_json(self, container, name):
@@ -88,6 +106,24 @@ def test_chat_without_raw_uses_pattern_masking(make_doc, key):
     chat = FakeChat()
     r = _post(_client(make_doc, FakeRaw({}), key, chat), key, {"question": "010-1234-5678 번호는?"})
     assert r.status_code == 200 and "010-1234-5678" not in chat.calls[0][2]
+
+
+def test_chat_without_raw_masks_registered_seller_in_model_input(make_doc, key):
+    from tests.console.conftest import FakeRaw
+
+    doc = make_doc() | {"applicant_id": "seller-bakery-20"}
+    runner = FakeRunner(result=_run())
+    client = _client(lambda: doc, FakeRaw({}), key, OfficerChat(runner, "offline"))
+    client.cookies.set("ama_locale_v2", "en")
+    history = [{"role": "user", "text": "Compare DAEJEON WHEAT BAKERY."},
+               {"role": "assistant", "text": "Checked 대전밀빵공방."}]
+    r = _post(client, key, {"question": "Daejeon Wheat Bakery or Yeonnam Candle Works?", "history": history})
+    assert r.status_code == 200
+    payload = runner.calls[0][1]
+    inputs = [payload["question"], *(turn["text"] for turn in payload["history"])]
+    assert len(inputs) == 3 and all("[[BIZNAME_" in text for text in inputs)
+    assert all("daejeon wheat bakery" not in text.casefold() and "대전밀빵공방" not in text for text in inputs)
+    assert "Yeonnam Candle Works" in payload["question"]
 
 
 def test_chat_trims_history(make_doc, raw, key):
@@ -137,6 +173,69 @@ def test_usd_missing_mask_sources_do_not_send_free_text(key):
     response = _post(_client(lambda: doc, FakeRaw({}), key, chat), key,
                      {"question": "Ask Jamie Park.", "history": [{"role": "user", "text": "Jamie Park"}]})
     assert response.status_code == 502 and not chat.calls
+
+
+@pytest.fixture
+def usd_chat_case(fake_raw, raw_profile):
+    from shared.contracts import USD_V1
+    from tests.console.test_assessment import usd_doc
+
+    usd = USD_V1.model_dump()
+    doc = usd_doc()
+    doc.update(id="usd-1", consent={"consent_id": "c-1"})
+    doc["underwriting"]["features"]["mkt_rating"] = 4.8
+    doc["policy"].update(application_id="usd-1", cash_only=dict(usd, decision="eligible", max_amount_cents=410000,
+                                                                 reason_codes=[]))
+    doc["underwriting"].update(signals={"new_installment_cents": 101}, monthly=[
+        {"month": "2026-01", "revenue_cents": 1000, "operating_out_cents": 100, "debt_service_cents": 0,
+         "owner_draw_cents": 0}])
+    raw = fake_raw({("consent-c-1", "profile.json"): {**raw_profile, **usd}, ("consent-c-1", "transactions.json"): []})
+    return doc, raw
+
+
+def test_chat_pricing_uses_verified_application_request(usd_chat_case, key):
+    doc, raw = usd_chat_case
+    runner = FakeRunner(result=_run("policy.trace.limit.requested_amount_cents"))
+    client = _client(lambda: doc, raw, key, OfficerChat(runner, "offline"))
+    path = "/applications/usd-1/chat"
+    body = {"question": "Explain the calculation."}
+    normal = _post(client, key, body, path=path)
+    assert normal.status_code == 200 and "$5,000.51" in normal.json()["answer"]
+    snap = runner.calls[0][1]["snapshot"]
+    assert snap["policy"]["trace"]["limit"]["limit_cents"] == 410000
+    assert "policy.trace.limit.requested_amount_cents" in evidence_menu(snap, "en")
+    # The inflow cap still binds, but the stored pricing inputs belong to a different request.
+    doc["requested_amount_cents"] = 499949
+    response = _post(client, key, body, path=path)
+    assert response.status_code == 502 and len(runner.calls) == 1
+
+
+@pytest.mark.parametrize("partial", ["policy", "cash_only", "features", "monthly", "empty_monthly"])
+def test_usd_chat_rejects_display_only_partial_evidence(usd_chat_case, key, partial):
+    doc, raw = usd_chat_case
+    chat = FakeChat()
+    client = _client(lambda: doc, raw, key, chat)
+    def ask():
+        return _post(client, key, {"question": "Explain my policy limit."}, path="/applications/usd-1/chat")
+    assert ask().status_code == 200 and len(chat.calls) == 1
+    if partial == "policy":
+        del doc["policy"]["language"]
+    elif partial == "cash_only":
+        del doc["policy"]["cash_only"]["language"]
+    elif partial == "features":
+        del doc["underwriting"]["features"]["avg_monthly_inflow_cents"]
+    elif partial == "empty_monthly":
+        doc["underwriting"]["monthly"] = []
+    else:
+        del doc["underwriting"]["monthly"][0]["debt_service_cents"]
+    assert ask().status_code == 502 and len(chat.calls) == 1
+    if partial == "empty_monthly":
+        doc["underwriting"]["features"]["months_of_history"] = 0
+        reason = {"code": "R001", "message": "Less than six months of transaction history"}
+        for result in (doc["policy"], doc["policy"]["cash_only"]):
+            result.update(decision="ineligible", max_amount_cents=0, reason_codes=[reason])
+        doc["policy"]["rate_band"] = None
+        assert ask().status_code == 200 and len(chat.calls) == 2
 
 
 @pytest.mark.parametrize("error, status, message", [

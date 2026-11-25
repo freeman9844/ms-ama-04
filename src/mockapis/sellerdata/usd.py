@@ -8,12 +8,11 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from shared.contracts import USD_V1, UsdTransaction
 from shared.krcalendar import add_business_days, is_business_day
-from shared.sellers import USD_CHANNEL_NAMES, UsdSeller
+from shared.sellers import USD_CHANNEL_NAMES, USD_PAYOUT_BUSINESS_DAYS, UsdSeller
 from shared.usd_source import UsdOrderDay, UsdSettlement
 
 FEE = {"naver_smart_store": Decimal(".066"), "coupang": Decimal(".1155"),
        "own_store": Decimal(".034"), "11st": Decimal(".12")}
-LAG = {"naver_smart_store": 5, "coupang": 20, "own_store": 2, "11st": 12}
 
 
 def booked(value: Decimal) -> int:
@@ -60,7 +59,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                 returns = booked(gross * Decimal(".02"))
                 orders.append(UsdOrderDay(**meta, order_on=d, platform_code=platform,
                                           gross_cents=gross, returns_cents=returns))
-                paid_on = add_business_days(d, LAG[platform])
+                paid_on = add_business_days(d, USD_PAYOUT_BUSINESS_DAYS[platform])
                 settleable = gross - returns
                 fee = booked(settleable * FEE[platform])
                 deposits[paid_on].append(UsdSettlement(**meta, settled_on=paid_on, platform_code=platform,

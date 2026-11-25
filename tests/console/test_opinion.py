@@ -1,6 +1,6 @@
 import json
 
-from console.opinion import evidence_label, evidence_value, opinion_panel
+from console.opinion import evidence_label, evidence_value, opinion_panel, review_history
 from console.views import detail_view
 
 
@@ -33,7 +33,9 @@ def test_claims_table_labels_values_and_evidence_mix(make_doc):
         {"text": "b", "evidence": [("S:2026-09:revenue", 40_000_000), ("P:R101:threshold", 1.25),
                                    ("M:unknown", None)], "txn_ids": []},
     ]
-    p = opinion_panel(view(make_doc, claims))
+    v = view(make_doc, claims)
+    v["transactions"] = [{"txn_id": "t2"}]
+    p = opinion_panel(v)
     first, second = p["claims"]
     assert [(e["label"], e["value"]) for e in first["evidence"]] == [("DSCR", "1.8"), ("월평균 입금", "42,000,000원")]
     assert first["ok"] and first["sources"] == 3
@@ -82,21 +84,21 @@ RUN = {"models": {"analyst": "gpt-5.6-sol", "reviewer": "gpt-5.4-mini"}, "rounds
 ]}
 
 
-def test_reflection_loop_rounds_tools_and_no_arguments(make_doc):
-    loop = opinion_panel(view(make_doc), RUN)["loop"]
+def test_reflection_loop_rounds_tools_and_no_arguments():
+    loop = review_history({"assessment_run": RUN}, published=True)
     assert [(r["n"], r["outcome"], r["tone"], r["tools"], r["tokens"], r["reviewer"]) for r in loop["rows"]] == [
         (1, "근거 보완 요청", "amber", 2, 900, "건너뜀(근거 검사 미통과)"),
         (2, "검토 지적", "amber", 1, 1100, "지적 1건"),
         (3, "통과", "green", 0, 900, "지적 0건")]
     assert [(b["label"], b["value"]) for b in loop["tools"]["bars"]] == [("지표 조회", 2), ("거래 조회", 1)]
     assert [[p["value"] for p in g["bars"][0]["parts"]] for g in loop["issues_chart"]["groups"]] == [
-        [1, 0], [0, 1], [0, 0]]
+        [1, None], [0, 1], [0, 0]]
     assert "ARG-BODY" not in json.dumps(loop, ensure_ascii=False, default=str)
 
 
-def test_failed_analyst_round_shows_error(make_doc):
+def test_failed_analyst_round_shows_error():
     run = {"rounds": [{"round": 1, "analyst_error": "HTTP 400 bad"}]}
-    row = opinion_panel(view(make_doc), run)["loop"]["rows"][0]
+    row = review_history({"assessment_run": run}, published=False)["rows"][0]
     assert (row["outcome"], row["tone"]) == ("분석 실패", "red") and "HTTP 400 bad" not in str(row)
 
 

@@ -201,6 +201,11 @@ form.inline button { padding: .3rem .7rem; font-size: .85em; border-radius: 8px;
 .dot { stroke: #fff; stroke-width: 1.5; }
 .trigger-mark { font-size: 12px; fill: var(--c-red); }
 .hbars { max-width: 480px; }
+.recommendation-bars { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
+.recommendation-bars li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: .75rem; row-gap: .2rem; }
+.recommendation-bars span { overflow-wrap: anywhere; }
+.recommendation-bars b { font-variant-numeric: tabular-nums; }
+.recommendation-bars svg { grid-column: 1 / -1; display: block; }
 .counterfactuals .hbars { max-width: 360px; margin-top: .3rem; }
 
 /* 정책 기준선 막대 */
@@ -399,6 +404,8 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
   .sidebar { position: static; height: auto; }
   .sidebar nav ul { display: flex; flex-wrap: wrap; gap: .25rem; }
   .who { display: none; }
+  .shell:has([data-tabs]) .who { display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem; }
+  .shell:has([data-tabs]) .who-name, .shell:has([data-tabs]) .who-roles { display: none; }
   main { padding: 1rem 1rem 2rem; }
   .hero-card { padding: 1.2rem 1.1rem; }
   .hero-amount { font-size: 1.9rem; }

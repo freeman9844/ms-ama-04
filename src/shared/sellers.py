@@ -58,6 +58,7 @@ class UsdSeller:
 
 USD_CHANNEL_NAMES = {"coupang": "Coupang", "naver_smart_store": "Naver Smart Store",
                      "own_store": "Own Store", "11st": "11st"}
+USD_PAYOUT_BUSINESS_DAYS = {"naver_smart_store": 5, "coupang": 20, "own_store": 2, "11st": 12}
 _GENERAL = (("coupang", 45), ("naver_smart_store", 40), ("own_store", 15))
 _RETAIL = (("coupang", 50), ("naver_smart_store", 35), ("11st", 15))
 _STUDIO = (("naver_smart_store", 65), ("own_store", 35))

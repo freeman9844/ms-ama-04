@@ -7,6 +7,12 @@
   "월별 자료가 없습니다.": "No monthly data available.",
   "월": "Month",
   "자료 없음": "No data available.",
+  "실제 주간 매출 입금(막대)을 심사 시점의 주 평균 매출(선)과 비교합니다.": "The bars show actual weekly sales receipts. The line shows average weekly revenue at underwriting.",
+  "상환 직전 예상 잔고": "Projected balance before payment",
+  "예정 상환액": "Scheduled payment",
+  "최근 영업일의 평균 순현금흐름, 대표자 인출 패턴과 예정 상환액을 반영한 전망입니다.": "The forecast uses recent net cash flow per business day, owner withdrawal patterns and scheduled payments.",
+  "금액(USD, 한도 %(limit)s)": "Amount (USD, limit %(limit)s)",
+  "금액(USD)": "Amount (USD)",
   "미리보기 심사역": "Preview officer",
   "데모 사용자": "Demo operator"
 }

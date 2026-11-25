@@ -27,7 +27,18 @@
   </section>
   <section class="card">
     <h2>{{ _("에이전트 권고") }}</h2>
-    {{ ch.hbars(ui.rec_bars, _("에이전트 권고 분포")) }}
+    {% set peak = ui.recommendations | map(attribute=1) | max %}
+    <ul class="recommendation-bars" aria-label="{{ _('에이전트 권고 분포') }}">
+      {% for label, count, color in ui.recommendations %}
+      <li>
+        <span>{{ label }}</span><b>{{ count }}</b>
+        <svg aria-hidden="true" focusable="false" width="100%" height="8">
+          <rect class="track" width="100%" height="8" rx="4"></rect>
+          <rect class="fill-{{ color }}" width="{{ 100 * count / peak if peak else 0 }}%" height="8" rx="4"></rect>
+        </svg>
+      </li>
+      {% endfor %}
+    </ul>
   </section>
 </div>
 <section class="card">

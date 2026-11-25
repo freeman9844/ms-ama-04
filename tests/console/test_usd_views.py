@@ -59,7 +59,7 @@ def test_archive_before_limit():
     deps.store = CosmosApplications(QueryContainer([*legacy, DOC]))
     client = TestClient(create_app(deps))
     home = client.get("/").text
-    assert "usd-first" in home and "old-0" not in home and "$5,000.01 USD" in home
+    assert "usd-first" in home and "old-0" not in home and "$5000" in home
     assert "Daejeon Bakery" in home
     archive = client.get("/legacy").text
     assert "usd-first" not in archive and "₩4,000,000" in archive
@@ -69,6 +69,298 @@ def test_archive_before_limit():
 
 def token(html):
     return re.search(r'name="csrf" value="([^"]+)"', html)[1]
+
+
+def detail_panels(html):
+    tabs = re.findall(r'role="tab" aria-controls="(tab-[a-z]+)"', html)
+    assert len(tabs) == 8
+    parts = re.split(r'<section id="(tab-[a-z]+)"[^>]*role="tabpanel"[^>]*>', html)
+    assert tabs == parts[1::2] == ["tab-" + name for name in
+        ("summary", "cashflow", "marketplace", "policy", "opinion", "evidence", "consent", "decision")]
+    return dict(zip(tabs, parts[2::2], strict=True))
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_auditor_masks_case_display_alias_in_officer_text(lang, make_doc, fake_raw, raw_profile):
+    deps = fixtures.build_deps()
+    source, alias = "대전밀빵공방", "Daejeon Wheat Bakery"
+    decision = {"decision": "approve", "reason": f"Checked {source} and {alias}.",
+                "conditions": [f"Contact {alias.upper()}."]}
+    doc = make_doc("approved", officer_decision=decision, applicant_id="seller-bakery-20")
+    deps.store.docs[doc["id"]] = doc
+    deps.raw = fake_raw({("consent-c-1", "profile.json"): dict(raw_profile, applicant_id=doc["applicant_id"],
+                                                               business_name=source),
+                         ("consent-c-1", "transactions.json"): []})
+    client = TestClient(create_app(deps))
+    url = f"/applications/{doc['id']}?lang={lang}"
+    officer = detail_panels(client.get(url).text)["tab-decision"]
+    assert decision["reason"] in officer and decision["conditions"][0] in officer
+    deps.demo_principal = Principal("auditor", "Auditor", frozenset({AUDITOR}))
+    html = client.get(url).text
+    assert source not in html and alias.casefold() not in html.casefold()
+    panel = detail_panels(html)["tab-decision"]
+    assert "Checked [[BIZNAME_" in panel and "Contact [[BIZNAME_" in panel
+
+
+@pytest.mark.parametrize("received,stored,codes,verified", [
+    ("2026-11-09T09:00:00+09:00", 5_000_000, [], True),
+    ("2026-11-03T09:00:00+09:00", 5_000_000, [], False),  # v1 was amended in place.
+    ("2026-11-09T09:00:00+09:00", 4_900_000, [], False),
+    ("2026-11-09T09:00:00+09:00", 5_000_000, None, False),
+])
+def test_archived_krw_formula_requires_verified_version(received, stored, codes, verified, make_doc):
+    deps = fixtures.build_deps()
+    doc = make_doc(received_at=received, requested_amount_krw=8_000_000)
+    doc["underwriting"]["features"].update(application_id=doc["id"], requested_amount_krw=8_000_000,
+        avg_monthly_inflow_krw=12_000_000, requested_tenor_months=12, months_of_history=12, cash_buffer_days=30,
+        revenue_volatility=.2, tax_bank_match_ratio=.95, region="서울", business_age_months=38)
+    doc["policy"].update(reason_codes=codes, max_amount_krw=stored)
+    deps.store.docs[doc["id"]] = doc
+    panes = detail_panels(TestClient(create_app(deps)).get(f"/applications/{doc['id']}?lang=ko").text)
+    summary = panes["tab-summary"]
+    assert f"한도 {stored:,}원" in summary and f"한도 {stored:,}원" in panes["tab-policy"]
+    if verified:
+        assert "상품 최대 500만 원" in summary and "산출 한도 5,000,000원" in summary
+    else:
+        assert "한도 산정 후보" not in summary and "산출 근거를 확인할 수 없습니다" in summary
+    if codes is None:
+        assert "걸린 사유 코드가 없습니다." not in panes["tab-policy"]
+    assert doc["policy"]["max_amount_krw"] == stored and doc["policy"]["reason_codes"] == codes
+
+
+def test_archived_transaction_changes_current_evidence_not_published_review(make_doc, raw):
+    deps = fixtures.build_deps()
+    doc = make_doc()
+    doc["assessment"]["claims"] = [{"text": "Reviewed transfer.", "txn_ids": ["tx-archived"], "metric_ids": []}]
+    doc["assessment"]["officer_checks"] = []
+    deps.store.docs[doc["id"]] = doc
+    deps.raw = raw
+    raw.blobs[("consent-c-1", "transactions.json")][0]["txn_id"] = "tx-archived"
+    client = TestClient(create_app(deps))
+    url = f"/applications/{doc['id']}?lang=en"
+    before = detail_panels(client.get(url).text)
+    assert ">1/1<" in before["tab-opinion"] and "All evidence verified" in before["tab-opinion"]
+    assert "tx-archived" in before["tab-evidence"]
+    raw.blobs.clear()
+    after = detail_panels(client.get(url).text)
+    assert ">0/1<" in after["tab-opinion"] and "All evidence verified" not in after["tab-opinion"]
+    assert "Reviewed transfer." in after["tab-opinion"] and ">Passed<" in after["tab-opinion"]
+    assert "Source data for the cited transactions is unavailable." in after["tab-evidence"]
+
+
+@pytest.mark.parametrize("record", [{}, {"penalties": None}, {"penalties": []}])
+def test_usd_penalties_unknown_is_not_explicit_empty(record):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["underwriting"]["marketplace"] = {"available": True, "mkt_days_since_suspension": 15, **record}
+    doc["underwriting"]["features"]["mkt_days_since_suspension"] = 15
+    panels = detail_panels(TestClient(create_app(deps)).get(f"/applications/{doc['id']}?lang=en").text)
+    if record.get("penalties") == []:
+        assert "No penalties." in panels["tab-marketplace"]
+    else:
+        assert "No penalties." not in panels["tab-marketplace"]
+        assert "Penalty history is unavailable." in panels["tab-marketplace"]
+    assert "15" in panels["tab-cashflow"] and "mkt_days_since_suspension" in panels["tab-cashflow"]
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_shared_detail_navigation_and_native_values(lang, fake_raw, raw_profile):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc.update(requested_amount_cents=499975, status="awaiting_officer", officer_decision=None,
+               consent={"consent_id": "c-1"}, sla={"deadline": "2026-11-03T09:00:00Z"},
+               timeline=[{"status": "received", "at": "2026-11-03T08:00:00Z"}])
+    doc["underwriting"].update(signals={"new_installment_cents": 11151}, marketplace={"available": True,
+        "platforms": [{"platform": "coupang", "pending_settlement_cents": 87650, "rating": 4.7}]})
+    doc["assessment"].update(claims=[{"text": "Stable receipts.", "txn_ids": ["tx-1"],
+        "metric_ids": ["S:2026-10:revenue_cents", "P:max_amount_cents"]}], officer_checks=[
+        {"text": "Check delayed deposits.", "metric_ids": ["P:max_amount_cents"], "supported": True}],
+        counterfactuals=[{"metric_id": "M:avg_monthly_inflow_cents", "current": 35000.0,
+                          "target": 40000.0, "explanation": "More deposits would improve coverage."}])
+    deps.raw = fake_raw({("consent-c-1", "profile.json"): dict(raw_profile, **USD, representative_name="Yun Boksun"),
+        ("consent-c-1", "transactions.json"): [dict(USD, txn_id="tx-1", booked_on="2026-10-02",
+            amount_cents=33151, balance_after_cents=44444, description="Yun Boksun transfer",
+            txn_type_code="TRANSFER_IN")]})
+    deps.chat = object()  # The GET renders the assistant; it must not invoke it.
+    client = TestClient(create_app(deps))
+    path = f"/applications/{doc['id']}?lang={lang}"
+    html = client.get(path).text
+    panes = detail_panels(html)
+    assert "2026-11-03T08:00:00Z" in html and "SLA" in html and 'data-default-tab="tab-decision"' in html
+    assert ("Timeline" if lang == "en" else "타임라인") in html
+    assert "$5000" in panes["tab-summary"] and "$6000" in panes["tab-summary"] and "summary-officer" not in html
+    assert "class=\"chart columns\"" in panes["tab-cashflow"]
+    for value in ("$16527", "$8000", "$185", "$112", "$297"):
+        assert value in panes["tab-cashflow"]
+    assert "$877" in panes["tab-marketplace"] and "Coupang" in panes["tab-marketplace"]
+    assert "usd-v1" in panes["tab-policy"] and "$6000" in panes["tab-policy"]
+    for value in ("Stable receipts.", "Check delayed deposits.", "More deposits would improve coverage.",
+                  "$16527", "$6000", "$350", "$400", "+$50", 'href="#tab-evidence"'):
+        assert value in panes["tab-opinion"]
+    opinion_text = re.sub("<[^>]+>", "", panes["tab-opinion"])
+    for cited_id in ("S:2026-10:revenue_cents", "P:max_amount_cents", "M:avg_monthly_inflow_cents"):
+        assert cited_id in opinion_text  # On touch screens tooltips alone cannot identify the source.
+    assert "Yun Boksun transfer" in panes["tab-evidence"] and "$332" in panes["tab-evidence"]
+    assert "restored" in panes["tab-consent"]
+    assert 'value="4999.75"' in panes["tab-decision"] and "data-officer-chat" in panes["tab-decision"]
+    assert "₩" not in html
+    doc.update(status="approved", officer_decision=dict(USD, decision="approve", amount_cents=440050,
+               reason="Checked Yun Boksun deposits.", conditions=["Contact Yun Boksun."]))
+    decided = detail_panels(client.get(path).text)
+    assert "$4401" in decided["tab-summary"] and "Checked Yun Boksun deposits." in decided["tab-decision"]
+    deps.demo_principal = Principal("audit", "Auditor", frozenset({AUDITOR}))
+    masked = client.get(path).text
+    assert "Yun Boksun" not in masked and "Daejeon Bakery" not in masked and "data-decision-form" not in masked
+    assert "$332" in detail_panels(masked)["tab-evidence"] and "[[PERSON_" in masked
+    deps.raw.blobs.clear()
+    deleted = client.get(path).text
+    assert "Yun Boksun" not in deleted
+    evidence = detail_panels(deleted)["tab-evidence"]
+    assert "$332" not in evidence and ("unavailable" if lang == "en" else "자료가 없습니다") in evidence
+    doc.update(status="awaiting_officer", officer_decision=None)
+    assert "data-decision-form" not in detail_panels(client.get(path).text)["tab-decision"]
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+@pytest.mark.parametrize("app_id", ["preview-usd-bakery", "app-20261103-p01"])
+def test_last_review_attempt_shows_outcomes_without_rejected_material(lang, app_id):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs[app_id]
+    doc["assessment_run"] = {"rounds": [
+        {"round": 1, "grounding_issues": ["PRIVATE-GROUND", "PRIVATE-GROUND-2"],
+         "analyst": {"tool_calls": [{"name": "PRIVATE-TOOL", "arguments": {"q": "PRIVATE-ARG"}}]}},
+        {"round": 2, "grounding_issues": [], "reviewer": {}, "review_issues": ["PRIVATE-REVIEW"]},
+        {"round": 3, "grounding_issues": [], "reviewer": {}, "review_issues": [],
+         "contract_issues": ["PRIVATE-CONTRACT"]}]}
+    doc["assessment"].update(summary="PRIVATE-DRAFT", review={"passed": False})
+    doc.update(status="failed", error={"stage": "assess_credit", "message": "PRIVATE-ERROR"})
+    client = TestClient(create_app(deps))
+    path = f"/applications/{app_id}?lang={lang}"
+    html = client.get(path).text
+    assert "PRIVATE-" not in html
+    opinion = detail_panels(html)["tab-opinion"]
+    assert ("No opinion" if lang == "en" else "의견 없음") in opinion
+    rows = re.findall(r"<tr><td>([123])</td>(.*?)</tr>", opinion, re.S)
+    assert [n for n, _ in rows] == ["1", "2", "3"]
+    labels = ("Evidence fix requested", "Review issues", "Validation failed") if lang == "en" else (
+        "근거 보완 요청", "검토 지적", "형식 검증 실패")
+    assert all(label in row for label, (_, row) in zip(labels, rows, strict=True))
+    assert ("Problems: 2" if lang == "en" else "문제 2건") in rows[0][1]
+    assert ("Issues: 1" if lang == "en" else "지적 1건") in rows[1][1]
+    doc["assessment"].update(summary="Reviewed summary.", review={"passed": True, "rounds": 3})
+    doc["assessment_run"]["rounds"][-1].pop("contract_issues")
+    doc.update(status="awaiting_officer", error=None)
+    html = client.get(path).text
+    assert "PRIVATE-" not in html
+    opinion = detail_panels(html)["tab-opinion"]
+    assert "Reviewed summary." in opinion
+    assert re.search(r'<tr><td>3</td>.*?badge-green[^>]*>(Passed|통과)<', opinion, re.S)
+
+
+def test_retry_without_a_returned_record_does_not_show_previous_attempt():
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc.update(status="failed", assessment=None, assessment_run={"error": "The opinion did not pass.",
+        "rounds": [{"round": 1, "grounding_issues": ["PRIVATE-REJECTION"]}]},
+        steps=[{"step": "assess", "outcome": "failed", "detail": "The"}])
+    client = TestClient(create_app(deps))
+    path = f"/applications/{doc['id']}?lang=en"
+    assert "Evidence fix requested" in detail_panels(client.get(path).text)["tab-opinion"]
+    # A thrown retry records the exception type in steps without replacing assessment_run.
+    doc["steps"].append({"step": "assess", "outcome": "failed", "detail": "RuntimeError"})
+    html = client.get(path).text
+    assert "No opinion" in detail_panels(html)["tab-opinion"]
+    assert "Evidence fix requested" not in html and "PRIVATE-REJECTION" not in html
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_monthly_expense_readouts_use_average_not_sum_and_handle_missing_installment(lang):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["underwriting"]["monthly"] = [dict(month=m, revenue_cents=10000, operating_out_cents=cost,
+        debt_service_cents=0, owner_draw_cents=0) for m, cost in (("2026-09", 12050), ("2026-10", 12249))]
+    html = TestClient(create_app(deps)).get(f"/applications/{doc['id']}?lang={lang}").text
+    cash = detail_panels(html)["tab-cashflow"]
+    donut = re.search(r'<svg class="chart donut".*?</svg>', cash, re.S)[0]
+    assert re.search(r"<title>[^<]+\$121 \(100(?:\.0)?%\)</title>", donut) and ">$121</text>" in donut
+    assert "$21" in cash and "0/0" not in cash and "₩" not in cash
+    assert ("Insufficient data" if lang == "en" else "자료 부족") in cash
+    assert ("could not be verified" if lang == "en" else "산출 근거를 확인할 수 없습니다") in html
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_verified_limit_from_policy_tab_and_exact_amount_on_error(lang):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc.update(status="escalated", officer_decision=None, requested_amount_cents=500051,
+               sla={"deadline": "2026-11-02T00:00:00Z", "escalated": True})
+    doc["underwriting"]["features"].update(application_id=doc["id"], dscr=1.8, cash_buffer_days=45,
+        revenue_volatility=0.2, tax_bank_match_ratio=.95, months_of_history=12, business_age_months=30,
+        industry="retail", region="Seoul", avg_monthly_inflow_cents=274169, requested_amount_cents=500051,
+        requested_tenor_months=6)
+    doc["policy"].update(max_amount_cents=410000, rate_band="B", reason_codes=[])
+    doc["assessment"]["recommendation"] = "decline"
+    client = TestClient(create_app(deps))
+    path = f"/applications/{doc['id']}"
+    html = client.get(path + f"?lang={lang}").text
+    panes = detail_panels(html)
+    assert 'href="#tab-summary"' in panes["tab-policy"] and "$4100" in panes["tab-policy"]
+    for value in ("$4100", "$4113", "$10000", "$100", "$5001"):
+        assert value in panes["tab-summary"]
+    assert ("request exceeds" if lang == "en" else "신청액이 정책 한도를 초과") in panes["tab-opinion"]
+    assert "SLA" in html and "2026-11-02 09:00" in html and 'value="5000.51"' in panes["tab-decision"]
+    resp = client.post(path + "/decision", data=dict(csrf=token(html), decision="approve",
+                                                     amount_usd="4150.37", reason="Reviewed"))
+    assert resp.status_code == 422 and not deps.queue.sent
+    assert 'data-default-tab="tab-decision" data-tab-reset' in resp.text
+    assert 'value="4150.37"' in detail_panels(resp.text)["tab-decision"]
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_in_progress_usd_without_evidence_refreshes_and_keeps_monthly_empty_state(lang):
+    deps = fixtures.build_deps()
+    deps.store.docs[DOC["id"]] = dict(DOC, policy=None, status="received")
+    html = TestClient(create_app(deps)).get(f"/applications/usd-first?lang={lang}").text
+    panes = detail_panels(html)
+    assert 'http-equiv="refresh"' in html and 'data-default-tab="tab-summary"' in html
+    assert ("No monthly data" if lang == "en" else "월별 자료가 없습니다") in panes["tab-cashflow"]
+    assert "data-decision-form" not in panes["tab-decision"] and "data-officer-chat" not in panes["tab-decision"]
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_unreadable_raw_data_does_not_block_or_disclose_detail(lang, fake_raw):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["consent"] = {"consent_id": "unreadable"}
+    deps.raw = fake_raw({("consent-unreadable", "profile.json"): {"private": "PRIVATE-SOURCE"},
+                         ("consent-unreadable", "transactions.json"): []})
+    client = TestClient(create_app(deps), raise_server_exceptions=False)
+    resp = client.get(f"/applications/{doc['id']}?lang={lang}")
+    assert resp.status_code == 200 and "PRIVATE-SOURCE" not in resp.text
+    assert "pii restored" not in detail_panels(resp.text)["tab-consent"]
+
+
+def test_sparse_settlement_alone_still_shows_known_rows_without_inventing_rates():
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["underwriting"] = {"pg_ledger": {"available": True, "platforms": [{"share": .9}],
+        "monthly_take_rate": [{"month": "2026-08"}, {"month": "2026-09", "rate": 0}],
+        "unmatched": [{"settled_on": "2026-10-01", "platform": "coupang", "net_cents": 0}]},
+        "marketplace": {"available": True, "platforms": [{"platform": "coupang", "rating": 4.76}]}}
+    resp = TestClient(create_app(deps), raise_server_exceptions=False).get(f"/applications/{doc['id']}")
+    assert resp.status_code == 200
+    panels = detail_panels(resp.text)
+    assert "2026-10-01 Coupang" in panels["tab-cashflow"] and "$0" in panels["tab-cashflow"]
+    assert "26-09 0%" in panels["tab-cashflow"] and "26-08 0%" not in panels["tab-cashflow"]
+    assert "4.76" in panels["tab-marketplace"]
+
+
+def test_rounded_display_preserves_editable_principal():
+    deps = fixtures.build_deps()
+    deps.store.docs[DOC["id"]] = dict(DOC, requested_amount_cents=499975)
+    html = TestClient(create_app(deps)).get("/applications/usd-first").text
+    assert re.search(r"<dt>Requested amount</dt>\s*<dd>\$5000 / 6 months</dd>", html)
+    assert 'name="amount_usd" inputmode="decimal" value="4999.75"' in html
 
 
 @pytest.mark.parametrize("setting, expected", [(None, 503), ("false", 503), ("yes", 503), ("true", 303)])
@@ -106,7 +398,7 @@ def test_usd_form_to_real_start_consumer(page, endpoint, source):
     deps = fixtures.build_deps()
     client = TestClient(create_app(deps), follow_redirects=False)
     html = client.get(page).text
-    assert 'name="requested_amount_usd"' in html and 'value="5000.00"' in html
+    assert 'name="requested_amount_usd"' in html and 'value="5000"' in html
     assert "New USD applications are not open yet." in html
     form = dict(csrf=token(html), applicant_id=SELLER, requested_amount_usd="5,000.01", requested_tenor_months="6",
                 consent_account="on", consent_tax="on", consent_pg="on")
@@ -131,7 +423,7 @@ def test_usd_officer_detail_to_real_decision_consumer(enabled):
     deps.store.docs[DOC["id"]] = DOC
     client = TestClient(create_app(deps))
     html = client.get("/applications/usd-first").text
-    assert "$5,000.01 USD" in html and "$6,000.00 USD" in html and 'name="amount_usd"' in html
+    assert "$5000" in html and "$6000" in html and 'name="amount_usd"' in html
     assert "Daejeon Bakery" in html and "₩" not in html
     result = client.post("/applications/usd-first/decision", data=dict(csrf=token(html), decision="approve",
                                                                        amount_usd="5000.01", reason="Reviewed"))
@@ -197,8 +489,53 @@ def test_usd_loan_repayment_and_chart_are_native():
                      "due_on": "2026-11-24", "status": "partial"}]})
     deps.monitoring.loans["usd-loan"] = loan
     html = TestClient(create_app(deps)).get("/loans/usd-loan").text
-    assert all(s in html for s in ["Daejeon Bakery", "$5,000.01 USD", "$4,041.23 USD", "$0.01 USD", "$833.32 USD"])
+    assert all(s in html for s in ["Daejeon Bakery", "$5000", "$4041", "$0", "$833"])
     assert "₩" not in html
+
+
+def test_usd_forecast_shows_recorded_due_day_cashflows_not_krw_assumptions():
+    deps = fixtures.build_deps()
+    loan = dict(USD, id="risk", application_id="risk", applicant_id=SELLER, amount_cents=500000,
+                tenor_months=6, decision="approve", baseline={"avg_weekly_revenue_cents": 28200,
+                "cash_buffer_days": 12}, monitoring={"processed_week": 1, "weeks": [{"week": 1,
+                "row": {"week": 1, "expected_revenue_cents": 28200, "revenue_cents": 14500,
+                        "revenue_vs_expected": None, "projected_min_balance_cents": -7200,
+                        "projected_min_date": "2026-11-11", "shortfall_date": "2026-11-11"},
+                "projection": {"start_balance_cents": 31100, "path": [
+                    {"date": "2026-11-10", "balance_cents": 13000, "before_payment_cents": 13000, "installment_cents": 0},
+                    {"date": "2026-11-11", "balance_cents": -7200, "before_payment_cents": 0, "installment_cents": 7200},
+                    {"date": "2026-11-12", "balance_cents": 7000, "before_payment_cents": 10000, "installment_cents": 3000}]}}]})
+    deps.monitoring.loans["risk"] = loan
+    client = TestClient(create_app(deps))
+    html = client.get("/loans/risk?lang=en").text
+    forecast = html.split("4-week balance forecast", 1)[1].split("</section>", 1)[0]
+    assert all(s in forecast for s in ("$311", "-$72", "11-10 $130", "11-12 $70"))
+    assert re.search(r"2026-11-11</td>\s*<td>\$0</td>\s*<td>\$72</td>", forecast)
+    assert re.search(r"2026-11-12</td>\s*<td>\$100</td>\s*<td>\$30</td>", forecast)
+    assert all(s not in forecast for s in ("Last 4 weeks attainment", "28-day total", "₩", ">0%</"))
+    assert "Actual vs expected inflow by week" in html and "$145" in html and "$282" in html
+    assert "Cash buffer (days, right axis)" not in html and "<td>None</td>" not in html
+    week = loan["monitoring"]["weeks"][0]
+    del week["row"]["shortfall_date"]
+    del week["projection"]["path"][1]["before_payment_cents"]
+    sparse = client.get("/loans/risk?lang=en").text.split("4-week balance forecast", 1)[1].split("</section>", 1)[0]
+    assert re.search(r"2026-11-11</td>\s*<td>-</td>\s*<td>\$72</td>", sparse)
+    assert not re.search(r'Expected shortfall date</div>\s*<div class="kpi-value">None', sparse)
+
+
+def test_usd_forecast_keeps_undated_payment_off_the_timeline():
+    deps = fixtures.build_deps()
+    path = [{"date": "2026-11-10", "balance_cents": 13000},
+            {"balance_cents": -7200, "before_payment_cents": 0, "installment_cents": 7200}]
+    deps.monitoring.loans["risk"] = dict(
+        USD, id="risk", application_id="risk", applicant_id=SELLER, amount_cents=500000, tenor_months=6,
+        decision="approve", baseline={"avg_weekly_revenue_cents": 28200, "cash_buffer_days": 12},
+        monitoring={"processed_week": 1, "weeks": [{"week": 1, "row": {"week": 1}, "projection": {"path": path}}]})
+    response = TestClient(create_app(deps)).get("/loans/risk?lang=en")
+    assert response.status_code == 200
+    forecast = response.text.split("4-week balance forecast", 1)[1].split("</section>", 1)[0]
+    assert re.findall(r"<circle[^>]*><title>(.*?)</title></circle>", forecast) == ["11-10 $130"]
+    assert "<td>—</td><td>$0</td><td>$72</td>" in forecast
 
 
 def test_borrower_portfolios_find_applications_before_consent_exists():
@@ -209,7 +546,7 @@ def test_borrower_portfolios_find_applications_before_consent_exists():
     client = TestClient(create_app(deps))
     path = f"/borrower/{SELLER}"
     usd = client.get(path + "?lang=ko").text
-    assert "$5,000.01 USD" in usd and "usd-first" in usd and "old-case" not in usd
+    assert "$5000" in usd and "usd-first" in usd and "old-case" not in usd
     archive = client.get("/legacy" + path + "?lang=en").text
     assert "₩4,500,000" in archive and "old-case" in archive and "usd-first" not in archive
 
@@ -219,10 +556,10 @@ def test_offline_preview_presents_named_seller_and_original_human_and_agent_reco
     home = client.get("/").text
     assert "Daejeon Bakery" in home
     detail = client.get("/applications/preview-usd-bakery").text
-    assert "$5,000.00 USD" in detail and "Verified settlement receipts." in detail
+    assert "$5000" in detail and "Verified settlement receipts." in detail
     assert "Settlement receipts support the requested amount." in detail
     assert "preview-usd-bakery" not in client.get("/legacy").text
-    assert "$5,000.00 USD" in client.get("/apply/preview-usd-bakery").text
+    assert "$5000" in client.get("/apply/preview-usd-bakery").text
 
 
 def test_grievance_submission_cannot_target_other_portfolio_for_same_seller():
@@ -251,8 +588,8 @@ def test_usd_review_renders_stored_policy_seller_and_settlement_evidence():
     doc["underwriting"]["pg_ledger"] = {"available": True, "pg_reconciliation_ratio": .9, "unmatched": [
         {"settled_on": "2026-11-03", "platform": "coupang", "net_cents": 45678}]}
     page = TestClient(create_app(deps)).get("/applications/preview-usd-bakery").text
-    for value in ["R107", "Sales depend on one channel.", "Naver Smart Store", "$123.45 USD", "Coupang",
-                  "$456.78 USD", "90.0%"]:
+    for value in ["R107", "Sales depend on one channel.", "Naver Smart Store", "$123", "Coupang",
+                  "$457", "90.0%"]:
         assert value in page
 
 
@@ -315,9 +652,9 @@ def test_policy_reason_displays_whole_cents_without_rounding_other_values():
                   .95, .85, "hit").reason().model_dump(),
     ]
     page = TestClient(create_app(deps)).get("/applications/" + doc["id"]).text
-    reasons = re.findall(r"<p>(R\d+.*?)</p>", page, re.S)
-    assert "$0.00 USD" in reasons[0] and "$100.00 USD" in reasons[0]
-    assert "0.95" in reasons[1] and "0.85" in reasons[1] and "$" not in reasons[1]
+    policy = detail_panels(page)["tab-policy"]
+    reasons = re.findall(r"<tr><td>(R\d+)</td><td>.*?</td><td>(.*?)</td><td>(.*?)</td></tr>", policy)
+    assert reasons == [("R900", "$0", "$100"), ("R107", "0.95", "0.85")]
 
 
 @pytest.mark.parametrize("usd", [True, False], ids=["usd", "legacy"])
