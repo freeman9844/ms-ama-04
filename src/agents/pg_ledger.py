@@ -183,7 +183,8 @@ def _summary(settlements, transactions, as_of, unit, lag_days):
         "pg_take_rate_trend_pp": _trend_pp([fee + off for _, fee, off in monthly_raw]),
         "pg_offset_rate_trend_pp": _trend_pp([off for _, _, off in monthly_raw]),
         "pg_cash_conversion_days": cash_conversion_days,
-        # R112 (> 0) is a synthetic-demo threshold: one unmatched settlement with a platform-less deposit counts as a hit.
+        # R112 (> 0) is a synthetic-demo threshold: one unmatched settlement with a platform-less
+        # deposit counts as a hit.
         "pg_advance_suspected_count": len(advance_pairs),
         "pg_advance_share": (
             round(sum(s.net for s in unmatched if id(s) in advance_pairs) / unmatched_total, 3)

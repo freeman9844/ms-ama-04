@@ -684,14 +684,32 @@ def test_v2_decision_shows_alt_data_compare_and_unit_values(lang):
     assert reasons(policy) == [("R113", "5.9%p", "3.0%p"), ("R111", "13.0%", "8.0%"), ("R112", *count)]
 
 
-def test_reason_text_formats_ratio_and_day_features():
+def test_reason_text_formats_ratio_and_day_features_only_for_usd():
     from console.views import reason_text
 
-    assert reason_text("pg_reconciliation_ratio", 0.857) == "85.7%"
-    assert reason_text("mkt_return_rate_90d", 0.18) == "18.0%"
-    assert reason_text("tax_bank_match_ratio", 0.4) == "40.0%"
-    assert reason_text("mkt_days_since_suspension", 30) == "30일"
-    assert reason_text("mkt_rating", 3.9) is None
+    assert reason_text("pg_reconciliation_ratio", 0.857, usd=True) == "85.7%"
+    assert reason_text("mkt_return_rate_90d", 0.18, usd=True) == "18.0%"
+    assert reason_text("tax_bank_match_ratio", 0.4, usd=True) == "40.0%"
+    assert reason_text("mkt_days_since_suspension", 30, usd=True) == "30일"
+    assert reason_text("mkt_rating", 3.9, usd=True) is None
+    assert reason_text("pg_reconciliation_ratio", 0.857) is None and reason_text("mkt_days_since_suspension", 30) is None
+
+
+def test_usd_page_shows_r108_as_percent_but_krw_page_keeps_raw_ratio():
+    from policy.engine import RuleCheck
+
+    usd = fixtures.build_deps()
+    usd.store.docs["preview-usd-bakery"]["policy"]["reason_codes"] = [
+        RuleCheck("R108", "m", "refer", "pg_reconciliation_ratio", "lt", .857, .9, "hit").reason().model_dump()]
+    shown = detail_panels(TestClient(create_app(usd)).get("/applications/preview-usd-bakery").text)["tab-policy"]
+    assert reasons(shown) == [("R108", "85.7%", "90.0%")]
+
+    krw = fixtures.build_deps()
+    doc = krw.store.docs["app-20261103-p03"]
+    doc["policy"]["reason_codes"] = [
+        RuleCheck("R101", "m", "refer", "tax_bank_match_ratio", "lt", .7, .9, "hit").reason().model_dump()]
+    shown = detail_panels(TestClient(create_app(krw)).get("/applications/" + doc["id"]).text)["tab-policy"]
+    assert reasons(shown) == [("R101", "0.7", "0.9")] and "70.0%" not in shown
 
 
 def test_v1_decision_keeps_cash_flow_label_and_trace():

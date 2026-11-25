@@ -9,7 +9,7 @@
 {% set chart_unit = "usd_cents" if usd else "krw" %}
 {% macro money(value) -%}{{ value|usd_cents if usd else value|krw }}{%- endmacro %}
 {% macro reason_value(field, value) -%}
-{{ reason_text(field, value) or (value|usd_tick if usd and (field or "").endswith("_cents") else (value if value is number else "—")) }}
+{{ reason_text(field, value, usd) or (value|usd_tick if usd and (field or "").endswith("_cents") else (value if value is number else "—")) }}
 {%- endmacro %}
 {% macro evidence_chip(e) -%}
 <span class="chip{% if e.missing %} warn{% endif %}">{{ e.label }} = {{ e.value }} <small>{{ e.id }}</small></span>

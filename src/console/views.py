@@ -202,6 +202,9 @@ REASON_UNITS: dict[str, Callable[[float], str]] = {
     "pg_advance_suspected_count": lambda v: _("%(v)s건", v=f"{v:.0f}"),
     "pg_offset_rate_trend_pp": lambda v: f"{v:.1f}%p",
     "mkt_cancel_rate_90d": lambda v: f"{v * 100:.1f}%",
+}
+# KRW 판정 화면은 이 필드를 원래 값 그대로 보이므로 USD 판정에만 쓴다.
+USD_REASON_UNITS: dict[str, Callable[[float], str]] = {
     "mkt_return_rate_90d": lambda v: f"{v * 100:.1f}%",
     "mkt_days_since_suspension": lambda v: _("%(v)s일", v=f"{v:.0f}"),
     "pg_reconciliation_ratio": lambda v: f"{v * 100:.1f}%",
@@ -209,11 +212,12 @@ REASON_UNITS: dict[str, Callable[[float], str]] = {
 }
 
 
-def reason_text(field: str | None, value: Any) -> str | None:
+def reason_text(field: str | None, value: Any, usd: bool = False) -> str | None:
     """단위가 있는 사유 지표의 표시값. 그 밖의 필드는 None이라 호출한 쪽이 기존 표시를 쓴다."""
-    if field not in REASON_UNITS or not isinstance(value, (int, float)) or isinstance(value, bool):
+    units = REASON_UNITS | USD_REASON_UNITS if usd else REASON_UNITS
+    if field not in units or not isinstance(value, (int, float)) or isinstance(value, bool):
         return None
-    return REASON_UNITS[field](value)
+    return units[field](value)
 
 
 def _substitutions(trace: Mapping[str, Any]) -> list[dict[str, Any]]:
