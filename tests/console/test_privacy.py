@@ -198,8 +198,16 @@ def test_customer_menu_links_every_page_of_the_chosen_seller(env):
     page = client.get(HOME, headers=CUSTOMER).text
     for sub in ("", "/plans", "/notices", "/consents", "/grievances"):
         assert f'href="{HOME}{sub}"' in page
-    assert 'href="/apply?applicant_id=seller-dailylook-01"' in page and 'href="/legacy/borrower">' in page
+    assert 'href="/apply?applicant_id=seller-dailylook-01"' in page and "이전 기록 (KRW)" not in page
     assert '<li class="n-status active">' in page
+
+
+def test_officer_menu_has_no_legacy_krw_entry(env):
+    client, _, _ = env
+    page = client.get("/", headers=OFFICER).text
+    assert 'class="n-loans' in page and 'href="/legacy"' not in page and "이전 기록 (KRW)" not in page
+    english = client.get("/borrower/seller-bakery-20", headers={**CUSTOMER, "Cookie": "ama_locale_v2=en"})
+    assert english.status_code == 200 and "Legacy records" not in english.text
 
 
 @pytest.mark.parametrize("path", ["/borrower", HOME, f"{HOME}/plans", f"{HOME}/consents", f"{HOME}/consents/c-0/proof"])

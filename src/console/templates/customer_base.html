@@ -28,7 +28,6 @@
   <div class="who">
     {% if applicant_id %}<span class="who-name">{{ applicant_id|seller_label if prefix else applicant_id|usd_seller }}</span>
     <a href="{{ prefix }}/borrower">{{ _("고객 변경") }}</a>{% else %}<span>{{ _("고객을 선택하면 메뉴가 열립니다.") }}</span>{% endif %}
-    <a href="/legacy/borrower{% if applicant_id %}/{{ applicant_id|path }}{% endif %}">{{ _("이전 기록 (KRW)") }}</a>
     {% include "_lang.html" %}
   </div>
 </aside>

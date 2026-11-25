@@ -1,5 +1,4 @@
 {
-  "이전 기록 (KRW)": "Legacy records (KRW)",
   "신청 금액(USD, $100~$10,000)": "Requested amount (USD, $100–$10,000)",
   "신청 금액은 USD 100~10,000 범위에서 소수 둘째 자리까지 입력하세요.": "Enter $100–$10,000 USD with at most two decimal places.",
   "정책 예외 승인에는 사유가 필요합니다. 최대 $10,000 USD입니다.": "Approving outside policy requires a reason. The maximum is $10,000 USD.",
