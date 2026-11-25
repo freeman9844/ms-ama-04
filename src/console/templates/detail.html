@@ -121,7 +121,7 @@
 </div>
 </div>
 {% if ui.settlement.unmatched %}
-<details><summary>{{ _("계좌에 들어오지 않은 정산 %(n)s건(최근 10건)", n=ui.settlement.unmatched_count) }}</summary>
+<details><summary>{{ ui.settlement.unmatched_heading }}</summary>
 <table class="kv">
 <thead><tr><th>{{ _("정산일 · 플랫폼") }}</th><th>{{ _("실지급액") }}</th><th>{{ _("추정 원인") }}</th></tr></thead>
 <tbody>{% for u in ui.settlement.unmatched %}<tr><th>{{ u.settled_on }} {{ u.platform }}</th><td>{{ u.net_krw|krw }}</td><td>{{ u.cause|mt }}</td></tr>{% endfor %}</tbody>

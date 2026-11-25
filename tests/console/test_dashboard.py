@@ -1,4 +1,4 @@
-from console import dashboard
+from console import dashboard, i18n
 from console.app import STATUS_LABELS
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import USD_V1
@@ -183,6 +183,29 @@ def test_usd_settlement_advance_percentage_uses_unrounded_native_amounts():
         "선지급 추정(0일 전, 정산액의 85%)", "원인 미상 — 지연·다른 계좌·상계 확인"]
     assert card["kpis"][0]["value"] == "0%"
     assert card["take_rate"]["groups"][0]["bars"][0]["parts"][0]["tip"].endswith(" 4.2%")
+
+
+def test_usd_settlement_counts_keep_missing_distinct_from_zero():
+    pg = {"available": True, "unmatched": [{"net_cents": 151}]}
+    for counts, unmatched, total in [({}, None, None), ({"settlement_count": 0, "unmatched_count": 0}, 0, 0),
+                                     ({"settlement_count": 34, "unmatched_count": 12}, 12, 34)]:
+        card = usd_detail(pg_ledger={**pg, **counts})["settlement"]
+        assert card["unmatched_count"] == unmatched
+        assert card["settlement_count"] == total
+        assert f"정산 {total if total is not None else '—'}건" in card["note"]
+        assert f"정산 {unmatched if unmatched is not None else '—'}건" in card["unmatched_heading"]
+
+
+def test_usd_settlement_cycles_show_platform_specific_business_days():
+    platforms = [{"platform": p} for p in ("coupang", "naver_smart_store", "own_store", "11st", "unknown")]
+    ledger = {"available": True, "platforms": platforms}
+    with i18n.use("en"):
+        cycles = usd_detail(pg_ledger=ledger)["settlement"]["cycles"]
+    assert [p["cycle"] for p in cycles] == [
+        "20 business days after the order date", "5 business days after the order date",
+        "2 business days after the order date", "12 business days after the order date", "—"]
+    with i18n.use("ko"):
+        assert usd_detail(pg_ledger=ledger)["settlement"]["cycles"][0]["cycle"] == "주문일로부터 20영업일 후"
 
 
 def test_usd_marketplace_pending_cents_do_not_imply_zero_assignment():

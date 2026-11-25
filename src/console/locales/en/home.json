@@ -260,6 +260,7 @@
   "운영비": "Operating costs",
   "순현금흐름(매출−지출)": "Net cash flow (revenue − spending)",
   "구매확정 후 1영업일": "1 business day after purchase confirmation",
+  "주문일로부터 %(n)s영업일 후": "%(n)s business days after the order date",
   "주정산 70% + 최종액 30%(익익월 1일)": "70% weekly + final 30% (1st of the month after next)",
   "월 2회(25일·익월 10일)": "Twice a month (25th and 10th of next month)",
   "PG 2영업일": "PG, 2 business days",

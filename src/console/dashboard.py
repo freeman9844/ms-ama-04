@@ -17,6 +17,7 @@ from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import MKT_FEATURES
 from shared.product_context import product_of
+from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -270,6 +271,13 @@ def _unmatched_cause(u: Mapping[str, Any], unit: str) -> str:
     return _("선지급 추정(%(lead)s일 전, 정산액의 %(pct)s%%)", lead=lead, pct=round(amount / net * 100))
 
 
+def _settlement_cycle(platform: str, *, usd: bool) -> str:
+    if not usd:
+        return _(PLATFORM_CYCLES.get(platform, "—"))
+    days = USD_PAYOUT_BUSINESS_DAYS.get(platform)
+    return _("주문일로부터 %(n)s영업일 후", n=days) if days is not None else "—"
+
+
 def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[str, Any]:
     """정산 원장 대사 카드. 옛 문서(pg_ledger 없음)·자료 없음은 available=False."""
     if not isinstance(pg, Mapping) or not pg.get("available"):
@@ -297,7 +305,7 @@ def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[
     platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue")
                               for p in platforms_list if charts.is_num(p.get("share"))],
                              width=320, label_w=88)
-    cycles = [{"platform": dt(p["platform"]), "cycle": _(PLATFORM_CYCLES.get(p["platform"], "—")),
+    cycles = [{"platform": dt(p["platform"]), "cycle": _settlement_cycle(p["platform"], usd=usd),
                "lag_days": p.get("lag_days")} for p in platforms_list]
     monthly = list(pg.get("monthly_take_rate") or ())
     split = bool(monthly) and all(charts.is_num(m.get("fee_rate")) and charts.is_num(m.get("offset_rate"))
@@ -319,12 +327,16 @@ def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[
     unit = "cents" if usd else "krw"
     unmatched = [{**u, "cause": _unmatched_cause(u, unit)} for u in pg.get("unmatched") or ()]
     period = pg.get("period") or {}
+    unmatched_count = pg.get("unmatched_count", None if usd else 0)
+    settlement_count = pg.get("settlement_count", None if usd else 0)
     return {"available": True, "kpis": kpis, "guide": [(_(title), _(text)) for title, text in SETTLEMENT_GUIDE],
             "platforms": platforms, "cycles": cycles,
             "take_rate_kind": "split" if split else "single", "take_rate": take, "take_rate_legend": take_rate_legend,
-            "unmatched": unmatched, "unmatched_count": pg.get("unmatched_count", 0),
+            "unmatched": unmatched, "unmatched_count": unmatched_count, "settlement_count": settlement_count,
+            "unmatched_heading": _("계좌에 들어오지 않은 정산 %(n)s건(최근 10건)",
+                                   n=_count_text(unmatched_count) if usd else unmatched_count),
             "note": _("%(start)s ~ %(end)s 정산 %(n)s건", start=period.get("from", ""), end=period.get("to", ""),
-                      n=pg.get("settlement_count", 0))}
+                      n=_count_text(settlement_count) if usd else settlement_count)}
 
 
 def _rate_text(v: Any) -> str:
