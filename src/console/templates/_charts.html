@@ -21,7 +21,7 @@
 {# 값+단위 표시. unit: none=건수, "krw"=원, "krw10k"=만 원(영문은 원으로 풀어 씀), "times"=회, 그 밖은 문자열을 그대로 붙인다. #}
 {% macro amount(value, unit=none) -%}
 {%- if unit is none -%}{{ _("%(n)s건", n=value) }}
-{%- elif unit == "usd_cents" -%}{{ value|round|int|usd_cents }}
+{%- elif unit == "usd_cents" -%}{{ value|usd_tick }}
 {%- elif unit == "krw" -%}{{ _("%(n)s원", n="{:,.0f}".format(value)) }}
 {%- elif unit == "krw10k" -%}{% if locale() == "en" %}₩{{ "{:,.0f}".format(value * 10000) }}{% else %}{{ _("%(n)s만 원", n=value) }}{% endif %}
 {%- elif unit == "times" -%}{{ _("%(n)s회", n=value) }}
@@ -32,8 +32,10 @@
 {% if d.arcs %}
 <svg class="chart donut" viewBox="0 0 120 120" role="img" aria-label="{{ label }}">
   <circle class="donut-track" cx="60" cy="60" r="{{ d.r }}"></circle>
-  {% for a in d.arcs %}<circle class="arc stroke-{{ a.color }}" cx="60" cy="60" r="{{ d.r }}" stroke-dasharray="{{ a.dash }} {{ a.gap }}" stroke-dashoffset="{{ a.offset }}" transform="rotate(-90 60 60)"><title>{{ a.label }} {{ amount(a.value, caption) }} ({{ a.pct }}%)</title></circle>{% endfor %}
-  {% if caption == "krw10k" and locale() == "en" %}
+  {% for a in d.arcs %}<circle class="arc stroke-{{ a.color }}" cx="60" cy="60" r="{{ d.r }}" stroke-dasharray="{{ a.dash }} {{ a.gap }}" stroke-dashoffset="{{ a.offset }}" transform="rotate(-90 60 60)"><title>{{ a.label }} {{ a.text if a.text is defined else amount(a.value, caption) }} ({{ a.pct }}%)</title></circle>{% endfor %}
+  {% if d.total_text is defined %}
+  <text class="donut-total" x="60" y="62" text-anchor="middle">{{ d.total_text }}</text>
+  {% elif caption == "krw10k" and locale() == "en" %}
   <text class="donut-total" x="60" y="62" text-anchor="middle">₩{{ "{:,.1f}".format(d.total / 100) }}M</text>
   {% else %}
   <text class="donut-total" x="60" y="62" text-anchor="middle">{{ d.total }}</text>

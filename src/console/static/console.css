@@ -404,6 +404,8 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
   .sidebar { position: static; height: auto; }
   .sidebar nav ul { display: flex; flex-wrap: wrap; gap: .25rem; }
   .who { display: none; }
+  .shell:has([data-tabs]) .who { display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem; }
+  .shell:has([data-tabs]) .who-name, .shell:has([data-tabs]) .who-roles { display: none; }
   main { padding: 1rem 1rem 2rem; }
   .hero-card { padding: 1.2rem 1.1rem; }
   .hero-amount { font-size: 1.9rem; }

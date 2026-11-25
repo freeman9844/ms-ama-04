@@ -156,12 +156,23 @@ def test_detector_only_usd_alert():
 
 
 def test_snapshot_to_evidence_uses_native_amounts():
-    doc = dict(META, requested_amount_cents=500000, officer_decision={"decision": "approve", "amount_cents": 490001})
-    snapshot = build_snapshot({"doc": doc})
+    from console.views import detail_view
+
+    features = dict(META, application_id="app", industry="retail", region="Seoul", business_age_months=30,
+        dscr=2.0, cash_buffer_days=45, revenue_volatility=.2, tax_bank_match_ratio=.95, months_of_history=6,
+        avg_monthly_inflow_cents=600000, requested_amount_cents=500000, requested_tenor_months=6)
+    monthly = [dict(month=f"2026-{m:02}", revenue_cents=600000, operating_out_cents=250000,
+                    debt_service_cents=70000, owner_draw_cents=30000) for m in range(5, 11)]
+    doc = dict(META, application_id="app", requested_amount_cents=500000, requested_tenor_months=6,
+        underwriting=dict(features=features, signals={"new_installment_cents": 85289}, monthly=monthly),
+        policy=dict(META, application_id="app", rules_version="usd-v1", decision="eligible", rate_band="B",
+                    reason_codes=[], max_amount_cents=500000),
+        officer_decision=dict(META, decision="approve", amount_cents=490001, reason="Private officer note."))
+    snapshot = build_snapshot(detail_view(doc, None, b"test-key", restore=False))
     menu = evidence_menu(snapshot, "en")
     assert "$5,000.00" in menu["application.requested_amount_cents"]
     assert "$4,900.01" in menu["officer_decision.amount_cents"]
-    assert "_krw" not in json.dumps(snapshot)
+    assert "_krw" not in json.dumps(snapshot) and "Private officer note." not in json.dumps(snapshot)
 
 
 def test_grievance_snapshot_keeps_product_and_original_reason():

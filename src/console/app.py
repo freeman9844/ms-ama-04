@@ -42,6 +42,7 @@ from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, parse
 from shared.portfolio import in_portfolio
 from console.dashboard import (
     display_usd,
+    usd_tick,
     POLICY_DECISIONS,
     RECOMMENDATION_LABELS,
     detail_summary,
@@ -65,7 +66,7 @@ from console.monitoring import (
     loan_view,
 )
 from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
-from console.opinion import opinion_panel
+from console.opinion import opinion_panel, review_history
 from console.ops import (
     AXIS_LABELS,
     RECENT_RUN,
@@ -261,6 +262,7 @@ def _templates() -> Environment:
                                   pgettext=i18n.pgettext, newstyle=True)
     env.filters["krw"] = _krw
     env.filters["usd_cents"] = display_usd
+    env.filters["usd_tick"] = usd_tick
     env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "").removesuffix(".00") if type(cents) is int else ""
     env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s
     env.filters["channel"] = lambda s: USD_CHANNEL_NAMES.get(s, s)
@@ -504,18 +506,16 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def detail(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
         state = state_tag(doc)
         ctx.setdefault("decision_pending", decision_pending(doc["application_id"], state))
-        raw = (read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])[0] if i18n.current() != i18n.SOURCE
-               else load_raw(deps.raw, doc))
+        raw, _ = read_raw(lambda: load_raw(deps.raw, doc), doc["application_id"])
         view = detail_view(doc, raw, deps.pseudonym_key, restore=user.can_restore)
         in_progress = doc.get("status") not in DECIDABLE | TERMINAL
         consents = deps.privacy.consents_for_application(doc["application_id"]) if deps.privacy else None
-        if product_of(doc):
-            return render("usd_detail.html", user, status_code, v=view, in_progress=in_progress, state=state,
-                          consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
-                          **ctx)
-        return render("detail.html", user, status_code, texts=page_texts(raw, doc["application_id"], translation_scope("applications", doc)),
+        usd = bool(product_of(doc))
+        texts = None if usd else page_texts(raw, doc["application_id"], translation_scope("applications", doc))
+        return render("detail.html", user, status_code, texts=texts, usd=usd,
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
-                      op=opinion_panel(view, doc.get("assessment_run")), in_progress=in_progress, state=state,
+                      op=opinion_panel(view), history=review_history(doc, published=bool(view["assessment"])),
+                      in_progress=in_progress, state=state,
                       consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
                       **ctx)
 

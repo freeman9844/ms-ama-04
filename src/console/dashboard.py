@@ -17,7 +17,7 @@ from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import MKT_FEATURES
 from shared.product_context import product_of
-from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
+from shared.sellers import USD_CHANNEL_NAMES, USD_PAYOUT_BUSINESS_DAYS
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -278,6 +278,10 @@ def _settlement_cycle(platform: str, *, usd: bool) -> str:
     return _("주문일로부터 %(n)s영업일 후", n=days) if days is not None else "—"
 
 
+def _platform(code: str | None, usd: bool) -> str:
+    return USD_CHANNEL_NAMES.get(code, code or "—") if usd else dt(code)
+
+
 def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[str, Any]:
     """정산 원장 대사 카드. 옛 문서(pg_ledger 없음)·자료 없음은 available=False."""
     if not isinstance(pg, Mapping) or not pg.get("available"):
@@ -289,7 +293,7 @@ def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[
     advance_sub = (_("미입금 중 선지급 짝") if not charts.is_num(advance_share)
                    else _("미입금액의 %(pct)s%%", pct=round(advance_share * 100)))
     kpis = [
-        {"label": _("정산금 계좌 입금"), "value": pct(recon), "sub": _("기준 90% 이상"),
+        {"label": _("정산금 계좌 입금"), "value": _rate_text(recon) if usd else pct(recon), "sub": _("기준 90% 이상"),
          "tone": "red" if charts.is_num(recon) and recon < RECONCILIATION_WARN else "green"},
         {"label": _("최대 채널 비중"), "value": pct(share), "sub": _("기준 80% 이하"),
          "tone": "amber" if charts.is_num(share) and share > TOP_SHARE_WARN else "blue"},
@@ -301,13 +305,13 @@ def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[
          "sub": advance_sub if charts.is_num(advance_n) else "",
          "tone": ("red" if advance_n >= 1 else "green") if charts.is_num(advance_n) else "neutral"},
     ]
-    platforms_list = list(pg.get("platforms") or ())
-    platforms = charts.hbars([(dt(p["platform"]), round(p["share"] * 100, 1), "blue")
+    platforms_list = [p for p in pg.get("platforms") or () if isinstance(p, Mapping)]
+    platforms = charts.hbars([(_platform(p.get("platform"), usd), round(p["share"] * 100, 1), "blue")
                               for p in platforms_list if charts.is_num(p.get("share"))],
                              width=320, label_w=88)
-    cycles = [{"platform": dt(p["platform"]), "cycle": _settlement_cycle(p["platform"], usd=usd),
+    cycles = [{"platform": _platform(p.get("platform"), usd), "cycle": _settlement_cycle(p.get("platform", ""), usd=usd),
                "lag_days": p.get("lag_days")} for p in platforms_list]
-    monthly = list(pg.get("monthly_take_rate") or ())
+    monthly = [m for m in pg.get("monthly_take_rate") or () if isinstance(m, Mapping) and isinstance(m.get("month"), str)]
     split = bool(monthly) and all(charts.is_num(m.get("fee_rate")) and charts.is_num(m.get("offset_rate"))
                                   for m in monthly)
     if split:
@@ -321,7 +325,8 @@ def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[
         take = charts.columns(groups, width=320, height=200, tick_fmt=lambda v: f"{v:.1f}%")
         take_rate_legend = [(fee, "purple"), (offset, "orange")]
     else:
-        take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple") for m in monthly],
+        take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple")
+                             for m in monthly if charts.is_num(m.get("rate"))],
                             width=320, label_w=56)
         take_rate_legend = []
     unit = "cents" if usd else "krw"
@@ -363,14 +368,14 @@ def marketplace_card(summary: Any, *, usd: bool = False) -> dict[str, Any]:
     feature_keys = (*MKT_FEATURES[:-1], net_key)
     rows = [p for p in summary.get("platforms") or () if isinstance(p, Mapping)]
     platforms = [{
-        "platform": dt(p.get("platform")), "opened_on": p.get("opened_on") or "—",
-        "rating": f"{p['rating']:.1f}" if charts.is_num(p.get("rating")) else "—",
+        "platform": _platform(p.get("platform"), usd), "opened_on": p.get("opened_on") or "—",
+        "rating": (str(p["rating"]) if usd else f"{p['rating']:.1f}") if charts.is_num(p.get("rating")) else "—",
         "review_count": _count_text(p.get("review_count")), "orders_90d": _count_text(p.get("orders_90d")),
         "return_rate": _rate_text(p.get("return_rate_90d")), "cancel_rate": _rate_text(p.get("cancel_rate_90d")),
         "grade": dt(p.get("seller_grade")) if p.get("seller_grade") else "—",
         "pending": p.get(pending_key), "assigned": p.get(f"assigned_pending_{unit}"),
     } for p in rows]
-    penalties = [{"platform": dt(p.get("platform")), "occurred_on": p.get("occurred_on"),
+    penalties = [{"platform": _platform(p.get("platform"), usd), "occurred_on": p.get("occurred_on"),
                   "kind": i18n.label(MARKET_PENALTY_LABELS, p.get("kind"))}
                  for p in summary.get("penalties") or () if isinstance(p, Mapping)]
     return {"available": True, "as_of": summary.get("as_of"), "platforms": platforms, "penalties": penalties,
@@ -412,7 +417,7 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     for r in (view.get("policy") or {}).get("reason_codes") or []:
         bar = charts.marker_bar(r.get("observed"), r.get("threshold"))
         if bar:
-            markers.append({"code": r.get("code"), "message": r.get("message"), "observed": r.get("observed"),
+            markers.append({"code": r.get("code"), "field": r.get("field"), "observed": r.get("observed"),
                             "threshold": r.get("threshold"), "bar": bar})
     assessment = view.get("assessment") or {}
     counterfactuals = []

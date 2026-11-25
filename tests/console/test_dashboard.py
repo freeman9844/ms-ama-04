@@ -181,7 +181,7 @@ def test_usd_settlement_advance_percentage_uses_unrounded_native_amounts():
     ]})["settlement"]
     assert [r["cause"] for r in card["unmatched"]] == [
         "선지급 추정(0일 전, 정산액의 85%)", "원인 미상 — 지연·다른 계좌·상계 확인"]
-    assert card["kpis"][0]["value"] == "0%"
+    assert card["kpis"][0]["value"] == "0.0%"
     assert card["take_rate"]["groups"][0]["bars"][0]["parts"][0]["tip"].endswith(" 4.2%")
 
 

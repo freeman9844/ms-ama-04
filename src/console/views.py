@@ -102,6 +102,16 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
     unit = "cents" if product else "krw"
     assessment = _map_strings(published_opinion(doc.get("assessment"), doc.get(f"requested_amount_{unit}")), model_text)
     display_doc = {k: v for k, v in doc.items() if k not in ("assessment", "assessment_run")}
+    if not restore and (decision := doc.get("officer_decision")):
+        # Officer-entered free text, unlike the model opinion, was not pseudonymized at write time.
+        shown = dict(decision)
+        if raw:
+            for field in ("reason", "conditions"):
+                if field in shown:
+                    shown[field] = _map_strings(shown[field], raw_text)
+        elif shown.get("reason") or shown.get("conditions"):
+            shown.update(reason=_("원천 자료가 없어 결정 사유와 조건을 가명 표시할 수 없습니다."), conditions=[])
+        display_doc["officer_decision"] = shown
     if (error := doc.get("error")) and error.get("stage") in ("assess", "assess_credit"):
         display_doc["error"] = {"stage": error["stage"], "message": _("의견 없음")}
     claims = [
@@ -142,6 +152,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "claims": claims,
         "officer_checks": officer_checks,
         "transactions": transactions,
+        "missing_transactions": bool(wanted.difference(t["txn_id"] for t in transactions)),
         "features": uw.get("features") or {},
         "policy": policy,
         "decidable": doc.get("status") in DECIDABLE,
