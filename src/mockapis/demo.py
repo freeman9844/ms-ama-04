@@ -10,7 +10,7 @@ from mockapis.sellerdata.marketplace import StoreOverride
 from mockapis.sellerdata.personas import DEMO_PERSONAS
 from mockapis.synth import Archetype, SyntheticCase, generate_case, load_persona
 from mockapis.synth import UsdCase, generate_usd_case
-from shared.sellers import USD_SELLERS
+from shared.sellers import USD_ONLY_SELLER_IDS, USD_SELLERS
 from shared.krcalendar import next_business_day
 from shared.segments import LOAD_GRID
 
@@ -41,6 +41,11 @@ DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
     ("seller-mugshop-21", Archetype.ASSIGNED, 121, False),
 )
 
+# USD 전용 장면 셀러(KRW 페르소나 없음). (applicant_id, seed). 순서는 shared.sellers.USD_ONLY_SELLER_IDS와 같다.
+USD_ONLY_APPLICANTS: tuple[tuple[str, int], ...] = tuple(zip(USD_ONLY_SELLER_IDS, range(122, 130)))
+# 장면별 신청 금액(센트). 없으면 500_000. 시나리오 실행기가 쓴다.
+SCENE_REQUEST_CENTS: dict[str, int] = {"seller-popup-29": 1_000_000}
+
 # 데모 셀러 덮어쓰기(스펙 8.1). 사후 시나리오 셀러(dailylook-01 등)는 건드리지 않는다.
 DEMO_STORE_OVERRIDES: dict[str, StoreOverride] = {
     "seller-streetfit-19": StoreOverride(rating=3.8),
@@ -60,8 +65,8 @@ def build_demo_cases(as_of: date) -> dict[str, SyntheticCase]:
 
 
 def build_usd_cases(as_of: date) -> dict[str, UsdCase]:
-    return {seller: generate_usd_case(seller, as_of, seed)
-            for seller, _, seed, _ in DEMO_APPLICANTS if seller in USD_SELLERS}
+    seeds = [(seller, seed) for seller, _, seed, _ in DEMO_APPLICANTS if seller in USD_SELLERS]
+    return {seller: generate_usd_case(seller, as_of, seed) for seller, seed in (*seeds, *USD_ONLY_APPLICANTS)}
 
 
 LOAD_ARCHETYPE = {
@@ -109,6 +114,7 @@ class FlowStore:
         self._start = next_business_day(as_of)
         seeds = {applicant_id: seed for applicant_id, _, seed, _ in DEMO_APPLICANTS}
         seeds.update({a.applicant_id: a.seed for a in LOAD_GRID})
+        seeds.update(USD_ONLY_APPLICANTS)
         self._seeds = seeds
         self._generate = lru_cache(maxsize=maxsize)(self._build)
         self.usd_case = lru_cache(maxsize=maxsize)(self._usd_case)

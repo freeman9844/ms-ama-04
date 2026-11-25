@@ -134,7 +134,31 @@ USD_SELLERS = {
     "seller-mugshop-21": UsdSeller("Yeonnam Mug Shop", "Byeon Jaemin", "Seoul", "Home and living",
                                    "Hanyang Ceramics", 325_000, _GENERAL, risk="assigned",
                                    inventory_percent=65),
+    # USD-only scene sellers (no KRW persona). Each one isolates one alt-data policy scene.
+    "seller-snackbox-22": UsdSeller("Mapo Snack Box", "Han Seoyeon", "Seoul", "Food", "Mapo Confectionery",
+                                    300_000, (("naver_smart_store", 60), ("own_store", 40)),
+                                    owner_floor_percent=40),
+    "seller-campgear-23": UsdSeller("Gapyeong Camp Gear", "Kwon Dohyun", "Gapyeong", "Sports",
+                                    "Outdoor Korea", 380_000, _GENERAL,
+                                    season_percent=(20, 20, 50, 100, 120, 90, 60, 60, 200, 280, 250, 60),
+                                    market_months=40),
+    "seller-teahouse-24": UsdSeller("Boseong Tea House", "Lim Eunji", "Boseong", "Food", "Boseong Green Tea",
+                                    300_000, _GENERAL, tax_declared_percent=40),
+    "seller-phonecase-25": UsdSeller("Sinchon Phone Case", "Yoo Junho", "Seoul", "Electronics", "Case Factory",
+                                     200_000, _TWO_MARKETS, 4, business_age_months=8, rating=4.3,
+                                     market_months=7),
+    "seller-toyland-26": UsdSeller("Bucheon Toy Land", "Cha Minji", "Bucheon", "Toys", "Toy Korea",
+                                   350_000, _GENERAL, cancel_rate=Decimal(".13")),
+    "seller-vitamin-27": UsdSeller("Ilsan Vitamin House", "Baek Seungwoo", "Goyang", "Health", "Nature Health",
+                                   360_000, _GENERAL, risk="assigned", advance_label="Marketplace payout"),
+    "seller-golfgear-28": UsdSeller("Yongin Golf Gear", "Nam Kyungho", "Yongin", "Sports", "Golf Pro Supply",
+                                    520_000, _RETAIL, offset_rise_days=90, offset_rise_rate=Decimal(".08")),
+    "seller-popup-29": UsdSeller("Seongsu Popup Goods", "Jo Yerin", "Seoul", "Character goods", "Character Lab",
+                                 120_000, (("coupang", 70), ("naver_smart_store", 30)), inventory_percent=30,
+                                 growth_days=40, growth_percent=300),
 }
+USD_ONLY_SELLER_IDS = ("seller-snackbox-22", "seller-campgear-23", "seller-teahouse-24", "seller-phonecase-25",
+                       "seller-toyland-26", "seller-vitamin-27", "seller-golfgear-28", "seller-popup-29")
 
 
 def seller_label(applicant_id: str) -> str:

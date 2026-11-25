@@ -544,12 +544,12 @@ git commit -m "feat(mockapis): diversify USD marketplace performance per platfor
   - `mockapis.demo.SCENE_REQUEST_CENTS: dict[str, int]`. popup만 1_000_000이고 나머지는 기본 500_000이다. 시나리오 실행기가 쓴다.
   - `build_usd_cases`는 기존 21개와 USD 전용 8개를 모두 만든다. `FlowStore._seeds`에도 넣는다.
 
-시작 값(제 판단). 장면 테스트가 기준이며, 수치는 맞을 때까지 조정할 수 있다.
+시작 값(제 판단). 장면 테스트가 기준이며, 수치는 맞을 때까지 조정할 수 있다. 아래 표는 조정을 마친 최종 값이다(Task 7 구현 시 `owner_floor_percent` 50→40, campgear `season_percent`를 키워 10% 여유 확보).
 
 | ID (시드) | 상호 / 업종 | 채널 | 주 매출(센트) | 레버 | 장면 |
 |---|---|---|---|---|---|
-| `seller-snackbox-22` (122) | Mapo Snack Box / Food | naver 60, own 40 | 300_000 | `owner_floor_percent=50` | O1 |
-| `seller-campgear-23` (123) | Gapyeong Camp Gear / Sports | `_GENERAL` | 380_000 | `season_percent=(30,30,60,100,120,90,60,60,180,250,230,70)`, `market_months=40` | O2 |
+| `seller-snackbox-22` (122) | Mapo Snack Box / Food | naver 60, own 40 | 300_000 | `owner_floor_percent=40` | O1 |
+| `seller-campgear-23` (123) | Gapyeong Camp Gear / Sports | `_GENERAL` | 380_000 | `season_percent=(20,20,50,100,120,90,60,60,200,280,250,60)`, `market_months=40` | O2 |
 | `seller-teahouse-24` (124) | Boseong Tea House / Food | `_GENERAL` | 300_000 | `tax_declared_percent=40` | O3 |
 | `seller-phonecase-25` (125) | Sinchon Phone Case / Electronics | `_TWO_MARKETS` | 200_000 | `history_months=4`, `business_age_months=8`, `market_months=7`, `rating=4.3` | O5 |
 | `seller-toyland-26` (126) | Bucheon Toy Land / Toys | `_GENERAL` | 350_000 | `cancel_rate=Decimal(".13")` | R1 |
@@ -558,8 +558,8 @@ git commit -m "feat(mockapis): diversify USD marketplace performance per platfor
 | `seller-popup-29` (129) | Seongsu Popup Goods / Character goods | coupang 70, naver 30 | 120_000 | `inventory_percent=30`, `growth_days=40`, `growth_percent=300` | O6 |
 
 스펙 예시와 다른 점과 이유:
-- **O2를 여름(surfwear)에서 가을 성수기 캠핑용품(campgear)으로 바꿨다.** 여름 성수기 셀러는 11월 기준일에 최근 60일 매출이 앞 180일보다 크게 낮아 R106(대체 불가 대상 아님, S004가 덮지 않음)에도 걸린다. 가을 성수기 셀러는 9~11월 매출이 높아 R102만 남는다(완결 월 2025-11~2026-10 변동계수 약 0.67).
-  - 겨울 성수기(skiwear)도 검토했지만 버렸다. 대출 기간(2026-11-25~2027-02-24)이 스키 성수기라 사후 모니터링 장면 ③(비수기 오경보)을 만들 수 없다. 캠핑용품은 12~2월이 비수기(70/30/30)라 은행만 보면 입금 급감 경보가 여러 주 뜬다. 사후 모니터링 계획이 이 셀러를 장면 ③에 쓴다.
+- **O2를 여름(surfwear)에서 가을 성수기 캠핑용품(campgear)으로 바꿨다.** 여름 성수기 셀러는 11월 기준일에 최근 60일 매출이 앞 180일보다 크게 낮아 R106(대체 불가 대상 아님, S004가 덮지 않음)에도 걸린다. 가을 성수기 셀러는 9~11월 매출이 높아 R102만 남는다(기준일 2026-11-24에 `revenue_volatility` 약 0.60).
+  - 겨울 성수기(skiwear)도 검토했지만 버렸다. 대출 기간(2026-11-25~2027-02-24)이 스키 성수기라 사후 모니터링 장면 ③(비수기 오경보)을 만들 수 없다. 캠핑용품은 12~2월이 비수기(60/20/20)라 은행만 보면 입금 급감 경보가 여러 주 뜬다. 사후 모니터링 계획이 이 셀러를 장면 ③에 쓴다.
 - **O1은 네이버 단일 집중을 피했다.** 네이버 85%면 R107(> 0.8)에 걸려 장면이 흐려진다. 네이버 60, 자사몰 40이면 현금화 약 5.4일, 최대 비중 0.6이다.
 - **O6은 성장을 기준일 40일 전부터만 준다.** 완결 월(10월까지)의 변동성과 평균 입금은 거의 그대로 두고, 현재 정산 예정금만 키운다. 쿠팡 70%(R107 여유)와 낮은 재고율(DSCR 여유, 요청 $10,000·6개월)도 같은 이유다.
 

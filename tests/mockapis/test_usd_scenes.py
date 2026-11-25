@@ -12,6 +12,7 @@ from agents import features
 from agents.classify import Category, classify
 from agents.marketplace import store_summary
 from mockapis import demo
+from mockapis.demo import SCENE_REQUEST_CENTS
 from mockapis.sellerdata.usd import simulate_usd
 from mockapis.synth import generate_usd_case
 from policy.engine import explain
@@ -169,3 +170,56 @@ def test_tax_declared_percent_and_offset_rise_in_generated_case(monkeypatch):
     assert late and early
     assert all(abs(s.deduction_cents / s.gross_cents - 0.08) < 0.005 for s in late)
     assert all(s.deduction_cents == 0 for s in early)
+
+
+SCENES = {  # seller: (bank-only decision, bank-only codes, final decision, final codes)
+    "seller-snackbox-22": (R, F({"R103"}), E, F()),
+    "seller-campgear-23": (R, F({"R102"}), E, F()),
+    "seller-teahouse-24": (I, F({"R004"}), R, F({"S005"})),
+    "seller-phonecase-25": (I, F({"R001", "R104"}), I, F({"R001", "R104"})),
+    "seller-toyland-26": (E, F(), R, F({"R111"})),
+    "seller-vitamin-27": (E, F(), R, F({"R108", "R112"})),
+    "seller-golfgear-28": (E, F(), R, F({"R113"})),
+    "seller-popup-29": (E, F(), E, F()),
+}
+
+
+@pytest.mark.parametrize("as_of", [AS_OF, date(2026, 11, 25)])
+@pytest.mark.parametrize("seller", sorted(SCENES))
+def test_scene_verdicts(seller, as_of):
+    d = explain(underwrite_at(seller, as_of, SCENE_REQUEST_CENTS.get(seller, 500_000)).features,
+                rules_for_version("usd-v2")).decision
+    bank, bank_codes, final, codes = SCENES[seller]
+    assert (d.cash_only.decision, {r.code for r in d.cash_only.reason_codes}) == (bank, bank_codes)
+    assert d.decision == final and {r.code for r in d.reason_codes} == codes
+
+
+def test_scene_limits_and_substitutions():
+    by = {s: explain(underwrite_at(s, AS_OF, SCENE_REQUEST_CENTS.get(s, 500_000)).features,
+                     rules_for_version("usd-v2")).decision for s in SCENES}
+    assert by["seller-snackbox-22"].applied_substitutions == ("S003",)
+    assert by["seller-campgear-23"].applied_substitutions == ("S004",)
+    assert by["seller-teahouse-24"].max_amount_cents == 500_000
+    assert "S001" not in by["seller-phonecase-25"].applied_substitutions
+    popup = by["seller-popup-29"]
+    assert popup.max_amount_cents >= popup.cash_only.max_amount_cents + 100_000
+
+
+MARGINS = {  # seller: [(feature, op, threshold)] - deciding features only, 10% margin
+    "seller-snackbox-22": [("cash_buffer_days", "lt", 10), ("pg_cash_conversion_days", "le", 10)],
+    "seller-campgear-23": [("revenue_volatility", "gt", .5), ("mkt_tenure_months", "ge", 24),
+                           ("mkt_review_count", "ge", 300), ("revenue_trend_ratio", "ge", .8)],
+    "seller-teahouse-24": [("tax_bank_match_ratio", "lt", .5)],
+    "seller-toyland-26": [("mkt_cancel_rate_90d", "gt", .08)],
+    "seller-golfgear-28": [("pg_offset_rate_trend_pp", "gt", 3.0)],
+    "seller-popup-29": [("revenue_volatility", "le", .5), ("pg_top_platform_share", "le", .8), ("dscr", "ge", 1.0)],
+}
+
+
+@pytest.mark.parametrize("seller", sorted(MARGINS))
+def test_scene_features_keep_ten_percent_margin(seller):
+    f = underwrite_at(seller, AS_OF, SCENE_REQUEST_CENTS.get(seller, 500_000)).features
+    for field, op, t in MARGINS[seller]:
+        v = getattr(f, field)
+        ok = v <= t / 1.1 if op in ("lt", "le") else v >= t * 1.1
+        assert ok, (field, v, t)
