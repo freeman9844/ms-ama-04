@@ -4,9 +4,31 @@ from datetime import date, timedelta
 
 from agents.classify import Category, classify
 from agents.forecast import project_usd
-from agents.ledger_monitor import CauseCandidate
+from agents.ledger_monitor import (CAUSE_FIELDS, CAUSE_OF_TRIGGER, COST_SURGE_PP, HOLD_SHARE, PERSIST_WEEKS,
+                                   PRE_LOAN_DAYS, RETURN_SPIKE_MULT, RETURN_SPIKE_PP, CauseCandidate)
 from agents.monitoring import week_window
-from shared.contracts import AlertCause
+
+_CENT_EVIDENCE = {"order_gross", "held", "advance_in", "returns", "deductions", "high_cost_lender", "loan_proceeds"}
+
+
+def _rate(part, whole):
+    return round(part / whole, 4) if whole else None
+
+
+def _candidates(history, rows):
+    """Causes in order of first firing week; evidence cites that week's USD row fields."""
+    first = {}
+    for entry in history:
+        for trigger in entry["triggers"]:
+            if (cause := CAUSE_OF_TRIGGER.get(trigger)) is not None and cause not in first:
+                first[cause] = entry["week"]
+    by_week = {r["week"]: r for r in rows}
+    out = []
+    for cause, week in sorted(first.items(), key=lambda kv: kv[1]):
+        fields = [f + "_cents" if f in _CENT_EVIDENCE else f for f in CAUSE_FIELDS[cause]]
+        out.append(CauseCandidate(cause, week, tuple(f"W:{week}:{f}" for f in fields
+                                                     if by_week[week].get(f) is not None), False))
+    return out
 
 
 def usd_baseline(uw):
@@ -35,16 +57,37 @@ def observe_usd(loan, visible, pg, week, dues):
     if len(recent) == 3 and expected and row["revenue_vs_expected"] < .75:
         triggers.append("inflow_drop")
     if pg is not None:
-        historical = [o for o in pg.orders if start - timedelta(weeks=8) <= o.order_on < start]
+        pre = start - timedelta(days=PRE_LOAN_DAYS)
+        historical = [o for o in pg.orders if pre <= o.order_on < start]
+        paid = [s for s in pg.settlements if pre <= s.settled_on < start]
         weekly = sum(o.gross_cents for o in historical) // 8
-        row["order_gross_cents"] = sum(o.gross_cents for o in pg.orders if lo <= o.order_on <= hi)
-        row["settle_net_cents"] = sum(s.net_cents for s in pg.settlements if lo <= s.settled_on <= hi)
+        weekly_net = sum(s.net_cents for s in paid) // 8
+        base_returns = _rate(sum(o.returns_cents for o in historical), sum(o.gross_cents for o in historical)) or 0
+        base_deductions = _rate(sum(s.deduction_cents for s in paid), sum(s.gross_cents for s in paid)) or 0
+        week_orders = [o for o in pg.orders if lo <= o.order_on <= hi]
+        week_paid = [s for s in pg.settlements if lo <= s.settled_on <= hi]
+        row["order_gross_cents"] = sum(o.gross_cents for o in week_orders)
+        row["returns_cents"] = sum(o.returns_cents for o in week_orders)
+        row["return_rate"] = _rate(row["returns_cents"], row["order_gross_cents"])
+        row["held_cents"] = sum(s.held_cents for s in week_paid)
+        row["deductions_cents"] = sum(s.deduction_cents for s in week_paid)
+        row["deduction_rate"] = _rate(row["deductions_cents"], sum(s.gross_cents for s in week_paid))
+        row["settle_net_cents"] = sum(s.net_cents for s in week_paid)
         row["orders_vs_expected"] = (round(sum(r["order_gross_cents"] for r in recent) / (weekly * len(recent)), 3)
                                      if weekly else None)
         if weekly and len(recent) == 3 and row["orders_vs_expected"] < .75:
             triggers.append("sales_slump")
-            first = next((w["week"] for w in mon["weeks"] if "sales_slump" in w["triggers"]), week)
-            candidates.append(CauseCandidate(AlertCause.SALES_SLUMP, first, (f"W:{first}:orders_vs_expected",), False))
+        if weekly_net > 0 and row["held_cents"] >= HOLD_SHARE * weekly_net:
+            triggers.append("settlement_hold")
+        last = rows[-PERSIST_WEEKS:]
+        if len(last) == PERSIST_WEEKS:
+            spike = max(RETURN_SPIKE_MULT * base_returns, base_returns + RETURN_SPIKE_PP)
+            if all((r.get("return_rate") or 0) >= spike for r in last):
+                triggers.append("return_spike")
+            if all(r.get("deduction_rate") is not None and r["deduction_rate"] >= base_deductions + COST_SURGE_PP
+                   for r in last):
+                triggers.append("cost_surge")
+        candidates = _candidates([*mon["weeks"], {"week": week, "triggers": triggers}], rows)
     proj = project_usd(visible, start, hi, dues)
     low = min(proj["path"], key=lambda p: p["balance_cents"])
     row.update(projected_min_balance_cents=low["balance_cents"], projected_min_date=low["date"],

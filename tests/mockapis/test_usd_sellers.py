@@ -13,7 +13,7 @@ from policy.app import create_app
 from policy.engine import explain
 from policy.rules import load_rules, rules_for_version
 from shared.contracts import Transaction, UsdPolicyDecision, UsdTransaction
-from shared.sellers import DEMO_SELLERS
+from shared.sellers import DEMO_SELLERS, USD_SELLERS
 from shared.usd_source import UsdSettlement
 
 AS_OF = date(2026, 11, 24)
@@ -171,3 +171,30 @@ def test_thirteen_week_flow_is_native_and_seeded(seller, slump):
     assert (late < early / 2) == slump
     if not slump:
         assert sum(t.amount_cents == -84_000 for t in flow.transactions) == 3
+
+
+@pytest.mark.parametrize("seller,cause", [
+    (BAKERY, None), (DAILY, "sales_slump"), ("seller-gearstore-06", "settlement_hold"),
+    ("seller-linen-10", "return_spike"), ("seller-tangerine-15", "cost_surge")])
+def test_usd_postloan_cause_reaches_the_detector(seller, cause):
+    from agents.usd_monitoring import observe_usd
+    from shared.contracts import USD_V1
+    from shared.usd_source import UsdPgFlow
+    case = case_for(seller)
+    flow = postloan.generate_usd_postloan(case, AS_OF, 1001, loan_id="loan-usd", amount_cents=500_000,
+                                          installment_cents=84_000)
+    assert flow.scenario.value == (cause or "stable")
+    pg = UsdPgFlow(**USD_V1.model_dump(), settlements=flow.pg_settlements, orders=flow.orders)
+    mon = {"flow_start": flow.start.isoformat(), "weeks": []}
+    loan = {"monitoring": mon, "baseline": {"avg_weekly_revenue_cents": USD_SELLERS[seller].weekly_sales_cents}}
+    causes = set()
+    for week in range(1, 14):
+        hi = flow.start + timedelta(days=7 * week - 1)
+        visible = [t for t in flow.transactions if t.booked_on <= hi]
+        rows, triggers, candidates, *_ = observe_usd(loan, visible, pg, week, {})
+        mon["weeks"].append({"week": week, "row": rows[-1], "triggers": triggers})
+        causes |= {c.cause.value for c in candidates}
+        assert all(e.split(":")[2] in rows[c.first_week - 1] for c in candidates for e in c.evidence_ids)
+    assert causes == ({cause} if cause else set())
+    if cause == "settlement_hold":
+        assert sum(s.released_cents for s in flow.pg_settlements) == sum(s.held_cents for s in flow.pg_settlements) > 0

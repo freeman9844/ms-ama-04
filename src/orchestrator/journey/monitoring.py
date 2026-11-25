@@ -553,7 +553,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         pg = UsdPgFlow.model_validate(raw) if raw is not None else None
         baseline, classification, lb = loan["baseline"], None, None
         rows, triggers, candidates, cats, proj = observe_usd(loan, visible, pg, week, due_amounts)
-        pg_weeks = [{k: r[k] for k in ("week", "order_gross_cents", "settle_net_cents")} for r in rows] if pg else None
+        pg_weeks = [{k: r[k] for k in ("week", "order_gross_cents", "returns_cents", "held_cents", "deductions_cents",
+                                       "settle_net_cents") if k in r} for r in rows] if pg else None
     else:
         classification, overrides, _ = _semantic(
             deps, profile, [t for t in visible if t.booked_on >= lo], mon["consent_id"]

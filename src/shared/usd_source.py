@@ -23,12 +23,15 @@ class UsdSettlement(UsdProduct):
     gross_cents: Cents
     fee_cents: Cents
     deduction_cents: Cents = 0
+    held_cents: Cents = 0
+    released_cents: Cents = 0
     net_cents: Cents
 
     @model_validator(mode="after")
     def _net(self):
-        if self.net_cents != self.gross_cents - self.fee_cents - self.deduction_cents:
-            raise ValueError("Settlement gross less fees and deductions must equal net")
+        if self.net_cents != (self.gross_cents - self.fee_cents - self.deduction_cents
+                              - self.held_cents + self.released_cents):
+            raise ValueError("Settlement gross less fees, deductions and holds plus releases must equal net")
         return self
 
 

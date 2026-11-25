@@ -18,11 +18,16 @@
   나눈다. 원장·주문은 대출 전 8주(PRE_LOAN_DAYS)부터 남겨 기준선을 만들 수 있게 한다.
 - default_on: 처음으로 일말 잔고가 0 미만이 된 날(부도 대리 지표, P6 평가의 사전 감지 일수 기준).
 labels(정답 분류)·cause·default_on은 평가 전용이며 API로 노출하지 않는다.
+
+USD(usd-v1) 흐름은 `generate_usd_postloan`이 `simulate_usd` 훅으로 만든다(USD_POSTLOAN_SCENARIOS): 매출 부진(4주차 주문 1/4),
+정산 보류(주력 플랫폼 지급을 15~42일 보류 후 일괄 해제, held_cents·released_cents), 반품 급증(3~8주차 반품률 18%),
+비용 증가(3주차부터 정산 공제 8%). 탐지는 `agents.usd_monitoring.observe_usd`가 원장 임계값으로 한다.
 """
 
 import random
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from enum import StrEnum
 
 from mockapis.postloan_scenarios import end_of_day_balances, scenario_plan
@@ -30,7 +35,7 @@ from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.engine import WARMUP_DAYS, simulate
 from mockapis.synth import RECEIPT_SEED_OFFSET, Archetype, SyntheticCase, TxnCategory
 from mockapis.synth import UsdCase
-from mockapis.sellerdata.usd import simulate_usd
+from mockapis.sellerdata.usd import BASE_RETURN_RATE, UsdPayoutHold, simulate_usd
 from shared.contracts import AlertCause, PgFlow, PgOrderDay, PgSettlement, Transaction
 from shared.contracts import UsdTransaction
 from shared.sellers import USD_SELLERS
@@ -58,6 +63,16 @@ DISBURSE_WEIGHTS = (0.35, 0.25, 0.15, 0.1, 0.05)
 DISBURSE_SUPPLIER_DAYS = 3  # 앞 사흘은 재고 매입, 나머지는 운영비
 LENDER = "에이엠에이렌딩"
 
+# USD 사후 시나리오(usd-v1) 파라미터. 원인 배정은 FlowScenario 아래 USD_POSTLOAN_SCENARIOS.
+USD_SLUMP_ONSET_DAY = 21
+USD_ONSET_DAY = 14
+USD_HOLD_TO_DAY = 41  # 주력 플랫폼(비중 최대) 지급을 이 날까지 보류하고
+USD_HOLD_RELEASE_DAY = 44  # 이 날 이후 첫 영업일에 한꺼번에 푼다
+USD_RETURN_TO_DAY = 55
+USD_RETURN_SPIKE_RATE = Decimal(".18")
+USD_RETURN_CALM_RATE = Decimal(".06")
+USD_COST_DEDUCTION_RATE = Decimal(".08")  # 플랫폼 광고·풀필먼트 비용이 정산에서 공제된다
+
 
 class FlowScenario(StrEnum):
     STABLE = "stable"
@@ -69,6 +84,15 @@ class FlowScenario(StrEnum):
     @classmethod
     def _missing_(cls, value: object) -> "FlowScenario | None":
         return cls.SALES_SLUMP if value == "stacking" else None  # 옛 재생 문서 호환(2026-11-11)
+
+
+# USD 사후 시나리오: KRW(demo.POSTLOAN_SCENARIOS)와 같은 건강 셀러 네 곳이 원인 하나씩을 맡는다. 나머지는 STABLE.
+USD_POSTLOAN_SCENARIOS: dict[str, FlowScenario] = {
+    "seller-dailylook-01": FlowScenario.SALES_SLUMP,
+    "seller-gearstore-06": FlowScenario.SETTLEMENT_HOLD,
+    "seller-linen-10": FlowScenario.RETURN_SPIKE,
+    "seller-tangerine-15": FlowScenario.COST_SURGE,
+}
 
 
 @dataclass(frozen=True)
@@ -118,7 +142,7 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
         raise ValueError("USD flow start must be contiguous with the account history")
     end = start + timedelta(days=POSTLOAN_DAYS-1)
     seller_id = case.profile.applicant_id
-    slump = seller_id == "seller-dailylook-01"
+    scenario = USD_POSTLOAN_SCENARIOS.get(seller_id, FlowScenario.STABLE)
     installments = {day: (i, installment_cents) for i, day in enumerate(due_dates(start, POSTLOAN_DAYS), 1)}
     if tenor_months is not None:
         from shared.repayment import usd_installments
@@ -126,14 +150,38 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
         if dues[0][1] != installment_cents:
             raise ValueError("Installment does not match loan terms")
         installments = {day: (i, a) for i, (day, a) in enumerate(dues, 1)}
-    books = simulate_usd(USD_SELLERS[seller_id], f"{seller_id}:{loan_id}", start, end, seed,
+    seller = USD_SELLERS[seller_id]
+    books = simulate_usd(seller, f"{seller_id}:{loan_id}", start, end, seed,
                          case.transactions[-1].balance_after_cents, pending=case.pending,
-                         slump_on=start+timedelta(weeks=3) if slump else None,
-                         loan_id=loan_id, principal=amount_cents, installments=installments)
+                         loan_id=loan_id, principal=amount_cents, installments=installments,
+                         **_usd_scenario(scenario, seller, start))
     baseline = start - timedelta(days=PRE_LOAN_DAYS)
-    return UsdPostLoanFlow(start, end, FlowScenario.SALES_SLUMP if slump else FlowScenario.STABLE,
+    return UsdPostLoanFlow(start, end, scenario,
                            books.transactions, tuple(o for o in case.orders if baseline <= o.order_on < start) + books.orders,
                            tuple(s for s in case.pg_settlements if baseline <= s.settled_on < start) + books.settlements)
+
+
+def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
+    """simulate_usd hooks for one cause. Hold, returns and costs start in week 3 (day 14) like the legacy plans;
+    the sales slump keeps its original week-4 start."""
+    onset = start + timedelta(days=USD_ONSET_DAY)
+    if scenario is FlowScenario.SALES_SLUMP:
+        return {"slump_on": start + timedelta(days=USD_SLUMP_ONSET_DAY)}
+    if scenario is FlowScenario.SETTLEMENT_HOLD:
+        platform = max(seller.channel_percent, key=lambda c: c[1])[0]
+        return {"hold": UsdPayoutHold(platform, onset, start + timedelta(days=USD_HOLD_TO_DAY),
+                                      start + timedelta(days=USD_HOLD_RELEASE_DAY))}
+    if scenario is FlowScenario.RETURN_SPIKE:
+        spike_to = start + timedelta(days=USD_RETURN_TO_DAY)
+
+        def return_rate(d: date) -> Decimal:
+            if d < onset:
+                return BASE_RETURN_RATE
+            return USD_RETURN_SPIKE_RATE if d <= spike_to else USD_RETURN_CALM_RATE
+        return {"return_rate": return_rate}
+    if scenario is FlowScenario.COST_SURGE:
+        return {"deduction_rate": lambda d: USD_COST_DEDUCTION_RATE if d >= onset else Decimal(0)}
+    return {}
 
 
 def _installments(dues: list[date], installment_krw: int) -> list[Event]:
