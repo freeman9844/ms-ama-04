@@ -198,7 +198,8 @@ def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
     if scenario is FlowScenario.COST_SURGE:
         return {"deduction_rate": lambda d: USD_COST_DEDUCTION_RATE if d >= onset else Decimal(0)}
     if scenario is FlowScenario.ADVANCE_AFTER_LOAN:
-        return {"advance_from": start + timedelta(days=USD_POSTLOAN_ADVANCE_DAY)}
+        # The lender keeps buying payouts that settle after the 13 weeks, so the last week still gets its advances.
+        return {"advance_from": start + timedelta(days=USD_POSTLOAN_ADVANCE_DAY), "advance_to": date.max}
     return {}
 
 

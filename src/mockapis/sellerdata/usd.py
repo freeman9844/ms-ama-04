@@ -51,12 +51,13 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                  pending=(), slump_on=None, loan_id=None, principal=0, installments=None,
                  return_rate=None, deduction_rate=None, hold: UsdPayoutHold | None = None,
                  stress_from: date | None = None, advance_from: date | None = None,
-                 growth_from: date | None = None) -> UsdBooks:
+                 advance_to: date | None = None, growth_from: date | None = None) -> UsdBooks:
     """Inclusive period. Materialize a payout once; that same net books the bank credit.
 
     return_rate(order_day) and deduction_rate(payout_day) return Decimal shares; hold withholds one platform's payouts.
     stress_from cuts sales and starts high-cost borrowing; advance_from sells the top platform's payouts to an
     early-payout lender, so the settlement is paid out but the bank sees a smaller, earlier advance instead.
+    The lender buys payouts settling through advance_to (default end).
     The seller's season_percent and, from growth_from on, growth_percent scale daily sales and inventory purchases.
     """
     rng = random.Random(seed)
@@ -71,7 +72,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
     stress_loans = 0
 
     def is_advanced(s):
-        return advanced == s.platform_code and advance_from <= s.settled_on <= end and s.net_cents > 0
+        return advanced == s.platform_code and advance_from <= s.settled_on <= (advance_to or end) and s.net_cents > 0
 
     def post(amount, description, code, *, platform=None, loan=None, item=None):
         nonlocal balance

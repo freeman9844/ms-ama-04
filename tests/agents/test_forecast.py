@@ -77,6 +77,28 @@ def test_scheduled_platform_deposits_leave_the_general_average_and_set_its_own()
     assert balance["2026-12-06"] == balance["2026-12-04"]  # weekend: no payouts
 
 
+def test_scheduled_payouts_are_discounted_by_reconciliation():
+    from agents.usd_monitoring import _scheduled
+    from shared.contracts import USD_V1
+    from shared.usd_source import UsdPgFlow, UsdSettlement
+
+    hi = date(2026, 11, 27)  # Friday; Naver pays within 5 business days -> known through 2026-12-04
+
+    def paid(on, net, released=0):
+        return UsdSettlement(**USD_V1.model_dump(), settled_on=on, platform_code="naver_smart_store",
+                             gross_cents=net - released, fee_cents=0, released_cents=released, net_cents=net)
+
+    pg = UsdPgFlow(**USD_V1.model_dump(), orders=(), settlements=(
+        paid(date(2026, 11, 27), 9000),  # already settled by hi
+        paid(date(2026, 12, 1), 1000),
+        paid(date(2026, 12, 2), 1000, released=500),  # a hold release is not a recurring payout
+        paid(date(2026, 12, 5), 1000),  # Saturday: rolls to Monday, past the known day
+        paid(date(2026, 12, 8), 1000),  # past the known day
+    ))
+    assert _scheduled(pg, hi, .4) == {"naver_smart_store": (date(2026, 12, 4), {date(2026, 12, 1): 400})}
+    assert _scheduled(pg, hi, None) == {"naver_smart_store": (date(2026, 12, 4), {date(2026, 12, 1): 1000})}
+
+
 @pytest.fixture(scope="module")
 def cafe():
     return build_demo_cases(AS_OF)["seller-dailylook-01"]

@@ -11,13 +11,16 @@ import pytest
 from agents import features
 from agents.classify import Category, classify
 from agents.marketplace import store_summary
-from mockapis import demo
+from agents.usd_monitoring import approval_basis, observe_usd, track_summary, usd_baseline
+from mockapis import demo, postloan
 from mockapis.demo import SCENE_REQUEST_CENTS
 from mockapis.sellerdata.usd import simulate_usd
 from mockapis.synth import generate_usd_case
 from policy.engine import explain
 from policy.rules import rules_for_version
+from shared.contracts import USD_V1, AlertCause
 from shared.sellers import USD_SELLERS
+from shared.usd_source import UsdPgFlow
 
 AS_OF = date(2026, 11, 24)
 E, R, I = "eligible", "refer", "ineligible"
@@ -244,3 +247,87 @@ def test_scene_substitution_conditions_keep_margin(seller):
     for c in sub.when:
         v = getattr(f, c.field)
         assert clears(c.field, c.op, v, c.threshold), (sub.code, c.field, v, c.threshold)
+
+
+def replay(seller, *, basis=None, ledger=True, prior_year=True):
+    """Book the loan as a usd-v2 approval and observe 13 weeks. Returns (UsdObservation per week, week entries)."""
+    uw = underwrite_at(seller, AS_OF)
+    stored = {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly}
+    decision = explain(uw.features, rules_for_version("usd-v2")).decision
+    flow = postloan.generate_usd_postloan(case_at(seller, AS_OF), AS_OF, 1001,
+                                          loan_id="loan-usd", amount_cents=500_000, installment_cents=84_000)
+    pg = UsdPgFlow(**USD_V1.model_dump(), settlements=flow.pg_settlements, orders=flow.orders,
+                   prior_year_orders=flow.prior_year_orders if prior_year else ())
+    mon = {"flow_start": flow.start.isoformat(), "weeks": []}
+    loan = {"monitoring": mon, "baseline": usd_baseline(stored),
+            "approval_basis": approval_basis(decision.applied_substitutions, stored["features"])
+            if basis is None else basis}
+    out = []
+    for week in range(1, 14):
+        hi = flow.start + timedelta(days=7 * week - 1)
+        obs = observe_usd(loan, [t for t in flow.transactions if t.booked_on <= hi], pg if ledger else None, week, {})
+        mon["weeks"].append({"week": week, "row": obs.rows[-1], "triggers": obs.triggers,
+                             "bank_only_triggers": obs.bank_only, "explained": obs.explained})
+        out.append(obs)
+    return out, mon["weeks"]
+
+
+def test_scene1_assignment_breaks_s003_basis():
+    obs, weeks = replay("seller-snackbox-22")
+    s = track_summary(weeks)
+    assert s["bank_first_week"] is None  # bank-only: never detected
+    assert s["full_first_week"] in (3, 4) and "basis_breach" in obs[s["full_first_week"] - 1].triggers
+    assert obs[s["full_first_week"] - 1].candidates[0].cause is AlertCause.SETTLEMENT_ASSIGNED
+
+
+def test_stable_s003_loan_never_breaches(monkeypatch):
+    monkeypatch.setitem(postloan.USD_POSTLOAN_SCENARIOS, "seller-snackbox-22", postloan.FlowScenario.STABLE)
+    obs, _ = replay("seller-snackbox-22")
+    assert all(b["status"] != "breach" for o in obs for b in o.basis)
+    assert all(o.basis for o in obs)  # the S003 basis is computed from week 1 (Review Focus 2)
+
+
+SCENE2 = {"seller-dailylook-01": (6, 5), "seller-gearstore-06": (5, 3), "seller-linen-10": (None, 4)}
+# (bank-only first week, full first week), measured in Task 4 Step 4.
+
+
+@pytest.mark.parametrize("seller", sorted(SCENE2))
+def test_scene2_full_track_detects_first(seller):
+    s = track_summary(replay(seller)[1])
+    assert s["full_first_week"] is not None
+    assert s["bank_first_week"] is None or s["full_first_week"] < s["bank_first_week"]
+    assert (s["bank_first_week"], s["full_first_week"]) == SCENE2[seller]
+
+
+def test_scene3_seasonal_drop_is_explained():
+    obs, weeks = replay("seller-campgear-23")
+    s = track_summary(weeks)
+    assert s["full_first_week"] is None and s["bank_only_weeks"] >= 3 and s["explained_weeks"] >= 3
+    assert all(b["status"] != "breach" for o in obs for b in o.basis)
+
+
+@pytest.mark.parametrize("seller", ["seller-campgear-23", "seller-dailylook-01"])
+def test_bank_only_track_equals_detector_without_ledger(seller):
+    _, weeks = replay(seller)
+    no_ledger, _ = replay(seller, ledger=False)
+    assert [w["bank_only_triggers"] for w in weeks] == [o.triggers for o in no_ledger]
+    assert all(o.explained == [] and o.basis == [] for o in no_ledger)
+
+
+def test_order_slump_is_never_explained():
+    obs, _ = replay("seller-dailylook-01")
+    assert not any(e["trigger"] == "inflow_drop" for o in obs for e in o.explained
+                   if o.rows[-1]["orders_per_day_vs_expected"] < .75)
+
+
+def test_missing_prior_year_keeps_flat_expectation():
+    obs, _ = replay("seller-campgear-23", prior_year=False)
+    assert len({o.rows[-1]["expected_orders_cents"] for o in obs}) == 1
+    assert all(o.rows[-1]["orders_vs_prior_year"] is None for o in obs)
+    assert all(b["status"] == "unknown" for o in obs for b in o.basis if b["code"] == "S004")
+    assert not any("basis_breach" in o.triggers for o in obs)
+
+
+def test_no_substitution_loan_has_empty_basis():
+    assert approval_basis((), {"pg_reconciliation_ratio": .99}) == []
+    assert all(o.basis == [] for o in replay("seller-bakery-20")[0])
