@@ -375,9 +375,10 @@ def marketplace_card(summary: Any, *, usd: bool = False) -> dict[str, Any]:
         "grade": dt(p.get("seller_grade")) if p.get("seller_grade") else "—",
         "pending": p.get(pending_key), "assigned": p.get(f"assigned_pending_{unit}"),
     } for p in rows]
+    penalty_records = summary.get("penalties")
     penalties = [{"platform": _platform(p.get("platform"), usd), "occurred_on": p.get("occurred_on"),
                   "kind": i18n.label(MARKET_PENALTY_LABELS, p.get("kind"))}
-                 for p in summary.get("penalties") or () if isinstance(p, Mapping)]
+                 for p in penalty_records if isinstance(p, Mapping)] if isinstance(penalty_records, (list, tuple)) else None
     return {"available": True, "as_of": summary.get("as_of"), "platforms": platforms, "penalties": penalties,
             "features": {k: summary.get(k) for k in feature_keys},
             "pending": {"total": _sum_amounts([p["pending"] for p in platforms], usd=usd),

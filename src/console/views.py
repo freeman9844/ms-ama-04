@@ -8,14 +8,15 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from agents.data_assembly import build_pseudonymizer
+from agents.data_assembly import build_pseudonymizer, case_entities
 from agents.pretranslate import load_case_raw
 from agents.evidence import build_catalog
-from console.i18n import _
+from console.i18n import CATALOGS, _
 from console.officer_chat import policy_trace
 from shared.contracts import ApplicantProfile, Transaction, UsdProduct, UsdTransaction
 from shared.product_context import product_of, validate_usd_evidence
 from shared.opinions import opinion_state, published_opinion
+from shared.pseudonymize import Pseudonymizer
 
 DECIDABLE = frozenset({"awaiting_officer", "escalated"})
 
@@ -54,9 +55,12 @@ def _text_functions(raw: RawData | None, key: bytes, restore: bool) -> tuple[str
     """(pii 상태, 모델 출력 변환, 원천 텍스트 변환)."""
     if raw is None:
         return ("unavailable" if restore else "masked"), (lambda s: s), (lambda s: s)
-    p = build_pseudonymizer(key, raw.profile, raw.transactions)
     if not restore:
-        return "masked", (lambda s: s), p.mask
+        entities = case_entities(raw.profile, raw.transactions)
+        # Officer text can contain a display name from another UI language.
+        aliases = {catalog[name]: kind for name, kind in entities.items() for catalog in CATALOGS.values() if name in catalog}
+        return "masked", (lambda s: s), Pseudonymizer(key, aliases | entities).mask
+    p = build_pseudonymizer(key, raw.profile, raw.transactions)
     # 토큰은 결정적(HMAC)이라 같은 원문을 다시 가명처리하면 저장된 토큰과 같은 매핑이 생긴다.
     p.mask(" ".join((raw.profile.business_name, raw.profile.representative_name, raw.profile.business_reg_no)))
     for t in raw.transactions:
@@ -92,6 +96,9 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
     policy = doc.get("policy")
     product = product_of(doc)
     catalog_policy = _usd_policy_evidence(policy, product) if product and policy else policy
+    if not product and policy and policy.get("reason_codes") is None:
+        # The lookup has no reason values to index; keep the original policy for trace verification.
+        catalog_policy = {**policy, "reason_codes": []}
     catalog = (
         build_catalog(uw.get("features") or {}, uw.get("signals") or {}, uw.get("monthly") or [], catalog_policy,
                       partial_usd=bool(product))
@@ -175,16 +182,17 @@ def _policy_compare(policy: Any, unit: str) -> dict[str, Any] | None:
 
 def verified_policy_trace(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[str, Any]:
     product = product_of(doc)
+    requested = "requested_amount_cents" if product else "requested_amount_krw"
+    if not isinstance(policy, Mapping) or not isinstance(features, Mapping) or features.get(requested) != doc.get(requested):
+        return {}
+    if "rate_band" not in policy or not isinstance(policy.get("reason_codes"), (list, tuple)):
+        return {}
     if product:
-        if not policy or policy.get("rules_version") != product.product_version:
+        if policy.get("rules_version") != product.product_version:
             return {}
         tags = product.model_dump()
         if any(not (tags.items() <= record.items()) for record in (policy, policy.get("cash_only"))
                if isinstance(record, Mapping)):
-            return {}
-        if "rate_band" not in policy or not isinstance(policy.get("reason_codes"), (list, tuple)):
-            return {}
-        if not features or features.get("requested_amount_cents") != doc.get("requested_amount_cents"):
             return {}
     return (policy_trace(policy, features, doc.get("received_at")) or {}).get("trace") or {}
 

@@ -88,7 +88,9 @@
 </div>
 {% if p.limit %}
 <section class="card">
-<h3>{{ _("한도 산정") }} <small>{{ _("후보 중 가장 작은 값을 %(unit)s 단위로 내림", unit=money(p.limit.unit_cents)) if usd else _("후보 중 가장 작은 값을 10만 원 단위로 내림") }}</small></h3>
+{% set step = p.limit.get("unit_" ~ unit) %}
+{% set step_text = ch.amount(step // 10000, "krw10k") if not usd and step % 10000 == 0 else money(step) %}
+<h3>{{ _("한도 산정") }} <small>{{ _("후보 중 가장 작은 값을 %(unit)s 단위로 내림", unit=step_text) }}</small></h3>
 {{ ch.hbars(p.limit.bars, _("한도 산정 후보"), "usd_cents" if usd else "krw10k") }}
 <p>{{ _("가장 작은 값:") }} <strong>{{ p.limit.binding }}</strong> → {{ _("산출 한도 %(v)s", v=money(p.limit.computed)) }}{% if p.limit.policy_limit is not none and p.limit.policy_limit != p.limit.computed %} · {{ _("정책 한도 %(v)s(부적격이면 $0)", v=money(p.limit.policy_limit)) if usd else _("정책 한도 %(v)s(부적격이면 0원)", v=money(p.limit.policy_limit)) }}{% endif %}</p>
 </section>
@@ -204,7 +206,8 @@
 </table>
 <p>{{ _("정산 예정금 합 %(total)s − 선정산 양도 %(assigned)s = 순정산 예정금 %(net)s. 예정액은 실제 계좌 입금액이 아닙니다. 입금 여부는 정산 원장과 계좌 거래를 대조해 확인합니다.", total=money(mk.pending.total), assigned=money(mk.pending.assigned), net=money(mk.pending.net)) }}</p>
 <h4>{{ _("제재 이력") }}</h4>
-{% if mk.penalties %}
+{% if mk.penalties is none %}<p class="note">{{ _("제재 이력 자료가 없습니다.") }}</p>
+{% elif mk.penalties %}
 <ul>{% for x in mk.penalties %}<li>{{ x.occurred_on }} · {{ x.platform }} · {{ x.kind }}</li>{% endfor %}</ul>
 {% else %}<p class="note">{{ _("제재 이력이 없습니다.") }}</p>{% endif %}
 {% else %}<p class="note">{{ _("자료 없음") if usd else _("마켓 판매 성과 자료 없음 — 동의하지 않았거나 2026-11-17 이전 심사분입니다.") }}</p>{% endif %}
@@ -234,7 +237,7 @@
   <thead><tr><th>{{ _("코드") }}</th><th>{{ _("내용") }}</th><th>{{ _("관측값") }}</th><th>{{ _("기준") }}</th></tr></thead>
   <tbody>{% for r in v.policy.reason_codes %}<tr><td>{{ r.code }}</td><td>{{ r.message|mt }}</td><td>{{ reason_value(r.field, r.observed) }}</td><td>{{ reason_value(r.field, r.threshold) }}</td></tr>{% endfor %}</tbody>
 </table>
-{% else %}<p class="note">{{ _("걸린 사유 코드가 없습니다.") }}</p>{% endif %}
+{% elif v.policy.get("reason_codes") is not none %}<p class="note">{{ _("걸린 사유 코드가 없습니다.") }}</p>{% endif %}
 {% if v.substitutions %}
 <h4>{{ _("셀러 데이터 대체") }}</h4>
 <table>
@@ -297,7 +300,7 @@
     <td><span class="claim-mark {{ 'ok' if c.ok else 'missing' }}" title="{{ _('근거 모두 확인') if c.ok else _('근거 값을 찾지 못한 항목이 있습니다') }}">{{ "✓" if c.ok else "⚠" }}</span></td>
     <td>{{ c.text|mt }}</td>
     <td>{% for e in c.evidence %}{{ evidence_chip(e) }}{% else %}-{% endfor %}</td>
-    <td>{% for t in c.txn_ids %}<a class="chip txn" href="#tab-evidence">{{ t }}</a>{% else %}-{% endfor %}</td>
+    <td>{% for t in c.txn_ids %}<a class="chip txn{% if t in c.missing %} warn{% endif %}" href="#tab-evidence">{{ t }}</a>{% else %}-{% endfor %}</td>
   </tr>
   {% endfor %}
   </tbody>
@@ -309,7 +312,7 @@
 </div>
 {% endif %}
 </div>
-<p class="note">{{ _("✓ 인용한 근거 값이 모두 심사 지표·정책 결과에 있음 · ⚠ 일부 근거를 찾지 못함(심사역이 직접 확인). 거래 ID를 누르면 근거 거래 탭으로 갑니다.") }}</p>
+<p class="note">{{ _("✓ 인용한 지표·정책 값과 거래를 현재 모두 확인할 수 있습니다. ⚠ 확인할 수 없는 근거가 있습니다. 거래 ID를 누르면 근거 거래 탭으로 갑니다.") }}</p>
 </section>
 
 {% if op.counterfactuals %}

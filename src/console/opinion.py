@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from console import charts, i18n
-from console.assessment import RECOMMENDATION_TONES
+from console.assessment import RECOMMENDATION_TONES, claim_check
 from console.dashboard import POLICY_DECISIONS, RECOMMENDATION_LABELS, usd_tick
 from console.i18n import _
 from shared.product_context import product_of
@@ -111,7 +111,8 @@ def _recommendation(assessment: Mapping[str, Any], policy: Mapping[str, Any], re
     }
 
 
-def _claims(claims: Sequence[Mapping[str, Any]], cents_ids: frozenset[str]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _claims(claims: Sequence[Mapping[str, Any]], cents_ids: frozenset[str],
+            found_transactions: set[str]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     counts = {key: 0 for key, _label, _color in SOURCES}
     rows = []
     for i, c in enumerate(claims, start=1):
@@ -122,9 +123,10 @@ def _claims(claims: Sequence[Mapping[str, Any]], cents_ids: frozenset[str]) -> t
             evidence.append({"id": metric_id, "label": evidence_label(metric_id),
                              "value": evidence_value(metric_id, value, cents_ids), "missing": missing})
         txn_ids = list(c.get("txn_ids") or ())
-        counts["txn"] += len(txn_ids)
+        for txn_id in txn_ids:
+            counts["txn" if txn_id in found_transactions else "missing"] += 1
         rows.append({"n": i, "text": c.get("text", ""), "evidence": evidence, "txn_ids": txn_ids,
-                     "ok": not any(e["missing"] for e in evidence), "sources": len(evidence) + len(txn_ids)})
+                     **claim_check(c, found_transactions), "sources": len(evidence) + len(txn_ids)})
     return rows, counts
 
 
@@ -288,7 +290,7 @@ def opinion_panel(view: Mapping[str, Any]) -> dict[str, Any] | None:
     cents_ids = frozenset(f"P:{r['code']}:{key}" for r in policy.get("reason_codes") or ()
                           if unit == "cents" and (r.get("field") or "").endswith("_cents")
                           for key in ("observed", "threshold"))
-    claims, counts = _claims(view.get("claims") or (), cents_ids)
+    claims, counts = _claims(view.get("claims") or (), cents_ids, {t["txn_id"] for t in view.get("transactions") or ()})
     review = assessment.get("review") or {}
     usage = _usage(doc, assessment.get("models") or {})
     ok = sum(1 for c in claims if c["ok"])

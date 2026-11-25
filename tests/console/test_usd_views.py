@@ -80,6 +80,89 @@ def detail_panels(html):
     return dict(zip(tabs, parts[2::2], strict=True))
 
 
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_auditor_masks_case_display_alias_in_officer_text(lang, make_doc, fake_raw, raw_profile):
+    deps = fixtures.build_deps()
+    source, alias = "대전밀빵공방", "Daejeon Wheat Bakery"
+    decision = {"decision": "approve", "reason": f"Checked {source} and {alias}.",
+                "conditions": [f"Contact {alias.upper()}."]}
+    doc = make_doc("approved", officer_decision=decision, applicant_id="seller-bakery-20")
+    deps.store.docs[doc["id"]] = doc
+    deps.raw = fake_raw({("consent-c-1", "profile.json"): dict(raw_profile, applicant_id=doc["applicant_id"],
+                                                               business_name=source),
+                         ("consent-c-1", "transactions.json"): []})
+    client = TestClient(create_app(deps))
+    url = f"/applications/{doc['id']}?lang={lang}"
+    officer = detail_panels(client.get(url).text)["tab-decision"]
+    assert decision["reason"] in officer and decision["conditions"][0] in officer
+    deps.demo_principal = Principal("auditor", "Auditor", frozenset({AUDITOR}))
+    html = client.get(url).text
+    assert source not in html and alias.casefold() not in html.casefold()
+    panel = detail_panels(html)["tab-decision"]
+    assert "Checked [[BIZNAME_" in panel and "Contact [[BIZNAME_" in panel
+
+
+@pytest.mark.parametrize("received,stored,codes,verified", [
+    ("2026-11-09T09:00:00+09:00", 5_000_000, [], True),
+    ("2026-11-03T09:00:00+09:00", 5_000_000, [], False),  # v1 was amended in place.
+    ("2026-11-09T09:00:00+09:00", 4_900_000, [], False),
+    ("2026-11-09T09:00:00+09:00", 5_000_000, None, False),
+])
+def test_archived_krw_formula_requires_verified_version(received, stored, codes, verified, make_doc):
+    deps = fixtures.build_deps()
+    doc = make_doc(received_at=received, requested_amount_krw=8_000_000)
+    doc["underwriting"]["features"].update(application_id=doc["id"], requested_amount_krw=8_000_000,
+        avg_monthly_inflow_krw=12_000_000, requested_tenor_months=12, months_of_history=12, cash_buffer_days=30,
+        revenue_volatility=.2, tax_bank_match_ratio=.95, region="서울", business_age_months=38)
+    doc["policy"].update(reason_codes=codes, max_amount_krw=stored)
+    deps.store.docs[doc["id"]] = doc
+    panes = detail_panels(TestClient(create_app(deps)).get(f"/applications/{doc['id']}?lang=ko").text)
+    summary = panes["tab-summary"]
+    assert f"한도 {stored:,}원" in summary and f"한도 {stored:,}원" in panes["tab-policy"]
+    if verified:
+        assert "상품 최대 500만 원" in summary and "산출 한도 5,000,000원" in summary
+    else:
+        assert "한도 산정 후보" not in summary and "산출 근거를 확인할 수 없습니다" in summary
+    if codes is None:
+        assert "걸린 사유 코드가 없습니다." not in panes["tab-policy"]
+    assert doc["policy"]["max_amount_krw"] == stored and doc["policy"]["reason_codes"] == codes
+
+
+def test_archived_transaction_changes_current_evidence_not_published_review(make_doc, raw):
+    deps = fixtures.build_deps()
+    doc = make_doc()
+    doc["assessment"]["claims"] = [{"text": "Reviewed transfer.", "txn_ids": ["tx-archived"], "metric_ids": []}]
+    doc["assessment"]["officer_checks"] = []
+    deps.store.docs[doc["id"]] = doc
+    deps.raw = raw
+    raw.blobs[("consent-c-1", "transactions.json")][0]["txn_id"] = "tx-archived"
+    client = TestClient(create_app(deps))
+    url = f"/applications/{doc['id']}?lang=en"
+    before = detail_panels(client.get(url).text)
+    assert ">1/1<" in before["tab-opinion"] and "All evidence verified" in before["tab-opinion"]
+    assert "tx-archived" in before["tab-evidence"]
+    raw.blobs.clear()
+    after = detail_panels(client.get(url).text)
+    assert ">0/1<" in after["tab-opinion"] and "All evidence verified" not in after["tab-opinion"]
+    assert "Reviewed transfer." in after["tab-opinion"] and ">Passed<" in after["tab-opinion"]
+    assert "Source data for the cited transactions is unavailable." in after["tab-evidence"]
+
+
+@pytest.mark.parametrize("record", [{}, {"penalties": None}, {"penalties": []}])
+def test_usd_penalties_unknown_is_not_explicit_empty(record):
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["underwriting"]["marketplace"] = {"available": True, "mkt_days_since_suspension": 15, **record}
+    doc["underwriting"]["features"]["mkt_days_since_suspension"] = 15
+    panels = detail_panels(TestClient(create_app(deps)).get(f"/applications/{doc['id']}?lang=en").text)
+    if record.get("penalties") == []:
+        assert "No penalties." in panels["tab-marketplace"]
+    else:
+        assert "No penalties." not in panels["tab-marketplace"]
+        assert "Penalty history is unavailable." in panels["tab-marketplace"]
+    assert "15" in panels["tab-cashflow"] and "mkt_days_since_suspension" in panels["tab-cashflow"]
+
+
 @pytest.mark.parametrize("lang", ["en", "ko"])
 def test_shared_detail_navigation_and_native_values(lang, fake_raw, raw_profile):
     deps = fixtures.build_deps()

@@ -1,6 +1,6 @@
 import pytest
 
-from console import assessment, i18n
+from console import i18n
 from console.assessment import SIGNAL_RULES, SIGNALS, assessment_panels
 from console.views import detail_view
 from policy.rules import DEFAULT_RULES_PATH, load_rules
@@ -23,7 +23,7 @@ def by_field(panels):
     return {s["field"]: s for s in panels["signals"]}
 
 
-def test_signal_thresholds_and_limits_match_policy_rules():
+def test_signal_thresholds_match_policy_rules():
     rules = load_rules(DEFAULT_RULES_PATH)
     expected = {c.field: ("knockout", c.threshold) for c in rules.knockouts}
     expected |= {c.field: ("refer", c.threshold) for c in rules.refers}
@@ -32,13 +32,6 @@ def test_signal_thresholds_and_limits_match_policy_rules():
     ops = {c.field: c.op for c in (*rules.knockouts, *rules.refers)} | {"tax_bank_match_ratio": "lt"}
     assert {field: direction for field, _, direction, _, _ in SIGNALS} == {
         f: "min" if op == "lt" else "max" for f, op in ops.items()}
-    assert assessment.PRODUCT_MAX_KRW == rules.product.max_amount_krw
-    assert assessment.INFLOW_MULTIPLIER == rules.product.inflow_multiplier
-    assert assessment.PENDING_SETTLEMENT_RATIO == rules.limit_boost.pending_settlement_ratio
-    assert assessment.SUBSTITUTED_MAX_KRW == rules.limit_boost.substituted_max_amount_krw
-    knockout_codes = {c.code for c in rules.knockouts}
-    assert assessment.KNOCKOUT_SUBSTITUTIONS == {s.code for s in rules.substitutions if s.replaces in knockout_codes}
-    assert rules.version in assessment.BOOST_VERSIONS
 
 
 def test_traffic_lights_colour_strength_and_plain_text(make_doc):
@@ -96,29 +89,37 @@ def test_high_cost_lender_signal_counts_transactions_not_lenders(make_doc):
         "고비용 대출 상환 25건 — 대부업·고금리 대출 상환 거래가 계좌에서 보입니다(기준 0건).")
 
 
+def krw_limit(make_doc, features, *, version, requested, saved, decision="eligible", codes=()):
+    features = dict(features, requested_amount_krw=requested, requested_tenor_months=12, application_id="app-1",
+                    industry="retail", region="서울")
+    policy = {"rules_version": version, "decision": decision, "max_amount_krw": saved, "rate_band": "B",
+              "reason_codes": [{"code": c} for c in codes]}
+    return assessment_panels(view(make_doc, features, policy, requested_amount_krw=requested))["limit"]
+
+
 def test_limit_bars_highlight_the_binding_minimum(make_doc):
-    p = assessment_panels(view(make_doc, STRONG, requested_amount_krw=10_000_000))
-    limit = p["limit"]
+    limit = krw_limit(make_doc, STRONG, version="2026.11-v3", requested=10_000_000, saved=6_100_000)
     assert [(b["label"], b["value"], b["color"]) for b in limit["bars"]["bars"]] == [
         ("신청액", 1000, "grey"), ("월평균 입금×1.5", 619, "blue"), ("상품 최대", 1000, "grey")]
     assert limit["binding"] == "월평균 입금×1.5" and limit["computed"] == 6_100_000
 
 
 def test_limit_uses_settlement_cap_and_substitution_cap(make_doc):
-    policy = {"decision": "refer", "max_amount_krw": 5_000_000, "rules_version": "2026.11-v4",
-              "reason_codes": [{"code": "S001", "message": "마켓 판매 이력으로 거래 이력 부족 대체"}]}
-    features = {**STRONG, "avg_monthly_inflow_krw": 2_000_000, "mkt_pending_settlement_krw": 10_000_000}
-    limit = assessment_panels(view(make_doc, features, policy, requested_amount_krw=8_000_000))["limit"]
+    v4 = dict(version="2026.11-v4", requested=8_000_000, decision="refer", codes=["S001"])
+    features = {**STRONG, "avg_monthly_inflow_krw": 2_000_000, "mkt_pending_settlement_krw": 10_000_000,
+                "months_of_history": 4, "mkt_tenure_months": 30, "mkt_rating": 4.7, "mkt_review_count": 500,
+                "mkt_return_rate_90d": 0.03}
+    limit = krw_limit(make_doc, features, saved=5_000_000, **v4)
     assert [(b["label"], b["value"], b["color"]) for b in limit["bars"]["bars"]] == [
         ("신청액", 800, "grey"), ("정산 예정금×0.8", 800, "grey"), ("상품 최대", 1000, "grey"),
         ("대체 상한", 500, "blue")]
     assert limit["binding"] == "대체 상한" and limit["computed"] == 5_000_000
     # 정산 예정금이 입금 상한보다 작으면 입금 상한이 그대로 두 번째 후보다. v3 판정은 정산 예정금을 보지 않는다.
     small = {**features, "mkt_pending_settlement_krw": 1_000_000}
-    limit = assessment_panels(view(make_doc, small, policy, requested_amount_krw=8_000_000))["limit"]
+    limit = krw_limit(make_doc, small, saved=3_000_000, **v4)
     assert limit["bars"]["bars"][1]["label"] == "월평균 입금×1.5" and limit["computed"] == 3_000_000
-    v3 = {**policy, "rules_version": "2026.11-v3", "reason_codes": []}
-    limit = assessment_panels(view(make_doc, features, v3, requested_amount_krw=8_000_000))["limit"]
+    limit = krw_limit(make_doc, {**features, "months_of_history": 12}, version="2026.11-v3",
+                      requested=8_000_000, saved=3_000_000)
     assert [b["label"] for b in limit["bars"]["bars"]] == ["신청액", "월평균 입금×1.5", "상품 최대"]
 
 
@@ -164,7 +165,7 @@ def test_summary_kpis_claim_checks_and_empty_document(make_doc):
     s = p["summary"]
     assert (s["decision"], s["recommendation"], s["review"]) == ("적격", "전액 승인 비권고", "통과 · 1회")
     assert s["gauge_text"] == "67%" and s["gauge_sub"] == "한도 20,000,000원 / 신청 30,000,000원"
-    assert p["claims"] == [{"ok": True, "missing": []}, {"ok": False, "missing": ["S:x"]}, {"ok": True, "missing": []}]
+    assert p["claims"] == [{"ok": True, "missing": []}, {"ok": False, "missing": ["S:x"]}, {"ok": False, "missing": []}]
     empty = assessment_panels({"doc": make_doc("received", underwriting=None, assessment=None), "policy": None,
                                "assessment": None, "features": {}, "claims": []})
     assert empty["signals"] == [] and empty["capacity"] is None and empty["limit"] is None

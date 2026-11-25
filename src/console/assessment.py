@@ -15,14 +15,6 @@ from console.statuses import FLAG_LABELS
 from console.views import verified_policy_trace
 from shared.product_context import product_of
 
-PRODUCT_MAX_KRW = 10_000_000
-INFLOW_MULTIPLIER = 1.5
-LIMIT_UNIT_KRW = 100_000
-# 정책 v4 한도 보정(limit_boost). 정산 예정금 상한은 v4 판정에만, 대체 상한은 거절 기준을 대체한 판정에만 쓴다.
-PENDING_SETTLEMENT_RATIO = 0.8
-SUBSTITUTED_MAX_KRW = 5_000_000
-KNOCKOUT_SUBSTITUTIONS = frozenset({"S001"})
-BOOST_VERSIONS = frozenset({"2026.11-v4"})
 CAPACITY_CHART = {"width": 480, "height": 240}  # 반 폭 카드에서 글자가 너무 작아지지 않게 한다.
 
 # 지표 → (기준 종류, 정책 임계값). "min"은 임계값 미만이 위반, "max"는 초과가 위반이다.
@@ -188,43 +180,20 @@ def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any, *, usd: bo
     }
 
 
-def _limit(doc: Mapping[str, Any], features: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str, Any] | None:
-    requested, inflow = doc.get("requested_amount_krw"), features.get("avg_monthly_inflow_krw")
-    if not (charts.is_num(requested) and charts.is_num(inflow)):
-        return None
-    inflow_cap = (_("월평균 입금×%(m)s", m=f"{INFLOW_MULTIPLIER:g}"), int(inflow * INFLOW_MULTIPLIER))
-    pending = features.get("mkt_pending_settlement_krw")
-    if policy.get("rules_version") in BOOST_VERSIONS and charts.is_num(pending):
-        settlement_cap = (_("정산 예정금×%(r)s", r=f"{PENDING_SETTLEMENT_RATIO:g}"), int(pending * PENDING_SETTLEMENT_RATIO))
-        inflow_cap = max(inflow_cap, settlement_cap, key=lambda c: c[1])  # 같으면 입금 상한(엔진의 max와 같다)
-    candidates = [(_("신청액"), requested), inflow_cap, (_("상품 최대"), PRODUCT_MAX_KRW)]
-    codes = {r.get("code") for r in policy.get("reason_codes") or [] if isinstance(r, Mapping)}
-    if codes & KNOCKOUT_SUBSTITUTIONS:
-        candidates.append((_("대체 상한"), SUBSTITUTED_MAX_KRW))
-    low = min(v for _label, v in candidates)
-    computed = low - low % LIMIT_UNIT_KRW
-    items = [(label, round(v / 10_000), "blue" if v == low else "grey") for label, v in candidates]
+def _limit(trace: Mapping[str, Any], policy: Mapping[str, Any], unit: str) -> dict[str, Any]:
+    cap = (_("월평균 입금×%(m)s", m=f"{trace['inflow_multiplier']:g}"), trace[f"inflow_cap_{unit}"])
+    if trace[f"settlement_cap_{unit}"] > cap[1]:
+        cap = (_("정산 예정금×%(r)s", r=f"{trace['pending_settlement_ratio']:g}"), trace[f"settlement_cap_{unit}"])
+    candidates = [(_("신청액"), trace[f"requested_amount_{unit}"]), cap, (_("상품 최대"), trace[f"product_max_{unit}"])]
+    if trace[f"substituted_cap_{unit}"] is not None:
+        candidates.append((_("대체 상한"), trace[f"substituted_cap_{unit}"]))
+    low = trace[f"before_rounding_{unit}"]
+    bars = [(label, round(v / 10_000) if unit == "krw" else v, "blue" if v == low else "grey")
+            for label, v in candidates]
     return {
-        "bars": charts.hbars(items, width=420, label_w=120),
+        "bars": charts.hbars(bars, width=420, label_w=120),
         "binding": next(label for label, v in candidates if v == low),
-        "computed": computed,
-        "policy_limit": policy.get("max_amount_krw"),
-    }
-
-
-def _usd_limit(trace: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str, Any]:
-    cap = (_("월평균 입금×%(m)s", m=f"{trace['inflow_multiplier']:g}"), trace["inflow_cap_cents"])
-    if trace["settlement_cap_cents"] > cap[1]:
-        cap = (_("정산 예정금×%(r)s", r=f"{trace['pending_settlement_ratio']:g}"), trace["settlement_cap_cents"])
-    candidates = [(_("신청액"), trace["requested_amount_cents"]), cap, (_("상품 최대"), trace["product_max_cents"])]
-    if trace["substituted_cap_cents"] is not None:
-        candidates.append((_("대체 상한"), trace["substituted_cap_cents"]))
-    low = trace["before_rounding_cents"]
-    return {
-        "bars": charts.hbars([(label, v, "blue" if v == low else "grey") for label, v in candidates],
-                             width=420, label_w=120),
-        "binding": next(label for label, v in candidates if v == low),
-        "computed": trace["limit_cents"], "unit_cents": trace["unit_cents"], "policy_limit": policy["max_amount_cents"],
+        "computed": trace[f"limit_{unit}"], f"unit_{unit}": trace[f"unit_{unit}"], "policy_limit": policy[f"max_amount_{unit}"],
     }
 
 
@@ -285,12 +254,11 @@ def _expenses(uw: Mapping[str, Any], features: Mapping[str, Any]) -> dict[str, A
     }
 
 
-def _claims(claims: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    out = []
-    for c in claims:
-        missing = [m for m, val in c.get("evidence") or () if val is None]
-        out.append({"ok": not missing, "missing": missing})
-    return out
+def claim_check(claim: Mapping[str, Any], found_transactions: set[str]) -> dict[str, Any]:
+    metrics, transactions = claim.get("evidence") or (), claim.get("txn_ids") or ()
+    missing = [m for m, value in metrics if value is None]
+    missing.extend(t for t in transactions if t not in found_transactions)
+    return {"ok": bool(metrics or transactions) and not missing, "missing": missing}
 
 
 def _strengths_risks(signals: Sequence[Mapping[str, Any]], policy: Mapping[str, Any],
@@ -317,21 +285,18 @@ def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
                if s[0] not in OPTIONAL_SIGNALS or charts.is_num(features.get(s[0]))] if features else []
     flags = [*(doc.get("flags") or ()), *(uw.get("flags") or ())]
     strengths, risks = _strengths_risks(signals, policy, flags)
-    if usd:
-        trace = (view["limit_trace"] if "limit_trace" in view
-                 else verified_policy_trace(doc, policy, features).get("limit"))
-        limit = _usd_limit(trace, policy) if trace else None
-    else:
-        limit = _limit(doc, features, policy)
+    trace = (view["limit_trace"] if "limit_trace" in view else verified_policy_trace(doc, policy, features).get("limit"))
+    limit = _limit(trace, policy, unit) if trace else None
+    found_transactions = {t["txn_id"] for t in view.get("transactions") or ()}
     return {
         "summary": _summary(view, doc, unit),
         "officer": _officer(doc, unit),
         "signals": signals,
         "capacity": _capacity(monthly, (uw.get("signals") or {}).get(f"new_installment_{unit}"), usd=usd),
         "limit": limit,
-        "limit_note": _("저장된 판정의 한도 산출 근거를 확인할 수 없습니다.") if usd and policy and not limit else None,
+        "limit_note": _("저장된 판정의 한도 산출 근거를 확인할 수 없습니다.") if policy and not limit else None,
         "expenses": _usd_expenses(uw, features) if usd else _expenses(uw, features),
-        "claims": _claims(view.get("claims") or ()),
+        "claims": [claim_check(c, found_transactions) for c in view.get("claims") or ()],
         "strengths": strengths,
         "risks": risks,
     }

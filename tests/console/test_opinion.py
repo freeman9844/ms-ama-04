@@ -33,7 +33,9 @@ def test_claims_table_labels_values_and_evidence_mix(make_doc):
         {"text": "b", "evidence": [("S:2026-09:revenue", 40_000_000), ("P:R101:threshold", 1.25),
                                    ("M:unknown", None)], "txn_ids": []},
     ]
-    p = opinion_panel(view(make_doc, claims))
+    v = view(make_doc, claims)
+    v["transactions"] = [{"txn_id": "t2"}]
+    p = opinion_panel(v)
     first, second = p["claims"]
     assert [(e["label"], e["value"]) for e in first["evidence"]] == [("DSCR", "1.8"), ("월평균 입금", "42,000,000원")]
     assert first["ok"] and first["sources"] == 3

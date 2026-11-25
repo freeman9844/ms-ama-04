@@ -109,7 +109,7 @@
   "근거 모두 확인": "All evidence verified",
   "근거 값을 찾지 못한 항목이 있습니다": "Some evidence values were not found",
   "주장 근거 출처 구성": "Sources of claim evidence",
-  "✓ 인용한 근거 값이 모두 심사 지표·정책 결과에 있음 · ⚠ 일부 근거를 찾지 못함(심사역이 직접 확인). 거래 ID를 누르면 근거 거래 탭으로 갑니다.": "✓ every cited evidence value is in the underwriting metrics or policy result · ⚠ some evidence was not found (officer should check). Click a transaction ID to open the evidence transactions tab.",
+  "✓ 인용한 지표·정책 값과 거래를 현재 모두 확인할 수 있습니다. ⚠ 확인할 수 없는 근거가 있습니다. 거래 ID를 누르면 근거 거래 탭으로 갑니다.": "✓ All cited metrics, policy values and transactions are currently available. ⚠ Evidence is missing. Select a transaction ID to open the evidence tab.",
   "근거": "Evidence",
   "평균 = 1.0": "average = 1.0",
   "월별 매출 지수": "Monthly revenue index",
@@ -326,5 +326,6 @@
   "조건 미충족": "Conditions not met",
   "정산 예정금 합 %(total)s − 선정산 양도 %(assigned)s = 순정산 예정금 %(net)s. 예정액은 실제 계좌 입금액이 아닙니다. 입금 여부는 정산 원장과 계좌 거래를 대조해 확인합니다.": "Expected settlements %(total)s − assigned advances %(assigned)s = net expected settlements %(net)s. An expected settlement is not a bank deposit. Compare the settlement ledger with account transactions to confirm receipt.",
   "제재 이력": "Penalty history",
+  "제재 이력 자료가 없습니다.": "Penalty history is unavailable.",
   "제재 이력이 없습니다.": "No penalties."
 }
