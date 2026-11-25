@@ -1,6 +1,7 @@
 from console import dashboard
 from console.app import STATUS_LABELS
 from opsmetrics.labels import STEP_LABELS
+from shared.contracts import USD_V1
 
 T = "2026-10-31T09:{:02d}:00+09:00"
 
@@ -136,6 +137,70 @@ def test_detail_summary_without_underwriting_or_assessment(make_doc):
                                   "assessment": None})
     assert s["monthly"] is None and s["markers"] == [] and s["counterfactuals"] == [] and s["review"] is None
     assert s["monthly_net"] is None
+
+
+def usd_detail(**underwriting):
+    return dashboard.detail_summary({"doc": {**USD_V1.model_dump(), "underwriting": underwriting}})
+
+
+def test_usd_monthly_keeps_cents_and_gaps_in_the_net_line():
+    s = usd_detail(monthly=[
+        {"month": "2026-08", "revenue_cents": 20_099, "operating_out_cents": 10_049,
+         "debt_service_cents": 0, "owner_draw_cents": 49},
+        {"month": "2026-09", "revenue_cents": 0, "operating_out_cents": 50, "debt_service_cents": 0},
+        {"month": "2026-10", "revenue_cents": 0, "operating_out_cents": 0,
+         "debt_service_cents": 0, "owner_draw_cents": 0},
+    ])
+    chart = s["monthly"]
+    revenue, expenses = chart["groups"][0]["bars"]
+    assert (revenue["parts"][0]["value"], revenue["parts"][0]["tip"]) == (20_099, "2026-08 매출 $201")
+    assert [(p["value"], p["tip"].split()[-1]) for p in expenses["parts"]] == [
+        (10_049, "$100"), (0, "$0"), (49, "$0")]
+    missing = chart["groups"][1]["bars"][1]["parts"][-1]
+    assert missing["value"] is None and missing["tip"].endswith(" -")
+    assert [(p["i"], p["value"]) for p in s["monthly_net"]["points"]] == [(0, 10_001), (2, 0)]
+    assert [t["text"] for t in chart["ticks"]] == ["$0", "$100", "$201"]
+    assert s["monthly_net"]["ticks"] == chart["ticks"]
+
+
+def test_usd_monthly_net_uses_detailed_expense_cents():
+    s = usd_detail(monthly=[{"month": "2026-09", "revenue_cents": 245}],
+                   expense_monthly=[{"month": "2026-09", "supplier_cents": 299, "rent_cents": 0,
+                                     "payroll_cents": 0, "tax_insurance_cents": 0, "other_operating_cents": 0,
+                                     "debt_service_cents": 0, "owner_draw_cents": 0, "unclassified_cents": 7}])
+    expense = s["monthly"]["groups"][0]["bars"][1]["parts"][0]
+    assert (expense["value"], expense["tip"]) == (299, "2026-09 거래처·물류 $3")
+    assert [p["value"] for p in s["monthly_net"]["points"]] == [-61]
+
+
+def test_usd_settlement_advance_percentage_uses_unrounded_native_amounts():
+    card = usd_detail(pg_ledger={"available": True, "pg_reconciliation_ratio": 0, "monthly_take_rate": [
+        {"month": "2026-09", "fee_rate": .042, "offset_rate": 0, "rate": .042}], "unmatched": [
+        {"net_cents": 151, "advance": {"amount_cents": 129, "lead_days": 0}},
+        {"net_cents": 151, "advance": {"lead_days": 2}},
+    ]})["settlement"]
+    assert [r["cause"] for r in card["unmatched"]] == [
+        "선지급 추정(0일 전, 정산액의 85%)", "원인 미상 — 지연·다른 계좌·상계 확인"]
+    assert card["kpis"][0]["value"] == "0%"
+    assert card["take_rate"]["groups"][0]["bars"][0]["parts"][0]["tip"].endswith(" 4.2%")
+
+
+def test_usd_marketplace_pending_cents_do_not_imply_zero_assignment():
+    card = usd_detail(marketplace={"available": True, "platforms": [
+        {"platform": "coupang", "pending_settlement_cents": 149, "return_rate_90d": .035},
+        {"platform": "11st", "pending_settlement_cents": 0}],
+        "mkt_pending_settlement_cents": 149})["marketplace"]
+    assert [(p["pending"], p["assigned"]) for p in card["platforms"]] == [(149, None), (0, None)]
+    assert card["platforms"][0]["return_rate"] == "3.5%"
+    assert card["pending"] == {"total": 149, "assigned": None, "net": 149}
+    assert card["features"]["mkt_pending_settlement_cents"] == 149
+    assert "mkt_pending_settlement_krw" not in card["features"]
+
+
+def test_usd_marketplace_partial_amounts_do_not_become_a_total():
+    card = usd_detail(marketplace={"available": True, "platforms": [
+        {"platform": "coupang", "pending_settlement_cents": 150}, {"platform": "11st"}]})["marketplace"]
+    assert card["pending"] == {"total": None, "assigned": None, "net": None}
 
 
 def test_loans_summary_counts():

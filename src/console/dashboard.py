@@ -16,6 +16,7 @@ from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from console.translate import data as dt
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import MKT_FEATURES
+from shared.product_context import product_of
 
 AWAITING = frozenset({"awaiting_officer", "escalated"})
 APPROVED = frozenset({"approved", "conditionally_approved"})
@@ -257,19 +258,19 @@ SETTLEMENT_GUIDE: tuple[tuple[str, str], ...] = (
 )
 
 
-def _unmatched_cause(u: Mapping[str, Any]) -> str:
+def _unmatched_cause(u: Mapping[str, Any], unit: str) -> str:
     if "advance" not in u:
         return "—"
     advance = u["advance"]
     if not isinstance(advance, Mapping):
         return _("원인 미상 — 지연·다른 계좌·상계 확인")
-    lead, amount, net = advance.get("lead_days"), advance.get("amount_krw"), u.get("net_krw")
+    lead, amount, net = advance.get("lead_days"), advance.get(f"amount_{unit}"), u.get(f"net_{unit}")
     if not (charts.is_num(lead) and charts.is_num(amount) and charts.is_num(net) and net):
         return _("원인 미상 — 지연·다른 계좌·상계 확인")
     return _("선지급 추정(%(lead)s일 전, 정산액의 %(pct)s%%)", lead=lead, pct=round(amount / net * 100))
 
 
-def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
+def settlement_card(pg: Mapping[str, Any] | None, *, usd: bool = False) -> dict[str, Any]:
     """정산 원장 대사 카드. 옛 문서(pg_ledger 없음)·자료 없음은 available=False."""
     if not isinstance(pg, Mapping) or not pg.get("available"):
         return {"available": False}
@@ -315,7 +316,8 @@ def settlement_card(pg: Mapping[str, Any] | None) -> dict[str, Any]:
         take = charts.hbars([(m["month"][2:], round(m["rate"] * 100, 2), "purple") for m in monthly],
                             width=320, label_w=56)
         take_rate_legend = []
-    unmatched = [{**u, "cause": _unmatched_cause(u)} for u in pg.get("unmatched") or ()]
+    unit = "cents" if usd else "krw"
+    unmatched = [{**u, "cause": _unmatched_cause(u, unit)} for u in pg.get("unmatched") or ()]
     period = pg.get("period") or {}
     return {"available": True, "kpis": kpis, "guide": [(_(title), _(text)) for title, text in SETTLEMENT_GUIDE],
             "platforms": platforms, "cycles": cycles,
@@ -333,10 +335,20 @@ def _count_text(v: Any) -> str:
     return f"{v:,}" if charts.is_num(v) else "—"
 
 
-def marketplace_card(summary: Any) -> dict[str, Any]:
+def _sum_amounts(values: Sequence[Any], *, usd: bool) -> int | float | None:
+    if usd:
+        return sum(values) if values and all(type(v) is int for v in values) else None
+    return sum(v for v in values if charts.is_num(v))
+
+
+def marketplace_card(summary: Any, *, usd: bool = False) -> dict[str, Any]:
     """마켓 셀러 탭 카드. 옛 문서(marketplace 없음)·자료 없음은 available=False."""
     if not isinstance(summary, Mapping) or not summary.get("available"):
         return {"available": False}
+    unit = "cents" if usd else "krw"
+    pending_key = f"pending_settlement_{unit}"
+    net_key = f"mkt_{pending_key}"
+    feature_keys = (*MKT_FEATURES[:-1], net_key)
     rows = [p for p in summary.get("platforms") or () if isinstance(p, Mapping)]
     platforms = [{
         "platform": dt(p.get("platform")), "opened_on": p.get("opened_on") or "—",
@@ -344,20 +356,24 @@ def marketplace_card(summary: Any) -> dict[str, Any]:
         "review_count": _count_text(p.get("review_count")), "orders_90d": _count_text(p.get("orders_90d")),
         "return_rate": _rate_text(p.get("return_rate_90d")), "cancel_rate": _rate_text(p.get("cancel_rate_90d")),
         "grade": dt(p.get("seller_grade")) if p.get("seller_grade") else "—",
-        "pending": p.get("pending_settlement_krw"), "assigned": p.get("assigned_pending_krw"),
+        "pending": p.get(pending_key), "assigned": p.get(f"assigned_pending_{unit}"),
     } for p in rows]
     penalties = [{"platform": dt(p.get("platform")), "occurred_on": p.get("occurred_on"),
                   "kind": i18n.label(MARKET_PENALTY_LABELS, p.get("kind"))}
                  for p in summary.get("penalties") or () if isinstance(p, Mapping)]
-    total = lambda key: sum(p[key] for p in rows if charts.is_num(p.get(key)))  # noqa: E731
     return {"available": True, "as_of": summary.get("as_of"), "platforms": platforms, "penalties": penalties,
-            "features": {k: summary.get(k) for k in MKT_FEATURES},
-            "pending": {"total": total("pending_settlement_krw"), "assigned": total("assigned_pending_krw"),
-                        "net": summary.get("mkt_pending_settlement_krw")}}
+            "features": {k: summary.get(k) for k in feature_keys},
+            "pending": {"total": _sum_amounts([p["pending"] for p in platforms], usd=usd),
+                        "assigned": _sum_amounts([p["assigned"] for p in platforms], usd=usd),
+                        "net": summary.get(net_key)}}
 
 
 def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
+    usd = bool(product_of(doc))
+    suffix = "_cents" if usd else ""
+    money = display_usd if usd else krw_text
+    tick_fmt = _usd_tick if usd else man
     uw = doc.get("underwriting") or {}
     monthly = [m for m in uw.get("monthly") or [] if isinstance(m, Mapping)]
     # 세부 그룹(expense_monthly)은 2026-11-08 이후 심사분에만 있다. 한 달이라도 없으면 3구분으로 그린다.
@@ -370,12 +386,16 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     for m in monthly:
         month = str(m.get("month") or "")
         src = by_month[m.get("month")] if detailed else m
-        revenue = [("revenue", m.get("revenue"), "blue", f"{month} {revenue_label} {krw_text(m.get('revenue'))}")]
-        expenses = [(k, src.get(k), color, f"{month} {label} {krw_text(src.get(k))}") for k, label, color in spec]
+        rev = m.get("revenue" + suffix)
+        revenue = [("revenue", rev, "blue", f"{month} {revenue_label} {money(rev)}")]
+        expenses = []
+        for k, label, color in spec:
+            amount = src.get(k + suffix)
+            expenses.append((k, amount, color, f"{month} {label} {money(amount)}"))
         groups.append((month[2:] if len(month) == 7 else month, [revenue, expenses]))
-        rev = m.get("revenue")
-        net.append(rev - sum(v for _k, v, _c, _t in expenses if charts.is_num(v)) if charts.is_num(rev) else None)
-    monthly_chart = charts.columns(groups, tick_fmt=man) if groups else None
+        total = _sum_amounts([v for _k, v, _c, _t in expenses], usd=usd)
+        net.append(rev - total if charts.is_num(rev) and total is not None else None)
+    monthly_chart = charts.columns(groups, tick_fmt=tick_fmt) if groups else None
     markers = []
     for r in (view.get("policy") or {}).get("reason_codes") or []:
         bar = charts.marker_bar(r.get("observed"), r.get("threshold"))
@@ -401,15 +421,15 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "steps": journey_steps(doc),
         "monthly": monthly_chart,
-        "monthly_net": charts.line(net, vmax=monthly_chart["vmax"], tick_fmt=man) if monthly_chart else None,
+        "monthly_net": charts.line(net, vmax=monthly_chart["vmax"], tick_fmt=tick_fmt) if monthly_chart else None,
         "monthly_legend": ([(_("매출"), "blue")] + [(label, color) for _k, label, color in spec]
                            + [(_(NET_LABEL), "green")]),
         "markers": markers,
         "counterfactuals": counterfactuals,
         "review": review,
         "gateway_blocks": gateway_blocks(doc),
-        "settlement": settlement_card(uw.get("pg_ledger")),
-        "marketplace": marketplace_card(uw.get("marketplace")),
+        "settlement": settlement_card(uw.get("pg_ledger"), usd=usd),
+        "marketplace": marketplace_card(uw.get("marketplace"), usd=usd),
     }
 
 
@@ -586,7 +606,7 @@ def display_usd(cents: int) -> str:
 
 
 def _usd_tick(value: Any) -> str:
-    return display_usd(round(value)) if charts.is_num(value) else "-"
+    return display_usd(int(value)) if charts.is_num(value) else "-"
 
 
 def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[str, Any]:
