@@ -15,8 +15,20 @@ FEE = {"naver_smart_store": Decimal(".066"), "coupang": Decimal(".1155"),
        "own_store": Decimal(".034"), "11st": Decimal(".12")}
 
 
+BASE_RETURN_RATE = Decimal(".02")
+
+
 def booked(value: Decimal) -> int:
     return int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+@dataclass(frozen=True)
+class UsdPayoutHold:
+    """Payouts of one platform due in [held_from, held_to] are withheld and paid together on release_on."""
+    platform_code: str
+    held_from: date
+    held_to: date
+    release_on: date
 
 
 @dataclass(frozen=True)
@@ -28,8 +40,12 @@ class UsdBooks:
 
 
 def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int, opening: int, *,
-                 pending=(), slump_on=None, loan_id=None, principal=0, installments=None) -> UsdBooks:
-    """Inclusive period. Materialize a payout once; that same net books the bank credit."""
+                 pending=(), slump_on=None, loan_id=None, principal=0, installments=None,
+                 return_rate=None, deduction_rate=None, hold: UsdPayoutHold | None = None) -> UsdBooks:
+    """Inclusive period. Materialize a payout once; that same net books the bank credit.
+
+    return_rate(order_day) and deduction_rate(payout_day) return Decimal shares; hold withholds one platform's payouts.
+    """
     rng = random.Random(seed)
     meta = USD_V1.model_dump()
     balance = opening
@@ -46,6 +62,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                                   txn_type_code=code, platform_code=platform, loan_id=loan, scheduled_item_key=item))
 
     d = start
+    held_total, released = 0, False
     while d <= end:
         if d == start and principal:
             post(principal, "AMALend loan proceeds", "TRANSFER_IN", loan=loan_id)
@@ -56,19 +73,31 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                 daily //= 4
             for platform, percent in seller.channel_percent:
                 gross = daily * percent // 100
-                returns = booked(gross * Decimal(".02"))
+                returns = booked(gross * (return_rate(d) if return_rate else BASE_RETURN_RATE))
                 orders.append(UsdOrderDay(**meta, order_on=d, platform_code=platform,
                                           gross_cents=gross, returns_cents=returns))
                 paid_on = add_business_days(d, USD_PAYOUT_BUSINESS_DAYS[platform])
                 settleable = gross - returns
                 fee = booked(settleable * FEE[platform])
+                deduction = booked(settleable * deduction_rate(paid_on)) if deduction_rate else 0
                 deposits[paid_on].append(UsdSettlement(**meta, settled_on=paid_on, platform_code=platform,
                                                        gross_cents=settleable, fee_cents=fee,
-                                                       net_cents=settleable - fee))
+                                                       deduction_cents=deduction,
+                                                       net_cents=settleable - fee - deduction))
+            if hold and held_total and not released and d >= hold.release_on:
+                released = True
+                deposits[d].insert(0, UsdSettlement(**meta, settled_on=d, platform_code=hold.platform_code,
+                                                    gross_cents=0, fee_cents=0, released_cents=held_total,
+                                                    net_cents=held_total))
             for s in deposits.pop(d, []):
+                if (hold and s.platform_code == hold.platform_code and hold.held_from <= d <= hold.held_to
+                        and s.net_cents > 0):
+                    held_total += s.net_cents
+                    s = UsdSettlement(**(s.model_dump() | {"held_cents": s.net_cents, "net_cents": 0}))
                 payouts.append(s)
-                post(s.net_cents, f"{USD_CHANNEL_NAMES[s.platform_code]} settlement", "PG_SETTLE",
-                     platform=s.platform_code)
+                if s.net_cents:
+                    post(s.net_cents, f"{USD_CHANNEL_NAMES[s.platform_code]} settlement", "PG_SETTLE",
+                         platform=s.platform_code)
             post(-(seller.weekly_sales_cents // 10), f"{seller.supplier} inventory", "TRANSFER_OUT")
             if d.weekday() == 4:
                 post(-(seller.weekly_sales_cents // 10), "Staff payroll", "TRANSFER_OUT")
