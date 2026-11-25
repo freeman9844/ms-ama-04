@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from agents.features import ANNUAL_RATE
 from agents.officer_facts import reviewed_detail
 from policy.engine import LIMIT_UNIT_KRW, explain
-from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
+from policy.rules import AMENDED_IN_PLACE, RuleSet, UsdRuleSet, is_usd_rules, rules_for_version
 from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures, UsdPolicyDecision
 from shared.product_context import product_of, validate_usd_evidence
 
@@ -77,7 +77,7 @@ def _settlement(pg: Any) -> dict[str, Any]:
 def _rules(rules: RuleSet) -> dict[str, Any]:
     return {
         "version": rules.version,
-        "product": rules.product.model_dump() | ({} if rules.version == "usd-v1" else {"limit_unit_krw": LIMIT_UNIT_KRW}),
+        "product": rules.product.model_dump() | ({} if isinstance(rules, UsdRuleSet) else {"limit_unit_krw": LIMIT_UNIT_KRW}),
         "knockouts": [c.model_dump() for c in rules.knockouts],
         "refers": [c.model_dump() for c in rules.refers],
         "rate_bands": [b.model_dump() for b in rules.rate_bands],
@@ -89,18 +89,18 @@ def _rules(rules: RuleSet) -> dict[str, Any]:
 def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[dict[str, Any] | None, str | None]:
     """저장된 특성으로 판정을 다시 계산한다. 저장된 판정과 다르면 틀린 근거가 되므로 싣지 않는다."""
     try:
-        parsed = (UsdCashFlowFeatures if rules.version == "usd-v1" else CashFlowFeatures).model_validate_json(json.dumps(features))
+        parsed = (UsdCashFlowFeatures if isinstance(rules, UsdRuleSet) else CashFlowFeatures).model_validate_json(json.dumps(features))
     except (ValidationError, TypeError, ValueError):
         return None, TRACE_NOTES["invalid_features"]
     e = explain(parsed, rules)
     d = e.decision
     stored_codes = {r.get("code") for r in policy.get("reason_codes") or () if isinstance(r, Mapping)}
-    limit = "max_amount_cents" if rules.version == "usd-v1" else "max_amount_krw"
+    limit = "max_amount_cents" if isinstance(rules, UsdRuleSet) else "max_amount_krw"
     if (d.decision.value, getattr(d, limit), d.rate_band, {r.code for r in d.reason_codes}) != (
         policy.get("decision"), policy.get(limit), policy.get("rate_band"), stored_codes
     ):
         return None, TRACE_NOTES["mismatch"]
-    if rules.version == "usd-v1" and (stored_cash := policy.get("cash_only")) is not None:
+    if isinstance(rules, UsdRuleSet) and (stored_cash := policy.get("cash_only")) is not None:
         cash = d.cash_only
         if (not isinstance(stored_cash, Mapping) or cash is None
                 or (cash.decision.value, cash.max_amount_cents) != (stored_cash.get("decision"), stored_cash.get(limit))):
@@ -134,13 +134,13 @@ def verified_policy(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[
     if product:
         tags = product.model_dump().items()
         records = (policy, policy.get("cash_only"))
-        if version != product.product_version or any(
+        if not is_usd_rules(version) or any(
             not (tags <= record.items()) for record in records if isinstance(record, Mapping)
         ):
             return None
     limit = "max_amount_cents" if product else "max_amount_krw"
     rules = rules_for_version(version)
-    if rules is not None and (rules.version == "usd-v1") != (limit == "max_amount_cents"):
+    if rules is not None and isinstance(rules, UsdRuleSet) != (limit == "max_amount_cents"):
         raise ValueError("Policy and ruleset products differ")
     if rules is None:
         trace, note = None, TRACE_NOTES["unknown_version"]

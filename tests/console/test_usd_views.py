@@ -657,6 +657,43 @@ def test_policy_reason_displays_whole_cents_without_rounding_other_values():
     assert reasons == [("R900", "$0", "$100"), ("R107", "0.95", "0.85")]
 
 
+def page_for(deps, lang):
+    return TestClient(create_app(deps)).get("/applications/preview-usd-bakery", params={"lang": lang}).text
+
+
+def reasons(policy):
+    return re.findall(r"<tr><td>(R\d+)</td><td>.*?</td><td>(.*?)</td><td>(.*?)</td></tr>", policy)
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_v2_decision_shows_alt_data_compare_and_unit_values(lang):
+    from policy.engine import RuleCheck
+
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["policy"] |= {"rules_version": "usd-v2", "decision": "refer",
+        "cash_only": {**USD_V1.model_dump(), "decision": "eligible", "max_amount_cents": 500000, "reason_codes": []},
+        "reason_codes": [
+            RuleCheck("R113", "m", "refer", "pg_offset_rate_trend_pp", "gt", 5.94, 3.0, "hit").reason().model_dump(),
+            RuleCheck("R111", "m", "refer", "mkt_cancel_rate_90d", "gt", .13, .08, "hit").reason().model_dump(),
+            RuleCheck("R112", "m", "refer", "pg_advance_suspected_count", "gt", 3, 0, "hit").reason().model_dump()]}
+    policy = detail_panels(page_for(deps, lang))["tab-policy"]
+    assert {"ko": "은행·세무 기록만 볼 때", "en": "Bank and tax records only"}[lang] in policy
+    assert {"ko": "정산·마켓 데이터 반영", "en": "With settlement and marketplace data"}[lang] in policy
+    count = {"ko": ("3건", "0건"), "en": ("3", "0")}[lang]
+    assert reasons(policy) == [("R113", "5.9%p", "3.0%p"), ("R111", "13.0%", "8.0%"), ("R112", *count)]
+
+
+def test_v1_decision_keeps_cash_flow_label_and_trace():
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]  # rules_version usd-v1, 새 pg 키·applied_substitutions 없음
+    doc["policy"].setdefault("cash_only", {**USD_V1.model_dump(), "decision": "eligible",
+                                           "max_amount_cents": doc["policy"]["max_amount_cents"], "reason_codes": []})
+    policy = detail_panels(page_for(deps, "ko"))["tab-policy"]
+    assert "현금흐름만 볼 때" in policy and "셀러 데이터 반영" in policy
+    assert "은행·세무 기록만 볼 때" not in policy and "정산·마켓 데이터 반영" not in policy
+
+
 @pytest.mark.parametrize("usd", [True, False], ids=["usd", "legacy"])
 def test_servicing_decisions_keep_the_original_officer_reason(usd):
     from tests.console.test_monitoring import BASELINE, ROW

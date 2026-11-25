@@ -11,11 +11,13 @@ from console.officer_chat import (
     build_snapshot,
     clean_history,
     validate_question,
+    verified_policy,
 )
 from console.views import detail_view
 from policy.engine import evaluate
 from policy.rules import rules_for_version
-from shared.contracts import CashFlowFeatures
+from shared.contracts import USD_V1, CashFlowFeatures
+from tests.policy.conftest import usd_features
 
 
 def _view(make_doc, key, **overrides):
@@ -270,6 +272,17 @@ def test_snapshot_v1_received_before_in_place_amendment(make_doc, key):
     assert p["rules"] is None and p["trace"] is None and p["trace_note"] == TRACE_NOTES["amended_version"]
     doc["received_at"] = None
     assert _policy_of(doc, key)["trace_note"] == TRACE_NOTES["amended_version"]
+
+
+def test_usd_v2_decision_is_verified_with_its_own_rules_and_substitution_trace():
+    f = usd_features(cash_buffer_days=6.0, pg_reconciliation_ratio=1.0, pg_cash_conversion_days=6.0,
+                     pg_top_platform_share=0.6, mkt_tenure_months=30)
+    policy = evaluate(f, rules_for_version("usd-v2")).model_dump(mode="json")
+    doc = USD_V1.model_dump() | {"requested_amount_cents": f.requested_amount_cents}
+    p = verified_policy(doc, policy, f.model_dump(mode="json"))
+    assert p is not None and p["rules_version"] == "usd-v2" and p["trace_note"] is None
+    assert p["rules"]["version"] == "usd-v2" and p["trace"] is not None
+    assert [s["code"] for s in p["trace"]["substitutions"] if s["applied"]] == ["S003"]
 
 
 def test_snapshot_v3_ignores_v1_amendment(make_doc, key):

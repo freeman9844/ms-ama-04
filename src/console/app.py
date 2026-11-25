@@ -82,7 +82,7 @@ from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console import translate
 from console.translate import MachineTranslation, PageTexts, catalog, data_label, mt_filters, page_scope, validate_texts
-from console.views import DECIDABLE, RawStore, case_masker, decision_for_display, detail_view, load_raw
+from console.views import DECIDABLE, RawStore, case_masker, decision_for_display, detail_view, load_raw, reason_text
 from journey.models import (
     CONSENT_PURPOSE,
     CONSENT_TTL_DAYS,
@@ -262,6 +262,7 @@ def _templates() -> Environment:
     env.filters["krw"] = _krw
     env.filters["usd_cents"] = display_usd
     env.filters["usd_tick"] = usd_tick
+    env.globals["reason_text"] = reason_text
     env.filters["policy_cents_ids"] = policy_cents_ids
     env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "").removesuffix(".00") if type(cents) is int else ""
     env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s

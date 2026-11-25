@@ -263,7 +263,7 @@ def test_usd_knockout_zero_is_not_missing_or_the_formula_amount(key):
     assert p["summary"]["gauge_text"] == "0%" and "$0" in p["summary"]["gauge_sub"]
     assert (p["limit"]["policy_limit"], p["limit"]["computed"]) == (0, 410000)
     assert v["policy_compare"] == {"cash": {"decision": "eligible", "max": 410000},
-                                   "seller": {"decision": "ineligible", "max": 0}}
+                                   "seller": {"decision": "ineligible", "max": 0}, "bank_tax": False}
     assert by_field(p)["mkt_days_since_suspension"]["state"] == "knockout"
 
 
