@@ -214,6 +214,8 @@ def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | 
         if type((uw.get("signals") or {}).get("new_installment_cents")) is not int:
             raise ValueError("Missing USD installment evidence")
         rows = uw.get("monthly")
+        if features["months_of_history"] > 0 and not rows:
+            raise ValueError("Missing USD monthly history")
         if not isinstance(rows, (list, tuple)) or not all(
             isinstance(m, Mapping) and m.get("month") and all(type(m.get(k)) is int for k in keys[1:]) for m in rows
         ):

@@ -139,7 +139,7 @@ def test_usd_missing_mask_sources_do_not_send_free_text(key):
     assert response.status_code == 502 and not chat.calls
 
 
-@pytest.mark.parametrize("partial", ["policy", "cash_only", "features", "monthly"])
+@pytest.mark.parametrize("partial", ["policy", "cash_only", "features", "monthly", "empty_monthly"])
 def test_usd_chat_rejects_display_only_partial_evidence(fake_raw, raw_profile, key, partial):
     from shared.contracts import USD_V1
     from tests.console.test_assessment import usd_doc
@@ -165,9 +165,18 @@ def test_usd_chat_rejects_display_only_partial_evidence(fake_raw, raw_profile, k
         del doc["policy"]["cash_only"]["language"]
     elif partial == "features":
         del doc["underwriting"]["features"]["avg_monthly_inflow_cents"]
+    elif partial == "empty_monthly":
+        doc["underwriting"]["monthly"] = []
     else:
         del doc["underwriting"]["monthly"][0]["debt_service_cents"]
     assert ask().status_code == 502 and len(chat.calls) == 1
+    if partial == "empty_monthly":
+        doc["underwriting"]["features"]["months_of_history"] = 0
+        reason = {"code": "R001", "message": "Less than six months of transaction history"}
+        for result in (doc["policy"], doc["policy"]["cash_only"]):
+            result.update(decision="ineligible", max_amount_cents=0, reason_codes=[reason])
+        doc["policy"]["rate_band"] = None
+        assert ask().status_code == 200 and len(chat.calls) == 2
 
 
 @pytest.mark.parametrize("error, status, message", [
