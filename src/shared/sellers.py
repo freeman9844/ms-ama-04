@@ -163,7 +163,9 @@ USD_ONLY_SELLER_IDS = ("seller-snackbox-22", "seller-campgear-23", "seller-teaho
 
 def seller_label(applicant_id: str) -> str:
     seller = SELLER_BY_ID.get(applicant_id)
-    return seller.label if seller else applicant_id
+    if seller:
+        return seller.label
+    return USD_SELLERS[applicant_id].business_name if applicant_id in USD_SELLERS else applicant_id
 
 
 # 업종별 부하 셀러 상호(업종당 8개: 부하 격자 48건 / 업종 6개).

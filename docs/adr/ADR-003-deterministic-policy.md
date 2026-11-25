@@ -28,6 +28,7 @@
   - **막는 규칙:** 대체할 수 없는 탈락(R002·R003·R900·R901) 중 하나라도 걸리면 어떤 대체도 판정에 반영하지 않는다. 사유 코드는 원래대로(R001·R104 포함) 남고, 추적에 대체 항목이 `not_applied`와 막은 규칙(`blocked_by`)으로 남는다. 콘솔은 "조건 충족, R002로 미적용"으로 보인다.
   - **한도 순서:** 대체 → 한도 → R900. `before = min(신청액, max(유입 한도, 정산 예정금 한도), 상품 최대)`이고, 탈락 규칙이 대체됐으면 대체 상한 500만 원으로 한 번 더 자른 뒤 10만 원 단위로 절사한다. 정산 예정금 한도는 `mkt_pending_settlement_krw × 0.8`이며 선정산 양도분은 뺀다(값이 없으면 0). 대체 상한은 탈락을 대체한 경우에만 걸린다. 금리 구간 규칙은 바꾸지 않았다.
   - **현금흐름만 판정(`cash_only`):** 같은 규칙셋에서 `mkt_*` 7개를 모두 `None`으로 바꾸고 대체·한도 보강 없이 다시 평가한 결과(판정·한도·사유 코드)를 함께 돌려준다. 콘솔은 "현금흐름만 볼 때 → 셀러 데이터 반영"으로 비교한다.
+    - **USD(2026-11-25):** USD 상품 버전은 현행 규칙셋으로 매핑된다(`USD_CURRENT_RULES = {"usd-v1": "usd-v2"}`). `usd-v2`는 정산·마켓 대체 규칙 S003–S005와 위험 규칙 R111–R113을 더한다. 은행만 보는 범위는 규칙셋별 `alt_data_features`가 정해 PG·마켓 지표를 지우며, 비교 문구는 `usd-v2`가 "Bank and tax records only" / "With settlement and marketplace data", `usd-v1`은 위 "Cash flow only" / "With seller data"다. 은행 분류는 TRANSFER_IN + "payout"을 REVENUE로 본다(선지급 규칙 다음). 셀러가 "Marketplace payout"으로 기록한 선지급이 은행만 보는 쪽에서 매출처럼 보이게 하려는 것이다. 마켓 행은 `orders_90d`·`seller_grade`·`assigned_pending_cents`를 싣고 순 정산 예정액은 양도 금액을 뺀다.
 - **대체 불가 규칙과 이유:**
 
   | 규칙 | 이유 |

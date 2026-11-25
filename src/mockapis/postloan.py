@@ -154,6 +154,7 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
     books = simulate_usd(seller, f"{seller_id}:{loan_id}", start, end, seed,
                          case.transactions[-1].balance_after_cents, pending=case.pending,
                          loan_id=loan_id, principal=amount_cents, installments=installments,
+                         growth_from=start if seller.growth_days else None,
                          **_usd_scenario(scenario, seller, start))
     baseline = start - timedelta(days=PRE_LOAN_DAYS)
     return UsdPostLoanFlow(start, end, scenario,

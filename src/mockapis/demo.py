@@ -121,7 +121,7 @@ class FlowStore:
         self.usd_flow = lru_cache(maxsize=maxsize)(self._usd_flow)
 
     def _usd_case(self, applicant_id: str) -> UsdCase | None:
-        if applicant_id not in self._cases or applicant_id not in USD_SELLERS:
+        if applicant_id not in USD_SELLERS or applicant_id not in self._seeds:
             return None
         return generate_usd_case(applicant_id, self._as_of, self._seeds[applicant_id])
 

@@ -727,3 +727,9 @@ def test_usd_consent_management_available_during_monitoring_outage(monkeypatch):
     deps.privacy = CosmosPrivacy(QueryContainer([dict(consent, id="consent-bakery")]), None, QueryContainer([]))
     response = TestClient(create_app(deps), raise_server_exceptions=False).get(f"/borrower/{SELLER}/consents")
     assert response.status_code == 200 and f"/borrower/{SELLER}/consents/consent-bakery/revoke" in response.text
+
+
+def test_usd_only_seller_is_listed_and_accepted_by_apply():
+    client = TestClient(create_app(fixtures.build_deps()))
+    assert "Mapo Snack Box" in client.get("/borrower").text
+    assert client.get("/apply?applicant_id=seller-snackbox-22", follow_redirects=False).status_code == 200

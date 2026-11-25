@@ -219,3 +219,28 @@ def test_usd_postloan_cause_reaches_the_detector(seller, cause):
     assert causes == ({cause} if cause else set())
     if cause == "settlement_hold":
         assert sum(s.released_cents for s in flow.pg_settlements) == sum(s.held_cents for s in flow.pg_settlements) > 0
+
+
+def _consent_client():
+    from mockapis.synth import Archetype, generate_case
+    legacy = {BAKERY: generate_case(BAKERY, Archetype.HEALTHY_SEASONAL, AS_OF, 120)}
+    now = datetime(2026, 11, 24, tzinfo=timezone.utc)
+    return TestClient(mock_app(legacy, bytes(32), lambda: now, flows=demo.FlowStore(legacy, AS_OF)))
+
+
+def test_usd_only_seller_consent_is_usd_only():
+    client = _consent_client()
+    req = dict(purpose="test", scopes=["account", "tax", "pg", "marketplace"])
+    meta = dict(product_version="usd-v1", language="en", currency="USD")
+    def post(seller, usd):
+        return client.post("/consents", json=req | {"applicant_id": seller} | (meta if usd else {}))
+    assert post("seller-snackbox-22", True).status_code == 201
+    assert post("seller-snackbox-22", False).status_code in (400, 404, 422)
+    assert post("seller-unknown-99", True).status_code in (400, 404, 422)
+
+
+@pytest.mark.parametrize("seller", ["seller-snackbox-22", "seller-campgear-23", "seller-popup-29"])
+def test_approved_scene_sellers_generate_stable_postloan(seller):
+    flow = demo.FlowStore(demo.build_demo_cases(AS_OF), AS_OF).usd_flow(seller, "loan", 500_000, 83_333, 6)
+    assert flow is not None and len({t.booked_on.isocalendar()[1] for t in flow.transactions}) >= 13
+    assert any(t.description == "AMALend loan repayment" for t in flow.transactions)

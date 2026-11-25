@@ -108,7 +108,7 @@ from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
 from shared.product_context import product_of
 from shared.money import format_usd, parse_usd_cents
-from shared.sellers import DEMO_SELLERS, USD_CHANNEL_NAMES, USD_SELLERS, seller_label, seller_name
+from shared.sellers import DEMO_SELLERS, USD_CHANNEL_NAMES, USD_ONLY_SELLER_IDS, USD_SELLERS, seller_label, seller_name
 from shared.contracts import USD_V1
 
 HERE = Path(__file__).parent
@@ -127,7 +127,7 @@ mt_log = logging.getLogger("console.translate")
 LIST_LIMIT = 50
 # 홈 신청 목록 건수(테스트 신청 제외). 홈 통계는 건수 제한 없이 모든 신청을 집계한다.
 HOME_LIST_LIMIT = 20
-DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
+DEMO_APPLICANTS = (*(s.applicant_id for s in DEMO_SELLERS), *USD_ONLY_SELLER_IDS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
 # 신청 상세(/applications/{id})의 모든 자동 새로 고침 주기.
 DETAIL_REFRESH_SECONDS = 10
