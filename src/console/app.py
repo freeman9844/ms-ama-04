@@ -363,10 +363,9 @@ def _issue_text(issue: str) -> str:
     return _(issue)
 
 
-def _token_script(token_map: dict[str, Any], css: str = "mt-tokens") -> str:
-    """영문 화면의 토큰 지도. 브라우저가 번역 결과의 토큰을 같은 화면에서 평문으로 보이던 값으로 되돌린다."""
-    body = json.dumps(token_map, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    return f'<script type="application/json" class="{css}">{body}</script>'
+def _grant_script(grant: dict[str, Any]) -> str:
+    body = json.dumps(grant, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    return f'<script type="application/json" class="mt-grant">{body}</script>'
 
 
 def create_app(deps: ConsoleDeps) -> FastAPI:
@@ -406,12 +405,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         page = texts or PageTexts(Pseudonymizer(deps.pseudonym_key), allow_pending=False)
         with page_scope(page):
             html = draw()
-        token_map = page.token_map()
-        script = _token_script(token_map) if token_map else ""
         if page.requested and user and page.scope:
             tickets = {t: translate.mt_ticket(deps.pseudonym_key, user.user_id, page.scope, t) for t in page.requested}
-            script += _token_script({"scope": page.scope, "tickets": tickets}, "mt-grant")
-        if script:
+            script = _grant_script({"scope": page.scope, "tickets": tickets})
             at = html.rfind("</body>")
             html = html + script if at < 0 else html[:at] + script + html[at:]
         return HTMLResponse(html, status_code=status_code)
@@ -699,7 +695,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
         if not readable or (usd and raw is None):
             return _chat_error("failed", usd)
-        masker = case_masker(raw, deps.pseudonym_key)
+        display_name = None if usd else seller_name(doc.get("applicant_id", ""))
+        masker = case_masker(raw, deps.pseudonym_key, display_name=display_name)
         translate = None
         if not usd and i18n.current() == "en":
             stored = await run_in_threadpool(stored_translations, application_id)

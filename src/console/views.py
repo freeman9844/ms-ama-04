@@ -51,8 +51,10 @@ def _map_strings(value: Any, fn: Callable[[str], str]) -> Any:
     return value
 
 
-def case_masker(raw: RawData | None, key: bytes) -> Pseudonymizer:
+def case_masker(raw: RawData | None, key: bytes, *, display_name: str | None = None) -> Pseudonymizer:
     entities = case_entities(raw.profile, raw.transactions) if raw else {}
+    if display_name:
+        entities[display_name] = "BIZNAME"
     # Officer text can contain a display name from another UI language.
     aliases = {catalog[name]: kind for name, kind in entities.items() for catalog in CATALOGS.values() if name in catalog}
     return Pseudonymizer(key, aliases | entities)

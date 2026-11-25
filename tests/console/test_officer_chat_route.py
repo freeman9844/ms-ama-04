@@ -108,6 +108,24 @@ def test_chat_without_raw_uses_pattern_masking(make_doc, key):
     assert r.status_code == 200 and "010-1234-5678" not in chat.calls[0][2]
 
 
+def test_chat_without_raw_masks_registered_seller_in_model_input(make_doc, key):
+    from tests.console.conftest import FakeRaw
+
+    doc = make_doc() | {"applicant_id": "seller-bakery-20"}
+    runner = FakeRunner(result=_run())
+    client = _client(lambda: doc, FakeRaw({}), key, OfficerChat(runner, "offline"))
+    client.cookies.set("ama_locale_v2", "en")
+    history = [{"role": "user", "text": "Compare DAEJEON WHEAT BAKERY."},
+               {"role": "assistant", "text": "Checked 대전밀빵공방."}]
+    r = _post(client, key, {"question": "Daejeon Wheat Bakery or Yeonnam Candle Works?", "history": history})
+    assert r.status_code == 200
+    payload = runner.calls[0][1]
+    inputs = [payload["question"], *(turn["text"] for turn in payload["history"])]
+    assert len(inputs) == 3 and all("[[BIZNAME_" in text for text in inputs)
+    assert all("daejeon wheat bakery" not in text.casefold() and "대전밀빵공방" not in text for text in inputs)
+    assert "Yeonnam Candle Works" in payload["question"]
+
+
 def test_chat_trims_history(make_doc, raw, key):
     chat = FakeChat()
     history = [{"role": "user" if i % 2 == 0 else "assistant", "text": "다" * 2001} for i in range(20)]

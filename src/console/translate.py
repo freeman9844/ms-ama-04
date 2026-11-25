@@ -150,7 +150,6 @@ class PageTexts:
         self._masker = masker
         self._stored = stored or {}
         self.owner_translations: dict[str, dict[str, str]] = {}
-        self._tokens: dict[str, str] = {}
         # False면 원천을 못 읽은 화면: 저장 번역·카탈로그만 쓰고 새 번역 대기(data-mt)는 내지 않는다.
         self.allow_pending = allow_pending
         self.scope: RawScope = ()
@@ -191,14 +190,14 @@ class PageTexts:
             return None
         return self.show(text, en)
 
-    def pending(self, text: str) -> str:
+    def pending_attrs(self, text: str) -> Markup:
         masked = self.masked(text)
         self.requested.add(masked)
-        self._tokens.update(self._fresh(text, masked))
-        return masked
-
-    def token_map(self) -> dict[str, str]:
-        return dict(self._tokens)
+        attrs = Markup('data-mt="{}"').format(masked)
+        visible = self._fresh(text, masked)
+        if visible:
+            attrs += Markup(' data-mt-restore="{}"').format(json.dumps(visible, ensure_ascii=False))
+        return attrs
 
 
 _page: contextvars.ContextVar[PageTexts | None] = contextvars.ContextVar("console_page_texts", default=None)
@@ -239,7 +238,7 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
         if cached:
             return Markup('{}<span class="mt-ref mt-done">{}</span>').format(text, cached)
         if translator and page.allow_pending:
-            return Markup('{}<span class="mt-ref" data-mt="{}"></span>').format(text, page.pending(text))
+            return Markup('{}<span class="mt-ref" {}></span>').format(text, page.pending_attrs(text))
         return text
     if fixed:
         return fixed
@@ -249,7 +248,7 @@ def _mark(text: str, mode: str, translator: MachineTranslation | None, key: byte
         return Markup('<span class="mt mt-done" title="{}">{}</span>').format(i18n.gettext("기계 번역 · 원문: %(t)s", t=text), cached)
     if translator is None or not page.allow_pending:
         return text
-    return Markup('<span class="mt" data-mt="{}">{}</span>').format(page.pending(text), text)
+    return Markup('<span class="mt" {}>{}</span>').format(page.pending_attrs(text), text)
 
 
 def mt_filters(translator: MachineTranslation | None, key: bytes) -> dict[str, Any]:

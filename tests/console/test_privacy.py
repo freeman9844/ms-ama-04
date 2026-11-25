@@ -514,6 +514,41 @@ def test_grievance_original_reason_respects_case_visibility(env, raw, lang, sour
     assert g == stored
 
 
+def test_pending_grievance_translation_preserves_each_nodes_visibility(env, raw, tmp_path):
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    chrome = shutil.which("chromium") or shutil.which("google-chrome") or r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    if not Path(chrome).is_file():
+        pytest.skip("Chrome is required to check the translated DOM")
+    client, deps = _translating(env)
+    g = deps.privacy.get_grievance("app-2", "grv-abc123")
+    deps.store.get("app-2")["consent"] = {"consent_id": "c-2"}
+    deps.privacy.consents["c-2"] = consent("c-2", "app-2")
+    raw.blobs["consent-c-2", "profile.json"] = raw.blobs["consent-c-1", "profile.json"]
+    raw.blobs["consent-c-2", "transactions.json"] = []
+    g["text"] = g["record"]["officer_decision"]["reason"] = "김대표 확인 메모"
+    page = client.get("/grievances/app-2/grv-abc123?lang=en", headers=AUDITOR_H).text
+    token, = set(re.findall(r'data-mt="(\[\[PERSON_[a-f0-9]{10}\]\]) 확인 메모"', page))
+    mt_js = (Path(__file__).resolve().parents[2] / "src/console/static/mt.js").read_text(encoding="utf-8")
+    stub = """<script>
+window.fetch = async (_, o) => ({ok:true, json:async () => ({
+    translations: JSON.parse(o.body).texts.map(t => t.replace("확인 메모", "verified"))
+})});
+</script>"""
+    page = re.sub(r'<script\b[^>]*\bsrc="[^"]+"[^>]*></script>|<link\b[^>]*>', "", page)
+    page = page.replace("<head>", """<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'">""")
+    path = tmp_path / "grievance.html"
+    path.write_text(page.replace("</body>", stub + "<script>" + mt_js + "</script></body>"), encoding="utf-8")
+    rendered = subprocess.run([chrome, "--headless", "--disable-gpu", "--no-first-run",
+                               f"--user-data-dir={tmp_path / 'profile'}", "--dump-dom", path.as_uri()],
+                              capture_output=True, check=True, timeout=45).stdout.decode("utf-8")
+    translations = re.findall(r'<span class="mt-ref mt-done"[^>]*>([^<]*)</span>', rendered)
+    assert "김대표 verified" in translations
+    assert f"{token} verified" in translations
+
+
 def test_english_grievance_page_reads_stored_translations_of_its_application(env):
     client, deps = _translating(env)
     deps.privacy.grievances[("app-2", "grv-abc123")]["record"]["officer_decision"]["reason"] = "거절"
