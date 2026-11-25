@@ -7,11 +7,13 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from agents.officer_chat import ChatAnswer
+from agents.officer_chat import ChatAnswer, OfficerChat
+from agents.officer_facts import evidence_menu
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.app import ConsoleDeps, create_app
 from console.auth import csrf_token
 from console.officer_chat import CHAT_SUGGESTIONS
+from tests.agents.test_officer_chat import FakeRunner, _run
 from tests.console.test_app import AUDITOR_H, NO_ROLE, OFFICER, FakeQueue, FakeStore
 
 
@@ -70,6 +72,22 @@ def test_chat_sends_no_pii_and_masks_officer_text_with_case_entities(make_doc, r
     text = json.dumps(chat.calls[0], ensure_ascii=False)
     assert "빈스카페" not in text and "김대표" not in text and "seller-dailylook-01" not in text
     assert "[[" in chat.calls[0][2] and "[[" in chat.calls[0][1][0]["text"]
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_chat_model_masks_only_this_cases_display_alias(make_doc, raw, key, lang):
+    raw.blobs["consent-c-1", "profile.json"]["business_name"] = "대전밀빵공방"
+    runner = FakeRunner(result=_run())
+    client = _client(make_doc, raw, key, OfficerChat(runner, "offline"))
+    client.cookies.set("ama_locale_v2", lang)
+    history = [{"role": "user", "text": "Compare Daejeon Wheat Bakery."},
+               {"role": "assistant", "text": "Checked DAEJEON WHEAT BAKERY."}]
+    response = _post(client, key, {"question": "Daejeon Wheat Bakery or Yeonnam Candle Works?", "history": history})
+    assert response.status_code == 200
+    payload = runner.calls[0][1]
+    assert "daejeon wheat bakery" not in json.dumps(payload).casefold()
+    assert "[[BIZNAME_" in payload["question"] and "Yeonnam Candle Works" in payload["question"]
+    assert len(payload["history"]) == 2 and all("[[BIZNAME_" in t["text"] for t in payload["history"])
 
 
 def test_chat_refuses_when_raw_cannot_be_read(make_doc, key):
@@ -139,8 +157,8 @@ def test_usd_missing_mask_sources_do_not_send_free_text(key):
     assert response.status_code == 502 and not chat.calls
 
 
-@pytest.mark.parametrize("partial", ["policy", "cash_only", "features", "monthly", "empty_monthly"])
-def test_usd_chat_rejects_display_only_partial_evidence(fake_raw, raw_profile, key, partial):
+@pytest.fixture
+def usd_chat_case(fake_raw, raw_profile):
     from shared.contracts import USD_V1
     from tests.console.test_assessment import usd_doc
 
@@ -154,6 +172,29 @@ def test_usd_chat_rejects_display_only_partial_evidence(fake_raw, raw_profile, k
         {"month": "2026-01", "revenue_cents": 1000, "operating_out_cents": 100, "debt_service_cents": 0,
          "owner_draw_cents": 0}])
     raw = fake_raw({("consent-c-1", "profile.json"): {**raw_profile, **usd}, ("consent-c-1", "transactions.json"): []})
+    return doc, raw
+
+
+def test_chat_pricing_uses_verified_application_request(usd_chat_case, key):
+    doc, raw = usd_chat_case
+    runner = FakeRunner(result=_run("policy.trace.limit.requested_amount_cents"))
+    client = _client(lambda: doc, raw, key, OfficerChat(runner, "offline"))
+    path = "/applications/usd-1/chat"
+    body = {"question": "Explain the calculation."}
+    normal = _post(client, key, body, path=path)
+    assert normal.status_code == 200 and "$5,000.51" in normal.json()["answer"]
+    snap = runner.calls[0][1]["snapshot"]
+    assert snap["policy"]["trace"]["limit"]["limit_cents"] == 410000
+    assert "policy.trace.limit.requested_amount_cents" in evidence_menu(snap, "en")
+    # The inflow cap still binds, but the stored pricing inputs belong to a different request.
+    doc["requested_amount_cents"] = 499949
+    response = _post(client, key, body, path=path)
+    assert response.status_code == 502 and len(runner.calls) == 1
+
+
+@pytest.mark.parametrize("partial", ["policy", "cash_only", "features", "monthly", "empty_monthly"])
+def test_usd_chat_rejects_display_only_partial_evidence(usd_chat_case, key, partial):
+    doc, raw = usd_chat_case
     chat = FakeChat()
     client = _client(lambda: doc, raw, key, chat)
     def ask():

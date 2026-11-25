@@ -82,7 +82,7 @@ from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console import translate
 from console.translate import MachineTranslation, PageTexts, catalog, data_label, mt_filters, page_scope, validate_texts
-from console.views import DECIDABLE, RawStore, detail_view, load_raw
+from console.views import DECIDABLE, RawStore, case_masker, decision_for_display, detail_view, load_raw
 from journey.models import (
     CONSENT_PURPOSE,
     CONSENT_TTL_DAYS,
@@ -103,7 +103,6 @@ from journey.models import (
     replay_held,
     replay_in_progress,
 )
-from agents.data_assembly import build_pseudonymizer
 from journey.validation import REREVIEW_ERRORS, usd_rereview_error, validate_officer_decision, validate_rereview_decision
 from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
@@ -700,8 +699,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
         if not readable or (usd and raw is None):
             return _chat_error("failed", usd)
-        masker = (build_pseudonymizer(deps.pseudonym_key, raw.profile, raw.transactions) if raw is not None
-                  else Pseudonymizer(deps.pseudonym_key))
+        masker = case_masker(raw, deps.pseudonym_key)
         translate = None
         if not usd and i18n.current() == "en":
             stored = await run_in_threadpool(stored_translations, application_id)
@@ -714,8 +712,6 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         try:
             snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
         except ValueError:
-            if not usd:
-                raise
             return _chat_error("failed", usd)
         started = time.monotonic()
         result, answer = "ok", None
@@ -1227,20 +1223,26 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404, "grievance not found")
         return doc
 
-    def grievance_texts(doc: dict[str, Any]) -> PageTexts | None:
-        """이의 화면: 그 신청의 원천으로 가명처리한다."""
-        if i18n.current() == i18n.SOURCE:
-            return None
+    def grievance_page(user: Principal, doc: dict[str, Any], status_code: int = 200, **ctx: Any) -> HTMLResponse:
         owner = doc["application_id"]
-        application, _ = read_raw(lambda: deps.store.get(owner), owner)
-        raw = read_raw(lambda: load_raw(deps.raw, application), owner)[0] if application else None
-        return page_texts(raw, owner, translation_scope("applications", application or {}))
+        record = doc.get("record") or {}
+        decision = record.get("officer_decision")
+        mask_decision = decision and not user.can_restore
+        texts = None
+        if mask_decision or i18n.current() != i18n.SOURCE:
+            application, _ = read_raw(lambda: deps.store.get(owner), owner)
+            raw = read_raw(lambda: load_raw(deps.raw, application), owner)[0] if application else None
+            texts = page_texts(raw, owner, translation_scope("applications", application or {}))
+            if mask_decision:
+                shown = decision_for_display(decision, case_masker(raw, deps.pseudonym_key).mask if raw else None)
+                doc = {**doc, "record": {**record, "officer_decision": shown}}
+        return render("grievance.html", user, status_code, texts=texts, g=doc, **ctx)
 
     @app.get("/grievances/{application_id}/{grievance_id}", response_class=HTMLResponse)
     def grievance(application_id: str, grievance_id: str, request: Request) -> HTMLResponse:
         user = viewer(request)
         doc = grievance_or_404(application_id, grievance_id)
-        return render("grievance.html", user, texts=grievance_texts(doc), g=doc)
+        return grievance_page(user, doc)
 
     @app.post("/grievances/{application_id}/{grievance_id}/decision", response_class=HTMLResponse)
     def grievance_decision(application_id: str, grievance_id: str, posted: Posted = Depends(decider_form)) -> HTMLResponse:
@@ -1254,8 +1256,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         product = product_of(doc)
 
         def invalid(message: str, code: str | None = None) -> HTMLResponse:
-            return render("grievance.html", user, 422, texts=grievance_texts(doc), g=doc, error=message,
-                          error_code=code, form=form)
+            return grievance_page(user, doc, 422, error=message, error_code=code, form=form)
 
         record = doc.get("record") or {}
         if product != product_of(record):

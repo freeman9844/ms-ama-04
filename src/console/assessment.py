@@ -11,8 +11,8 @@ from agents.features import WATCH_METRICS
 from console import charts, i18n
 from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, display_usd, man, usd_tick
 from console.i18n import _
+from console.officer_chat import policy_for_view
 from console.statuses import FLAG_LABELS
-from console.views import verified_policy_trace
 from shared.product_context import product_of
 
 CAPACITY_CHART = {"width": 480, "height": 240}  # 반 폭 카드에서 글자가 너무 작아지지 않게 한다.
@@ -89,7 +89,7 @@ def _signal(field: str, name: str, direction: str, strong: float, text: str, fea
     kind, threshold = SIGNAL_RULES[field]
     v = features.get(field)
     name = _(name)
-    if not charts.is_num(v):
+    if not charts.is_num(v) or (kind == "watch" and v <= 0):
         return {"field": field, "name": name, "value": None, "state": "unknown", "tone": "grey", "strong": False,
                 "label": i18n.label(SIGNAL_STATE_LABELS, "unknown"), "text": _("%(name)s — 값이 없습니다.", name=name),
                 "bar": None, "threshold": threshold}
@@ -273,6 +273,19 @@ def _strengths_risks(signals: Sequence[Mapping[str, Any]], policy: Mapping[str, 
     return strengths, risks
 
 
+def _signals(doc: Mapping[str, Any], features: Mapping[str, Any]) -> list[dict]:
+    if not features:
+        return []
+    assembly = doc.get("assembly") or {}
+    tax = (assembly.get("sources") or {}).get("tax") or {}
+    scopes = (doc.get("consent") or {}).get("scopes")
+    if (tax.get("fetched") is False or tax.get("consented") is False or tax.get("records") == 0
+            or "tax" in (assembly.get("missing_sources") or ()) or (scopes is not None and "tax" not in scopes)):
+        features = {**features, "tax_bank_match_ratio": None}
+    return [_signal(*s, features) for s in SIGNALS
+            if s[0] not in OPTIONAL_SIGNALS or charts.is_num(features.get(s[0]))]
+
+
 def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
     usd = bool(product_of(doc))
@@ -281,11 +294,10 @@ def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
     features = view.get("features") or uw.get("features") or {}
     policy = view.get("policy") or {}
     monthly = [m for m in uw.get("monthly") or [] if isinstance(m, Mapping)]
-    signals = [_signal(*s, features) for s in SIGNALS
-               if s[0] not in OPTIONAL_SIGNALS or charts.is_num(features.get(s[0]))] if features else []
+    signals = _signals(doc, features)
     flags = [*(doc.get("flags") or ()), *(uw.get("flags") or ())]
     strengths, risks = _strengths_risks(signals, policy, flags)
-    trace = (view["limit_trace"] if "limit_trace" in view else verified_policy_trace(doc, policy, features).get("limit"))
+    trace = ((policy_for_view(view) or {}).get("trace") or {}).get("limit")
     limit = _limit(trace, policy, unit) if trace else None
     found_transactions = {t["txn_id"] for t in view.get("transactions") or ()}
     return {

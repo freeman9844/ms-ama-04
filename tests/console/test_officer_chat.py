@@ -179,7 +179,7 @@ def _decided_doc(make_doc, version="2026.11-v3", **kw):
                 requested_amount_krw=3_000_000, requested_tenor_months=12, industry="cafe", region="서울 성동구",
                 business_age_months=38) | kw
     f = CashFlowFeatures(**base)
-    doc = make_doc(received_at="2026-11-09T09:00:00+09:00")
+    doc = make_doc(requested_amount_krw=base["requested_amount_krw"], received_at="2026-11-09T09:00:00+09:00")
     doc["underwriting"] = doc["underwriting"] | {"features": f.model_dump(mode="json")}
     doc["policy"] = evaluate(f, rules_for_version(version)).model_dump(mode="json")
     return doc

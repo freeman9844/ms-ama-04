@@ -467,6 +467,53 @@ class BrokenRaw:
         raise RuntimeError("blob down")
 
 
+@pytest.mark.parametrize("lang", ["ko", "en"])
+@pytest.mark.parametrize("source", ["available", "missing", "error"])
+@pytest.mark.parametrize("usd", [False, True], ids=["krw", "usd"])
+def test_grievance_original_reason_respects_case_visibility(env, raw, lang, source, usd):
+    from copy import deepcopy
+    from shared.contracts import USD_V1
+
+    client, deps = _translating(env)
+    g = deps.privacy.get_grievance("app-2", "grv-abc123")
+    app = deps.store.get("app-2")
+    app["consent"] = {"consent_id": "c-2"}
+    deps.privacy.consents["c-2"] = consent("c-2", "app-2")
+    profile = dict(raw.blobs["consent-c-1", "profile.json"], business_name="대전밀빵공방")
+    raw.blobs["consent-c-2", "profile.json"] = profile
+    raw.blobs["consent-c-2", "transactions.json"] = []
+    if usd:
+        tags = USD_V1.model_dump()
+        for record in (g, g["record"], profile, app):
+            record.update(tags)
+        del app["requested_amount_krw"]
+        app["requested_amount_cents"] = 499949
+        g["record"]["policy"] = dict(tags, decision="eligible", max_amount_cents=410000, reason_codes=[],
+                                     rules_version="usd-v1", rate_band="B")
+        g["record"]["officer_decision"] = dict(tags, decision="approve", amount_cents=400000, officer_id="oid-officer")
+    reason = "원결정 메모: 대전밀빵공방 / DAEJEON WHEAT BAKERY / 김대표 / 010-1234-5678"
+    g["record"]["officer_decision"].update(reason=reason, conditions=["비공개 조건"])
+    stored = deepcopy(g)
+    if source == "missing":
+        raw.blobs.clear()
+    elif source == "error":
+        deps.raw = BrokenRaw()
+    url = f"/grievances/app-2/grv-abc123?lang={lang}"
+    response = client.get(url, headers=AUDITOR_H)
+    assert response.status_code == 200
+    for private in ("대전밀빵공방", "daejeon wheat bakery", "김대표", "010-1234-5678", "비공개 조건"):
+        assert private not in response.text.casefold()
+    if source == "available":
+        assert re.search(r"원결정 메모: \[\[BIZNAME_\w+\]\] / \[\[BIZNAME_\w+\]\] / "
+                         r"\[\[PERSON_\w+\]\] / \[\[PHONE_", response.text)
+        if not usd and lang == "en":
+            assert any(text.startswith("원결정 메모: [[BIZNAME_") for text in _pending(response))
+    else:
+        assert "원결정 메모" not in response.text
+    assert reason in client.get(url, headers=OFFICER).text
+    assert g == stored
+
+
 def test_english_grievance_page_reads_stored_translations_of_its_application(env):
     client, deps = _translating(env)
     deps.privacy.grievances[("app-2", "grv-abc123")]["record"]["officer_decision"]["reason"] = "거절"

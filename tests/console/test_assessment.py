@@ -69,6 +69,39 @@ def test_tax_match_is_watch_not_refer(make_doc):
     assert s["tax_bank_match_ratio"]["state"] == "watch" and s["tax_bank_match_ratio"]["tone"] == "amber"
 
 
+@pytest.mark.parametrize("ratio,fetched,records,expected", [
+    (0.0, False, 0, "unknown"), (0.0, True, 2, "unknown"),
+    (0.6, True, 0, "unknown"), (0.6, False, 0, "unknown"),
+    (0.6, True, 2, "watch"), (0.7, True, 2, "pass"),
+])
+def test_tax_signal_requires_recorded_evidence(key, ratio, fetched, records, expected):
+    doc = usd_doc()
+    doc["assembly"] = {"sources": {"tax": {"fetched": fetched, "records": records}}}
+    doc["underwriting"]["features"]["tax_bank_match_ratio"] = ratio
+    with i18n.use("en"):
+        panels = assessment_panels(detail_view(doc, None, key, restore=False))
+    signal = by_field(panels)["tax_bank_match_ratio"]
+    assert signal["state"] == expected
+    assert any("of reported revenue is confirmed" in risk for risk in panels["risks"]) == (expected == "watch")
+    if expected == "unknown":
+        assert signal["value"] is None and signal["bar"] is None and not signal["strong"]
+    assert doc["underwriting"]["features"]["tax_bank_match_ratio"] == ratio
+    assert doc["policy"]["decision"] == "eligible"
+
+
+@pytest.mark.parametrize("record", [
+    {"consent": {"scopes": ["account", "pg"]}},
+    {"assembly": {"sources": {"tax": {"consented": False}}}},
+    {"assembly": {"missing_sources": ["tax"]}},
+])
+def test_uncollected_tax_cannot_create_a_strength_or_new_signals(key, record):
+    doc = usd_doc() | record
+    p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert by_field(p)["tax_bank_match_ratio"]["state"] == "unknown"
+    doc["underwriting"] = {}
+    assert assessment_panels(detail_view(doc, None, key, restore=False))["signals"] == []
+
+
 def test_v3_optional_signals_hidden_when_missing(make_doc):
     fields = set(by_field(assessment_panels(view(make_doc, features=STRONG))))
     assert not fields & {"revenue_trend_ratio", "high_cost_lender_count", "pg_reconciliation_ratio",

@@ -12,7 +12,7 @@ from agents.data_assembly import build_pseudonymizer, case_entities
 from agents.pretranslate import load_case_raw
 from agents.evidence import build_catalog
 from console.i18n import CATALOGS, _
-from console.officer_chat import policy_trace
+from console.officer_chat import verified_policy
 from shared.contracts import ApplicantProfile, Transaction, UsdProduct, UsdTransaction
 from shared.product_context import product_of, validate_usd_evidence
 from shared.opinions import opinion_state, published_opinion
@@ -51,15 +51,31 @@ def _map_strings(value: Any, fn: Callable[[str], str]) -> Any:
     return value
 
 
+def case_masker(raw: RawData | None, key: bytes) -> Pseudonymizer:
+    entities = case_entities(raw.profile, raw.transactions) if raw else {}
+    # Officer text can contain a display name from another UI language.
+    aliases = {catalog[name]: kind for name, kind in entities.items() for catalog in CATALOGS.values() if name in catalog}
+    return Pseudonymizer(key, aliases | entities)
+
+
+def decision_for_display(decision: Mapping[str, Any], mask: Callable[[str], str] | None) -> dict[str, Any]:
+    """An auditor's copy: officer-entered text was not pseudonymized at write time."""
+    shown = dict(decision)
+    if mask is not None:
+        for field in ("reason", "conditions"):
+            if field in shown:
+                shown[field] = _map_strings(shown[field], mask)
+    elif shown.get("reason") or shown.get("conditions"):
+        shown.update(reason=_("원천 자료가 없어 결정 사유와 조건을 가명 표시할 수 없습니다."), conditions=[])
+    return shown
+
+
 def _text_functions(raw: RawData | None, key: bytes, restore: bool) -> tuple[str, Callable[[str], str], Callable[[str], str]]:
     """(pii 상태, 모델 출력 변환, 원천 텍스트 변환)."""
     if raw is None:
         return ("unavailable" if restore else "masked"), (lambda s: s), (lambda s: s)
     if not restore:
-        entities = case_entities(raw.profile, raw.transactions)
-        # Officer text can contain a display name from another UI language.
-        aliases = {catalog[name]: kind for name, kind in entities.items() for catalog in CATALOGS.values() if name in catalog}
-        return "masked", (lambda s: s), Pseudonymizer(key, aliases | entities).mask
+        return "masked", (lambda s: s), case_masker(raw, key).mask
     p = build_pseudonymizer(key, raw.profile, raw.transactions)
     # 토큰은 결정적(HMAC)이라 같은 원문을 다시 가명처리하면 저장된 토큰과 같은 매핑이 생긴다.
     p.mask(" ".join((raw.profile.business_name, raw.profile.representative_name, raw.profile.business_reg_no)))
@@ -110,15 +126,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
     assessment = _map_strings(published_opinion(doc.get("assessment"), doc.get(f"requested_amount_{unit}")), model_text)
     display_doc = {k: v for k, v in doc.items() if k not in ("assessment", "assessment_run")}
     if not restore and (decision := doc.get("officer_decision")):
-        # Officer-entered free text, unlike the model opinion, was not pseudonymized at write time.
-        shown = dict(decision)
-        if raw:
-            for field in ("reason", "conditions"):
-                if field in shown:
-                    shown[field] = _map_strings(shown[field], raw_text)
-        elif shown.get("reason") or shown.get("conditions"):
-            shown.update(reason=_("원천 자료가 없어 결정 사유와 조건을 가명 표시할 수 없습니다."), conditions=[])
-        display_doc["officer_decision"] = shown
+        display_doc["officer_decision"] = decision_for_display(decision, raw_text if raw else None)
     if (error := doc.get("error")) and error.get("stage") in ("assess", "assess_credit"):
         display_doc["error"] = {"stage": error["stage"], "message": _("의견 없음")}
     claims = [
@@ -150,7 +158,8 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         for t in (raw.transactions if raw else ())
         if t.txn_id in wanted
     ]
-    trace = verified_policy_trace(doc, policy, uw.get("features"))
+    checked = verified_policy(doc, policy, uw.get("features"))
+    trace = (checked or {}).get("trace") or {}
     return {
         "doc": display_doc,
         "pii": pii,
@@ -166,7 +175,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         f"max_amount_{unit}": (policy or {}).get(f"max_amount_{unit}"),
         "policy_blocked": (policy or {}).get("decision") not in ("eligible", "refer"),
         "policy_compare": _policy_compare(policy, unit),
-        "limit_trace": trace.get("limit"),
+        "verified_policy": checked,
         "substitutions": _substitutions(trace),
     }
 
@@ -178,23 +187,6 @@ def _policy_compare(policy: Any, unit: str) -> dict[str, Any] | None:
         return None
     return {"cash": {"decision": cash.get("decision"), "max": cash.get(f"max_amount_{unit}")},
             "seller": {"decision": policy.get("decision"), "max": policy.get(f"max_amount_{unit}")}}
-
-
-def verified_policy_trace(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[str, Any]:
-    product = product_of(doc)
-    requested = "requested_amount_cents" if product else "requested_amount_krw"
-    if not isinstance(policy, Mapping) or not isinstance(features, Mapping) or features.get(requested) != doc.get(requested):
-        return {}
-    if "rate_band" not in policy or not isinstance(policy.get("reason_codes"), (list, tuple)):
-        return {}
-    if product:
-        if policy.get("rules_version") != product.product_version:
-            return {}
-        tags = product.model_dump()
-        if any(not (tags.items() <= record.items()) for record in (policy, policy.get("cash_only"))
-               if isinstance(record, Mapping)):
-            return {}
-    return (policy_trace(policy, features, doc.get("received_at")) or {}).get("trace") or {}
 
 
 def _substitutions(trace: Mapping[str, Any]) -> list[dict[str, Any]]:
