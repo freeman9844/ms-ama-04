@@ -57,6 +57,26 @@ def test_scheduled_payouts_replace_trailing_average_until_known_day():
     assert gain["2026-12-03"] == 3000 and gain["2026-12-10"] == 3000  # the platform's own average (0) after the known day
 
 
+def test_scheduled_platform_deposits_leave_the_general_average_and_set_its_own():
+    from agents.forecast import project_usd
+    from shared.contracts import USD_V1, UsdTransaction
+
+    hi, start = date(2026, 11, 27), date(2026, 11, 2)  # 20 business days in the 4-week window
+    naver = UsdTransaction(**USD_V1.model_dump(), txn_id="n1", booked_on=date(2026, 11, 10), amount_cents=4000,
+                           platform_code="naver_smart_store", balance_after_cents=9000, description="Naver payout",
+                           txn_type_code="PG_SETTLE")
+    visible = [naver, *_usd_history(hi)]
+    known = {date(2026, 11, 30): 1000, date(2026, 12, 1): 1000, date(2026, 12, 2): 1000}
+    path = project_usd(visible, start, hi, {}, {"naver_smart_store": (date(2026, 12, 2), known)})["path"]
+    balance = {p["date"]: p["balance_cents"] for p in path}
+    # General average 700 // 20 = 35 a day; Naver's own average 4000 // 20 = 200 a day only after the known day.
+    assert balance["2026-11-30"] == 10000 + 35 + 1000
+    assert balance["2026-12-02"] == 10000 + 3 * (35 + 1000)
+    assert balance["2026-12-03"] - balance["2026-12-02"] == 35 + 200
+    assert balance["2026-12-04"] - balance["2026-12-03"] == 35 + 200
+    assert balance["2026-12-06"] == balance["2026-12-04"]  # weekend: no payouts
+
+
 @pytest.fixture(scope="module")
 def cafe():
     return build_demo_cases(AS_OF)["seller-dailylook-01"]
