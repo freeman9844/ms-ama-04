@@ -50,12 +50,14 @@ class UsdBooks:
 def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int, opening: int, *,
                  pending=(), slump_on=None, loan_id=None, principal=0, installments=None,
                  return_rate=None, deduction_rate=None, hold: UsdPayoutHold | None = None,
-                 stress_from: date | None = None, advance_from: date | None = None) -> UsdBooks:
+                 stress_from: date | None = None, advance_from: date | None = None,
+                 growth_from: date | None = None) -> UsdBooks:
     """Inclusive period. Materialize a payout once; that same net books the bank credit.
 
     return_rate(order_day) and deduction_rate(payout_day) return Decimal shares; hold withholds one platform's payouts.
     stress_from cuts sales and starts high-cost borrowing; advance_from sells the top platform's payouts to an
     early-payout lender, so the settlement is paid out but the bank sees a smaller, earlier advance instead.
+    The seller's season_percent and, from growth_from on, growth_percent scale daily sales and inventory purchases.
     """
     rng = random.Random(seed)
     meta = USD_V1.model_dump()
@@ -78,6 +80,13 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                                   amount_cents=amount, balance_after_cents=balance, description=description,
                                   txn_type_code=code, platform_code=platform, loan_id=loan, scheduled_item_key=item))
 
+    def scaled(amount):
+        if seller.season_percent:
+            amount = amount * seller.season_percent[d.month - 1] // 100
+        if growth_from and d >= growth_from:
+            amount = amount * seller.growth_percent // 100
+        return amount
+
     d = start
     held_total, released = 0, False
     while d <= end:
@@ -90,6 +99,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                 daily //= 4
             if stress_from and d >= stress_from:
                 daily = daily * STRESS_SALES_PERCENT // 100
+            daily = scaled(daily)
             for platform, percent in seller.channel_percent:
                 gross = daily * percent // 100
                 returns = booked(gross * (return_rate(d) if return_rate else seller.return_rate or BASE_RETURN_RATE))
@@ -107,7 +117,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                         s.net_cents * ADVANCE_PERCENT // 100)
             for day in sorted(k for k in advances if k <= d):
                 for amount in advances.pop(day):
-                    post(amount, ADVANCE_DESCRIPTION, "TRANSFER_IN")
+                    post(amount, seller.advance_label or ADVANCE_DESCRIPTION, "TRANSFER_IN")
             if hold and held_total and not released and d >= hold.release_on:
                 released = True
                 deposits[d].insert(0, UsdSettlement(**meta, settled_on=d, platform_code=hold.platform_code,
@@ -126,15 +136,16 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                 post(seller.weekly_sales_cents * STRESS_PROCEEDS_PERCENT // 100,
                      f"{STRESS_LENDERS[stress_loans % len(STRESS_LENDERS)]} loan proceeds", "TRANSFER_IN")
                 stress_loans += 1
-            post(-(seller.weekly_sales_cents * seller.inventory_percent // 500), f"{seller.supplier} inventory",
+            post(-scaled(seller.weekly_sales_cents * seller.inventory_percent // 500), f"{seller.supplier} inventory",
                  "TRANSFER_OUT")
             if d.weekday() == 4:
                 for i in range(stress_loans):
                     post(-(seller.weekly_sales_cents * STRESS_REPAYMENT_PERMILLE // 1000),
                          f"{STRESS_LENDERS[i % len(STRESS_LENDERS)]} repayment", "AUTO_DEBIT")
                 post(-(seller.weekly_sales_cents // 10), "Staff payroll", "TRANSFER_OUT")
-                if balance > seller.weekly_sales_cents * 2:
-                    post(seller.weekly_sales_cents * 2 - balance, "Owner withdrawal", "TRANSFER_OUT")
+                floor = seller.weekly_sales_cents * seller.owner_floor_percent // 100
+                if balance > floor:
+                    post(floor - balance, "Owner withdrawal", "TRANSFER_OUT")
             if installments and d in installments:
                 number, amount = installments[d]
                 if balance >= amount:

@@ -51,7 +51,7 @@ def classify(txn: Transaction | UsdTransaction) -> Category:
             ("AUTO_DEBIT", "loan repayment", Category.LOAN_REPAYMENT), ("AUTO_DEBIT", "insurance", Category.SOCIAL_INSURANCE),
             ("TRANSFER_OUT", "payroll", Category.PAYROLL), ("TRANSFER_OUT", "owner withdrawal", Category.OWNER_TRANSFER),
             ("TRANSFER_IN", "loan proceeds", Category.LOAN_PROCEEDS), ("TRANSFER_IN", "advance", Category.LOAN_PROCEEDS),
-            ("TRANSFER_IN", "settlement", Category.REVENUE),
+            ("TRANSFER_IN", "settlement", Category.REVENUE), ("TRANSFER_IN", "payout", Category.REVENUE),
         ):
             if code == txn.txn_type_code and keyword in txn.description.casefold():
                 return category

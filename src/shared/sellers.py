@@ -62,6 +62,21 @@ class UsdSeller:
     return_rate: Decimal | None = None  # None이면 기본 반품률(mockapis.sellerdata.usd.BASE_RETURN_RATE)
     inventory_percent: int = 50  # 영업일마다 주 매출의 이 비율 ÷ 5를 재고로 매입한다
     risk: Literal["stressed", "assigned"] | None = None
+    # 대안데이터 장면용 선택 레버. 기본값은 기존 장부를 그대로 만든다.
+    season_percent: tuple[int, ...] | None = None  # 1~12월 일 매출·재고 매입 배수(%)
+    owner_floor_percent: int = 200  # 금요일 사주 인출 후 남기는 잔고(주 매출 대비 %)
+    tax_declared_percent: int = 100  # 세무 신고액 = 월 정산 순액 × 이 비율 // 100
+    growth_days: int = 0  # 기준일 growth_days일 전부터 일 매출·재고 매입에 growth_percent를 곱한다
+    growth_percent: int = 100
+    offset_rise_days: int = 0  # 기준일 offset_rise_days일 전 이후 지급분에 offset_rise_rate를 상계한다
+    offset_rise_rate: Decimal = Decimal(0)
+    advance_label: str | None = None  # 선정산 입금 적요. None이면 mockapis.sellerdata.usd.ADVANCE_DESCRIPTION
+    market_months: int | None = None
+    cancel_rate: Decimal | None = None
+
+    def __post_init__(self):
+        if self.season_percent is not None and len(self.season_percent) != 12:
+            raise ValueError("season_percent must have 12 monthly values")
 
 
 USD_CHANNEL_NAMES = {"coupang": "Coupang", "naver_smart_store": "Naver Smart Store",

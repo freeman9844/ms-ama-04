@@ -8,6 +8,7 @@ labels(정답 분류)는 평가 하네스 전용이며 API로 노출하지 않�
 import random
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from decimal import Decimal
 from enum import StrEnum
 
 from shared.krcalendar import month_add
@@ -97,9 +98,15 @@ def generate_usd_case(applicant_id: str, as_of: date, seed: int) -> UsdCase:
     meta = USD_V1.model_dump()
     start = date(*month_add(as_of.year, as_of.month, -seller.history_months), 1)
     opening = 3 * seller.weekly_sales_cents
+    offsets = {}
+    if seller.offset_rise_days:
+        rise_from = as_of - timedelta(days=seller.offset_rise_days)
+        offsets["deduction_rate"] = lambda day: seller.offset_rise_rate if day >= rise_from else Decimal(0)
     books = simulate_usd(seller, applicant_id, start, as_of - timedelta(days=1), seed, opening,
                          stress_from=as_of - timedelta(days=STRESS_DAYS) if seller.risk == "stressed" else None,
-                         advance_from=as_of - timedelta(days=ASSIGNED_DAYS) if seller.risk == "assigned" else None)
+                         advance_from=as_of - timedelta(days=ASSIGNED_DAYS) if seller.risk == "assigned" else None,
+                         growth_from=as_of - timedelta(days=seller.growth_days) if seller.growth_days else None,
+                         **offsets)
     profile = UsdProfile(**meta, applicant_id=applicant_id, business_name=seller.business_name,
                          representative_name=seller.representative, industry=seller.industry, region=seller.region,
                          business_age_months=seller.business_age_months,
@@ -122,6 +129,7 @@ def generate_usd_case(applicant_id: str, as_of: date, seed: int) -> UsdCase:
         begin = date(*month_add(start.year, start.month, month), 1)
         end = date(*month_add(begin.year, begin.month, 1), 1)
         declared = sum(s.net_cents for s in books.settlements if begin <= s.settled_on < end)
+        declared = declared * seller.tax_declared_percent // 100
         filings.append(UsdTaxFiling(**meta, period_start=begin, period_end=end-timedelta(days=1),
                                     declared_revenue_cents=declared))
     return UsdCase(profile, opening, books.transactions, books.settlements, tuple(filings), market,

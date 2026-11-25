@@ -1,15 +1,21 @@
 import hashlib
 import json
-from datetime import date
+from dataclasses import replace
+from datetime import date, timedelta
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
 from agents import features
+from agents.classify import Category, classify
 from mockapis import demo
+from mockapis.sellerdata.usd import simulate_usd
+from mockapis.synth import generate_usd_case
 from policy.engine import explain
 from policy.rules import rules_for_version
+from shared.sellers import USD_SELLERS
 
 AS_OF = date(2026, 11, 24)
 E, R, I = "eligible", "refer", "ineligible"
@@ -75,3 +81,61 @@ def test_usd_underwriting_carries_settlement_features():
     assert 12 <= bakery.pg_cash_conversion_days <= 20 and bakery.pg_advance_suspected_count == 0
     assert bakery.pg_offset_rate_trend_pp in (0.0, None)
     assert underwrite_at("seller-mugshop-21", AS_OF).features.pg_advance_suspected_count > 0
+
+
+BASE = USD_SELLERS["seller-bakery-20"]
+
+
+def books(seller, **kw):
+    return simulate_usd(seller, "k", date(2026, 1, 1), date(2026, 3, 31), 7, 3 * seller.weekly_sales_cents, **kw)
+
+
+def test_default_levers_keep_books_identical():
+    assert books(replace(BASE)) == books(BASE)
+
+
+def test_season_scales_sales_by_month():
+    flat = books(BASE)
+    peaked = books(replace(BASE, season_percent=(200,) + (100,) * 11))
+    jan = lambda b: sum(o.gross_cents for o in b.orders if o.order_on.month == 1)
+    feb = lambda b: sum(o.gross_cents for o in b.orders if o.order_on.month == 2)
+    assert jan(peaked) >= 1.95 * jan(flat) and feb(peaked) == feb(flat)
+    with pytest.raises(ValueError):
+        replace(BASE, season_percent=(100,) * 11)
+
+
+def test_owner_floor_lowers_friday_balance():
+    low = books(replace(BASE, owner_floor_percent=50))
+    fridays = [t.balance_after_cents for t in low.transactions if t.description == "Owner withdrawal"]
+    assert fridays and max(fridays) == BASE.weekly_sales_cents // 2
+
+
+def test_growth_from_scales_sales_after_the_date():
+    flat = books(BASE)
+    grown = books(replace(BASE, growth_percent=150), growth_from=date(2026, 2, 1))
+    gross = lambda b, month: sum(o.gross_cents for o in b.orders if o.order_on.month == month)
+    assert gross(grown, 1) == gross(flat, 1) and gross(grown, 3) >= 1.45 * gross(flat, 3)
+
+
+def test_advance_label_books_advances_as_revenue_without_platform():
+    b = simulate_usd(replace(BASE, advance_label="Marketplace payout"), "k", date(2026, 1, 1), date(2026, 3, 31),
+                     7, 0, advance_from=date(2026, 2, 1))
+    adv = [t for t in b.transactions if t.description == "Marketplace payout"]
+    assert adv and all(t.platform_code is None and classify(t) is Category.REVENUE for t in adv)
+
+
+def test_tax_declared_percent_and_offset_rise_in_generated_case(monkeypatch):
+    monkeypatch.setitem(USD_SELLERS, "seller-bakery-20",
+                        replace(BASE, tax_declared_percent=40, offset_rise_days=90, offset_rise_rate=Decimal(".08")))
+    case = generate_usd_case("seller-bakery-20", AS_OF, 7)
+    assert case.tax_filings
+    for f in case.tax_filings:
+        net = sum(s.net_cents for s in case.pg_settlements
+                  if f.period_start <= s.settled_on <= f.period_end)
+        assert f.declared_revenue_cents == net * 40 // 100
+    cutoff = AS_OF - timedelta(days=90)
+    late = [s for s in case.pg_settlements if s.settled_on >= cutoff and s.gross_cents]
+    early = [s for s in case.pg_settlements if s.settled_on < cutoff]
+    assert late and early
+    assert all(abs(s.deduction_cents / s.gross_cents - 0.08) < 0.005 for s in late)
+    assert all(s.deduction_cents == 0 for s in early)
