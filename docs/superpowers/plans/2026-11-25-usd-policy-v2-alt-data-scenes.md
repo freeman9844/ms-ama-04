@@ -724,6 +724,12 @@ git commit -m "feat: wire USD-only scene sellers through mock API, console and p
 
   정책을 마지막에 올리는 이유는 Review Focus 1이다.
 
+  배포 창 주의(최종 리뷰 F1):
+  - 배포 창 동안에는 USD 신청을 넣지 않는다. 데모 신청은 네 구성요소를 모두 올린 뒤에만 넣는다.
+  - 오케스트레이터 → 콘솔 → 모의 API → 정책을 사이를 두지 않고 연이어 배포하고, `ops smoke` 같은 확인은 넷이 모두 끝난 뒤에 한다.
+  - 새 오케스트레이터는 `pg_cash_conversion_days`·`pg_advance_suspected_count`·`pg_offset_rate_trend_pp`를 항상 보낸다. 옛 정책(`UsdCashFlowFeatures`, `extra="forbid"`)은 이를 422로 거절해 오케스트레이터가 `policy_unavailable`로 fail-closed 한다. 반대로 옛 오케스트레이터는 `rules_version "usd-v2"`와 `applied_substitutions`를 거절한다. 그래서 어느 쪽 순서든 두 구성요소가 어긋난 동안 들어온 신청은 실패한다.
+  - 롤백은 오케스트레이터와 정책을 한 쌍으로 함께 되돌린다. 하나만 되돌리면 같은 불일치가 다시 생긴다.
+
 - [ ] **Step 3: 운영 확인.** 정책 `/healthz`가 응답하는지 본다. 콘솔에서 기존 `usd-v1` 판정 하나를 열어 추적과 "Cash flow only" 문구가 그대로인지 본다.
 
 - [ ] **Step 4: 장면 신청.**
