@@ -162,6 +162,37 @@
 {% else %}<p class="pii">{{ _("가명 표시 중.") }}</p>{% endif %}
 
 {% if v.weeks %}
+{% if v.track %}{% set tk = v.track %}
+<section class="card">
+<h2>{{ _("감시 비교") }}</h2>
+<p><small>{{ _("은행만 트랙은 탐지기 기준, 실제 경보는 정산·마켓 트랙과 조사 에이전트 판단") }}</small></p>
+{% if tk.lead_weeks and tk.lead_weeks > 0 %}<p class="ok">{{ _("정산·마켓 데이터가 %(n)s주 먼저 감지", n=tk.lead_weeks) }}</p>{% endif %}
+{% if tk.bank_first_week is none and tk.full_first_week is not none %}<p class="error">{{ _("은행만: 미감지") }}</p>{% endif %}
+{% if tk.explained_weeks and tk.explained_weeks > 0 %}<p>{{ _("설명된 입금 감소 %(n)s주", n=tk.explained_weeks) }}</p>{% endif %}
+<table>
+  <thead><tr><th>{{ _("주차") }}</th>{% for t in tk.timeline %}<th>{{ t.week }}</th>{% endfor %}</tr></thead>
+  <tbody>
+    <tr><th>{{ _("은행만") }}</th>{% for t in tk.timeline %}<td>{{ "●" if t.bank == "trigger" else "○" if t.bank == "bank_only" else "" }}</td>{% endfor %}</tr>
+    <tr><th>{{ _("정산·마켓") }}</th>{% for t in tk.timeline %}<td>{{ "●" if t.full == "trigger" else "✓" if t.full == "explained" else "" }}</td>{% endfor %}</tr>
+  </tbody>
+</table>
+<p><small>{{ _("● 트리거 ○ 은행만 트리거 ✓ 정산 예정표로 설명됨") }}</small></p>
+</section>
+{% endif %}
+{% if v.basis_cards %}
+<section class="card">
+<h2>{{ _("승인 근거") }}</h2>
+<ul class="claims">
+{% for c in v.basis_cards %}
+  <li><strong>{{ c.code }}</strong> {{ c.code|basis_label }} <small>({{ c.metric }})</small>
+    <div><span class="chip">{{ c.approved }} → {{ c.floor }}</span>{% if c.latest is not none %}<span class="chip{% if c.breach_week %} warn{% endif %}">{{ c.latest }}</span>{% endif %}
+    {% if c.breach_week %}<span class="chip warn">{{ _("훼손(%(n)s주차)", n=c.breach_week) }}</span>
+    {% elif c.latest is not none and c.status == "ok" %}<span class="chip ok">{{ pgettext("basis", "유지") }}</span>
+    {% else %}<span class="chip">{{ _("판단 불가") }}</span>{% endif %}</div></li>
+{% endfor %}
+</ul>
+</section>
+{% endif %}
 <section class="card">
 <h2>{{ _("주간 흐름과 탐지기") }}</h2>
 {% if ui.chart %}
@@ -179,7 +210,7 @@
   {% set ratio = r.revenue_vs_expected|default(r.revenue_ratio) %}
   <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue_cents|usd_cents if usd else r.revenue|krw }}</td><td>{{ r.expected_revenue_cents|usd_cents if usd else r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ ratio if ratio is number else "-" }}</td>
   <td>{{ r.buffer_days if r.buffer_days is number else "-" }}</td><td>{{ r.projected_min_balance_cents|usd_cents if usd else r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count if r.high_cost_count is number else "-" }}</td>
-  <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}</td>
+  <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}{% if w.explained %}<span class="chip ok">{{ _("설명됨") }}</span>{% endif %}</td>
   <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% for cid in w.case_ids or ([w.case_id] if w.case_id else []) %} · <a href="#{{ cid }}">{{ _("미납") }}</a>{% endfor %}</td>
 </tr>
 {% endfor %}

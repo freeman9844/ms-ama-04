@@ -13,6 +13,7 @@ from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
 from agents.pretranslate import load_case_raw
 from agents.repayment import item_amount, item_key
+from agents.usd_monitoring import track_summary
 from console import i18n
 from console.i18n import _
 from console.views import RawData, RawStore, _map_strings, _text_functions
@@ -45,8 +46,15 @@ TRIGGER_LABELS = {
     "return_spike": "반품 급증",
     "cost_surge": "공제 증가",
     "due_shortfall": "상환일 잔고 부족",
+    "basis_breach": "승인 근거 훼손",
 }
 REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "partial": "부분납", "missed": "미납"}
+# 승인 근거 코드(USD 정산·마켓 신호) → 승인 당시 근거 설명.
+BASIS_LABELS = {
+    "S003": "빠르고 정확한 정산",
+    "S005": "정산 원장으로 매출 실재 확인",
+    "S004": "계절 매출 패턴",
+}
 # 재생을 멈춘 대기 항목(2026-11-11). 이 순서대로 멈춤 배너에 보인다(journey.holds.HOLD_ORDER와 같은 순서).
 HOLD_LABELS = {
     "collections_proposal": "추심 승인 대기",
@@ -105,6 +113,7 @@ MONITORING_FILTERS = {
     "offer_label": OFFER_LABELS,
     "plan_change_label": PLAN_CHANGE_LABELS,
     "borrower_plan_label": BORROWER_PLAN_LABELS,
+    "basis_label": BASIS_LABELS,
 }
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
 CAUSE_LABELS = {
@@ -113,6 +122,7 @@ CAUSE_LABELS = {
     "return_spike": "반품 급증",
     "cost_surge": "비용 증가",
     "high_cost_borrowing": "고금리 차입",
+    "settlement_assigned": "정산 양도",
 }
 NO_CAUSE_LABEL = "—"
 NO_LEDGER_LABEL = "정산 원장 없음"
@@ -231,9 +241,46 @@ def loan_view(
         "pii": pii,
         "ledger_rows": ledger_rows,
         "ledger_note": ledger_note,
+        "track": _track_view(weeks),
+        "basis_cards": _basis_cards(loan, weeks),
         **_plan_view(loan.get("repayment") or {}),
         "holds": sorted(mon.get("holds") or (), key=lambda h: list(HOLD_LABELS).index(h) if h in HOLD_LABELS else 99),
     }
+
+
+def _track_view(weeks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """USD 두 트랙(은행만·정산/마켓) 비교. 트랙 키가 없는 옛·KRW 재생은 None."""
+    summary = track_summary(weeks)
+    if summary is None:
+        return None
+    timeline = []
+    for w in weeks:
+        full, bank = w.get("triggers"), w.get("bank_only_triggers")
+        timeline.append({
+            "week": w["week"],
+            "bank": "trigger" if bank and full else "bank_only" if bank else "",
+            "full": "trigger" if full else "explained" if w.get("explained") else "",
+        })
+    return {**summary, "timeline": timeline}
+
+
+def _basis_cards(loan: Mapping[str, Any], weeks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """승인 근거별 승인값·하한과 최근 값. 근거가 기록되지 않은 대출은 빈 목록."""
+    cards = []
+    for item in loan.get("approval_basis") or ():
+        code = item["code"]
+        entries = [(w["week"], e) for w in weeks for e in w.get("basis") or () if e.get("code") == code]
+        last = entries[-1][1] if entries else None
+        cards.append({
+            "code": code,
+            "metric": item.get("metric"),
+            "approved": item.get("approved"),
+            "floor": item.get("floor"),
+            "latest": last.get("value") if last else None,
+            "status": last.get("status") if last else None,
+            "breach_week": next((n for n, e in entries if e.get("status") == "breach"), None),
+        })
+    return cards
 
 
 def installment_label(item: Mapping[str, Any]) -> str:

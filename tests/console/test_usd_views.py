@@ -493,6 +493,48 @@ def test_usd_loan_repayment_and_chart_are_native():
     assert "₩" not in html
 
 
+def _track_week(n, full, bank, explained, basis=()):
+    return {"week": n, "row": {"week": n, "revenue_cents": 404123, "buffer_days": 7}, "triggers": full,
+            "bank_only_triggers": bank, "explained": explained, "basis": list(basis)}
+
+
+def test_usd_loan_shows_track_comparison_and_basis():
+    deps = fixtures.build_deps()
+    breach = {"code": "S003", "metric": "settlement_on_time_rate", "approved": 0.99, "floor": 0.95,
+              "value": 0.81, "status": "breach"}
+    loan = dict(USD, id="usd-track", application_id="usd-track", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                approval_basis=[{"code": "S003", "metric": "settlement_on_time_rate", "approved": 0.99, "floor": 0.95}],
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": 4, "weeks": [
+                    _track_week(1, [], [], []), _track_week(2, [], [], []),
+                    _track_week(3, ["basis_breach"], [], [], [breach]),
+                    _track_week(4, [], ["inflow_drop"], [{"trigger": "inflow_drop"}])]})
+    alert = {"id": "ew-3", "alert_id": "ew-3", "loan_id": "usd-track", "replay_id": "rp", "week": 3,
+             "severity": "high", "recommended_action": "check", "status": "open", "summary": "s",
+             "primary_cause": "settlement_assigned", "models": {}}
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [alert])
+    page = TestClient(create_app(deps)).get("/loans/usd-track?lang=en").text
+    for text in ("Monitoring comparison", "Alt data detected 1 week(s) earlier", "Approval basis",
+                 "Broken (week 3)", "0.99", "0.81", "Settlement assignment", "Approval basis broken",
+                 "Fast, accurate settlements", "Explained"):
+        assert text in page
+
+
+def test_old_usd_replay_hides_track_cards():
+    deps = fixtures.build_deps()
+    loan = dict(USD, id="usd-old", application_id="usd-old", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                monitoring={"status": "completed", "processed_week": 1, "weeks": [
+                    {"week": 1, "row": {"week": 1, "revenue_cents": 404123, "buffer_days": 7},
+                     "triggers": ["inflow_drop"], "new_triggers": ["inflow_drop"]}]})
+    deps.monitoring.loans["usd-old"] = loan
+    page = TestClient(create_app(deps)).get("/loans/usd-old?lang=en").text
+    assert all(s not in page for s in ("Monitoring comparison", "Approval basis", "Explained"))
+    assert page.count('class="chip') >= 1
+
+
 def test_usd_forecast_shows_recorded_due_day_cashflows_not_krw_assumptions():
     deps = fixtures.build_deps()
     loan = dict(USD, id="risk", application_id="risk", applicant_id=SELLER, amount_cents=500000,
