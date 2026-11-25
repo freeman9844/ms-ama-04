@@ -23,7 +23,7 @@ from agents.monitoring import Baseline, categorize, detect, settlement_for, week
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
 from mockapis.postloan import FlowScenario, LoanTerms, generate_postloan
-from shared.contracts import AlertCause, EarlyWarningAlert
+from shared.contracts import USD_V1, AlertCause, EarlyWarningAlert
 from shared.pseudonymize import find_pii
 
 AS_OF = date(2026, 11, 2)
@@ -505,3 +505,28 @@ def test_raise_alert_schema_requires_check_action():
 
 def test_old_alert_without_check_action_validates():
     assert EarlyWarningAlert.model_validate(OLD_ALERT_DOC).check_action is None
+
+
+def usd_week_row(week):
+    return {"week": week, "revenue_vs_expected": 0.5}
+
+
+def usd_ctx(rows, triggers=("inflow_drop",)):
+    return EwContext("alert", "loan", rows[-1]["week"], date(2026, 11, 24), "retail", list(triggers), rows, {}, [], {},
+                     str, dict(USD_V1.model_dump(), amount_cents=500000))
+
+
+@pytest.mark.parametrize("codes,metric,kind", [
+    (["S003"], "recon_ratio", "settlement_assigned"), (["S004"], "orders_vs_prior_year", "inflow_drop")])
+def test_fallback_basis_breach_cites_breached_metric(codes, metric, kind):
+    row = {**usd_week_row(week=3), "recon_ratio": 0.81, "orders_vs_prior_year": 0.6, "basis_breached": codes}
+    ctx = usd_ctx(rows=[row], triggers=["basis_breach"])
+    alert = fallback_alert(ctx, "agent_unavailable")
+    sig = next(s for s in alert.signals if s.kind.value == kind)
+    assert sig.metric_ids == (f"W:3:{metric}",) and f"W:3:{metric}" in ctx.catalog
+
+
+def test_usd_catalog_includes_new_week_fields():
+    row = {**usd_week_row(week=2), "expected_orders_cents": 1000, "unreconciled_payout_cents": 0, "recon_ratio": 1.0}
+    ctx = usd_ctx(rows=[row])
+    assert {"W:2:expected_orders_cents", "W:2:unreconciled_payout_cents", "W:2:recon_ratio"} <= ctx.catalog.keys()

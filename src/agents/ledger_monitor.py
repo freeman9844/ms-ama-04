@@ -53,6 +53,7 @@ CAUSE_FIELDS: dict[AlertCause, tuple[str, ...]] = {
     AlertCause.RETURN_SPIKE: ("returns", "return_rate"),
     AlertCause.COST_SURGE: ("deductions", "deduction_rate"),
     AlertCause.HIGH_COST_BORROWING: ("high_cost_lender", "high_cost_count", "loan_proceeds"),
+    AlertCause.SETTLEMENT_ASSIGNED: ("recon_ratio", "unreconciled_payout"),
 }
 PLATFORM_FIELDS = ("order_gross", "returns", "held", "released", "deductions", "settle_net")
 

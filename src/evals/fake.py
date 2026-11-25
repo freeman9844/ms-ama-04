@@ -28,6 +28,7 @@ _EW_SIGNAL_KIND = {
     "return_spike": "return_spike",
     "cost_surge": "cost_surge",
     "high_cost_borrowing": "loan_stacking",
+    "settlement_assigned": "settlement_assigned",
 }
 
 

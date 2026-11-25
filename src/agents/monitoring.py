@@ -73,6 +73,13 @@ WEEK_FIELDS = (
     "deductions",
     "deduction_rate",
     "settle_net",
+    # 대체 데이터 근거 지표(USD 행만 채운다. KRW 행에는 없어 카탈로그에 안 생긴다)
+    "settle_coverage",
+    "expected_orders",
+    "orders_per_day_vs_expected",
+    "orders_vs_prior_year",
+    "recon_ratio",
+    "unreconciled_payout",
 )
 FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date", "next_due_on", "due_balance")
 ADVANCE_KEYWORD = "선정산"  # 정산 양도 선지급 입금 적요. 매출도 신규 차입도 아니다(스펙 §5.5)

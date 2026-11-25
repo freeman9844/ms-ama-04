@@ -475,6 +475,7 @@ class SignalKind(StrEnum):
     SETTLEMENT_HOLD = "settlement_hold"
     RETURN_SPIKE = "return_spike"
     COST_SURGE = "cost_surge"
+    SETTLEMENT_ASSIGNED = "settlement_assigned"
     PAYROLL_DELAY = "payroll_delay"
     SUPPLIER_LOSS = "supplier_loss"
     TAX_ARREARS = "tax_arrears"
@@ -489,13 +490,14 @@ class RecommendedAction(StrEnum):
 
 
 class AlertCause(StrEnum):
-    """조기경보 원인(2026-11-11). 라벨: 매출 부진, 정산 보류, 반품 급증, 비용 증가, 고금리 차입."""
+    """조기경보 원인(2026-11-11). 라벨: 매출 부진, 정산 보류, 반품 급증, 비용 증가, 고금리 차입, 정산 양도."""
 
     SALES_SLUMP = "sales_slump"
     SETTLEMENT_HOLD = "settlement_hold"
     RETURN_SPIKE = "return_spike"
     COST_SURGE = "cost_surge"
     HIGH_COST_BORROWING = "high_cost_borrowing"
+    SETTLEMENT_ASSIGNED = "settlement_assigned"
 
 
 class AlertSignal(Claim):

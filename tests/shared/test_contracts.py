@@ -356,7 +356,7 @@ def test_early_warning_alert_round_trip_and_invariants():
 
 def test_alert_cause_values():
     assert [c.value for c in AlertCause] == [
-        "sales_slump", "settlement_hold", "return_spike", "cost_surge", "high_cost_borrowing"]
+        "sales_slump", "settlement_hold", "return_spike", "cost_surge", "high_cost_borrowing", "settlement_assigned"]
 
 
 def test_ledger_signal_kinds_accepted():
