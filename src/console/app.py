@@ -82,7 +82,7 @@ from console.privacy import DEMO_ACTIONS, LABEL_FILTERS, PrivacyStore
 from console.statuses import STATUS_LABELS, TERMINAL
 from console import translate
 from console.translate import MachineTranslation, PageTexts, catalog, data_label, mt_filters, page_scope, validate_texts
-from console.views import DECIDABLE, RawStore, case_masker, decision_for_display, detail_view, load_raw
+from console.views import DECIDABLE, RawStore, case_masker, decision_for_display, detail_view, load_raw, reason_text
 from journey.models import (
     CONSENT_PURPOSE,
     CONSENT_TTL_DAYS,
@@ -108,7 +108,7 @@ from shared.opinions import archived_reply, opinion_state, published_opinion
 from shared.pseudonymize import Pseudonymizer
 from shared.product_context import product_of
 from shared.money import format_usd, parse_usd_cents
-from shared.sellers import DEMO_SELLERS, USD_CHANNEL_NAMES, USD_SELLERS, seller_label, seller_name
+from shared.sellers import DEMO_SELLERS, USD_CHANNEL_NAMES, USD_ONLY_SELLER_IDS, USD_SELLERS, seller_label, seller_name
 from shared.contracts import USD_V1
 
 HERE = Path(__file__).parent
@@ -127,7 +127,7 @@ mt_log = logging.getLogger("console.translate")
 LIST_LIMIT = 50
 # 홈 신청 목록 건수(테스트 신청 제외). 홈 통계는 건수 제한 없이 모든 신청을 집계한다.
 HOME_LIST_LIMIT = 20
-DEMO_APPLICANTS = tuple(s.applicant_id for s in DEMO_SELLERS)
+DEMO_APPLICANTS = (*(s.applicant_id for s in DEMO_SELLERS), *USD_ONLY_SELLER_IDS)
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
 # 신청 상세(/applications/{id})의 모든 자동 새로 고침 주기.
 DETAIL_REFRESH_SECONDS = 10
@@ -262,6 +262,7 @@ def _templates() -> Environment:
     env.filters["krw"] = _krw
     env.filters["usd_cents"] = display_usd
     env.filters["usd_tick"] = usd_tick
+    env.globals["reason_text"] = reason_text
     env.filters["policy_cents_ids"] = policy_cents_ids
     env.filters["usd_input"] = lambda cents: format_usd(cents)[1:].replace(",", "").removesuffix(".00") if type(cents) is int else ""
     env.filters["usd_seller"] = lambda s: USD_SELLERS[s].business_name if s in USD_SELLERS else s
@@ -276,7 +277,8 @@ def _templates() -> Environment:
     env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
     env.filters["seller_label"] = lambda s: data_label(seller_label(s))
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
-    env.filters["seller_initial"] = lambda s: str(translate.data(seller_name(s)) or s)[:1]
+    env.filters["seller_initial"] = lambda s: str(translate.data(seller_name(s) or (
+        USD_SELLERS[s].business_name if s in USD_SELLERS else None)) or s)[:1]
     env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
     env.filters["opinion_state"] = opinion_state
     env.filters["archived_reply"] = archived_reply
@@ -1063,7 +1065,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def borrower_index(request: Request) -> HTMLResponse:
         user = customer(request)
         privacy()
-        return render("customer_select.html", user, prefix="/legacy" if request.url.path.startswith("/legacy/") else "")
+        legacy = request.url.path.startswith("/legacy/")
+        applicants = tuple(a for a in DEMO_APPLICANTS if a not in USD_ONLY_SELLER_IDS) if legacy else DEMO_APPLICANTS
+        return render("customer_select.html", user, prefix="/legacy" if legacy else "", applicants=applicants)
 
     @app.get("/legacy/borrower/{applicant_id}", response_class=HTMLResponse)
     @app.get("/borrower/{applicant_id}", response_class=HTMLResponse)

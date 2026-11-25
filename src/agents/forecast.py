@@ -188,24 +188,36 @@ def summarize(projection: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"projected_min_balance": low["balance"], "projected_min_date": low["date"], "shortfall_date": short}
 
 
-def project_usd(visible: Sequence[UsdTransaction], start: date, hi: date, dues: Mapping[date, int]) -> dict[str, Any]:
-    """Forecast ordinary cash flows; synthetic owner withdrawals sweep only surplus funds."""
+def project_usd(visible: Sequence[UsdTransaction], start: date, hi: date, dues: Mapping[date, int],
+                scheduled: Mapping[str, tuple[date, Mapping[date, int]]] | None = None) -> dict[str, Any]:
+    """Forecast ordinary cash flows; synthetic owner withdrawals sweep only surplus funds.
+
+    `scheduled` maps a platform to (last known day, scheduled net payout by day). Through that day the platform's
+    payouts come from the schedule; after it, from the platform's own trailing business-day average, and its
+    PG_SETTLE deposits leave the general trailing average."""
     lo = max(start, hi - timedelta(days=HORIZON_DAYS - 1))
     days = sum(is_business_day(lo + timedelta(days=i)) for i in range((hi - lo).days + 1))
     ordinary, sweep_floor = 0, {}
+    by_platform: dict[str, int] = defaultdict(int)
     for t in visible:
         if not lo <= t.booked_on <= hi or t.loan_id:
             continue
         if classify(t) == Category.OWNER_TRANSFER:
             sweep_floor[t.booked_on.weekday()] = t.balance_after_cents
+        elif scheduled and t.txn_type_code == "PG_SETTLE" and t.platform_code in scheduled:
+            by_platform[t.platform_code] += t.amount_cents
         else:
             ordinary += t.amount_cents
     daily = ordinary // max(days, 1)
+    platform_daily = {p: by_platform[p] // max(days, 1) for p in scheduled or ()}
     balance = visible[-1].balance_after_cents
     path = []
     for n in range(1, HORIZON_DAYS + 1):
         d = hi + timedelta(days=n)
         before = balance + (daily if is_business_day(d) else 0)
+        if is_business_day(d):
+            for p, (known_until, amounts) in (scheduled or {}).items():
+                before += amounts.get(d, 0) if d <= known_until else platform_daily[p]
         if is_business_day(d) and d.weekday() in sweep_floor:
             before = min(before, sweep_floor[d.weekday()])
         balance = before - dues.get(d, 0)

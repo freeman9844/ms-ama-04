@@ -62,6 +62,21 @@ class UsdSeller:
     return_rate: Decimal | None = None  # None이면 기본 반품률(mockapis.sellerdata.usd.BASE_RETURN_RATE)
     inventory_percent: int = 50  # 영업일마다 주 매출의 이 비율 ÷ 5를 재고로 매입한다
     risk: Literal["stressed", "assigned"] | None = None
+    # 대안데이터 장면용 선택 레버. 기본값은 기존 장부를 그대로 만든다.
+    season_percent: tuple[int, ...] | None = None  # 1~12월 일 매출·재고 매입 배수(%)
+    owner_floor_percent: int = 200  # 금요일 사주 인출 후 남기는 잔고(주 매출 대비 %)
+    tax_declared_percent: int = 100  # 세무 신고액 = 월 정산 순액 × 이 비율 // 100
+    growth_days: int = 0  # 기준일 growth_days일 전부터 일 매출·재고 매입에 growth_percent를 곱한다
+    growth_percent: int = 100
+    offset_rise_days: int = 0  # 기준일 offset_rise_days일 전 이후 지급분에 offset_rise_rate를 상계한다
+    offset_rise_rate: Decimal = Decimal(0)
+    advance_label: str | None = None  # 선정산 입금 적요. None이면 mockapis.sellerdata.usd.ADVANCE_DESCRIPTION
+    market_months: int | None = None
+    cancel_rate: Decimal | None = None
+
+    def __post_init__(self):
+        if self.season_percent is not None and len(self.season_percent) != 12:
+            raise ValueError("season_percent must have 12 monthly values")
 
 
 USD_CHANNEL_NAMES = {"coupang": "Coupang", "naver_smart_store": "Naver Smart Store",
@@ -119,12 +134,38 @@ USD_SELLERS = {
     "seller-mugshop-21": UsdSeller("Yeonnam Mug Shop", "Byeon Jaemin", "Seoul", "Home and living",
                                    "Hanyang Ceramics", 325_000, _GENERAL, risk="assigned",
                                    inventory_percent=65),
+    # USD-only scene sellers (no KRW persona). Each one isolates one alt-data policy scene.
+    "seller-snackbox-22": UsdSeller("Mapo Snack Box", "Han Seoyeon", "Seoul", "Food", "Mapo Confectionery",
+                                    300_000, (("naver_smart_store", 60), ("own_store", 40)),
+                                    owner_floor_percent=40),
+    "seller-campgear-23": UsdSeller("Gapyeong Camp Gear", "Kwon Dohyun", "Gapyeong", "Sports",
+                                    "Outdoor Korea", 380_000, _GENERAL,
+                                    season_percent=(20, 20, 50, 100, 120, 90, 60, 60, 200, 280, 250, 60),
+                                    market_months=40),
+    "seller-teahouse-24": UsdSeller("Boseong Tea House", "Lim Eunji", "Boseong", "Food", "Boseong Green Tea",
+                                    300_000, _GENERAL, tax_declared_percent=40),
+    "seller-phonecase-25": UsdSeller("Sinchon Phone Case", "Yoo Junho", "Seoul", "Electronics", "Case Factory",
+                                     200_000, _TWO_MARKETS, 4, business_age_months=8, rating=4.3,
+                                     market_months=7),
+    "seller-toyland-26": UsdSeller("Bucheon Toy Land", "Cha Minji", "Bucheon", "Toys", "Toy Korea",
+                                   350_000, _GENERAL, cancel_rate=Decimal(".13")),
+    "seller-vitamin-27": UsdSeller("Ilsan Vitamin House", "Baek Seungwoo", "Goyang", "Health", "Nature Health",
+                                   360_000, _TWO_MARKETS, risk="assigned", advance_label="Marketplace payout"),
+    "seller-golfgear-28": UsdSeller("Yongin Golf Gear", "Nam Kyungho", "Yongin", "Sports", "Golf Pro Supply",
+                                    520_000, _RETAIL, offset_rise_days=90, offset_rise_rate=Decimal(".08")),
+    "seller-popup-29": UsdSeller("Seongsu Popup Goods", "Jo Yerin", "Seoul", "Character goods", "Character Lab",
+                                 120_000, (("coupang", 70), ("naver_smart_store", 30)), inventory_percent=30,
+                                 growth_days=40, growth_percent=300),
 }
+USD_ONLY_SELLER_IDS = ("seller-snackbox-22", "seller-campgear-23", "seller-teahouse-24", "seller-phonecase-25",
+                       "seller-toyland-26", "seller-vitamin-27", "seller-golfgear-28", "seller-popup-29")
 
 
 def seller_label(applicant_id: str) -> str:
     seller = SELLER_BY_ID.get(applicant_id)
-    return seller.label if seller else applicant_id
+    if seller:
+        return seller.label
+    return USD_SELLERS[applicant_id].business_name if applicant_id in USD_SELLERS else applicant_id
 
 
 # 업종별 부하 셀러 상호(업종당 8개: 부하 격자 48건 / 업종 6개).

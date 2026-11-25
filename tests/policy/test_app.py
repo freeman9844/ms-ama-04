@@ -8,11 +8,17 @@ from fastapi.testclient import TestClient
 from policy.app import create_app
 from policy.rules import DEFAULT_RULES_PATH
 from shared.contracts import PolicyDecision
+from tests.policy.conftest import usd_features_payload
 
 
 @pytest.fixture
 def client(rules):
     return TestClient(create_app(rules))
+
+
+def test_usd_application_is_judged_with_current_usd_rules(client):
+    body = client.post("/v1/decisions", json=usd_features_payload()).json()
+    assert body["rules_version"] == "usd-v2" and "applied_substitutions" in body
 
 
 def test_healthz_reports_rules_version(client):

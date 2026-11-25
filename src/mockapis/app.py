@@ -127,7 +127,9 @@ def create_app(
     @app.post("/consents", status_code=201)
     def create_consent(req: ConsentRequest | UsdConsentRequest) -> ConsentResponse | UsdConsentResponse:
         usd = isinstance(req, UsdConsentRequest)
-        if req.applicant_id not in cases or usd and (not isinstance(flows, FlowStore) or not flows.usd_case(req.applicant_id)):
+        known = (isinstance(flows, FlowStore) and flows.usd_case(req.applicant_id) is not None if usd
+                 else req.applicant_id in cases)
+        if not known:
             raise _error(404, "unknown_applicant")
         grant = registry.grant(req.applicant_id, req.scopes, req.purpose, timedelta(days=req.ttl_days), clock(),
                                USD_V1 if usd else None)
@@ -193,7 +195,8 @@ def create_app(
                              settlements=tuple(s for s in flow.pg_settlements
                                                if (not start or start <= s.settled_on) and (not end or s.settled_on <= end)),
                              orders=tuple(o for o in flow.orders
-                                          if (not start or start <= o.order_on) and (not end or o.order_on <= end)))
+                                          if (not start or start <= o.order_on) and (not end or o.order_on <= end)),
+                             prior_year_orders=flow.prior_year_orders)
         pg = flow.pg_flow()
         return PgFlow(
             settlements=tuple(

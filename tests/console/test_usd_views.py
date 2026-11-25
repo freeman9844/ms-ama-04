@@ -493,6 +493,90 @@ def test_usd_loan_repayment_and_chart_are_native():
     assert "₩" not in html
 
 
+def _track_week(n, full, bank, explained, basis=()):
+    return {"week": n, "row": {"week": n, "revenue_cents": 404123, "buffer_days": 7}, "triggers": full,
+            "bank_only_triggers": bank, "explained": explained, "basis": list(basis)}
+
+
+def test_usd_loan_shows_track_comparison_and_basis():
+    deps = fixtures.build_deps()
+    breach = {"code": "S003", "metric": "recon_ratio", "approved": 0.99, "floor": 0.95,
+              "value": 0.81, "status": "breach"}
+    loan = dict(USD, id="usd-track", application_id="usd-track", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                approval_basis=[{"code": "S003", "metric": "recon_ratio", "approved": 0.99, "floor": 0.95}],
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": 4, "weeks": [
+                    _track_week(1, [], [], []), _track_week(2, [], [], []),
+                    _track_week(3, ["basis_breach"], [], [], [breach]),
+                    _track_week(4, [], ["inflow_drop"], [{"trigger": "inflow_drop"}])]})
+    alert = {"id": "ew-3", "alert_id": "ew-3", "loan_id": "usd-track", "replay_id": "rp", "week": 3,
+             "severity": "high", "recommended_action": "check", "status": "open", "summary": "s",
+             "primary_cause": "settlement_assigned", "models": {}}
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [alert])
+    page = TestClient(create_app(deps)).get("/loans/usd-track?lang=en").text
+    for text in ("Monitoring comparison", "Alt data detected 1 week(s) earlier", "Approval basis",
+                 "Broken (week 3)", "Approved 0.99", "Floor 0.95", "Week 3 0.81", "Reconciliation ratio",
+                 "Settlement assignment", "Approval basis broken", "Fast, accurate settlements", "Explained"):
+        assert text in page
+    assert "settlement_on_time_rate" not in page and "recon_ratio" not in page
+
+
+def test_usd_loan_s004_basis_has_no_approved_value_and_never_renders_none():
+    deps = fixtures.build_deps()
+    ok = {"code": "S004", "metric": "orders_vs_prior_year", "approved": None, "floor": 0.75, "value": 0.9,
+          "status": "ok"}
+    loan = dict(USD, id="usd-s004", application_id="usd-s004", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                approval_basis=[{"code": "S004", "metric": "orders_vs_prior_year", "approved": None, "floor": 0.75}],
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": 2, "weeks": [
+                    _track_week(1, [], [], [], [dict(ok, value=0.95)]), _track_week(2, [], [], [], [ok])]})
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [])
+    page = TestClient(create_app(deps)).get("/loans/usd-s004?lang=en").text
+    for text in ("vs. same period last year", "Orders vs last year", "Floor 0.75", "Week 2 0.9", "Holding"):
+        assert text in page
+    assert "None" not in page and "Approved" not in page
+
+
+def _usd_track_page(weeks, loan_id):
+    deps = fixtures.build_deps()
+    loan = dict(USD, id=loan_id, application_id=loan_id, applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": len(weeks), "weeks": weeks})
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [])
+    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang=en").text
+
+
+def test_track_view_timeline_cells():
+    page = _usd_track_page([_track_week(1, [], ["inflow_drop"], []), _track_week(2, [], [], [{"trigger": "inflow_drop"}]),
+                            _track_week(3, ["inflow_drop"], ["inflow_drop"], [])], "usd-tl")
+    rows = re.findall(r"<tr><th>(Bank only|Settlement \+ marketplace)</th>((?:<td>.*?</td>)+)</tr>", page)
+    cells = {name: re.findall(r"<td>(.*?)</td>", tds) for name, tds in rows}
+    assert cells == {"Bank only": ["○", "", "●"], "Settlement + marketplace": ["", "✓", "●"]}
+    assert "Bank only: not detected" not in page
+
+
+def test_track_view_says_bank_only_did_not_detect():
+    page = _usd_track_page([_track_week(1, [], [], []), _track_week(2, ["basis_breach"], [], [])], "usd-nd")
+    assert "Bank only: not detected" in page
+
+
+def test_old_usd_replay_hides_track_cards():
+    deps = fixtures.build_deps()
+    loan = dict(USD, id="usd-old", application_id="usd-old", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                monitoring={"status": "completed", "processed_week": 1, "weeks": [
+                    {"week": 1, "row": {"week": 1, "revenue_cents": 404123, "buffer_days": 7},
+                     "triggers": ["inflow_drop"], "new_triggers": ["inflow_drop"]}]})
+    deps.monitoring.loans["usd-old"] = loan
+    page = TestClient(create_app(deps)).get("/loans/usd-old?lang=en").text
+    assert all(s not in page for s in ("Monitoring comparison", "Approval basis", "Explained"))
+    assert page.count('class="chip') >= 1
+
+
 def test_usd_forecast_shows_recorded_due_day_cashflows_not_krw_assumptions():
     deps = fixtures.build_deps()
     loan = dict(USD, id="risk", application_id="risk", applicant_id=SELLER, amount_cents=500000,
@@ -657,6 +741,71 @@ def test_policy_reason_displays_whole_cents_without_rounding_other_values():
     assert reasons == [("R900", "$0", "$100"), ("R107", "0.95", "0.85")]
 
 
+def page_for(deps, lang):
+    return TestClient(create_app(deps)).get("/applications/preview-usd-bakery", params={"lang": lang}).text
+
+
+def reasons(policy):
+    return re.findall(r"<tr><td>(R\d+)</td><td>.*?</td><td>(.*?)</td><td>(.*?)</td></tr>", policy)
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_v2_decision_shows_alt_data_compare_and_unit_values(lang):
+    from policy.engine import RuleCheck
+
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["policy"] |= {"rules_version": "usd-v2", "decision": "refer",
+        "cash_only": {**USD_V1.model_dump(), "decision": "eligible", "max_amount_cents": 500000, "reason_codes": []},
+        "reason_codes": [
+            RuleCheck("R113", "m", "refer", "pg_offset_rate_trend_pp", "gt", 5.94, 3.0, "hit").reason().model_dump(),
+            RuleCheck("R111", "m", "refer", "mkt_cancel_rate_90d", "gt", .13, .08, "hit").reason().model_dump(),
+            RuleCheck("R112", "m", "refer", "pg_advance_suspected_count", "gt", 3, 0, "hit").reason().model_dump()]}
+    policy = detail_panels(page_for(deps, lang))["tab-policy"]
+    assert {"ko": "은행·세무 기록만 볼 때", "en": "Bank and tax records only"}[lang] in policy
+    assert {"ko": "정산·마켓 데이터 반영", "en": "With settlement and marketplace data"}[lang] in policy
+    count = {"ko": ("3건", "0건"), "en": ("3", "0")}[lang]
+    assert reasons(policy) == [("R113", "5.9%p", "3.0%p"), ("R111", "13.0%", "8.0%"), ("R112", *count)]
+
+
+def test_reason_text_formats_ratio_and_day_features_only_for_usd():
+    from console.views import reason_text
+
+    assert reason_text("pg_reconciliation_ratio", 0.857, usd=True) == "85.7%"
+    assert reason_text("mkt_return_rate_90d", 0.18, usd=True) == "18.0%"
+    assert reason_text("tax_bank_match_ratio", 0.4, usd=True) == "40.0%"
+    assert reason_text("mkt_days_since_suspension", 30, usd=True) == "30일"
+    assert reason_text("mkt_rating", 3.9, usd=True) is None
+    assert reason_text("pg_reconciliation_ratio", 0.857) is None and reason_text("mkt_days_since_suspension", 30) is None
+
+
+def test_usd_page_shows_r108_as_percent_but_krw_page_keeps_raw_ratio():
+    from policy.engine import RuleCheck
+
+    usd = fixtures.build_deps()
+    usd.store.docs["preview-usd-bakery"]["policy"]["reason_codes"] = [
+        RuleCheck("R108", "m", "refer", "pg_reconciliation_ratio", "lt", .857, .9, "hit").reason().model_dump()]
+    shown = detail_panels(TestClient(create_app(usd)).get("/applications/preview-usd-bakery").text)["tab-policy"]
+    assert reasons(shown) == [("R108", "85.7%", "90.0%")]
+
+    krw = fixtures.build_deps()
+    doc = krw.store.docs["app-20261103-p03"]
+    doc["policy"]["reason_codes"] = [
+        RuleCheck("R101", "m", "refer", "tax_bank_match_ratio", "lt", .7, .9, "hit").reason().model_dump()]
+    shown = detail_panels(TestClient(create_app(krw)).get("/applications/" + doc["id"]).text)["tab-policy"]
+    assert reasons(shown) == [("R101", "0.7", "0.9")] and "70.0%" not in shown
+
+
+def test_v1_decision_keeps_cash_flow_label_and_trace():
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]  # rules_version usd-v1, 새 pg 키·applied_substitutions 없음
+    doc["policy"].setdefault("cash_only", {**USD_V1.model_dump(), "decision": "eligible",
+                                           "max_amount_cents": doc["policy"]["max_amount_cents"], "reason_codes": []})
+    policy = detail_panels(page_for(deps, "ko"))["tab-policy"]
+    assert "현금흐름만 볼 때" in policy and "셀러 데이터 반영" in policy
+    assert "은행·세무 기록만 볼 때" not in policy and "정산·마켓 데이터 반영" not in policy
+
+
 @pytest.mark.parametrize("usd", [True, False], ids=["usd", "legacy"])
 def test_servicing_decisions_keep_the_original_officer_reason(usd):
     from tests.console.test_monitoring import BASELINE, ROW
@@ -690,3 +839,18 @@ def test_usd_consent_management_available_during_monitoring_outage(monkeypatch):
     deps.privacy = CosmosPrivacy(QueryContainer([dict(consent, id="consent-bakery")]), None, QueryContainer([]))
     response = TestClient(create_app(deps), raise_server_exceptions=False).get(f"/borrower/{SELLER}/consents")
     assert response.status_code == 200 and f"/borrower/{SELLER}/consents/consent-bakery/revoke" in response.text
+
+
+def test_usd_only_seller_is_listed_and_accepted_by_apply():
+    client = TestClient(create_app(fixtures.build_deps()))
+    assert "Mapo Snack Box" in client.get("/borrower").text
+    assert client.get("/apply?applicant_id=seller-snackbox-22", follow_redirects=False).status_code == 200
+
+
+def test_usd_only_sellers_are_in_usd_picker_with_name_initial_but_not_in_legacy_picker():
+    client = TestClient(create_app(fixtures.build_deps()))
+    usd = client.get("/borrower").text
+    assert re.search(r'avatar av-\d" aria-hidden="true">M</span> <span class="seller-card-label">Mapo Snack Box', usd)
+    legacy = client.get("/legacy/borrower").text
+    assert "seller-snackbox-22" not in legacy and "seller-popup-29" not in legacy
+    assert "/legacy/borrower/seller-dailylook-01" in legacy

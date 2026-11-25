@@ -188,13 +188,19 @@ def explain(features: CashFlowFeatures | UsdCashFlowFeatures, rules: RuleSet) ->
         decision=Decision.INELIGIBLE if ko_hits else Decision.REFER if refer_hits else Decision.ELIGIBLE,
         rate_band=None if ko_hits else band, reason_codes=tuple(ko_hits + refer_hits),
         rules_version=rules.version, cash_only=cash_only, **{amount_key: 0 if ko_hits else limit},
-        **(USD_V1.model_dump() if usd else {}))
+        **({**USD_V1.model_dump(), "applied_substitutions": tuple(t.code for t in applied)} if usd else {}))
     return Explanation(rules.version, checks, limit_trace, band_trace, decision, traces)
 
 
 def _cash_only(features: CashFlowFeatures | UsdCashFlowFeatures, rules: RuleSet) -> CashOnlyDecision | UsdCashOnlyDecision | None:
-    """마켓 자료를 모두 지운 같은 신청의 판정. 마켓 자료가 없으면 비교할 것이 없다."""
-    keys = (*MKT_FEATURES[:-1], "mkt_pending_settlement_cents") if isinstance(features, UsdCashFlowFeatures) else MKT_FEATURES
+    """마켓 자료를 모두 지운 같은 신청의 판정. 마켓 자료가 없으면 비교할 것이 없다.
+
+    USD 규칙셋이 `alt_data_features`를 정하면 그 목록(PG·마켓 지표)을 지운다.
+    """
+    if isinstance(features, UsdCashFlowFeatures):
+        keys = getattr(rules, "alt_data_features", None) or (*MKT_FEATURES[:-1], "mkt_pending_settlement_cents")
+    else:
+        keys = MKT_FEATURES
     if all(getattr(features, k) is None for k in keys):
         return None
     cash = explain(features.model_copy(update=dict.fromkeys(keys)), rules).decision

@@ -13,6 +13,7 @@ from agents.pretranslate import load_case_raw
 from agents.evidence import build_catalog
 from console.i18n import CATALOGS, _
 from console.officer_chat import verified_policy
+from policy.rules import UsdRuleSet, rules_for_version
 from shared.contracts import ApplicantProfile, Transaction, UsdProduct, UsdTransaction
 from shared.product_context import product_of, validate_usd_evidence
 from shared.opinions import opinion_state, published_opinion
@@ -183,12 +184,40 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
 
 
 def _policy_compare(policy: Any, unit: str) -> dict[str, Any] | None:
-    """v4 판정의 '현금흐름만 볼 때' 비교. cash_only가 null이거나 없는 판정(v3 이하)은 None."""
+    """v4 판정의 '현금흐름만 볼 때' 비교. cash_only가 null이거나 없는 판정(v3 이하)은 None.
+
+    bank_tax는 비교에서 지운 것이 마켓 자료뿐이 아니라 대안 데이터(PG·마켓) 전체인 규정(usd-v2~)이면 True다.
+    """
     cash = policy.get("cash_only") if isinstance(policy, Mapping) else None
     if not isinstance(cash, Mapping):
         return None
+    rules = rules_for_version(policy.get("rules_version"))
     return {"cash": {"decision": cash.get("decision"), "max": cash.get(f"max_amount_{unit}")},
-            "seller": {"decision": policy.get("decision"), "max": policy.get(f"max_amount_{unit}")}}
+            "seller": {"decision": policy.get("decision"), "max": policy.get(f"max_amount_{unit}")},
+            "bank_tax": isinstance(rules, UsdRuleSet) and bool(rules.alt_data_features)}
+
+
+REASON_UNITS: dict[str, Callable[[float], str]] = {
+    "pg_cash_conversion_days": lambda v: _("%(v)s일", v=f"{v:.1f}"),
+    "pg_advance_suspected_count": lambda v: _("%(v)s건", v=f"{v:.0f}"),
+    "pg_offset_rate_trend_pp": lambda v: f"{v:.1f}%p",
+    "mkt_cancel_rate_90d": lambda v: f"{v * 100:.1f}%",
+}
+# KRW 판정 화면은 이 필드를 원래 값 그대로 보이므로 USD 판정에만 쓴다.
+USD_REASON_UNITS: dict[str, Callable[[float], str]] = {
+    "mkt_return_rate_90d": lambda v: f"{v * 100:.1f}%",
+    "mkt_days_since_suspension": lambda v: _("%(v)s일", v=f"{v:.0f}"),
+    "pg_reconciliation_ratio": lambda v: f"{v * 100:.1f}%",
+    "tax_bank_match_ratio": lambda v: f"{v * 100:.1f}%",
+}
+
+
+def reason_text(field: str | None, value: Any, usd: bool = False) -> str | None:
+    """단위가 있는 사유 지표의 표시값. 그 밖의 필드는 None이라 호출한 쪽이 기존 표시를 쓴다."""
+    units = REASON_UNITS | USD_REASON_UNITS if usd else REASON_UNITS
+    if field not in units or not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return units[field](value)
 
 
 def _substitutions(trace: Mapping[str, Any]) -> list[dict[str, Any]]:

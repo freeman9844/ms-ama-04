@@ -57,6 +57,7 @@ _TRIGGER_TEXT = {
     "return_spike": ("return_spike", "W:{week}:return_rate", "반품률이 기준선보다 크게 높다"),
     "cost_surge": ("cost_surge", "W:{week}:deduction_rate", "정산 공제율이 기준선보다 높다"),
     "due_shortfall": ("projected_shortfall", "F:{week}:due_balance", "다음 상환일 출금 직전 예상 잔고가 상환액보다 적다"),
+    "basis_breach": ("settlement_assigned", "W:{week}:recon_ratio", "대체 규칙으로 승인한 근거가 깨졌다"),
 }
 _USD_TRIGGERS = {
     "inflow_drop": ("Settlement receipts are below expectations.", "Check recent orders and deposits."),
@@ -69,10 +70,14 @@ _USD_TRIGGERS = {
     "return_spike": ("Returns have increased relative to baseline.", "Check returns and deductions from settlements."),
     "cost_surge": ("Settlement deductions have increased.", "Review current costs and upcoming deductions."),
     "due_shortfall": ("Projected funds are below the scheduled payment.", "Check receipts expected before the due date."),
+    "basis_breach": ("An approval basis from alternative data no longer holds.",
+                     "Review the approval basis against recent settlements and orders."),
+    "settlement_assigned": ("Platform payouts are no longer reaching this account, so the approval basis (fast settlement) no longer holds.",
+                            "Ask whether payouts were sold to an early-payout lender."),
 }
 _CENT_FIELDS = frozenset("revenue expected_revenue operating_out debt_service high_cost_lender loan_proceeds "
                          "unclassified_in end_balance advance_in order_gross held returns deductions "
-                         "settle_net projected_min_balance due_balance".split())
+                         "settle_net projected_min_balance due_balance expected_orders unreconciled_payout".split())
 
 
 def _usd_field(name):
@@ -83,6 +88,8 @@ def _usd_field(name):
 _SETTLEMENT_HOLD_TEXT = ("정산 지급이 보류되어 다음 상환일 자금이 부족할 수 있습니다.", "플랫폼 정산 상태와 다른 계좌의 가용자금 확인이 필요합니다.")
 _SALES_SLUMP_TEXT = ("판매대금 입금이 줄어 상환재원이 줄 수 있습니다.", "최근 주문·정산 추이 확인이 필요합니다.")
 _HIGH_COST_TEXT = ("고금리 차입 상환 부담으로 상환 여력이 줄 수 있습니다.", "신규 차입 내역과 상환 일정 확인이 필요합니다.")
+_SETTLEMENT_ASSIGNED_TEXT = ("플랫폼 정산금이 이 계좌로 들어오지 않아 승인 근거(빠른 정산)가 깨졌습니다.",
+                             "선정산 업체 양도 여부와 정산 수령 계좌 확인이 필요합니다.")
 FALLBACK_TEXT: dict[str, tuple[str, str]] = {
     AlertCause.SALES_SLUMP.value: _SALES_SLUMP_TEXT,
     AlertCause.SETTLEMENT_HOLD.value: _SETTLEMENT_HOLD_TEXT,
@@ -92,6 +99,8 @@ FALLBACK_TEXT: dict[str, tuple[str, str]] = {
         "광고비·매입비 지출 계획 확인이 필요합니다.",
     ),
     AlertCause.HIGH_COST_BORROWING.value: _HIGH_COST_TEXT,
+    AlertCause.SETTLEMENT_ASSIGNED.value: _SETTLEMENT_ASSIGNED_TEXT,
+    "basis_breach": _SETTLEMENT_ASSIGNED_TEXT,
     "inflow_drop": _SALES_SLUMP_TEXT,
     "new_debt": _HIGH_COST_TEXT,
     "due_shortfall": (
@@ -117,10 +126,11 @@ INSTRUCTIONS = """너는 한국 소상공인 운전자금 대출의 사후 조�
    분류가 unclassified_in·unclassified_out인 거래도 적요를 직접 읽고 판단한다.
 3. 매출 감소가 같은 달 계절 지수(B:index:MM)나 업종 집단 지수(B:cohort:index:MM), 명절 전후 정산 공백으로
    설명되고 다른 신호가 없으면 경보를 올리지 않는다.
+   basis_breach는 심사 때 대체 규칙(S003 빠른 정산, S004 계절 매출 등)으로 승인한 근거가 깨졌다는 뜻이다. 어떤 근거가 깨졌는지는 각 주차 행의 basis_breached 필드에 있다(인용용 근거 ID가 아니다).
 4. get_baseline의 cause_candidates가 원인 후보다. 차입은 대개 결과다. 차입보다 앞선 주문·정산·반품·비용 변화가 있으면
    그것을 주원인으로 고른다. primary_cause는 후보 중 하나여야 하고, 그 원인의 지표(매출 부진: W:n:order_gross·orders_vs_expected,
    정산 보류: W:n:held·advance_in, 반품 급증: W:n:returns·return_rate, 비용 증가: W:n:deductions·deduction_rate,
-   고금리 차입: W:n:high_cost_lender·high_cost_count·loan_proceeds)를 신호에 인용한다. 후보가 없으면 primary_cause를 비운다.
+   고금리 차입: W:n:high_cost_lender·high_cost_count·loan_proceeds, 정산 양도: W:n:recon_ratio·unreconciled_payout)를 신호에 인용한다. 후보가 없으면 primary_cause를 비운다.
 5. 경보가 필요하면 raise_alert를 호출한다. signals마다 근거를 단다: W:·F:·B:로 시작하는 ID는 metric_ids에,
    query_transactions가 준 txn_id는 txn_ids에 넣는다. 문장 속 숫자는 인용한 근거 값과 같아야 한다
    (반올림 2% 이내, 만·억·% 표기 허용). raise_alert가 accepted=false와 issues를 돌려주면 고쳐서 다시 호출한다.
@@ -497,6 +507,18 @@ def build_alert(args: Mapping[str, Any], ctx: EwContext, models: dict[str, str])
     )
 
 
+_BREACH_SIGNAL = {
+    "S003": ("settlement_assigned", "W:{week}:recon_ratio"),
+    "S005": ("settlement_assigned", "W:{week}:recon_ratio"),
+    "S004": ("inflow_drop", "W:{week}:orders_vs_prior_year"),
+}
+
+
+def _first_breach_code(ctx: EwContext) -> str:
+    codes = ctx.rows[-1].get("basis_breached") if ctx.rows else None
+    return str(codes[0]) if isinstance(codes, list | tuple) and codes else ""
+
+
 def fallback_alert(ctx: EwContext, reason: str) -> EarlyWarningAlert:
     """에이전트 없이 탐지기 결과만으로 올리는 경보. 수치를 문장에 넣지 않아 grounding 문제가 없다.
 
@@ -507,6 +529,8 @@ def fallback_alert(ctx: EwContext, reason: str) -> EarlyWarningAlert:
     signals = []
     for trigger in ctx.triggers:
         kind, metric, text = _TRIGGER_TEXT[trigger]
+        if trigger == "basis_breach":
+            kind, metric = _BREACH_SIGNAL.get(_first_breach_code(ctx), (kind, metric))
         if ctx.product:
             prefix, name = metric.rsplit(":", 1)
             metric = prefix + ":" + _usd_field(name)

@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from policy.engine import decision_payload, evaluate
-from policy.rules import RuleSet, UsdRuleSet, rules_for_version
+from policy.rules import RuleSet, UsdRuleSet, current_usd_rules
 from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures
 
 FAULT_MODES = ("none", "unavailable")
@@ -31,7 +31,7 @@ def create_app(rules: RuleSet, fault: str = "none") -> FastAPI:
 
     @app.post("/v1/decisions")
     def decide(features: CashFlowFeatures | UsdCashFlowFeatures) -> dict:
-        selected = rules_for_version(features.product_version) if isinstance(features, UsdCashFlowFeatures) else rules
+        selected = current_usd_rules(features.product_version) if isinstance(features, UsdCashFlowFeatures) else rules
         return decision_payload(evaluate(features, selected))
 
     return app

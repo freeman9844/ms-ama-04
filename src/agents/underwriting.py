@@ -44,7 +44,8 @@ MAX_ROUNDS = 3
 MAX_TXNS = 20
 MAX_OFFICER_CHECKS = 3
 OFFICER_CHECK_PREFIXES = (
-    "M:pg_", "P:R107:", "P:R108:", "M:mkt_", "P:R003:", "P:R109:", "P:R110:", "P:S001:", "P:S002:",
+    "M:pg_", "M:mkt_", "P:R003:", "P:R004:", "P:R107:", "P:R108:", "P:R109:", "P:R110:", "P:R111:", "P:R112:",
+    "P:R113:", "P:S001:", "P:S002:", "P:S003:", "P:S004:", "P:S005:",
 )
 FLAG_ASSESSMENT_UNAVAILABLE = "assessment_unavailable"
 FLAG_REVIEW_NOT_PASSED = "review_not_passed"
@@ -77,6 +78,7 @@ ANALYST_INSTRUCTIONS = """너는 한국 소상공인 현금흐름 기반 운전�
 6. counterfactuals에는 결과를 바꿀 수 있는 지표를 metric_id, current(근거 값 그대로), target, explanation으로 적는다.
    정책 사유 코드가 있으면 P:Rxxx:threshold를 목표값으로 활용한다.
    정책 사유 R107·R108이 있으면 M:pg_top_platform_share 또는 M:pg_reconciliation_ratio를 반사실 지표로 쓸 수 있다(목표값 P:R107:threshold·P:R108:threshold).
+   R111·R112·R113이 있으면 M:mkt_cancel_rate_90d·M:pg_advance_suspected_count·M:pg_offset_rate_trend_pp를 같은 방식으로 쓸 수 있다.
 7. [[PERSON_...]] 같은 토큰은 가려진 개인정보다. 복원하거나 추측하지 않는다.
 8. 이전 초안과 지적 사항이 주어지면 지적을 모두 반영한 새 초안을 낸다.
 9. summary는 심사역에게 주는 한국어 분석 의견이다. 6~8문장 안에서 첫 문장에 이번 신청의 핵심 쟁점을 제시한다.
@@ -91,7 +93,7 @@ ANALYST_INSTRUCTIONS = """너는 한국 소상공인 현금흐름 기반 운전�
    해소할 구체적인 자료와 확인 목적을 제시한다(예: 다음 회차 전 예정 정산이 실제 계좌에 입금되는지 대조).
    summary 속 숫자는 도구가 준 근거 값과 같아야 하며 근거 ID는 쓰지 않는다.
 10. 정산 또는 셀러 자료가 있으면 officer_checks에 심사역이 확인할 사항을 0~3개 쓴다. 각 항목은 '무엇을 확인·요청할지 + 이유'를
-    한 문장으로 쓰고, 이유가 되는 M:pg_*·M:mkt_* 또는 P:R107·P:R108·P:R003·P:R109·P:R110·P:S001 근거를 1개 이상 단다.
+    한 문장으로 쓰고, 이유가 되는 M:pg_*·M:mkt_* 또는 P:R003·P:R004·P:R107~P:R113·P:S001~P:S005 근거를 1개 이상 단다.
     정책 사유에 S001이 있으면 확인 사항 하나 이상에 P:S001 근거를 단다. 승인·거절·금리·한도를 지시하지 않는다.
     정산·셀러 자료가 없으면 빈 배열.
     확인 사항에는 거래 상대방 이름 대신 '선정산' 같은 일반 명사를 쓴다.
@@ -200,7 +202,7 @@ ANALYST_OUTPUT_SCHEMA: dict[str, Any] = {
                     "metric_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "M:pg_*·P:R107:·P:R108: 근거 ID",
+                        "description": "M:pg_*·M:mkt_*·P:R003·P:R004·P:R107~P:R113·P:S001~P:S005 근거 ID",
                     },
                 },
                 "required": ["text", "metric_ids"],
@@ -514,7 +516,7 @@ def check_grounding(draft: AnalystDraft, ctx: UnderwritingContext) -> list[str]:
             issues.append(f"officer_checks[{i}]: copy an exact evidence ID from the tools." if ctx.product else f"officer_checks[{i}]: 알 수 없는 근거 ID {unknown}")
         known = [m for m in chk.metric_ids if m in ctx.catalog]
         if known and not any(m.startswith(OFFICER_CHECK_PREFIXES) for m in known):
-            issues.append(f"officer_checks[{i}]: cite a settlement or marketplace metric." if ctx.product else f"officer_checks[{i}]: 정산·셀러 근거(M:pg_*·M:mkt_*·P:R107·P:R108·P:R003·P:R109·P:R110·P:S001)가 없다")
+            issues.append(f"officer_checks[{i}]: cite a settlement or marketplace metric." if ctx.product else f"officer_checks[{i}]: 정산·셀러 근거(M:pg_*·M:mkt_*·P:R003·P:R004·P:R107~P:R113·P:S001~P:S005)가 없다")
         bad = ctx.check_numbers(chk.text, known)
         if bad:
             issues.append(f"officer_checks[{i}]: write a qualitative verification step supported by its cited metric." if ctx.product else f"officer_checks[{i}]: 인용 근거와 맞지 않는 수치 {bad}")

@@ -790,6 +790,91 @@ def test_usd_officer_to_servicing(run_journey, seller, stress, high):
             monitoring_module.start_replay(replace(deps, mock=WrongLoanFeed()), LOAN)
 
 
+def usd_registration(run_journey, substitutions=None, ratio=None):
+    """USD 승인 후 이미 등록된 대출을 지우고, 심사 근거(정책 대체 규칙·대사 비율)를 바꿔 다시 등록할 입력을 만든다."""
+    import asyncio
+    from functools import partial
+    from unittest.mock import AsyncMock
+    from journey.activities import ACTIVITIES
+    from journey.adapters import HttpPolicyApi
+    from journey.entry import handle_decision, handle_start
+    from policy.app import create_app
+    from policy.rules import load_rules
+    from shared.contracts import USD_V1
+
+    day, seller = date(2026, 11, 24), "seller-dailylook-01"
+    sellers = build_demo_cases(day)
+    outbox = Outbox()
+    now = NOW.replace(day=day.day)
+    deps = make_deps(create_mock_app(sellers, SECRET, lambda: now, flows=FlowStore(sellers, day)), outbox)
+    deps = replace(deps, policy=HttpPolicyApi(client=TestClient(create_app(load_rules()))), clock=lambda: now)
+    meta = USD_V1.model_dump()
+    acts = {k: partial(f, deps) for k, f in ACTIVITIES.items()}
+    acts["assess_credit"] = lambda _: {"assessment": {"review": {"passed": True}}}
+    decision = dict(meta, decision="approve", amount_cents=500000, officer_id="test-officer")
+    durable = AsyncMock()
+    durable.get_status.return_value = None
+    durable.start_new.return_value = LOAN
+    request = dict(meta, application_id=LOAN, applicant_id=seller, requested_amount_cents=500000,
+                   requested_tenor_months=6)
+    assert asyncio.run(handle_start(durable, json.dumps(request))) == LOAN
+    durable.get_status.return_value = type("Running", (), {"runtime_status": "Running"})()
+    assert asyncio.run(handle_decision(durable, json.dumps(dict(application_id=LOAN, decision=decision))))
+    _, ctx = run_journey(durable.start_new.call_args.args[2], acts, [("event", {**decision, "currency": "KRW"}),
+                         ("event", durable.raise_event.call_args.args[2])], start=now)
+    registration = deepcopy(ctx.called("register_monitoring")[0].input)
+    deps.store.docs.pop((LOANS, LOAN))
+    deps.store.etags.pop((LOANS, LOAN), None)
+    saved = deps.store.read("applications", LOAN, LOAN)
+    if substitutions is not None:
+        deps.store.upsert("applications", {**saved, "policy": {**(saved.get("policy") or {}),
+                                                               "applied_substitutions": substitutions}})
+    if ratio is not None:
+        registration["underwriting"]["features"]["pg_reconciliation_ratio"] = ratio
+    return deps, outbox, registration, meta
+
+
+def test_register_usd_loan_stores_approval_basis(run_journey):
+    deps, _, registration, _ = usd_registration(run_journey, substitutions=["S003"], ratio=0.99)
+    assert register_monitoring(deps, registration) == {"loan_id": LOAN}
+    doc = loan(deps)
+    assert doc["approval_basis"] == [{"code": "S003", "metric": "recon_ratio", "approved": 0.99, "floor": 0.95}]
+    assert "approval_basis" not in doc["baseline"] and doc["monitoring"] is None
+
+
+def test_register_v1_usd_loan_has_empty_basis(run_journey):
+    deps, _, registration, _ = usd_registration(run_journey, substitutions=[])
+    register_monitoring(deps, registration)
+    assert loan(deps)["approval_basis"] == []
+
+
+def test_register_krw_loan_has_no_approval_basis(mock_app):
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    assert "approval_basis" not in loan(deps)
+
+
+def test_usd_week_entry_records_both_tracks(run_journey):
+    deps, outbox, registration, meta = usd_registration(run_journey)
+    register_monitoring(deps, registration)
+    assert replay(deps, **meta)["replay_id"]
+    pump(deps, outbox)
+    week = loan(deps)["monitoring"]["weeks"][0]
+    assert {"bank_only_triggers", "explained", "basis"} <= week.keys()
+    assert isinstance(week["bank_only_triggers"], list) and isinstance(week["explained"], list)
+    assert week["basis"] == loan(deps)["approval_basis"]
+
+
+def test_replay_restart_keeps_approval_basis(run_journey):
+    deps, _, registration, meta = usd_registration(run_journey, substitutions=["S003"], ratio=0.99)
+    register_monitoring(deps, registration)
+    basis = loan(deps)["approval_basis"]
+    assert basis
+    replay(deps, **meta)
+    replay(deps, **meta)
+    assert loan(deps)["approval_basis"] == basis
+
+
 def alerts(deps):
     return [d for (c, i), d in deps.store.docs.items() if c == ALERTS and i.startswith("ew-")]
 

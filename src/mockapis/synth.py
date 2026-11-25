@@ -8,6 +8,7 @@ labels(정답 분류)는 평가 하네스 전용이며 API로 노출하지 않�
 import random
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from decimal import Decimal
 from enum import StrEnum
 
 from shared.krcalendar import month_add
@@ -15,6 +16,7 @@ from mockapis.sellerdata.categories import TxnCategory
 from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.engine import simulate
 from mockapis.sellerdata.usd import simulate_usd
+from mockapis.sellerdata.usd_market import build_usd_market
 from mockapis.sellerdata.marketplace import (
     MARKETPLACE_SEED_OFFSET,
     StoreOverride,
@@ -25,7 +27,7 @@ from mockapis.sellerdata.personas import DEMO_PERSONAS, Persona, business_reg_no
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.contracts import USD_V1, StorePenalty, UsdTransaction
 from shared.sellers import USD_SELLERS
-from shared.usd_source import UsdMarketplace, UsdOrderDay, UsdProfile, UsdSettlement, UsdStorePlatform, UsdTaxFiling
+from shared.usd_source import UsdMarketplace, UsdOrderDay, UsdProfile, UsdSettlement, UsdTaxFiling
 
 __all__ = ["INJECTION_TEXT", "Archetype", "Persona", "SyntheticCase", "TxnCategory", "generate_case", "load_persona",
            "UsdCase", "generate_usd_case"]
@@ -97,31 +99,29 @@ def generate_usd_case(applicant_id: str, as_of: date, seed: int) -> UsdCase:
     meta = USD_V1.model_dump()
     start = date(*month_add(as_of.year, as_of.month, -seller.history_months), 1)
     opening = 3 * seller.weekly_sales_cents
+    offsets = {}
+    if seller.offset_rise_days:
+        rise_from = as_of - timedelta(days=seller.offset_rise_days)
+        offsets["deduction_rate"] = lambda day: seller.offset_rise_rate if day >= rise_from else Decimal(0)
     books = simulate_usd(seller, applicant_id, start, as_of - timedelta(days=1), seed, opening,
                          stress_from=as_of - timedelta(days=STRESS_DAYS) if seller.risk == "stressed" else None,
-                         advance_from=as_of - timedelta(days=ASSIGNED_DAYS) if seller.risk == "assigned" else None)
+                         advance_from=as_of - timedelta(days=ASSIGNED_DAYS) if seller.risk == "assigned" else None,
+                         growth_from=as_of - timedelta(days=seller.growth_days) if seller.growth_days else None,
+                         **offsets)
     profile = UsdProfile(**meta, applicant_id=applicant_id, business_name=seller.business_name,
                          representative_name=seller.representative, industry=seller.industry, region=seller.region,
                          business_age_months=seller.business_age_months,
                          business_reg_no=business_reg_no(random.Random(seed)))
-    platforms = []
-    for code, _ in seller.channel_percent:
-        recent = [o for o in books.orders if o.platform_code == code and o.order_on >= as_of - timedelta(days=90)]
-        platforms.append(UsdStorePlatform(**meta, platform_code=code, opened_on=as_of-timedelta(days=790),
-                                          rating=seller.rating, review_count=len(recent)*3,
-                                          gross_90d_cents=sum(o.gross_cents for o in recent),
-                                          return_90d_cents=sum(o.returns_cents for o in recent), cancel_90d_cents=0,
-                                          pending_settlement_cents=sum(s.net_cents for s in books.pending
-                                                                       if s.platform_code == code)))
     penalties = () if not seller.suspension_days_ago else (
-        StorePenalty(platform=platforms[0].platform_code, occurred_on=as_of-timedelta(days=seller.suspension_days_ago),
+        StorePenalty(platform=seller.channel_percent[0][0], occurred_on=as_of-timedelta(days=seller.suspension_days_ago),
                      kind="suspension"),)
-    market = UsdMarketplace(**meta, as_of=as_of, platforms=tuple(platforms), penalties=penalties)
+    market = build_usd_market(seller, as_of, seed, books.orders, books.pending, penalties)
     filings = []
     for month in range(seller.history_months):
         begin = date(*month_add(start.year, start.month, month), 1)
         end = date(*month_add(begin.year, begin.month, 1), 1)
         declared = sum(s.net_cents for s in books.settlements if begin <= s.settled_on < end)
+        declared = declared * seller.tax_declared_percent // 100
         filings.append(UsdTaxFiling(**meta, period_start=begin, period_end=end-timedelta(days=1),
                                     declared_revenue_cents=declared))
     return UsdCase(profile, opening, books.transactions, books.settlements, tuple(filings), market,

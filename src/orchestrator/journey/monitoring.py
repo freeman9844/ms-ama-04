@@ -552,7 +552,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         raw = deps.raw.get_json(raw_container(mon["consent_id"]), "pg_flow.json")
         pg = UsdPgFlow.model_validate(raw) if raw is not None else None
         baseline, classification, lb = loan["baseline"], None, None
-        rows, triggers, candidates, cats, proj = observe_usd(loan, visible, pg, week, due_amounts)
+        obs = observe_usd(loan, visible, pg, week, due_amounts)
+        rows, triggers, candidates, cats, proj = obs[:5]
         pg_weeks = [{k: r[k] for k in ("week", "order_gross_cents", "returns_cents", "held_cents", "deductions_cents",
                                        "settle_net_cents") if k in r} for r in rows] if pg else None
     else:
@@ -588,6 +589,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         "repayment": None,
         "case_id": None,
     }
+    if product_of(loan):
+        entry.update(bank_only_triggers=list(obs.bank_only), explained=obs.explained, basis=obs.basis)
     alert_id = f"ew-{replay_id}-w{week:02d}"
     # 재시도한 주차: 앞선 시도가 경보를 쓴 뒤 실패했으면 다시 조사하지 않고 저장된 경보(진행 상태 포함)를 쓴다.
     stored = deps.store.read(ALERTS, alert_id, loan_id) if new else None

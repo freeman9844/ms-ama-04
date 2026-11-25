@@ -2,7 +2,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from policy.rules import DEFAULT_RULES_PATH, RuleSet, load_rules, rules_for_version
+from policy.rules import (DEFAULT_RULES_PATH, USD_CURRENT_RULES, RuleSet, UsdRuleSet, current_usd_rules,
+                          is_usd_rules, load_rules, rules_for_version)
+from shared.contracts import MKT_FEATURES
+
+USD_V2_PATH = DEFAULT_RULES_PATH.parent / "usd-v2.yaml"
 
 
 def test_rules_for_version_reads_every_ruleset():
@@ -130,3 +134,41 @@ def test_load_rules_from_custom_path(tmp_path):
     path = tmp_path / "rules.yaml"
     path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     assert load_rules(path).version == "test-v2"
+
+
+def test_usd_v2_loads_with_new_rules_and_one_substitution_per_target():
+    r = rules_for_version("usd-v2")
+    assert isinstance(r, UsdRuleSet) and r.version == "usd-v2"
+    assert {c.code: (c.field, c.op, c.threshold) for c in r.knockouts}["R004"] == ("tax_bank_match_ratio", "lt", 0.5)
+    refers = {c.code: (c.field, c.op, c.threshold) for c in r.refers}
+    assert refers["R111"] == ("mkt_cancel_rate_90d", "gt", 0.08)
+    assert refers["R112"] == ("pg_advance_suspected_count", "gt", 0)
+    assert refers["R113"] == ("pg_offset_rate_trend_pp", "gt", 3.0)
+    subs = {s.code: (s.replaces, s.outcome) for s in r.substitutions}
+    assert subs == {"S001": ("R001", "refer"), "S002": ("R104", "pass"), "S003": ("R103", "pass"),
+                    "S004": ("R102", "pass"), "S005": ("R004", "refer")}
+    assert r.limit_boost.substituted_max_amount_cents == 500_000
+    assert set(r.alt_data_features) == {*(k for k in MKT_FEATURES if k != "mkt_pending_settlement_krw"),
+        "mkt_pending_settlement_cents", "pg_reconciliation_ratio", "pg_top_platform_share",
+        "pg_cash_conversion_days", "pg_advance_suspected_count", "pg_offset_rate_trend_pp"}
+    assert all(c.message.isascii() for c in (*r.knockouts, *r.refers, *r.substitutions))
+
+
+def test_usd_v1_is_unchanged_and_current_rules_map_to_v2():
+    assert rules_for_version("usd-v1").alt_data_features is None
+    assert current_usd_rules("usd-v1").version == "usd-v2"
+    assert is_usd_rules("usd-v1") and is_usd_rules("usd-v2") and not is_usd_rules("2026.11-v4")
+
+
+def test_current_usd_rules_rejects_unknown_product_version(monkeypatch):
+    with pytest.raises(ValueError, match="usd-v9"):
+        current_usd_rules("usd-v9")
+    monkeypatch.setitem(USD_CURRENT_RULES, "usd-v1", load_rules(DEFAULT_RULES_PATH).version)
+    with pytest.raises(ValueError):
+        current_usd_rules("usd-v1")
+
+
+def test_alt_data_features_must_be_optional_usd_fields():
+    data = yaml.safe_load(USD_V2_PATH.read_text(encoding="utf-8")) | {"alt_data_features": ["dscr"]}
+    with pytest.raises(ValidationError):
+        UsdRuleSet.model_validate(data)

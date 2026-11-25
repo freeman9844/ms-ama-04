@@ -20,7 +20,7 @@ from agents.pg_ledger import FLAG_PG_LEDGER_UNAVAILABLE
 from agents.translator import TRANSLATE_MODEL
 from agents.txn_classify import ClassificationCache, Decider, LlmFallback, classify_unresolved
 from agents.underwriting import FLAG_ASSESSMENT_UNAVAILABLE, AgentRunner, UnderwritingContext, assess
-from agents.usd_monitoring import usd_baseline
+from agents.usd_monitoring import approval_basis, usd_baseline
 from journey.models import CONSENT_PURPOSE, CONSENT_SCOPES, CONSENT_TTL_DAYS, LifecycleStart, UsdLifecycleStart
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.contracts import UsdProduct, UsdTransaction
@@ -584,7 +584,11 @@ def register_monitoring(deps: Deps, payload: dict[str, Any]) -> dict[str, Any]:
                 or uw["features"]["application_id"] != loan_id):
             raise ValueError("Invalid approved loan registration")
         usd_installments(date.fromisoformat(payload["decided_at"][:10]), payload["amount_cents"], payload["tenor_months"])
-        terms = {**product.model_dump(), "amount_cents": payload["amount_cents"], "baseline": usd_baseline(uw)}
+        terms = {
+            **product.model_dump(), "amount_cents": payload["amount_cents"], "baseline": usd_baseline(uw),
+            "approval_basis": approval_basis((application.get("policy") or {}).get("applied_substitutions") or (),
+                                             uw["features"]),
+        }
     else:
         parsed = ApplicantProfile.model_validate(profile)
         terms = {"amount_krw": payload["amount_krw"], "baseline": Baseline.from_underwriting(
