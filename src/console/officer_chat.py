@@ -16,8 +16,8 @@ from agents.features import ANNUAL_RATE
 from agents.officer_facts import reviewed_detail
 from policy.engine import LIMIT_UNIT_KRW, explain
 from policy.rules import AMENDED_IN_PLACE, RuleSet, rules_for_version
-from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures
-from shared.product_context import product_of
+from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures, UsdPolicyDecision
+from shared.product_context import product_of, validate_usd_evidence
 
 SNAPSHOT_MAX_CHARS = 24_000
 QUESTION_MAX = 500
@@ -100,6 +100,11 @@ def _trace(rules: RuleSet, policy: Mapping[str, Any], features: Any) -> tuple[di
         policy.get("decision"), policy.get(limit), policy.get("rate_band"), stored_codes
     ):
         return None, TRACE_NOTES["mismatch"]
+    if rules.version == "usd-v1" and (stored_cash := policy.get("cash_only")) is not None:
+        cash = d.cash_only
+        if (not isinstance(stored_cash, Mapping) or cash is None
+                or (cash.decision.value, cash.max_amount_cents) != (stored_cash.get("decision"), stored_cash.get(limit))):
+            return None, TRACE_NOTES["mismatch"]
     band = asdict(e.band)
     band["bands"] = [{"band": b, "min_dscr": m} for b, m in e.band.bands]
     return {"checks": [asdict(c) for c in e.checks], "limit": asdict(e.limit), "band": band,
@@ -201,6 +206,18 @@ def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | 
     if ((features and product_of(features) != product) or (policy and product_of(policy) != product)):
         raise ValueError("Chat evidence does not match the application product")
     keys = [k + ("_cents" if product and k != "month" else "") for k in MONTHLY_KEYS]
+    if product:
+        # Revalidate originals at the model boundary; the display view may accept incomplete evidence.
+        UsdCashFlowFeatures.model_validate(features)
+        UsdPolicyDecision.model_validate(policy)
+        validate_usd_evidence((uw, policy, doc.get("officer_decision")))
+        if type((uw.get("signals") or {}).get("new_installment_cents")) is not int:
+            raise ValueError("Missing USD installment evidence")
+        rows = uw.get("monthly")
+        if not isinstance(rows, (list, tuple)) or not all(
+            isinstance(m, Mapping) and m.get("month") and all(type(m.get(k)) is int for k in keys[1:]) for m in rows
+        ):
+            raise ValueError("Incomplete USD monthly evidence")
     monthly = [{k: m.get(k) for k in keys} for m in uw.get("monthly") or () if isinstance(m, Mapping)]
     signals = uw.get("signals") or {}
     officer = doc.get("officer_decision")

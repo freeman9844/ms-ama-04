@@ -710,7 +710,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                 translated = catalog(text) or page.stored_en(text)
                 return masker.mask(translated) if translated else None
 
-        snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
+        try:
+            snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
+        except ValueError:
+            if not usd:
+                raise
+            return _chat_error("failed", usd)
         started = time.monotonic()
         result, answer = "ok", None
         try:

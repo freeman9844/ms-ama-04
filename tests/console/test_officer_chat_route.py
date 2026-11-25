@@ -139,6 +139,37 @@ def test_usd_missing_mask_sources_do_not_send_free_text(key):
     assert response.status_code == 502 and not chat.calls
 
 
+@pytest.mark.parametrize("partial", ["policy", "cash_only", "features", "monthly"])
+def test_usd_chat_rejects_display_only_partial_evidence(fake_raw, raw_profile, key, partial):
+    from shared.contracts import USD_V1
+    from tests.console.test_assessment import usd_doc
+
+    usd = USD_V1.model_dump()
+    doc = usd_doc()
+    doc.update(id="usd-1", consent={"consent_id": "c-1"})
+    doc["underwriting"]["features"]["mkt_rating"] = 4.8
+    doc["policy"].update(application_id="usd-1", cash_only=dict(usd, decision="eligible", max_amount_cents=410000,
+                                                                 reason_codes=[]))
+    doc["underwriting"].update(signals={"new_installment_cents": 101}, monthly=[
+        {"month": "2026-01", "revenue_cents": 1000, "operating_out_cents": 100, "debt_service_cents": 0,
+         "owner_draw_cents": 0}])
+    raw = fake_raw({("consent-c-1", "profile.json"): {**raw_profile, **usd}, ("consent-c-1", "transactions.json"): []})
+    chat = FakeChat()
+    client = _client(lambda: doc, raw, key, chat)
+    def ask():
+        return _post(client, key, {"question": "Explain my policy limit."}, path="/applications/usd-1/chat")
+    assert ask().status_code == 200 and len(chat.calls) == 1
+    if partial == "policy":
+        del doc["policy"]["language"]
+    elif partial == "cash_only":
+        del doc["policy"]["cash_only"]["language"]
+    elif partial == "features":
+        del doc["underwriting"]["features"]["avg_monthly_inflow_cents"]
+    else:
+        del doc["underwriting"]["monthly"][0]["debt_service_cents"]
+    assert ask().status_code == 502 and len(chat.calls) == 1
+
+
 @pytest.mark.parametrize("error, status, message", [
     (GatewayThrottled("rate_limited", "c"), 429, "요청이 많습니다. 잠시 후 다시 질문해 주세요."),
     (GatewayBlocked("content_blocked", "c"), 422, "이 질문에는 답할 수 없습니다."),

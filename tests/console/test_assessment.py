@@ -233,6 +233,21 @@ def test_usd_knockout_zero_is_not_missing_or_the_formula_amount(key):
     assert by_field(p)["mkt_days_since_suspension"]["state"] == "knockout"
 
 
+@pytest.mark.parametrize(("has_market", "cash_decision", "cash_limit"), [
+    (True, "refer", 410000), (True, "eligible", 410001), (False, "eligible", 410000),
+])
+def test_usd_unverified_cash_only_keeps_stored_comparison_but_hides_formula(key, has_market, cash_decision, cash_limit):
+    doc = usd_doc()
+    if has_market:
+        doc["underwriting"]["features"]["mkt_rating"] = 4.8
+    doc["policy"]["cash_only"] = dict(USD_V1.model_dump(), decision=cash_decision, max_amount_cents=cash_limit)
+    v = detail_view(doc, None, key, restore=False)
+    assert v["policy_compare"]["cash"] == {"decision": cash_decision, "max": cash_limit}
+    assert v["policy_compare"]["seller"] == {"decision": "eligible", "max": 410000}
+    p = assessment_panels(v)
+    assert p["limit"] is None and p["limit_note"]
+
+
 def test_usd_referred_limit_uses_verified_settlement_and_substitution_caps(key):
     doc = usd_doc()
     doc["underwriting"]["features"].update(months_of_history=3, mkt_rating=4.6, mkt_return_rate_90d=0.02,
@@ -356,8 +371,13 @@ def test_usd_expense_donut_preserves_small_amounts_and_rejects_incomplete_costs(
     assert expenses() is None
 
 
-def test_usd_monthly_expense_fallback_rounds_only_the_readout(key):
+@pytest.mark.parametrize("missing_breakdown_inflow", [False, True])
+def test_usd_monthly_expense_fallback_rounds_only_the_readout(key, missing_breakdown_inflow):
     doc = usd_doc()
+    if missing_breakdown_inflow:
+        del doc["underwriting"]["features"]["avg_monthly_inflow_cents"]
+        doc["underwriting"]["expense_breakdown"] = [{"group": g, "monthly_avg_cents": 725} for g in (
+            "supplier", "rent", "payroll", "tax_insurance", "other_operating", "debt_service", "owner_draw", "unclassified")]
     doc["underwriting"]["monthly"] = [
         {"month": "2026-01", "revenue_cents": 1000, "operating_out_cents": 149, "debt_service_cents": 0, "owner_draw_cents": 0},
         {"month": "2026-02", "revenue_cents": 1000, "operating_out_cents": 150, "debt_service_cents": 0, "owner_draw_cents": 0}]

@@ -13,8 +13,8 @@ from agents.pretranslate import load_case_raw
 from agents.evidence import build_catalog
 from console.i18n import _
 from console.officer_chat import policy_trace
-from shared.contracts import ApplicantProfile, Transaction, UsdTransaction
-from shared.product_context import product_of
+from shared.contracts import ApplicantProfile, Transaction, UsdProduct, UsdTransaction
+from shared.product_context import product_of, validate_usd_evidence
 from shared.opinions import opinion_state, published_opinion
 
 DECIDABLE = frozenset({"awaiting_officer", "escalated"})
@@ -72,13 +72,28 @@ def _referenced(claims: Iterable[Mapping[str, Any]]) -> list[str]:
     return list(seen)
 
 
+def _usd_policy_evidence(policy: Mapping[str, Any], product: UsdProduct) -> dict[str, Any]:
+    """Read only cited policy values. Never repair product tags on the original decision."""
+    tags = product.model_dump()
+    policy_fields = dict(policy)
+    cash = policy_fields.pop("cash_only", None)
+    for record in (policy_fields, cash):
+        if record is None:
+            continue
+        if not isinstance(record, Mapping) or any(k in record and record[k] != v for k, v in tags.items()):
+            raise ValueError("Stored policy contradicts the application product")
+        validate_usd_evidence({k: v for k, v in record.items() if k not in tags})
+    return {k: policy[k] for k in ("max_amount_cents", "reason_codes") if k in policy}
+
+
 def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, restore: bool) -> dict[str, Any]:
     pii, model_text, raw_text = _text_functions(raw, key, restore)
     uw = doc.get("underwriting") or {}
     policy = doc.get("policy")
     product = product_of(doc)
+    catalog_policy = _usd_policy_evidence(policy, product) if product and policy else policy
     catalog = (
-        build_catalog(uw.get("features") or {}, uw.get("signals") or {}, uw.get("monthly") or [], policy,
+        build_catalog(uw.get("features") or {}, uw.get("signals") or {}, uw.get("monthly") or [], catalog_policy,
                       partial_usd=bool(product))
         if uw and policy
         else {}
@@ -150,7 +165,11 @@ def _policy_compare(policy: Any, unit: str) -> dict[str, Any] | None:
 def verified_policy_trace(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[str, Any]:
     product = product_of(doc)
     if product:
-        if not policy or policy.get("rules_version") != product.product_version or not policy.get("product_version"):
+        if not policy or policy.get("rules_version") != product.product_version:
+            return {}
+        tags = product.model_dump()
+        if any(not (tags.items() <= record.items()) for record in (policy, policy.get("cash_only"))
+               if isinstance(record, Mapping)):
             return {}
         if "rate_band" not in policy or not isinstance(policy.get("reason_codes"), (list, tuple)):
             return {}

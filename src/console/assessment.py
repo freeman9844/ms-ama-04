@@ -231,9 +231,10 @@ def _usd_limit(trace: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str,
 def _usd_expenses(uw: Mapping[str, Any], features: Mapping[str, Any]) -> dict[str, Any] | None:
     breakdown = uw.get("expense_breakdown") or []
     groups = {r.get("group") for r in breakdown if isinstance(r, Mapping) and type(r.get("monthly_avg_cents")) is int}
-    if groups == EXPENSE_COLORS.keys() and len(groups) == len(breakdown):
+    revenue = features.get("avg_monthly_inflow_cents")
+    if type(revenue) is int and groups == EXPENSE_COLORS.keys() and len(groups) == len(breakdown):
         parts = [(_(r.get("label") or r["group"]), r["monthly_avg_cents"], EXPENSE_COLORS[r["group"]]) for r in breakdown]
-        revenue, source, divisor = features.get("avg_monthly_inflow_cents"), "breakdown", 1
+        source, divisor = "breakdown", 1
     else:
         monthly = uw.get("monthly") or []
         keys = ["revenue", *(k for k, _, _ in EXPENSES)]
@@ -243,8 +244,6 @@ def _usd_expenses(uw: Mapping[str, Any], features: Mapping[str, Any]) -> dict[st
         # Preserve integer totals and their common denominator, even for a fractional-cent monthly average.
         parts = [(_(label), sum(m[k + "_cents"] for m in monthly), color) for k, label, color in EXPENSES]
         revenue, source, divisor = sum(m["revenue_cents"] for m in monthly), "monthly", len(monthly)
-    if type(revenue) is not int:
-        return None
     leftover = revenue - sum(v for _, v, _ in parts)
     segments = [*parts, (_(LEFTOVER[1]), max(leftover, 0), LEFTOVER[2])]
     donut = charts.donut(segments)
