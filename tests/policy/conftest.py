@@ -4,7 +4,32 @@ from pathlib import Path
 
 import policy.rules
 from policy.rules import load_rules
-from shared.contracts import CashFlowFeatures
+from shared.contracts import USD_V1, CashFlowFeatures, UsdCashFlowFeatures
+
+
+def usd_features(**overrides) -> UsdCashFlowFeatures:
+    """usd-v1과 usd-v2 모두에서 적격인 기본 신청. 나머지 pg_*·mkt_*는 None이다."""
+    base = dict(
+        application_id="app-usd-1",
+        months_of_history=12,
+        dscr=2.5,
+        cash_buffer_days=25,
+        revenue_volatility=0.1,
+        tax_bank_match_ratio=1.0,
+        revenue_trend_ratio=1.0,
+        business_age_months=38,
+        high_cost_lender_count=0,
+        avg_monthly_inflow_cents=2_000_000,
+        requested_amount_cents=500_000,
+        requested_tenor_months=6,
+        industry="Food",
+        region="Seoul",
+    )
+    return UsdCashFlowFeatures(**USD_V1.model_dump(), **{**base, **overrides})
+
+
+def usd_features_payload(**overrides) -> dict:
+    return usd_features(**overrides).model_dump(mode="json")
 
 
 @pytest.fixture

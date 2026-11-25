@@ -4,8 +4,9 @@ import pytest
 
 import policy.rules
 from policy.engine import evaluate, explain
-from policy.rules import load_rules
-from shared.contracts import Decision
+from policy.rules import load_rules, rules_for_version
+from shared.contracts import USD_V1, Decision, UsdPolicyDecision
+from tests.policy.conftest import usd_features
 
 RULESETS = Path(policy.rules.__file__).parent / "rulesets"
 
@@ -252,3 +253,34 @@ def test_v3_ruleset_has_no_settlement_cap(make_features, rules_v3):
                               mkt_pending_settlement_krw=5_000_000), rules_v3)
     assert e.limit.pending_settlement_ratio is None and e.limit.settlement_cap_krw == 0
     assert e.decision.max_amount_krw == 3_000_000 and e.substitutions == ()
+
+
+def test_v2_bank_only_strips_settlement_and_market_but_v1_keeps_settlement():
+    f = usd_features(cash_buffer_days=6.0, pg_reconciliation_ratio=1.0, pg_cash_conversion_days=6.0,
+                     pg_top_platform_share=0.6, mkt_tenure_months=30)
+    v2 = explain(f, rules_for_version("usd-v2")).decision
+    assert (v2.decision, v2.applied_substitutions) == ("eligible", ("S003",))
+    assert (v2.cash_only.decision, {r.code for r in v2.cash_only.reason_codes}) == ("refer", {"R103"})
+    v1 = explain(f, rules_for_version("usd-v1")).decision
+    assert v1.cash_only.decision == "refer" and v1.applied_substitutions == ()
+
+
+def test_s005_refers_tax_gap_and_caps_limit():
+    f = usd_features(tax_bank_match_ratio=0.4, pg_reconciliation_ratio=1.0, mkt_tenure_months=20,
+                     requested_amount_cents=1_000_000)
+    d = explain(f, rules_for_version("usd-v2")).decision
+    assert (d.decision, {r.code for r in d.reason_codes}, d.max_amount_cents) == ("refer", {"S005"}, 500_000)
+    assert d.cash_only.decision == "ineligible" and {r.code for r in d.cash_only.reason_codes} == {"R004"}
+
+
+def test_v2_without_alt_data_has_no_cash_only_and_no_substitution():
+    f = usd_features(cash_buffer_days=6.0)  # pg_*, mkt_* 모두 None
+    d = explain(f, rules_for_version("usd-v2")).decision
+    assert d.cash_only is None and d.applied_substitutions == ()
+    assert {r.code for r in d.reason_codes} == {"R103"}
+
+
+def test_usd_decision_accepts_v1_payload_without_new_fields():
+    stored = {**USD_V1.model_dump(), "application_id": "a", "decision": "eligible", "max_amount_cents": 500000,
+              "rate_band": "A", "reason_codes": [], "rules_version": "usd-v1"}
+    assert UsdPolicyDecision.model_validate(stored).applied_substitutions == ()

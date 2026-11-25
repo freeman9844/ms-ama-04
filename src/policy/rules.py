@@ -3,12 +3,12 @@
 from datetime import datetime
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from shared.contracts import MKT_FEATURES
+from shared.contracts import MKT_FEATURES, UsdCashFlowFeatures, UsdRulesVersion
 
 RESERVED_CODES = frozenset({"R900", "R901"})
 # 상환 능력(R002)과 플랫폼 제재(R003)는 셀러 평판으로 덮지 않는다.
@@ -27,6 +27,9 @@ FeatureName = Literal[
     "revenue_trend_ratio",
     "pg_top_platform_share",
     "pg_reconciliation_ratio",
+    "pg_cash_conversion_days",
+    "pg_advance_suspected_count",
+    "pg_offset_rate_trend_pp",
 ]
 Op = Literal["lt", "le", "gt", "ge"]
 
@@ -132,15 +135,25 @@ class RuleSet(_Model):
 
 
 class UsdRuleSet(RuleSet):
-    version: Literal["usd-v1"]
+    version: UsdRulesVersion
     product: UsdLimits
     limit_boost: UsdBoost
+    # 대안 데이터(PG·마켓) 지표. 있으면 은행 거래만 본 비교 판정(cash_only)이 이 목록을 지운다.
+    alt_data_features: tuple[str, ...] | None = None
+
+    @model_validator(mode="after")
+    def _alt_data_are_optional_usd_fields(self) -> "UsdRuleSet":
+        fields = UsdCashFlowFeatures.model_fields
+        for name in self.alt_data_features or ():
+            if name not in fields or fields[name].is_required() or fields[name].default is not None:
+                raise ValueError(f"alt_data_features: {name}는 UsdCashFlowFeatures의 선택(None 허용) 필드가 아니다")
+        return self
 
 
 def load_rules(path: Path = DEFAULT_RULES_PATH) -> RuleSet:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    return (UsdRuleSet if isinstance(data, dict) and data.get("version") == "usd-v1" else RuleSet).model_validate(data)
+    return (UsdRuleSet if isinstance(data, dict) and is_usd_rules(data.get("version")) else RuleSet).model_validate(data)
 
 
 @cache
@@ -157,3 +170,18 @@ AMENDED_IN_PLACE: dict[str, datetime] = {"2026.11-v1": datetime.fromisoformat("2
 def rules_for_version(version: object) -> RuleSet | None:
     """판정에 적힌 규정 버전의 규칙을 돌려준다. 모르는 버전이면 None."""
     return _rulesets().get(version) if isinstance(version, str) else None
+
+
+# 상품 버전 → 새 신청을 판정하는 현행 규정 버전. 저장된 판정은 자기 rules_version으로 다시 설명한다.
+USD_CURRENT_RULES: dict[str, str] = {"usd-v1": "usd-v2"}
+
+
+def is_usd_rules(version: object) -> bool:
+    return isinstance(version, str) and version in get_args(UsdRulesVersion)
+
+
+def current_usd_rules(product_version: str) -> UsdRuleSet:
+    """USD 상품 버전의 현행 규칙. 모르는 상품 버전이면 KeyError."""
+    rules = rules_for_version(USD_CURRENT_RULES[product_version])
+    assert isinstance(rules, UsdRuleSet)
+    return rules

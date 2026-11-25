@@ -26,6 +26,7 @@ class UsdProduct(Contract):
 
 
 USD_V1 = UsdProduct(product_version="usd-v1", currency="USD", language="en")
+UsdRulesVersion = Literal["usd-v1", "usd-v2"]
 PlatformCode = Literal["naver_smart_store", "coupang", "own_store", "11st"]
 Cents = Annotated[StrictInt, Field(ge=0)]
 
@@ -257,6 +258,10 @@ class UsdCashFlowFeatures(_CommonFeatures, UsdProduct):
     requested_amount_cents: RequestedUsdCents
     requested_tenor_months: int = Field(ge=MIN_TENOR_MONTHS, le=MAX_TENOR_MONTHS)
     mkt_pending_settlement_cents: Cents | None = None
+    # usd-v2 대안 데이터 지표. 자료가 없으면 None이며 해당 규칙은 적용하지 않는다.
+    pg_cash_conversion_days: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    pg_advance_suspected_count: int | None = Field(default=None, ge=0)
+    pg_offset_rate_trend_pp: float | None = Field(default=None, allow_inf_nan=False)
 
 
 MKT_FEATURES: tuple[str, ...] = (
@@ -333,8 +338,9 @@ class UsdPolicyDecision(UsdCashOnlyDecision):
     schema_version: SchemaV1 = "1"
     application_id: str = Field(min_length=1)
     rate_band: str | None
-    rules_version: Literal["usd-v1"]
+    rules_version: UsdRulesVersion
     cash_only: UsdCashOnlyDecision | None = None
+    applied_substitutions: tuple[Annotated[str, Field(pattern=r"^S\d{3}$")], ...] = ()
 
     @model_validator(mode="after")
     def _valid_band(self):

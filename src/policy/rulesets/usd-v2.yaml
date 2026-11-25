@@ -1,0 +1,84 @@
+version: usd-v2
+product:
+  min_amount_cents: 10000
+  max_amount_cents: 1000000
+  limit_unit_cents: 10000
+  inflow_multiplier: 1.5
+alt_data_features:
+  - mkt_tenure_months
+  - mkt_rating
+  - mkt_review_count
+  - mkt_return_rate_90d
+  - mkt_cancel_rate_90d
+  - mkt_days_since_suspension
+  - mkt_pending_settlement_cents
+  - pg_reconciliation_ratio
+  - pg_top_platform_share
+  - pg_cash_conversion_days
+  - pg_advance_suspected_count
+  - pg_offset_rate_trend_pp
+knockouts:
+  - {code: R001, message: "Less than six months of transaction history", field: months_of_history, op: lt, threshold: 6}
+  - {code: R002, message: "DSCR below 1.0", field: dscr, op: lt, threshold: 1.0}
+  - {code: R003, message: "Selling suspension in the last 90 days", field: mkt_days_since_suspension, op: lt, threshold: 90}
+  - {code: R004, message: "Tax filings cover less than half of bank revenue", field: tax_bank_match_ratio, op: lt, threshold: 0.5}
+refers:
+  - {code: R102, message: "High revenue volatility", field: revenue_volatility, op: gt, threshold: 0.5}
+  - {code: R103, message: "Insufficient cash buffer", field: cash_buffer_days, op: lt, threshold: 10}
+  - {code: R104, message: "Business less than 12 months old", field: business_age_months, op: lt, threshold: 12}
+  - {code: R105, message: "High-cost lender repayment detected", field: high_cost_lender_count, op: gt, threshold: 0}
+  - {code: R106, message: "Revenue fell in the last 60 days", field: revenue_trend_ratio, op: lt, threshold: 0.8}
+  - {code: R107, message: "Sales concentrated on one platform", field: pg_top_platform_share, op: gt, threshold: 0.8}
+  - {code: R108, message: "Settlement deposits do not reconcile", field: pg_reconciliation_ratio, op: lt, threshold: 0.9}
+  - {code: R109, message: "High return rate in the last 90 days", field: mkt_return_rate_90d, op: gt, threshold: 0.15}
+  - {code: R110, message: "Low marketplace rating", field: mkt_rating, op: lt, threshold: 4.0}
+  - {code: R111, message: "Order cancellations spiked in the last 90 days", field: mkt_cancel_rate_90d, op: gt, threshold: 0.08}
+  - {code: R112, message: "Settlements appear sold to an early-payout lender", field: pg_advance_suspected_count, op: gt, threshold: 0}
+  - {code: R113, message: "Advertising offsets against settlements are rising", field: pg_offset_rate_trend_pp, op: gt, threshold: 3.0}
+substitutions:
+  - code: S001
+    message: "Marketplace history substitutes for short bank history"
+    replaces: R001
+    outcome: refer
+    when:
+      - {field: mkt_tenure_months, op: ge, threshold: 18}
+      - {field: mkt_rating, op: ge, threshold: 4.5}
+      - {field: mkt_review_count, op: ge, threshold: 100}
+      - {field: mkt_return_rate_90d, op: le, threshold: 0.08}
+  - code: S002
+    message: "Marketplace history substitutes for short business tenure"
+    replaces: R104
+    outcome: pass
+    when:
+      - {field: mkt_tenure_months, op: ge, threshold: 18}
+      - {field: mkt_rating, op: ge, threshold: 4.5}
+  - code: S003
+    message: "Fast, fully reconciled settlements offset a thin cash buffer"
+    replaces: R103
+    outcome: pass
+    when:
+      - {field: pg_reconciliation_ratio, op: ge, threshold: 0.98}
+      - {field: pg_cash_conversion_days, op: le, threshold: 10}
+  - code: S004
+    message: "Long marketplace track record explains seasonal revenue swings"
+    replaces: R102
+    outcome: pass
+    when:
+      - {field: mkt_tenure_months, op: ge, threshold: 24}
+      - {field: mkt_review_count, op: ge, threshold: 300}
+      - {field: mkt_rating, op: ge, threshold: 4.5}
+  - code: S005
+    message: "Settlement ledger confirms revenue that tax filings under-report"
+    replaces: R004
+    outcome: refer
+    when:
+      - {field: pg_reconciliation_ratio, op: ge, threshold: 0.95}
+      - {field: mkt_tenure_months, op: ge, threshold: 12}
+limit_boost:
+  pending_settlement_ratio: 0.8
+  substituted_max_amount_cents: 500000
+rate_bands:
+  - {band: A, min_dscr: 2.0}
+  - {band: B, min_dscr: 1.5}
+  - {band: C, min_dscr: 1.2}
+  - {band: D, min_dscr: 1.0}
