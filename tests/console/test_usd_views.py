@@ -684,6 +684,16 @@ def test_v2_decision_shows_alt_data_compare_and_unit_values(lang):
     assert reasons(policy) == [("R113", "5.9%p", "3.0%p"), ("R111", "13.0%", "8.0%"), ("R112", *count)]
 
 
+def test_reason_text_formats_ratio_and_day_features():
+    from console.views import reason_text
+
+    assert reason_text("pg_reconciliation_ratio", 0.857) == "85.7%"
+    assert reason_text("mkt_return_rate_90d", 0.18) == "18.0%"
+    assert reason_text("tax_bank_match_ratio", 0.4) == "40.0%"
+    assert reason_text("mkt_days_since_suspension", 30) == "30일"
+    assert reason_text("mkt_rating", 3.9) is None
+
+
 def test_v1_decision_keeps_cash_flow_label_and_trace():
     deps = fixtures.build_deps()
     doc = deps.store.docs["preview-usd-bakery"]  # rules_version usd-v1, 새 pg 키·applied_substitutions 없음
@@ -733,3 +743,12 @@ def test_usd_only_seller_is_listed_and_accepted_by_apply():
     client = TestClient(create_app(fixtures.build_deps()))
     assert "Mapo Snack Box" in client.get("/borrower").text
     assert client.get("/apply?applicant_id=seller-snackbox-22", follow_redirects=False).status_code == 200
+
+
+def test_usd_only_sellers_are_in_usd_picker_with_name_initial_but_not_in_legacy_picker():
+    client = TestClient(create_app(fixtures.build_deps()))
+    usd = client.get("/borrower").text
+    assert re.search(r'avatar av-\d" aria-hidden="true">M</span> <span class="seller-card-label">Mapo Snack Box', usd)
+    legacy = client.get("/legacy/borrower").text
+    assert "seller-snackbox-22" not in legacy and "seller-popup-29" not in legacy
+    assert "/legacy/borrower/seller-dailylook-01" in legacy

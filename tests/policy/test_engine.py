@@ -280,6 +280,40 @@ def test_v2_without_alt_data_has_no_cash_only_and_no_substitution():
     assert {r.code for r in d.reason_codes} == {"R103"}
 
 
+@pytest.mark.parametrize("field,code,values,expected", [
+    ("mkt_cancel_rate_90d", "R111", (.0799, .08, .0801), (False, False, True)),
+    ("pg_advance_suspected_count", "R112", (0, 1), (False, True)),
+    ("pg_offset_rate_trend_pp", "R113", (2.99, 3.0, 3.01), (False, False, True)),
+])
+def test_usd_v2_alt_data_refer_boundaries(field, code, values, expected):
+    for value, hit in zip(values, expected, strict=True):
+        d = explain(usd_features(**{field: value}), rules_for_version("usd-v2")).decision
+        assert (code in _codes(d)) == hit, (field, value)
+
+
+@pytest.mark.parametrize("overrides,applied", [
+    ({"pg_reconciliation_ratio": .98, "pg_cash_conversion_days": 10.0}, True),
+    ({"pg_reconciliation_ratio": .9799, "pg_cash_conversion_days": 10.0}, False),
+    ({"pg_reconciliation_ratio": .98, "pg_cash_conversion_days": 10.01}, False),
+])
+def test_s003_waives_thin_cash_buffer_only_at_threshold(overrides, applied):
+    d = explain(usd_features(cash_buffer_days=6.0, **overrides), rules_for_version("usd-v2")).decision
+    assert ("S003" in d.applied_substitutions) == applied
+    assert ("R103" in _codes(d)) != applied
+
+
+@pytest.mark.parametrize("overrides,applied", [
+    ({"mkt_tenure_months": 24, "mkt_review_count": 300, "mkt_rating": 4.5}, True),
+    ({"mkt_tenure_months": 23, "mkt_review_count": 300, "mkt_rating": 4.5}, False),
+    ({"mkt_tenure_months": 24, "mkt_review_count": 299, "mkt_rating": 4.5}, False),
+    ({"mkt_tenure_months": 24, "mkt_review_count": 300, "mkt_rating": 4.49}, False),
+])
+def test_s004_explains_volatility_only_at_threshold(overrides, applied):
+    d = explain(usd_features(revenue_volatility=0.6, **overrides), rules_for_version("usd-v2")).decision
+    assert ("S004" in d.applied_substitutions) == applied
+    assert ("R102" in _codes(d)) != applied
+
+
 def test_usd_decision_accepts_v1_payload_without_new_fields():
     stored = {**USD_V1.model_dump(), "application_id": "a", "decision": "eligible", "max_amount_cents": 500000,
               "rate_band": "A", "reason_codes": [], "rules_version": "usd-v1"}

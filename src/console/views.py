@@ -197,19 +197,23 @@ def _policy_compare(policy: Any, unit: str) -> dict[str, Any] | None:
             "bank_tax": isinstance(rules, UsdRuleSet) and bool(rules.alt_data_features)}
 
 
-def reason_text(field: str | None, value: Any) -> str | None:
-    """단위가 있는 사유 지표의 표시값. 그 밖의 필드는 None이라 호출한 쪽이 기존 표시를 쓴다."""
-    if field not in REASON_UNITS or not isinstance(value, (int, float)) or isinstance(value, bool):
-        return None
-    return REASON_UNITS[field](value)
-
-
 REASON_UNITS: dict[str, Callable[[float], str]] = {
     "pg_cash_conversion_days": lambda v: _("%(v)s일", v=f"{v:.1f}"),
     "pg_advance_suspected_count": lambda v: _("%(v)s건", v=f"{v:.0f}"),
     "pg_offset_rate_trend_pp": lambda v: f"{v:.1f}%p",
     "mkt_cancel_rate_90d": lambda v: f"{v * 100:.1f}%",
+    "mkt_return_rate_90d": lambda v: f"{v * 100:.1f}%",
+    "mkt_days_since_suspension": lambda v: _("%(v)s일", v=f"{v:.0f}"),
+    "pg_reconciliation_ratio": lambda v: f"{v * 100:.1f}%",
+    "tax_bank_match_ratio": lambda v: f"{v * 100:.1f}%",
 }
+
+
+def reason_text(field: str | None, value: Any) -> str | None:
+    """단위가 있는 사유 지표의 표시값. 그 밖의 필드는 None이라 호출한 쪽이 기존 표시를 쓴다."""
+    if field not in REASON_UNITS or not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return REASON_UNITS[field](value)
 
 
 def _substitutions(trace: Mapping[str, Any]) -> list[dict[str, Any]]:

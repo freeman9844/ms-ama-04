@@ -26,7 +26,10 @@ SUITE = "underwriting"
 TAX_EVIDENCE = ("M:tax_bank_match_ratio",)
 SETTLEMENT_EVIDENCE = ("M:pg_reconciliation_ratio", "P:R108")
 SETTLEMENT_CHECK_EVIDENCE = ("M:pg_advance_share", "M:pg_reconciliation_ratio", "P:R108")
-SELLER_EVIDENCE = ("M:mkt_", "P:S001", "P:R003", "P:R109", "P:R110")
+SELLER_EVIDENCE = (
+    "M:mkt_", "P:S001", "P:S002", "P:S003", "P:S004", "P:S005", "P:R003", "P:R004", "P:R109", "P:R110",
+    "P:R111", "P:R112", "P:R113",
+)
 
 
 @cache

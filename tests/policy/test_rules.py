@@ -2,8 +2,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from policy.rules import (DEFAULT_RULES_PATH, RuleSet, UsdRuleSet, current_usd_rules, is_usd_rules, load_rules,
-                          rules_for_version)
+from policy.rules import (DEFAULT_RULES_PATH, USD_CURRENT_RULES, RuleSet, UsdRuleSet, current_usd_rules,
+                          is_usd_rules, load_rules, rules_for_version)
 from shared.contracts import MKT_FEATURES
 
 USD_V2_PATH = DEFAULT_RULES_PATH.parent / "usd-v2.yaml"
@@ -158,6 +158,14 @@ def test_usd_v1_is_unchanged_and_current_rules_map_to_v2():
     assert rules_for_version("usd-v1").alt_data_features is None
     assert current_usd_rules("usd-v1").version == "usd-v2"
     assert is_usd_rules("usd-v1") and is_usd_rules("usd-v2") and not is_usd_rules("2026.11-v4")
+
+
+def test_current_usd_rules_rejects_unknown_product_version(monkeypatch):
+    with pytest.raises(ValueError, match="usd-v9"):
+        current_usd_rules("usd-v9")
+    monkeypatch.setitem(USD_CURRENT_RULES, "usd-v1", load_rules(DEFAULT_RULES_PATH).version)
+    with pytest.raises(ValueError):
+        current_usd_rules("usd-v1")
 
 
 def test_alt_data_features_must_be_optional_usd_fields():

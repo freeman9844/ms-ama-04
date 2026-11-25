@@ -42,7 +42,7 @@ DEMO_APPLICANTS: tuple[tuple[str, Archetype, int, bool], ...] = (
 )
 
 # USD 전용 장면 셀러(KRW 페르소나 없음). (applicant_id, seed). 순서는 shared.sellers.USD_ONLY_SELLER_IDS와 같다.
-USD_ONLY_APPLICANTS: tuple[tuple[str, int], ...] = tuple(zip(USD_ONLY_SELLER_IDS, range(122, 130)))
+USD_ONLY_APPLICANTS: tuple[tuple[str, int], ...] = tuple(zip(USD_ONLY_SELLER_IDS, range(122, 130), strict=True))
 # 장면별 신청 금액(센트). 없으면 500_000. 시나리오 실행기가 쓴다.
 SCENE_REQUEST_CENTS: dict[str, int] = {"seller-popup-29": 1_000_000}
 

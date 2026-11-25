@@ -181,7 +181,9 @@ def is_usd_rules(version: object) -> bool:
 
 
 def current_usd_rules(product_version: str) -> UsdRuleSet:
-    """USD 상품 버전의 현행 규칙. 모르는 상품 버전이면 KeyError."""
-    rules = rules_for_version(USD_CURRENT_RULES[product_version])
-    assert isinstance(rules, UsdRuleSet)
+    """USD 상품 버전의 현행 규칙. 모르는 상품 버전이거나 USD 규정이 아니면 ValueError."""
+    version = USD_CURRENT_RULES.get(product_version)
+    rules = rules_for_version(version) if version else None
+    if not isinstance(rules, UsdRuleSet):
+        raise ValueError(f"no current USD ruleset for product_version: {product_version}")
     return rules

@@ -277,7 +277,8 @@ def _templates() -> Environment:
     env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
     env.filters["seller_label"] = lambda s: data_label(seller_label(s))
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
-    env.filters["seller_initial"] = lambda s: str(translate.data(seller_name(s)) or s)[:1]
+    env.filters["seller_initial"] = lambda s: str(translate.data(seller_name(s) or (
+        USD_SELLERS[s].business_name if s in USD_SELLERS else None)) or s)[:1]
     env.filters["recommendation_label"] = lambda s: i18n.label(RECOMMENDATION_LABELS, s)
     env.filters["opinion_state"] = opinion_state
     env.filters["archived_reply"] = archived_reply
@@ -1064,7 +1065,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     def borrower_index(request: Request) -> HTMLResponse:
         user = customer(request)
         privacy()
-        return render("customer_select.html", user, prefix="/legacy" if request.url.path.startswith("/legacy/") else "")
+        legacy = request.url.path.startswith("/legacy/")
+        applicants = tuple(a for a in DEMO_APPLICANTS if a not in USD_ONLY_SELLER_IDS) if legacy else DEMO_APPLICANTS
+        return render("customer_select.html", user, prefix="/legacy" if legacy else "", applicants=applicants)
 
     @app.get("/legacy/borrower/{applicant_id}", response_class=HTMLResponse)
     @app.get("/borrower/{applicant_id}", response_class=HTMLResponse)
