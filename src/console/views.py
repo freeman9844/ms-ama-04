@@ -76,13 +76,15 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
     pii, model_text, raw_text = _text_functions(raw, key, restore)
     uw = doc.get("underwriting") or {}
     policy = doc.get("policy")
+    product = product_of(doc)
     catalog = (
-        build_catalog(uw.get("features") or {}, uw.get("signals") or {}, uw.get("monthly") or [], policy)
+        build_catalog(uw.get("features") or {}, uw.get("signals") or {}, uw.get("monthly") or [], policy,
+                      partial_usd=bool(product))
         if uw and policy
         else {}
     )
     state = opinion_state(doc.get("assessment"))
-    unit = "cents" if product_of(doc) else "krw"
+    unit = "cents" if product else "krw"
     assessment = _map_strings(published_opinion(doc.get("assessment"), doc.get(f"requested_amount_{unit}")), model_text)
     display_doc = {k: v for k, v in doc.items() if k not in ("assessment", "assessment_run")}
     if (error := doc.get("error")) and error.get("stage") in ("assess", "assess_credit"):
@@ -116,6 +118,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         for t in (raw.transactions if raw else ())
         if t.txn_id in wanted
     ]
+    trace = verified_policy_trace(doc, policy, uw.get("features"))
     return {
         "doc": display_doc,
         "pii": pii,
@@ -129,23 +132,35 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         "decidable": doc.get("status") in DECIDABLE,
         f"max_amount_{unit}": (policy or {}).get(f"max_amount_{unit}"),
         "policy_blocked": (policy or {}).get("decision") not in ("eligible", "refer"),
-        "policy_compare": _policy_compare(policy),
-        "substitutions": _substitutions(policy, uw.get("features"), doc.get("received_at")),
+        "policy_compare": _policy_compare(policy, unit),
+        "limit_trace": trace.get("limit"),
+        "substitutions": _substitutions(trace),
     }
 
 
-def _policy_compare(policy: Any) -> dict[str, Any] | None:
+def _policy_compare(policy: Any, unit: str) -> dict[str, Any] | None:
     """v4 판정의 '현금흐름만 볼 때' 비교. cash_only가 null이거나 없는 판정(v3 이하)은 None."""
     cash = policy.get("cash_only") if isinstance(policy, Mapping) else None
     if not isinstance(cash, Mapping):
         return None
-    return {"cash": {"decision": cash.get("decision"), "max": cash.get("max_amount_krw")},
-            "seller": {"decision": policy.get("decision"), "max": policy.get("max_amount_krw")}}
+    return {"cash": {"decision": cash.get("decision"), "max": cash.get(f"max_amount_{unit}")},
+            "seller": {"decision": policy.get("decision"), "max": policy.get(f"max_amount_{unit}")}}
 
 
-def _substitutions(policy: Any, features: Any, received_at: Any) -> list[dict[str, Any]]:
+def verified_policy_trace(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[str, Any]:
+    product = product_of(doc)
+    if product:
+        if not policy or policy.get("rules_version") != product.product_version or not policy.get("product_version"):
+            return {}
+        if "rate_band" not in policy or not isinstance(policy.get("reason_codes"), (list, tuple)):
+            return {}
+        if not features or features.get("requested_amount_cents") != doc.get("requested_amount_cents"):
+            return {}
+    return (policy_trace(policy, features, doc.get("received_at")) or {}).get("trace") or {}
+
+
+def _substitutions(trace: Mapping[str, Any]) -> list[dict[str, Any]]:
     """대상 규칙에 걸린 셀러 데이터 대체(S0xx)만 고른다. 계산 과정을 만들 수 없으면 빈 목록."""
-    trace = (policy_trace(policy, features, received_at) or {}).get("trace") or {}
     rows = []
     for s in trace.get("substitutions") or ():
         if not s.get("target_hit"):

@@ -9,9 +9,11 @@ from typing import Any
 
 from agents.features import WATCH_METRICS
 from console import charts, i18n
-from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, man
+from console.dashboard import EXPENSE_COLORS, EXPENSES, POLICY_DECISIONS, RECOMMENDATION_LABELS, display_usd, man, usd_tick
 from console.i18n import _
 from console.statuses import FLAG_LABELS
+from console.views import verified_policy_trace
+from shared.product_context import product_of
 
 PRODUCT_MAX_KRW = 10_000_000
 INFLOW_MULTIPLIER = 1.5
@@ -110,7 +112,7 @@ def _signal(field: str, name: str, direction: str, strong: float, text: str, fea
     }
 
 
-def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
+def _summary(view: Mapping[str, Any], doc: Mapping[str, Any], unit: str) -> dict[str, Any]:
     policy, assessment = view.get("policy") or {}, view.get("assessment") or {}
     decision = policy.get("decision")
     decision_label, decision_tone = POLICY_DECISIONS.get(decision, (decision or "판정 없음", "neutral"))
@@ -121,7 +123,8 @@ def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
         review_text = _("통과") if review.get("passed") else _("미통과")
         if charts.is_num(review.get("rounds")):
             review_text = _("%(result)s · %(n)s회", result=review_text, n=review["rounds"])
-    requested, limit = doc.get("requested_amount_krw"), policy.get("max_amount_krw")
+    requested, limit = doc.get(f"requested_amount_{unit}"), policy.get(f"max_amount_{unit}")
+    money = display_usd if unit == "cents" else charts.won
     gauge = charts.gauge(limit, requested)
     return {
         "decision": _(decision_label), "decision_tone": decision_tone,
@@ -130,42 +133,55 @@ def _summary(view: Mapping[str, Any], doc: Mapping[str, Any]) -> dict[str, Any]:
         "review": review_text, "review_tone": "green" if review.get("passed") else ("red" if review else "neutral"),
         "gauge": gauge,
         "gauge_text": f"{gauge['pct']:.0f}%" if gauge["frac"] is not None else "-",
-        "gauge_sub": _("한도 %(limit)s / 신청 %(requested)s", limit=charts.won(limit), requested=charts.won(requested)),
+        "gauge_sub": _("한도 %(limit)s / 신청 %(requested)s", limit=money(limit), requested=money(requested)),
     }
 
 
-def _officer(doc: Mapping[str, Any]) -> dict[str, Any] | None:
+def _officer(doc: Mapping[str, Any], unit: str) -> dict[str, Any] | None:
     od = doc.get("officer_decision")
     if not isinstance(od, Mapping) or od.get("decision") not in OFFICER_DECISIONS:
         return None
     label, tone = OFFICER_DECISIONS[od["decision"]]
     return {
         "label": _(label), "tone": tone,
-        "requested": doc.get("requested_amount_krw"), "tenor": doc.get("requested_tenor_months"),
-        "approved": od.get("amount_krw") if od["decision"] in APPROVED else None,
+        "requested": doc.get(f"requested_amount_{unit}"), "tenor": doc.get("requested_tenor_months"),
+        "approved": od.get(f"amount_{unit}") if od["decision"] in APPROVED else None,
         "override": bool(od.get("policy_override")), "at": od.get("at"),
     }
 
 
-def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any) -> dict[str, Any] | None:
+def _capacity(monthly: Sequence[Mapping[str, Any]], installment: Any, *, usd: bool) -> dict[str, Any] | None:
     if not monthly:
         return None
-    new = installment if charts.is_num(installment) else 0
+    new = installment if charts.is_num(installment) else (None if usd else 0)
+    suffix = "_cents" if usd else ""
+    money, tick_fmt = (display_usd, usd_tick) if usd else (charts.won, man_tick)
     groups, obligations = [], []
+    short_months = compared = 0
+    top = 0
     for m in monthly:
         month = str(m.get("month") or "")
-        rev, opex, debt = m.get("revenue"), m.get("operating_out"), m.get("debt_service")
+        rev, opex, debt = (m.get(k + suffix) for k in ("revenue", "operating_out", "debt_service"))
         cap = (rev - opex) if charts.is_num(rev) and charts.is_num(opex) else None
-        owed = (debt if charts.is_num(debt) else 0) + new
-        short = cap is None or cap < owed
-        tip = _("%(month)s 매출−운영비 %(cap)s · 갚을 돈 %(owed)s", month=month, cap=charts.won(cap),
-                owed=charts.won(owed))
-        groups.append((month[2:] if len(month) == 7 else month, [[("capacity", cap, "red" if short else "green", tip)]]))
+        if usd:
+            owed = debt + new if charts.is_num(debt) and new is not None else None
+            top = max(top, cap or 0, owed or 0)
+        else:
+            owed = (debt if charts.is_num(debt) else 0) + new
+        if usd and (cap is None or owed is None):
+            color = "grey"
+        else:
+            short = cap is None or cap < owed
+            short_months += short
+            compared += 1
+            color = "red" if short else "green"
+        tip = _("%(month)s 매출−운영비 %(cap)s · 갚을 돈 %(owed)s", month=month, cap=money(cap), owed=money(owed))
+        groups.append((month[2:] if len(month) == 7 else month, [[("capacity", cap, color, tip)]]))
         obligations.append(owed)
-    chart = charts.columns(groups, tick_fmt=man_tick, **CAPACITY_CHART)
+    chart = charts.columns(groups, tick_fmt=tick_fmt, vmax=top or None, **CAPACITY_CHART)
     return {
-        "chart": chart, "line": charts.line(obligations, vmax=chart["vmax"], tick_fmt=man_tick, **CAPACITY_CHART),
-        "short_months": sum(1 for _label, bars in groups if bars[0][0][2] == "red"), "months": len(groups),
+        "chart": chart, "line": charts.line(obligations, vmax=chart["vmax"], tick_fmt=tick_fmt, **CAPACITY_CHART),
+        "short_months": short_months, "months": compared,
         "installment": new,
         "legend": [(_("매출 − 운영비(여유)"), "green"), (_("갚을 돈보다 적은 달"), "red"),
                    (_("기존 상환 + 이번 대출 월 상환액(선)"), "purple")],
@@ -193,6 +209,52 @@ def _limit(doc: Mapping[str, Any], features: Mapping[str, Any], policy: Mapping[
         "binding": next(label for label, v in candidates if v == low),
         "computed": computed,
         "policy_limit": policy.get("max_amount_krw"),
+    }
+
+
+def _usd_limit(trace: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str, Any]:
+    cap = (_("월평균 입금×%(m)s", m=f"{trace['inflow_multiplier']:g}"), trace["inflow_cap_cents"])
+    if trace["settlement_cap_cents"] > cap[1]:
+        cap = (_("정산 예정금×%(r)s", r=f"{trace['pending_settlement_ratio']:g}"), trace["settlement_cap_cents"])
+    candidates = [(_("신청액"), trace["requested_amount_cents"]), cap, (_("상품 최대"), trace["product_max_cents"])]
+    if trace["substituted_cap_cents"] is not None:
+        candidates.append((_("대체 상한"), trace["substituted_cap_cents"]))
+    low = trace["before_rounding_cents"]
+    return {
+        "bars": charts.hbars([(label, v, "blue" if v == low else "grey") for label, v in candidates],
+                             width=420, label_w=120),
+        "binding": next(label for label, v in candidates if v == low),
+        "computed": trace["limit_cents"], "unit_cents": trace["unit_cents"], "policy_limit": policy["max_amount_cents"],
+    }
+
+
+def _usd_expenses(uw: Mapping[str, Any], features: Mapping[str, Any]) -> dict[str, Any] | None:
+    breakdown = uw.get("expense_breakdown") or []
+    groups = {r.get("group") for r in breakdown if isinstance(r, Mapping) and type(r.get("monthly_avg_cents")) is int}
+    if groups == EXPENSE_COLORS.keys() and len(groups) == len(breakdown):
+        parts = [(_(r.get("label") or r["group"]), r["monthly_avg_cents"], EXPENSE_COLORS[r["group"]]) for r in breakdown]
+        revenue, source, divisor = features.get("avg_monthly_inflow_cents"), "breakdown", 1
+    else:
+        monthly = uw.get("monthly") or []
+        keys = ["revenue", *(k for k, _, _ in EXPENSES)]
+        if not monthly or not all(isinstance(m, Mapping) and all(type(m.get(k + "_cents")) is int for k in keys)
+                                  for m in monthly):
+            return None
+        # Preserve integer totals and their common denominator, even for a fractional-cent monthly average.
+        parts = [(_(label), sum(m[k + "_cents"] for m in monthly), color) for k, label, color in EXPENSES]
+        revenue, source, divisor = sum(m["revenue_cents"] for m in monthly), "monthly", len(monthly)
+    if type(revenue) is not int:
+        return None
+    leftover = revenue - sum(v for _, v, _ in parts)
+    segments = [*parts, (_(LEFTOVER[1]), max(leftover, 0), LEFTOVER[2])]
+    donut = charts.donut(segments)
+    for arc in donut["arcs"]:
+        arc["text"] = display_usd(arc["value"], divisor=divisor)
+    donut["total_text"] = display_usd(donut["total"], divisor=divisor)
+    return {
+        "donut": donut, "source": source, "divisor": divisor, "leftover": leftover,
+        "overspend_text": display_usd(-leftover, divisor=divisor) if leftover < 0 else None,
+        "legend": [(arc["label"], arc["color"], arc["text"]) for arc in donut["arcs"]],
     }
 
 
@@ -246,6 +308,8 @@ def _strengths_risks(signals: Sequence[Mapping[str, Any]], policy: Mapping[str, 
 
 def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
     doc = view["doc"]
+    usd = bool(product_of(doc))
+    unit = "cents" if usd else "krw"
     uw = doc.get("underwriting") or {}
     features = view.get("features") or uw.get("features") or {}
     policy = view.get("policy") or {}
@@ -254,13 +318,20 @@ def assessment_panels(view: Mapping[str, Any]) -> dict[str, Any]:
                if s[0] not in OPTIONAL_SIGNALS or charts.is_num(features.get(s[0]))] if features else []
     flags = [*(doc.get("flags") or ()), *(uw.get("flags") or ())]
     strengths, risks = _strengths_risks(signals, policy, flags)
+    if usd:
+        trace = (view["limit_trace"] if "limit_trace" in view
+                 else verified_policy_trace(doc, policy, features).get("limit"))
+        limit = _usd_limit(trace, policy) if trace else None
+    else:
+        limit = _limit(doc, features, policy)
     return {
-        "summary": _summary(view, doc),
-        "officer": _officer(doc),
+        "summary": _summary(view, doc, unit),
+        "officer": _officer(doc, unit),
         "signals": signals,
-        "capacity": _capacity(monthly, (uw.get("signals") or {}).get("new_installment_krw")),
-        "limit": _limit(doc, features, policy),
-        "expenses": _expenses(uw, features),
+        "capacity": _capacity(monthly, (uw.get("signals") or {}).get(f"new_installment_{unit}"), usd=usd),
+        "limit": limit,
+        "limit_note": _("저장된 판정의 한도 산출 근거를 확인할 수 없습니다.") if usd and policy and not limit else None,
+        "expenses": _usd_expenses(uw, features) if usd else _expenses(uw, features),
         "claims": _claims(view.get("claims") or ()),
         "strengths": strengths,
         "risks": risks,

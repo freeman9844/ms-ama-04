@@ -24,26 +24,41 @@ def build_catalog(
     signals: Mapping[str, Any],
     monthly: Sequence[Mapping[str, Any]],
     policy: Mapping[str, Any],
+    *,
+    partial_usd: bool = False,
 ) -> dict[str, int | float]:
     catalog: dict[str, int | float] = {}
     for source in (features, signals):
         catalog.update({f"M:{k}": v for k, v in source.items() if _numeric(v)})
-    product = product_of(features)
-    if product != product_of(policy):
-        raise ValueError("Policy and feature products differ")
-    if product:
+    if partial_usd:
+        usd = True  # Only the read view inherits the application product; agent inputs stay strict.
+    else:
+        product = product_of(features)
+        if product != product_of(policy):
+            raise ValueError("Policy and feature products differ")
+        usd = bool(product)
+    if usd:
         validate_usd_evidence((features, signals, monthly, policy))
-    suffix = "_cents" if product else ""
+    suffix = "_cents" if usd else ""
     revenue = f"revenue{suffix}"
-    mean = sum(r[revenue] for r in monthly) / len(monthly) if monthly else 0
+    if partial_usd and any(not _numeric(r.get(revenue)) for r in monthly):
+        mean = None
+    else:
+        mean = sum(r[revenue] for r in monthly) / len(monthly) if monthly else 0
     for row in monthly:
+        if partial_usd and not row.get("month"):
+            continue
         for name in MONTHLY_FIELDS:
             name += suffix
-            catalog[f"S:{row['month']}:{name}"] = row[name]
-        catalog[f"S:{row['month']}:index"] = round(row[revenue] / mean, 3) if mean > 0 else 0.0
-    limit = "max_amount_cents" if product else "max_amount_krw"
-    catalog[f"P:{limit}"] = policy[limit]
-    for reason in policy.get("reason_codes", ()):
+            if not partial_usd or _numeric(row.get(name)):
+                catalog[f"S:{row['month']}:{name}"] = row[name]
+        if mean is not None:
+            catalog[f"S:{row['month']}:index"] = round(row[revenue] / mean, 3) if mean > 0 else 0.0
+    limit = "max_amount_cents" if usd else "max_amount_krw"
+    if not partial_usd or _numeric(policy.get(limit)):
+        catalog[f"P:{limit}"] = policy[limit]
+    reasons = policy.get("reason_codes", ())
+    for reason in (reasons or ()) if partial_usd else reasons:
         for name in ("observed", "threshold"):
             if _numeric(reason.get(name)):
                 catalog[f"P:{reason['code']}:{name}"] = reason[name]

@@ -1,6 +1,10 @@
-from console import assessment
+import pytest
+
+from console import assessment, i18n
 from console.assessment import SIGNAL_RULES, SIGNALS, assessment_panels
+from console.views import detail_view
 from policy.rules import DEFAULT_RULES_PATH, load_rules
+from shared.contracts import USD_V1
 
 STRONG = {"dscr": 1.8, "cash_buffer_days": 45.0, "revenue_volatility": 0.2, "tax_bank_match_ratio": 0.95,
           "business_age_months": 30, "months_of_history": 12, "avg_monthly_inflow_krw": 4_123_456}
@@ -183,3 +187,183 @@ def test_summary_officer_decision_only_for_approve_or_decline(make_doc):
     assert (o["label"], o["tone"], o["approved"], o["override"]) == ("거절", "red", None, False)
     assert assessment_panels(view(make_doc, STRONG))["officer"] is None
     assert assessment_panels(view(make_doc, STRONG, officer_decision={"decision": "refer"}))["officer"] is None
+
+
+def usd_doc():
+    usd = USD_V1.model_dump()
+    features = dict(usd, application_id="usd-1", dscr=1.8, cash_buffer_days=45, revenue_volatility=0.2,
+                    tax_bank_match_ratio=0.95, months_of_history=12, business_age_months=30, industry="retail",
+                    region="Seoul", avg_monthly_inflow_cents=274169, requested_amount_cents=500051,
+                    requested_tenor_months=6)
+    return dict(usd, application_id="usd-1", requested_amount_cents=500051, requested_tenor_months=6,
+                underwriting={"features": features}, policy=dict(usd, rules_version="usd-v1", decision="eligible",
+                    max_amount_cents=410000, rate_band="B", reason_codes=[]))
+
+
+def test_usd_verified_limit_candidates_and_actual_approval(key):
+    doc = usd_doc()
+    doc["assessment"] = dict(USD_V1.model_dump(), schema_version="2", review={"passed": True},
+                             recommendation="approve", summary="Supported by verified deposits.")
+    with i18n.use("en"):
+        p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert p["officer"] is None
+    assert p["summary"]["gauge_sub"] == "Limit $4100 / requested $5001"
+    limit = p["limit"]
+    assert [b["value"] for b in limit["bars"]["bars"]] == [500051, 411253, 1000000]
+    assert limit["binding"] == "Avg. monthly deposits × 1.5"
+    assert (limit["computed"], limit["policy_limit"], limit["unit_cents"]) == (410000, 410000, 10000)
+    doc["officer_decision"] = dict(USD_V1.model_dump(), decision="approve", amount_cents=399951)
+    officer = assessment_panels(detail_view(doc, None, key, restore=False))["officer"]
+    assert (officer["requested"], officer["approved"]) == (500051, 399951)
+
+
+def test_usd_knockout_zero_is_not_missing_or_the_formula_amount(key):
+    doc = usd_doc()
+    doc["underwriting"]["features"]["mkt_days_since_suspension"] = 0
+    doc["policy"].update(decision="ineligible", max_amount_cents=0, rate_band=None,
+                         reason_codes=[{"code": "R003", "field": "mkt_days_since_suspension",
+                                        "message": "Selling suspension in the last 90 days"}],
+                         cash_only=dict(USD_V1.model_dump(), decision="eligible", max_amount_cents=410000))
+    v = detail_view(doc, None, key, restore=False)
+    p = assessment_panels(v)
+    assert p["summary"]["gauge_text"] == "0%" and "$0" in p["summary"]["gauge_sub"]
+    assert (p["limit"]["policy_limit"], p["limit"]["computed"]) == (0, 410000)
+    assert v["policy_compare"] == {"cash": {"decision": "eligible", "max": 410000},
+                                   "seller": {"decision": "ineligible", "max": 0}}
+    assert by_field(p)["mkt_days_since_suspension"]["state"] == "knockout"
+
+
+def test_usd_referred_limit_uses_verified_settlement_and_substitution_caps(key):
+    doc = usd_doc()
+    doc["underwriting"]["features"].update(months_of_history=3, mkt_rating=4.6, mkt_return_rate_90d=0.02,
+                                           mkt_review_count=130, mkt_tenure_months=20, mkt_pending_settlement_cents=702347)
+    doc["policy"].update(decision="refer", max_amount_cents=500000, reason_codes=[{"code": "S001"}])
+    p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert p["limit"] is not None
+    assert [(b["value"], b["color"]) for b in p["limit"]["bars"]["bars"]] == [
+        (500051, "grey"), (561877, "grey"), (1000000, "grey"), (500000, "blue")]
+    assert (p["limit"]["binding"], p["limit"]["computed"]) == ("대체 상한", 500000)
+
+
+@pytest.mark.parametrize("override", [
+    {"max_amount_cents": 410001}, {"rate_band": "A"}, {"decision": "refer"},
+    {"reason_codes": [{"code": "R001"}]}, {"rules_version": "unknown"}, {"rules_version": "2026.11-v4"},
+])
+def test_usd_unverified_policy_omits_formula_but_keeps_stored_limit(key, override):
+    doc = usd_doc()
+    doc["policy"].update(override)
+    p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert p["limit"] is None and p.get("limit_note")
+    assert "$4100" in p["summary"]["gauge_sub"]
+
+
+def test_usd_partial_features_and_policy_have_no_invented_limit(key):
+    doc = usd_doc()
+    del doc["policy"]["max_amount_cents"]
+    doc["underwriting"]["features"] = {**USD_V1.model_dump(), "dscr": 1.8}
+    doc["policy"]["cash_only"] = {"decision": "ineligible", "max_amount_cents": 0}
+    v = detail_view(doc, None, key, restore=False)
+    p = assessment_panels(v)
+    assert p["summary"]["gauge_text"] == "-" and "$0" not in p["summary"]["gauge_sub"]
+    assert p["limit"] is None and p.get("limit_note")
+    assert v["policy_compare"]["cash"]["max"] == 0 and v["policy_compare"]["seller"]["max"] is None
+    assert by_field(p)["cash_buffer_days"]["state"] == "unknown"
+
+
+def test_usd_sparse_evidence_inherits_product_but_cannot_verify_a_formula(key):
+    doc = usd_doc()
+    doc["underwriting"]["features"] = {"dscr": 0.95}
+    doc["policy"] = {"decision": "ineligible", "max_amount_cents": 0, "rules_version": "usd-v1"}
+    p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert by_field(p)["dscr"]["value"] == 0.95 and p["summary"]["gauge_text"] == "0%"
+    assert p["limit"] is None and p["limit_note"]
+    doc["underwriting"]["features"] = {"requested_amount_krw": 500051}
+    doc["policy"] = {"decision": "ineligible", "max_amount_krw": 0}
+    with pytest.raises(ValueError):
+        detail_view(doc, None, key, restore=False)
+
+
+def test_usd_formula_does_not_describe_a_different_recorded_request(key):
+    doc = usd_doc()
+    doc["requested_amount_cents"] = 499949  # Inflow still binds: the final policy limit happens to agree.
+    p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert p["limit"] is None and p["limit_note"]
+    assert "$4999" in p["summary"]["gauge_sub"]
+
+
+@pytest.mark.parametrize("partial", [{}, {"reason_codes": None}])
+def test_usd_missing_reason_list_is_not_a_verified_empty_list(key, partial):
+    doc = usd_doc()
+    del doc["policy"]["reason_codes"]
+    doc["policy"].update(partial)
+    p = assessment_panels(detail_view(doc, None, key, restore=False))
+    assert p["limit"] is None and p["limit_note"]
+
+
+def test_usd_capacity_axis_includes_repayments_when_all_months_are_short(key):
+    doc = usd_doc()
+    doc["underwriting"].update(signals={"new_installment_cents": 2100}, monthly=[
+        {"month": "2026-01", "revenue_cents": 550, "operating_out_cents": 250, "debt_service_cents": 100},
+        {"month": "2026-02", "revenue_cents": 250, "operating_out_cents": 250, "debt_service_cents": 0}])
+    cap = assessment_panels(detail_view(doc, None, key, restore=False))["capacity"]
+    assert cap["chart"]["vmax"] == cap["line"]["vmax"] == 2200
+    assert cap["short_months"] == 2 and cap["line"]["points"][0]["y"] < cap["line"]["points"][1]["y"]
+
+
+def test_usd_partial_monthly_rows_keep_only_supported_opinion_evidence(key):
+    doc = usd_doc()
+    doc["underwriting"]["monthly"] = [{"month": "2026-01", "revenue_cents": 12345}, {"month": "2026-02"}]
+    ids = ["S:2026-01:revenue_cents", "S:2026-01:index", "S:2026-02:revenue_cents"]
+    doc["assessment"] = dict(USD_V1.model_dump(), schema_version="2", review={"passed": True},
+                             recommendation="refer", claims=[{"text": "Check January receipts.", "metric_ids": ids}])
+    v = detail_view(doc, None, key, restore=False)
+    assert v["claims"][0]["evidence"] == list(zip(ids, [12345, None, None], strict=True))
+
+
+def test_usd_capacity_compares_exact_cents_only_for_known_months(key):
+    doc = usd_doc()
+    doc["underwriting"].update(signals={"new_installment_cents": 101}, monthly=[
+        {"month": "2026-01", "revenue_cents": 624, "operating_out_cents": 423, "debt_service_cents": 100},
+        {"month": "2026-02", "revenue_cents": 623, "operating_out_cents": 423, "debt_service_cents": 100},
+        {"month": "2026-03", "revenue_cents": 395, "operating_out_cents": 100},
+        {"month": "2026-04", "revenue_cents": 400, "debt_service_cents": 0}])
+    cap = assessment_panels(detail_view(doc, None, key, restore=False))["capacity"]
+    bars = [g["bars"][0]["parts"][0] for g in cap["chart"]["groups"]]
+    assert [(b["color"], b["value"]) for b in bars] == [
+        ("green", 201), ("red", 200), ("grey", 295), ("grey", None)]
+    assert "$2" in bars[1]["tip"] and "$" in cap["chart"]["ticks"][1]["text"]
+    assert [(p["i"], p["value"]) for p in cap["line"]["points"]] == [(0, 201), (1, 201), (3, 101)]
+    assert (cap["short_months"], cap["months"]) == (1, 2)
+    del doc["underwriting"]["signals"]["new_installment_cents"]
+    cap = assessment_panels(detail_view(doc, None, key, restore=False))["capacity"]
+    assert cap["installment"] is None and not cap["line"]["points"] and cap["months"] == 0
+
+
+def test_usd_expense_donut_preserves_small_amounts_and_rejects_incomplete_costs(key):
+    doc = usd_doc()
+    rows = [{"group": g, "monthly_avg_cents": 133 if g == "rent" else 1 if g == "debt_service" else 0}
+            for g in ("supplier", "rent", "payroll", "tax_insurance", "other_operating",
+                      "debt_service", "owner_draw", "unclassified")]
+    doc["underwriting"].update(expense_breakdown=rows)
+    def expenses():
+        return assessment_panels(detail_view(doc, None, key, restore=False))["expenses"]
+    ex = expenses()
+    assert [a["value"] for a in ex["donut"]["arcs"]] == [133, 1, 274035]
+    assert ex["leftover"] == 274035 and ex["legend"][1][2] == "$0"
+    del rows[0]["monthly_avg_cents"]
+    assert expenses() is None
+    rows.pop(0)
+    assert expenses() is None
+
+
+def test_usd_monthly_expense_fallback_rounds_only_the_readout(key):
+    doc = usd_doc()
+    doc["underwriting"]["monthly"] = [
+        {"month": "2026-01", "revenue_cents": 1000, "operating_out_cents": 149, "debt_service_cents": 0, "owner_draw_cents": 0},
+        {"month": "2026-02", "revenue_cents": 1000, "operating_out_cents": 150, "debt_service_cents": 0, "owner_draw_cents": 0}]
+    ex = assessment_panels(detail_view(doc, None, key, restore=False))["expenses"]
+    # Use 299 / 2 months. $1.495 must not round twice to $2.
+    assert [a["value"] for a in ex["donut"]["arcs"]] == [299, 1701] and ex["divisor"] == 2
+    assert ex["legend"][0][2] == "$1"
+    del doc["underwriting"]["monthly"][0]["owner_draw_cents"]
+    assert assessment_panels(detail_view(doc, None, key, restore=False))["expenses"] is None

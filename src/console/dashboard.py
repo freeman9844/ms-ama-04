@@ -385,7 +385,7 @@ def detail_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     usd = bool(product_of(doc))
     suffix = "_cents" if usd else ""
     money = display_usd if usd else krw_text
-    tick_fmt = _usd_tick if usd else man
+    tick_fmt = usd_tick if usd else man
     uw = doc.get("underwriting") or {}
     monthly = [m for m in uw.get("monthly") or [] if isinstance(m, Mapping)]
     # 세부 그룹(expense_monthly)은 2026-11-08 이후 심사분에만 있다. 한 달이라도 없으면 3구분으로 그린다.
@@ -554,7 +554,7 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     loan, mon, weeks, alerts = view["loan"], view["monitoring"] or {}, view["weeks"], view["alerts"]
     usd = loan.get("currency") == "USD"
     suffix = "_cents" if usd else ""
-    money = _usd_tick if usd else krw_text
+    money = usd_tick if usd else krw_text
     baseline = loan.get("baseline") or {}
     processed = _int(mon.get("processed_week"))
     severity = dict.fromkeys(("high", "medium", "low"), 0)
@@ -579,7 +579,7 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", r.get("revenue" + suffix), bar_color, tip)]]))
     base_rev = baseline.get("avg_weekly_revenue" + suffix)
     refs = [(_("기준 주매출"), base_rev, "neutral")] if charts.is_num(base_rev) else []
-    chart = charts.columns(groups, refs=refs, tick_fmt=_usd_tick if usd else man, **LOAN_CHART) if groups else None
+    chart = charts.columns(groups, refs=refs, tick_fmt=usd_tick if usd else man, **LOAN_CHART) if groups else None
     markers = []
     if chart:
         for w, g in zip(weeks, chart["groups"], strict=True):
@@ -610,14 +610,14 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def display_usd(cents: int) -> str:
+def display_usd(cents: int, *, divisor: int = 1) -> str:
     if type(cents) is not int:
         return "-"
-    dollars = (abs(cents) + 50) // 100
+    dollars = (abs(cents) + 50 * divisor) // (100 * divisor)
     return f"{'-' if cents < 0 and dollars else ''}${dollars}"
 
 
-def _usd_tick(value: Any) -> str:
+def usd_tick(value: Any) -> str:
     return display_usd(int(value)) if charts.is_num(value) else "-"
 
 
@@ -625,7 +625,7 @@ def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False
     """주차별 실제 입금 막대와 기대 입금 선(같은 축)."""
     rows = [w.get("row") or {} for w in weeks]
     suffix = "_cents" if usd else ""
-    money = _usd_tick if usd else krw_text
+    money = usd_tick if usd else krw_text
     expected = [r.get("expected_revenue" + suffix) for r in rows]
     if not any(charts.is_num(v) for v in expected):
         return {"expected_chart": None, "expected_line": None}
@@ -637,7 +637,7 @@ def _expected_vs_actual(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False
                 expected=money(exp))
         groups.append((_("%(n)s주", n=w.get("week")), [[("revenue", rev, "amber" if short else "blue", tip)]]))
     top = max([v for v in expected + [r.get("revenue" + suffix) for r in rows] if charts.is_num(v)], default=0)
-    chart = charts.columns(groups, vmax=top or None, tick_fmt=_usd_tick if usd else man, **LOAN_CHART)
+    chart = charts.columns(groups, vmax=top or None, tick_fmt=usd_tick if usd else man, **LOAN_CHART)
     return {"expected_chart": chart, "expected_line": charts.line(expected, vmax=chart["vmax"], **LOAN_CHART)}
 
 
@@ -657,7 +657,7 @@ def _forecast(weeks: Sequence[Mapping[str, Any]], *, usd: bool = False) -> dict[
         "min_date": r.get("projected_min_date"),
         "shortfall_date": r.get("shortfall_date"),
         "chart": charts.signed_line([(d["date"][5:], d["balance" + suffix]) for d in p.get("path") or []],
-                                    tick_fmt=_usd_tick if usd else man, **FORECAST_CHART),
+                                    tick_fmt=usd_tick if usd else man, **FORECAST_CHART),
         "totals": [(_(label), totals[k]) for k, label in {"inflow": "기대 입금", **OUTFLOW_LABELS}.items()
                    if k in totals],
     }

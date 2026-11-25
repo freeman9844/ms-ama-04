@@ -172,6 +172,7 @@
   "%(result)s · %(n)s회": "%(result)s · %(n)s rounds",
   "권고 없음": "No recommendation",
   "한도 %(limit)s / 신청 %(requested)s": "Limit %(limit)s / requested %(requested)s",
+  "저장된 판정의 한도 산출 근거를 확인할 수 없습니다.": "The limit calculation could not be verified against the stored decision.",
   "%(month)s 매출−운영비 %(cap)s · 갚을 돈 %(owed)s": "%(month)s revenue − operating costs %(cap)s · repayments due %(owed)s",
   "매출 − 운영비(여유)": "Revenue − operating costs (headroom)",
   "갚을 돈보다 적은 달": "Months short of repayments",
