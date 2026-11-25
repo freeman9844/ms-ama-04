@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from agents.pg_ledger import _trend_pp, features_of, ledger_summary
+from agents.pg_ledger import USD_PG_FEATURES, _trend_pp, features_of, ledger_summary, usd_features_of
 from shared.contracts import PgSettlement, Transaction
 
 AS_OF = date(2026, 11, 1)
@@ -18,6 +18,13 @@ def _t(day, amount, desc, code="PG_SETTLE", i=[0]):
     i[0] += 1
     return Transaction(txn_id=f"t{i[0]}", booked_on=day, amount_krw=amount, balance_after_krw=0, description=desc,
                        txn_type_code=code)
+
+
+def test_usd_features_of_adds_three_keys_and_krw_does_not():
+    summary = {"available": True, "pg_reconciliation_ratio": 1.0, "pg_top_platform_share": .5,
+               "pg_cash_conversion_days": 6.4, "pg_advance_suspected_count": 0, "pg_offset_rate_trend_pp": 1.2}
+    assert set(usd_features_of(summary)) == set(features_of(summary)) | set(USD_PG_FEATURES)
+    assert set(features_of(summary)) == {"pg_reconciliation_ratio", "pg_top_platform_share"}
 
 
 def test_matches_within_three_business_days_and_reports_unpaid():

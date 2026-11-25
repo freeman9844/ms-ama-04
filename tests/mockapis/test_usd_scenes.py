@@ -68,3 +68,10 @@ def test_usd_v1_verdicts_are_pinned(seller):
 @pytest.mark.parametrize("seller", sorted(V1_TABLE))
 def test_existing_seller_books_do_not_change(seller):
     assert books_digest(case_at(seller, AS_OF)) == DIGESTS[seller]
+
+
+def test_usd_underwriting_carries_settlement_features():
+    bakery = underwrite_at("seller-bakery-20", AS_OF).features
+    assert 12 <= bakery.pg_cash_conversion_days <= 20 and bakery.pg_advance_suspected_count == 0
+    assert bakery.pg_offset_rate_trend_pp in (0.0, None)
+    assert underwrite_at("seller-mugshop-21", AS_OF).features.pg_advance_suspected_count > 0

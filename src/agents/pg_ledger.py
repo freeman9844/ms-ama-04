@@ -200,6 +200,14 @@ def _summary(settlements, transactions, as_of, unit, lag_days):
     }
 
 
+USD_PG_FEATURES: tuple[str, ...] = ("pg_cash_conversion_days", "pg_advance_suspected_count",
+                                    "pg_offset_rate_trend_pp")
+
+
 def features_of(summary: Mapping) -> dict[str, float | None]:
     return {"pg_reconciliation_ratio": summary.get("pg_reconciliation_ratio"),
             "pg_top_platform_share": summary.get("pg_top_platform_share")}
+
+
+def usd_features_of(summary: Mapping) -> dict[str, float | int | None]:
+    return {**features_of(summary), **{k: summary.get(k) for k in USD_PG_FEATURES}}

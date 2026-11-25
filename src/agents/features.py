@@ -19,7 +19,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from agents.classify import RULES_VERSION, Category, classify
 from agents.marketplace import features_of as marketplace_features_of
 from agents.marketplace import store_summary
-from agents.pg_ledger import features_of, ledger_summary, usd_ledger_summary
+from agents.pg_ledger import features_of, ledger_summary, usd_features_of, usd_ledger_summary
 from shared.contracts import USD_V1, UsdCashFlowFeatures, UsdTransaction
 from shared.usd_source import UsdMarketplace, UsdProfile, UsdSettlement, UsdTaxFiling
 from shared.contracts import (
@@ -298,7 +298,7 @@ def _underwrite(application_id, profile, transactions, tax_filings, as_of, princ
     adjusted = _compute(*args, rules | applied, **kw) if applied else base
     features = _conservative(base.features, adjusted.features)
     pg = (usd_ledger_summary if usd else ledger_summary)(pg_settlements or (), transactions, data_end(transactions, as_of))
-    features = features.model_copy(update=features_of(pg))
+    features = features.model_copy(update=(usd_features_of if usd else features_of)(pg))
     market = store_summary(marketplace, as_of)
     market_features = ({k: v for k, v in market.items() if k.startswith("mkt_")}
                        if usd else marketplace_features_of(market))
