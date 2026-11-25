@@ -18,7 +18,7 @@ from agents.early_warning import (
     investigate,
 )
 from agents.features import compute_underwriting
-from agents.ledger_monitor import ledger_baseline, observe as ledger_observe, platform_weeks
+from agents.ledger_monitor import CauseCandidate, ledger_baseline, observe as ledger_observe, platform_weeks
 from agents.monitoring import Baseline, categorize, detect, settlement_for, weekly_series
 from agents.runtime import AgentError, AgentRun, ToolCall
 from mockapis.demo import build_demo_cases
@@ -530,3 +530,16 @@ def test_usd_catalog_includes_new_week_fields():
     row = {**usd_week_row(week=2), "expected_orders_cents": 1000, "unreconciled_payout_cents": 0, "recon_ratio": 1.0}
     ctx = usd_ctx(rows=[row])
     assert {"W:2:expected_orders_cents", "W:2:unreconciled_payout_cents", "W:2:recon_ratio"} <= ctx.catalog.keys()
+
+
+def test_instructions_do_not_offer_basis_breached_as_citation_id():
+    assert "W:n:basis_breached" not in INSTRUCTIONS
+    assert "basis_breached 필드" in INSTRUCTIONS
+
+
+def test_usd_fallback_for_assigned_settlement_names_the_basis_breach():
+    row = {**usd_week_row(week=3), "recon_ratio": 0.81, "basis_breached": ["S003"]}
+    ctx = usd_ctx(rows=[row], triggers=["basis_breach"])
+    ctx.candidates = [CauseCandidate(AlertCause.SETTLEMENT_ASSIGNED, 3, ("W:3:recon_ratio",), False)]
+    summary = fallback_alert(ctx, "agent_unavailable").summary
+    assert "approval basis" in summary and "no longer reaching" in summary

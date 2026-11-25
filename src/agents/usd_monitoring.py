@@ -100,14 +100,14 @@ def approval_basis(substitutions: Sequence[str], features: Mapping[str, Any]) ->
 
 
 def track_summary(weeks: Sequence[Mapping]) -> dict | None:
-    """First alert week per track; None when the weeks were recorded before the two tracks existed."""
-    if not any("bank_only_triggers" in w for w in weeks):
+    """First alert week per track; None unless every week was recorded with both tracks (older or mixed replays)."""
+    if not weeks or not all("bank_only_triggers" in w for w in weeks):
         return None
     bank = next((w["week"] for w in weeks if w.get("bank_only_triggers")), None)
     full = next((w["week"] for w in weeks if w.get("triggers")), None)
     return {"bank_first_week": bank, "full_first_week": full,
             "lead_weeks": bank - full if bank is not None and full is not None else None,
-            "explained_weeks": sum(1 for w in weeks if w.get("explained")),
+            "explained_weeks": sum(1 for w in weeks if any(e.get("trigger") == "inflow_drop" for e in w.get("explained") or ())),
             "bank_only_weeks": sum(1 for w in weeks if w.get("bank_only_triggers") and not w.get("triggers"))}
 
 
@@ -149,11 +149,12 @@ def _window_sum(by_day: Mapping[date, int], lo: date, hi: date) -> int:
     return sum(v for d, v in by_day.items() if lo <= d <= hi)
 
 
-def _forecast_fields(row, proj):
+def _forecast_fields(row, proj, with_due=True):
     low = min(proj["path"], key=lambda p: p["balance_cents"])
     row.update(projected_min_balance_cents=low["balance_cents"], projected_min_date=low["date"],
                shortfall_date=next((p["date"] for p in proj["path"] if p["balance_cents"] < 0), None))
-    if due := next((p for p in proj["path"] if p["installment_cents"]), None):
+    due = next((p for p in proj["path"] if p["installment_cents"]), None)
+    if with_due and due:
         row.update(next_due_on=due["date"], due_balance_cents=due["before_payment_cents"])
     return low, due
 
@@ -249,7 +250,7 @@ def observe_usd(loan, visible, pg, week, dues) -> UsdObservation:
     if breached := [b["code"] for b in basis if b["status"] == "breach"]:
         row["basis_breached"] = breached
     proj = project_usd(visible, start, hi, dues, scheduled=_scheduled(pg, hi, row["recon_ratio"]))
-    low, _ = _forecast_fields(row, proj)
+    low, _ = _forecast_fields(row, proj, with_due=False)  # due fields stay with the bank forecast that decides due_shortfall
 
     explained = []
     inflow = "inflow_drop" in bank_only

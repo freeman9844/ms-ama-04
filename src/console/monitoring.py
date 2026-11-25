@@ -55,6 +55,11 @@ BASIS_LABELS = {
     "S005": "정산 원장으로 매출 실재 확인",
     "S004": "계절 매출 패턴",
 }
+# 승인 근거 지표 id(usd_monitoring.BASIS_METRICS) → 표시 이름.
+BASIS_METRIC_LABELS = {
+    "recon_ratio": "정산 대사율",
+    "orders_vs_prior_year": "작년 대비 주문",
+}
 # 재생을 멈춘 대기 항목(2026-11-11). 이 순서대로 멈춤 배너에 보인다(journey.holds.HOLD_ORDER와 같은 순서).
 HOLD_LABELS = {
     "collections_proposal": "추심 승인 대기",
@@ -114,6 +119,7 @@ MONITORING_FILTERS = {
     "plan_change_label": PLAN_CHANGE_LABELS,
     "borrower_plan_label": BORROWER_PLAN_LABELS,
     "basis_label": BASIS_LABELS,
+    "basis_metric_label": BASIS_METRIC_LABELS,
 }
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
 CAUSE_LABELS = {
@@ -277,6 +283,7 @@ def _basis_cards(loan: Mapping[str, Any], weeks: list[dict[str, Any]]) -> list[d
             "approved": item.get("approved"),
             "floor": item.get("floor"),
             "latest": last.get("value") if last else None,
+            "latest_week": entries[-1][0] if entries else None,
             "status": last.get("status") if last else None,
             "breach_week": next((n for n, e in entries if e.get("status") == "breach"), None),
         })

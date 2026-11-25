@@ -500,12 +500,12 @@ def _track_week(n, full, bank, explained, basis=()):
 
 def test_usd_loan_shows_track_comparison_and_basis():
     deps = fixtures.build_deps()
-    breach = {"code": "S003", "metric": "settlement_on_time_rate", "approved": 0.99, "floor": 0.95,
+    breach = {"code": "S003", "metric": "recon_ratio", "approved": 0.99, "floor": 0.95,
               "value": 0.81, "status": "breach"}
     loan = dict(USD, id="usd-track", application_id="usd-track", applicant_id=SELLER, industry="Food",
                 amount_cents=500001, tenor_months=6, decision="approve",
                 baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
-                approval_basis=[{"code": "S003", "metric": "settlement_on_time_rate", "approved": 0.99, "floor": 0.95}],
+                approval_basis=[{"code": "S003", "metric": "recon_ratio", "approved": 0.99, "floor": 0.95}],
                 monitoring={"status": "completed", "replay_id": "rp", "processed_week": 4, "weeks": [
                     _track_week(1, [], [], []), _track_week(2, [], [], []),
                     _track_week(3, ["basis_breach"], [], [], [breach]),
@@ -516,9 +516,51 @@ def test_usd_loan_shows_track_comparison_and_basis():
     deps.monitoring = fixtures.MemoryMonitoring([loan], [alert])
     page = TestClient(create_app(deps)).get("/loans/usd-track?lang=en").text
     for text in ("Monitoring comparison", "Alt data detected 1 week(s) earlier", "Approval basis",
-                 "Broken (week 3)", "0.99", "0.81", "Settlement assignment", "Approval basis broken",
-                 "Fast, accurate settlements", "Explained"):
+                 "Broken (week 3)", "Approved 0.99", "Floor 0.95", "Week 3 0.81", "Reconciliation ratio",
+                 "Settlement assignment", "Approval basis broken", "Fast, accurate settlements", "Explained"):
         assert text in page
+    assert "settlement_on_time_rate" not in page and "recon_ratio" not in page
+
+
+def test_usd_loan_s004_basis_has_no_approved_value_and_never_renders_none():
+    deps = fixtures.build_deps()
+    ok = {"code": "S004", "metric": "orders_vs_prior_year", "approved": None, "floor": 0.75, "value": 0.9,
+          "status": "ok"}
+    loan = dict(USD, id="usd-s004", application_id="usd-s004", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                approval_basis=[{"code": "S004", "metric": "orders_vs_prior_year", "approved": None, "floor": 0.75}],
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": 2, "weeks": [
+                    _track_week(1, [], [], [], [dict(ok, value=0.95)]), _track_week(2, [], [], [], [ok])]})
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [])
+    page = TestClient(create_app(deps)).get("/loans/usd-s004?lang=en").text
+    for text in ("vs. same period last year", "Orders vs last year", "Floor 0.75", "Week 2 0.9", "Holding"):
+        assert text in page
+    assert "None" not in page and "Approved" not in page
+
+
+def _usd_track_page(weeks, loan_id):
+    deps = fixtures.build_deps()
+    loan = dict(USD, id=loan_id, application_id=loan_id, applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": len(weeks), "weeks": weeks})
+    deps.monitoring = fixtures.MemoryMonitoring([loan], [])
+    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang=en").text
+
+
+def test_track_view_timeline_cells():
+    page = _usd_track_page([_track_week(1, [], ["inflow_drop"], []), _track_week(2, [], [], [{"trigger": "inflow_drop"}]),
+                            _track_week(3, ["inflow_drop"], ["inflow_drop"], [])], "usd-tl")
+    rows = re.findall(r"<tr><th>(Bank only|Settlement \+ marketplace)</th>((?:<td>.*?</td>)+)</tr>", page)
+    cells = {name: re.findall(r"<td>(.*?)</td>", tds) for name, tds in rows}
+    assert cells == {"Bank only": ["○", "", "●"], "Settlement + marketplace": ["", "✓", "●"]}
+    assert "Bank only: not detected" not in page
+
+
+def test_track_view_says_bank_only_did_not_detect():
+    page = _usd_track_page([_track_week(1, [], [], []), _track_week(2, ["basis_breach"], [], [])], "usd-nd")
+    assert "Bank only: not detected" in page
 
 
 def test_old_usd_replay_hides_track_cards():

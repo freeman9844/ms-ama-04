@@ -184,8 +184,8 @@
 <h2>{{ _("승인 근거") }}</h2>
 <ul class="claims">
 {% for c in v.basis_cards %}
-  <li><strong>{{ c.code }}</strong> {{ c.code|basis_label }} <small>({{ c.metric }})</small>
-    <div><span class="chip">{{ c.approved }} → {{ c.floor }}</span>{% if c.latest is not none %}<span class="chip{% if c.breach_week %} warn{% endif %}">{{ c.latest }}</span>{% endif %}
+  <li><strong>{{ c.code }}</strong> {{ c.code|basis_label }}   <small>({{ c.metric|basis_metric_label }})</small>
+     <div>{% if c.approved is not none %}<span class="chip">{{ _("승인 %(v)s", v=c.approved) }}</span>{% else %}<span class="chip">{{ _("작년 같은 시기 대비") }}</span>{% endif %}<span class="chip">{{ _("하한 %(v)s", v=c.floor) }}</span>{% if c.latest is not none %}<span class="chip{% if c.breach_week %} warn{% endif %}">{{ _("%(n)s주차 %(v)s", n=c.latest_week, v=c.latest) }}</span>{% endif %}
     {% if c.breach_week %}<span class="chip warn">{{ _("훼손(%(n)s주차)", n=c.breach_week) }}</span>
     {% elif c.latest is not none and c.status == "ok" %}<span class="chip ok">{{ pgettext("basis", "유지") }}</span>
     {% else %}<span class="chip">{{ _("판단 불가") }}</span>{% endif %}</div></li>

@@ -306,6 +306,34 @@ def test_scene3_seasonal_drop_is_explained():
     assert all(b["status"] != "breach" for o in obs for b in o.basis)
 
 
+def test_due_fields_stay_with_the_bank_forecast(monkeypatch):
+    def fake(visible, start, hi, dues, scheduled=None):
+        bal = 100 if scheduled is None else 999
+        return {"path": [{"date": "2026-12-01", "balance_cents": bal, "installment_cents": 50,
+                          "before_payment_cents": bal}]}
+
+    monkeypatch.setattr("agents.usd_monitoring.project_usd", fake)
+    rows = [w["row"] for w in replay("seller-campgear-23")[1]]
+    assert {r["due_balance_cents"] for r in rows} == {100}
+    assert {r["projected_min_balance_cents"] for r in rows} == {999}
+
+
+def _weeks(*specs):
+    return [{"week": n, "row": {}, "triggers": full, "explained": explained,
+             **({"bank_only_triggers": bank} if bank is not None else {})} for n, full, bank, explained in specs]
+
+
+def test_track_summary_needs_two_track_keys_on_every_week():
+    assert track_summary(_weeks((1, [], None, []), (2, ["inflow_drop"], ["inflow_drop"], []))) is None
+    assert track_summary([]) is None
+    assert track_summary(_weeks((1, [], [], []))) is not None
+
+
+def test_explained_weeks_count_only_inflow_drop_explanations():
+    s = track_summary(_weeks((1, [], [], [{"trigger": "inflow_drop"}]), (2, [], [], [{"trigger": "other"}]), (3, [], [], [])))
+    assert s["explained_weeks"] == 1
+
+
 @pytest.mark.parametrize("seller", ["seller-campgear-23", "seller-dailylook-01"])
 def test_bank_only_track_equals_detector_without_ledger(seller):
     _, weeks = replay(seller)

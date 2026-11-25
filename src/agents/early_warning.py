@@ -72,7 +72,7 @@ _USD_TRIGGERS = {
     "due_shortfall": ("Projected funds are below the scheduled payment.", "Check receipts expected before the due date."),
     "basis_breach": ("An approval basis from alternative data no longer holds.",
                      "Review the approval basis against recent settlements and orders."),
-    "settlement_assigned": ("Platform payouts are no longer reaching this account.",
+    "settlement_assigned": ("Platform payouts are no longer reaching this account, so the approval basis (fast settlement) no longer holds.",
                             "Ask whether payouts were sold to an early-payout lender."),
 }
 _CENT_FIELDS = frozenset("revenue expected_revenue operating_out debt_service high_cost_lender loan_proceeds "
@@ -126,7 +126,7 @@ INSTRUCTIONS = """너는 한국 소상공인 운전자금 대출의 사후 조�
    분류가 unclassified_in·unclassified_out인 거래도 적요를 직접 읽고 판단한다.
 3. 매출 감소가 같은 달 계절 지수(B:index:MM)나 업종 집단 지수(B:cohort:index:MM), 명절 전후 정산 공백으로
    설명되고 다른 신호가 없으면 경보를 올리지 않는다.
-   basis_breach는 심사 때 대체 규칙(S003 빠른 정산, S004 계절 매출 등)으로 승인한 근거가 깨졌다는 뜻이다. 근거 코드는 W:n:basis_breached에 있다.
+   basis_breach는 심사 때 대체 규칙(S003 빠른 정산, S004 계절 매출 등)으로 승인한 근거가 깨졌다는 뜻이다. 어떤 근거가 깨졌는지는 각 주차 행의 basis_breached 필드에 있다(인용용 근거 ID가 아니다).
 4. get_baseline의 cause_candidates가 원인 후보다. 차입은 대개 결과다. 차입보다 앞선 주문·정산·반품·비용 변화가 있으면
    그것을 주원인으로 고른다. primary_cause는 후보 중 하나여야 하고, 그 원인의 지표(매출 부진: W:n:order_gross·orders_vs_expected,
    정산 보류: W:n:held·advance_in, 반품 급증: W:n:returns·return_rate, 비용 증가: W:n:deductions·deduction_rate,
