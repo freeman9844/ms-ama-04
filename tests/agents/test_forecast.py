@@ -28,6 +28,35 @@ def test_usd_forecast_does_not_repeat_initial_stock_purchase_or_surplus_sweeps()
     assert payment["before_payment_cents"] - payment["balance_cents"] == 83333
 
 
+def _usd_history(hi):
+    from shared.contracts import USD_V1, UsdTransaction
+
+    return [UsdTransaction(**USD_V1.model_dump(), txn_id="c1", booked_on=hi, amount_cents=700,
+                           balance_after_cents=10000, description="Card sales", txn_type_code="CARD_SETTLE")]
+
+
+def test_project_usd_without_schedule_is_unchanged():
+    from agents.forecast import project_usd
+
+    hi = date(2026, 11, 27)
+    visible = _usd_history(hi)
+    dues = {date(2026, 12, 4): 5000}
+    assert project_usd(visible, date(2026, 11, 2), hi, dues) == project_usd(visible, date(2026, 11, 2), hi, dues, None)
+
+
+def test_scheduled_payouts_replace_trailing_average_until_known_day():
+    from agents.forecast import project_usd
+
+    hi, start = date(2026, 11, 27), date(2026, 11, 2)
+    visible = _usd_history(hi)  # no Naver payouts in the last 4 weeks: they are held
+    known = {date(2026, 11, 30): 1000, date(2026, 12, 1): 1000, date(2026, 12, 2): 1000}
+    base = project_usd(visible, start, hi, {})["path"]
+    planned = project_usd(visible, start, hi, {}, {"naver_smart_store": (date(2026, 12, 2), known)})["path"]
+    gain = {b["date"]: p["before_payment_cents"] - b["before_payment_cents"] for b, p in zip(base, planned)}
+    assert gain["2026-11-30"] == 1000 and gain["2026-12-01"] == 2000 and gain["2026-12-02"] == 3000
+    assert gain["2026-12-03"] == 3000 and gain["2026-12-10"] == 3000  # the platform's own average (0) after the known day
+
+
 @pytest.fixture(scope="module")
 def cafe():
     return build_demo_cases(AS_OF)["seller-dailylook-01"]

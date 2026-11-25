@@ -41,6 +41,25 @@ def test_matches_within_three_business_days_and_reports_unpaid():
     assert coupang["unpaid_krw"] == 1800 and r["platforms"][0]["platform"] == "쿠팡"
 
 
+def test_weekly_reconciliation_counts_only_judgeable_payouts():
+    from agents.pg_ledger import weekly_reconciliation
+    from shared.contracts import USD_V1, UsdTransaction
+    from shared.usd_source import UsdSettlement
+
+    def payout(day, platform, net):
+        return UsdSettlement(**USD_V1.model_dump(), settled_on=day, platform_code=platform, gross_cents=net,
+                             fee_cents=0, net_cents=net)
+
+    lo, hi = date(2026, 10, 12), date(2026, 10, 23)
+    deposit = UsdTransaction(**USD_V1.model_dump(), txn_id="d1", booked_on=date(2026, 10, 14),
+                             platform_code="naver_smart_store", amount_cents=1000, balance_after_cents=0,
+                             description="Naver payout", txn_type_code="PG_SETTLE")
+    payouts = [payout(date(2026, 10, 12), "naver_smart_store", 1000), payout(date(2026, 10, 13), "naver_smart_store", 2000),
+               payout(date(2026, 10, 22), "coupang", 500)]  # match window still open at hi
+    assert weekly_reconciliation(payouts, [deposit], lo, hi) == (round(1 - 2000 / 3000, 3), 2000)
+    assert weekly_reconciliation((), [deposit], lo, hi) == (None, 0)
+
+
 def test_same_amount_same_day_matches_once():
     s = [_s(date(2026, 10, 13), "쿠팡", 1000), _s(date(2026, 10, 13), "쿠팡", 1000)]
     t = [_t(date(2026, 10, 13), 1000, "쿠팡(주) 주정산")]

@@ -117,13 +117,50 @@ def usd_ledger_summary(settlements: Sequence[UsdSettlement], transactions: Seque
                        as_of: date) -> dict:
     rows = [_Payout(s.settled_on, s.platform_code, s.net_cents, s.gross_cents, s.fee_cents, s.deduction_cents)
             for s in settlements]
+    deposits = _usd_deposits(transactions)
+    return {**USD_V1.model_dump(), **_summary(rows, deposits, as_of, "cents",
+                                              {"naver_smart_store": 7, "coupang": 28, "own_store": 3, "11st": 17})}
+
+
+def _usd_deposits(transactions: Sequence[Transaction | UsdTransaction]) -> list[_Deposit]:
     def platform(t):
         return t.platform_code or next((code for code, label in USD_CHANNEL_NAMES.items()
                                         if label.casefold() in t.description.casefold()), None)
-    deposits = [_Deposit(t.txn_id, t.booked_on, platform(t), t.amount_cents) for t in transactions
-                if isinstance(t, UsdTransaction) and t.amount_cents > 0]
-    return {**USD_V1.model_dump(), **_summary(rows, deposits, as_of, "cents",
-                                              {"naver_smart_store": 7, "coupang": 28, "own_store": 3, "11st": 17})}
+    return [_Deposit(t.txn_id, t.booked_on, platform(t), t.amount_cents) for t in transactions
+            if isinstance(t, UsdTransaction) and t.amount_cents > 0]
+
+
+def _match(rows: Sequence[_Payout], deposits: Sequence[_Deposit], used: set[str] | None = None) -> list[_Payout]:
+    """Pair each payout with the earliest unused deposit of the same platform and amount booked within
+    MATCH_BUSINESS_DAYS; return the unmatched payouts. Matched deposit ids are added to `used` when given."""
+    used = set() if used is None else used
+    candidates = sorted((t for t in deposits if t.platform), key=lambda t: (t.booked_on, t.txn_id))
+    unmatched: list[_Payout] = []
+    for s in rows:
+        last = add_business_days(s.settled_on, MATCH_BUSINESS_DAYS)
+        hit = next((t for t in candidates if t.txn_id not in used and t.platform == s.platform
+                    and s.settled_on <= t.booked_on <= last and t.amount == s.net), None)
+        if hit is None:
+            unmatched.append(s)
+        else:
+            used.add(hit.txn_id)
+    return unmatched
+
+
+def weekly_reconciliation(settlements: Sequence[UsdSettlement], transactions: Sequence[Transaction | UsdTransaction],
+                          lo: date, hi: date) -> tuple[float | None, int]:
+    """Reconciliation ratio and unmatched net cents for payouts settled from `lo` whose match window closed by `hi`."""
+    rows = sorted(
+        (_Payout(s.settled_on, s.platform_code, s.net_cents, s.gross_cents, s.fee_cents, s.deduction_cents)
+         for s in settlements
+         if s.net_cents > 0 and lo <= s.settled_on and add_business_days(s.settled_on, MATCH_BUSINESS_DAYS) <= hi),
+        key=lambda s: (s.settled_on, s.platform, s.net),
+    )
+    target = sum(s.net for s in rows)
+    if target <= 0:
+        return None, 0
+    unpaid = sum(s.net for s in _match(rows, _usd_deposits(transactions)))
+    return round(1 - unpaid / target, 3), unpaid
 
 
 def _summary(settlements, transactions, as_of, unit, lag_days):
@@ -135,18 +172,8 @@ def _summary(settlements, transactions, as_of, unit, lag_days):
     )
     if not rows:
         return {"available": False}
-    deposits = sorted((t for t in transactions if t.platform),
-                      key=lambda t: (t.booked_on, t.txn_id))
     used: set[str] = set()
-    unmatched: list[_Payout] = []
-    for s in rows:
-        last = add_business_days(s.settled_on, MATCH_BUSINESS_DAYS)
-        hit = next((t for t in deposits if t.txn_id not in used and t.platform == s.platform
-                    and s.settled_on <= t.booked_on <= last and t.amount == s.net), None)
-        if hit is None:
-            unmatched.append(s)
-        else:
-            used.add(hit.txn_id)
+    unmatched = _match(rows, transactions, used)
     advance_candidates = sorted(
         (t for t in transactions if t.platform is None and t.txn_id not in used),
         key=lambda t: (t.booked_on, t.txn_id),
