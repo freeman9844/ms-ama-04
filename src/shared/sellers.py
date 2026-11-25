@@ -1,6 +1,8 @@
 """데모 마켓플레이스 셀러 카탈로그. 콘솔 라벨과 mock 데이터 생성이 함께 쓴다."""
 
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import Literal
 
 from shared.segments import LOAD_GRID
 
@@ -54,6 +56,12 @@ class UsdSeller:
     channel_percent: tuple[tuple[str, int], ...]
     history_months: int = 12
     suspension_days_ago: int | None = None
+    # KRW 원형(mockapis.synth.Archetype)과 같은 정책 판정이 나도록 USD 장부에 얹는 위험 레버.
+    business_age_months: int = 38
+    rating: float = 4.8
+    return_rate: Decimal | None = None  # None이면 기본 반품률(mockapis.sellerdata.usd.BASE_RETURN_RATE)
+    inventory_percent: int = 50  # 영업일마다 주 매출의 이 비율 ÷ 5를 재고로 매입한다
+    risk: Literal["stressed", "assigned"] | None = None
 
 
 USD_CHANNEL_NAMES = {"coupang": "Coupang", "naver_smart_store": "Naver Smart Store",
@@ -61,7 +69,7 @@ USD_CHANNEL_NAMES = {"coupang": "Coupang", "naver_smart_store": "Naver Smart Sto
 USD_PAYOUT_BUSINESS_DAYS = {"naver_smart_store": 5, "coupang": 20, "own_store": 2, "11st": 12}
 _GENERAL = (("coupang", 45), ("naver_smart_store", 40), ("own_store", 15))
 _RETAIL = (("coupang", 50), ("naver_smart_store", 35), ("11st", 15))
-_STUDIO = (("naver_smart_store", 65), ("own_store", 35))
+_STUDIO = (("naver_smart_store", 85), ("own_store", 15))
 _TWO_MARKETS = (("coupang", 55), ("naver_smart_store", 45))
 USD_SELLERS = {
     "seller-bakery-20": UsdSeller("Daejeon Bakery", "Yun Boksun", "Daejeon", "Food", "Geumgang Flour",
@@ -70,44 +78,47 @@ USD_SELLERS = {
                                    "Natural Pet Foods", 510_000, _GENERAL,
                                    suspension_days_ago=40),
     "seller-knitroom-04": UsdSeller("Pangyo Hand-Knit Studio", "Yun Jia", "Seongnam", "Handmade",
-                                    "Thread and Needle", 315_000, (("naver_smart_store", 87), ("own_store", 13)), 4),
+                                    "Thread and Needle", 315_000, (("naver_smart_store", 87), ("own_store", 13)), 4,
+                                    business_age_months=8),
     "seller-dailylook-01": UsdSeller("Seongsu Daily Look", "Kim Minsu", "Seoul", "Apparel",
                                      "Dongdaemun Fabric", 620_000,
                                      (("naver_smart_store", 45), ("coupang", 35), ("own_store", 20))),
     "seller-mangwon-02": UsdSeller("Mangwon Table Market", "Choi Yeonghui", "Seoul", "Food",
                                    "Hankki Foods", 390_000, _RETAIL),
     "seller-glowlab-03": UsdSeller("Haeundae Beauty Lab", "Jeong Daeho", "Busan", "Beauty",
-                                   "Cos Lab", 480_000, _GENERAL),
+                                   "Cos Lab", 480_000, _GENERAL, risk="stressed"),
     "seller-candle-05": UsdSeller("Yeonnam Candle Works", "Seo Jiu", "Seoul", "Home and living",
                                   "Soy Wax Korea", 225_000, _STUDIO),
     "seller-gearstore-06": UsdSeller("Yongsan Gear Store", "Hwang Jaeseok", "Seoul", "Electronics",
                                      "Hanbit Electronics", 695_000, _RETAIL),
     "seller-ceramic-08": UsdSeller("Icheon Pottery Studio", "Jang Inho", "Icheon", "Handmade",
-                                   "Yeoju Clay", 195_000, _STUDIO),
+                                   "Yeoju Clay", 195_000, _STUDIO, return_rate=Decimal(".18")),
     "seller-kimchi-09": UsdSeller("Jeonju Hansang Kimchi", "Jeon Sunja", "Jeonju", "Food",
                                   "Honam Produce", 385_000, _GENERAL),
     "seller-linen-10": UsdSeller("Euljiro Linen", "Ryu Sangcheol", "Seoul", "Apparel",
                                  "Daegu Textiles", 410_000, _GENERAL),
     "seller-skinlab-11": UsdSeller("Daegu Skin Lab", "Son Yeji", "Daegu", "Beauty",
-                                   "Dalbit Cosmetics", 375_000, _RETAIL),
+                                   "Dalbit Cosmetics", 375_000, _RETAIL, risk="stressed"),
     "seller-kitchen-12": UsdSeller("Incheon Kitchenware", "O Changsu", "Incheon", "Home and living",
                                    "Steel Living", 340_000, _RETAIL),
     "seller-cable-13": UsdSeller("Guro Cable Mall", "Lee Gangsan", "Seoul", "Electronics",
-                                 "Tech Line", 455_000, _RETAIL),
+                                 "Tech Line", 455_000, _RETAIL, risk="stressed"),
     "seller-leather-14": UsdSeller("Seongsu Leather Studio", "Mun Taesik", "Seoul", "Handmade",
-                                   "Seongsu Leather Supply", 170_000, _STUDIO, 4),
+                                   "Seongsu Leather Supply", 170_000, _STUDIO, 4, business_age_months=8),
     "seller-tangerine-15": UsdSeller("Jeju Tangerine Day", "Gang Misuk", "Jeju", "Food",
                                      "Seogwipo Citrus", 270_000, _GENERAL),
     "seller-petcare-16": UsdSeller("Bundang Pet Care Shop", "Kim Sohui", "Seongnam", "Pet supplies",
                                    "Pet and Life", 295_000, _TWO_MARKETS),
     "seller-tint-17": UsdSeller("Hongdae Tint House", "Bak Hana", "Seoul", "Beauty",
-                                "Cos Lab", 165_000, _STUDIO, 4),
+                                "Cos Lab", 165_000, _STUDIO, 4, business_age_months=8),
     "seller-sofa-18": UsdSeller("Gwangju Sofa Factory", "Na Jeonghun", "Gwangju", "Home and living",
-                                "Honam Timber", 570_000, _GENERAL),
+                                "Honam Timber", 570_000, _GENERAL, risk="stressed"),
     "seller-streetfit-19": UsdSeller("Dongdaemun Street Fit", "Choi Wonbin", "Seoul", "Apparel",
-                                     "Dongdaemun Fabric", 275_000, _TWO_MARKETS, 4),
+                                     "Dongdaemun Fabric", 275_000, _TWO_MARKETS, 4,
+                                     business_age_months=8, rating=3.8, inventory_percent=60),
     "seller-mugshop-21": UsdSeller("Yeonnam Mug Shop", "Byeon Jaemin", "Seoul", "Home and living",
-                                   "Hanyang Ceramics", 325_000, _GENERAL),
+                                   "Hanyang Ceramics", 325_000, _GENERAL, risk="assigned",
+                                   inventory_percent=65),
 }
 
 

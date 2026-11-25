@@ -16,6 +16,14 @@ FEE = {"naver_smart_store": Decimal(".066"), "coupang": Decimal(".1155"),
 
 
 BASE_RETURN_RATE = Decimal(".02")
+# KRW STRESSED·ASSIGNED 원형(mockapis.synth)과 같은 레버. 난수를 쓰지 않아 다른 셀러의 흐름은 그대로다.
+STRESS_SALES_PERCENT = 60
+STRESS_PROCEEDS_PERCENT = 22  # 주 매출 대비 2주마다 받는 고비용 차입액(월 매출의 약 5%)
+STRESS_REPAYMENT_PERMILLE = 17  # 차입 1건마다 매주 금요일 상환액(주 매출 대비)
+STRESS_LENDERS = ("Hanbit Credit high-cost", "Fundly P2P")
+ADVANCE_PERCENT = 85
+ADVANCE_LEAD_DAYS = 5
+ADVANCE_DESCRIPTION = "Hangyeol early payout advance"
 
 
 def booked(value: Decimal) -> int:
@@ -41,10 +49,13 @@ class UsdBooks:
 
 def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int, opening: int, *,
                  pending=(), slump_on=None, loan_id=None, principal=0, installments=None,
-                 return_rate=None, deduction_rate=None, hold: UsdPayoutHold | None = None) -> UsdBooks:
+                 return_rate=None, deduction_rate=None, hold: UsdPayoutHold | None = None,
+                 stress_from: date | None = None, advance_from: date | None = None) -> UsdBooks:
     """Inclusive period. Materialize a payout once; that same net books the bank credit.
 
     return_rate(order_day) and deduction_rate(payout_day) return Decimal shares; hold withholds one platform's payouts.
+    stress_from cuts sales and starts high-cost borrowing; advance_from sells the top platform's payouts to an
+    early-payout lender, so the settlement is paid out but the bank sees a smaller, earlier advance instead.
     """
     rng = random.Random(seed)
     meta = USD_V1.model_dump()
@@ -53,6 +64,12 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
     for s in pending:
         deposits[s.settled_on].append(s)
     txns, payouts, orders = [], [], []
+    advances = defaultdict(list)
+    advanced = max(seller.channel_percent, key=lambda c: c[1])[0] if advance_from else None
+    stress_loans = 0
+
+    def is_advanced(s):
+        return advanced == s.platform_code and advance_from <= s.settled_on <= end and s.net_cents > 0
 
     def post(amount, description, code, *, platform=None, loan=None, item=None):
         nonlocal balance
@@ -71,19 +88,26 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
             daily = seller.weekly_sales_cents * rng.randint(90, 110) // 500
             if slump_on and d >= slump_on:
                 daily //= 4
+            if stress_from and d >= stress_from:
+                daily = daily * STRESS_SALES_PERCENT // 100
             for platform, percent in seller.channel_percent:
                 gross = daily * percent // 100
-                returns = booked(gross * (return_rate(d) if return_rate else BASE_RETURN_RATE))
+                returns = booked(gross * (return_rate(d) if return_rate else seller.return_rate or BASE_RETURN_RATE))
                 orders.append(UsdOrderDay(**meta, order_on=d, platform_code=platform,
                                           gross_cents=gross, returns_cents=returns))
                 paid_on = add_business_days(d, USD_PAYOUT_BUSINESS_DAYS[platform])
                 settleable = gross - returns
                 fee = booked(settleable * FEE[platform])
                 deduction = booked(settleable * deduction_rate(paid_on)) if deduction_rate else 0
-                deposits[paid_on].append(UsdSettlement(**meta, settled_on=paid_on, platform_code=platform,
-                                                       gross_cents=settleable, fee_cents=fee,
-                                                       deduction_cents=deduction,
-                                                       net_cents=settleable - fee - deduction))
+                s = UsdSettlement(**meta, settled_on=paid_on, platform_code=platform, gross_cents=settleable,
+                                  fee_cents=fee, deduction_cents=deduction, net_cents=settleable - fee - deduction)
+                deposits[paid_on].append(s)
+                if is_advanced(s):
+                    advances[max(d, paid_on - timedelta(days=ADVANCE_LEAD_DAYS))].append(
+                        s.net_cents * ADVANCE_PERCENT // 100)
+            for day in sorted(k for k in advances if k <= d):
+                for amount in advances.pop(day):
+                    post(amount, ADVANCE_DESCRIPTION, "TRANSFER_IN")
             if hold and held_total and not released and d >= hold.release_on:
                 released = True
                 deposits[d].insert(0, UsdSettlement(**meta, settled_on=d, platform_code=hold.platform_code,
@@ -95,11 +119,19 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                     held_total += s.net_cents
                     s = UsdSettlement(**(s.model_dump() | {"held_cents": s.net_cents, "net_cents": 0}))
                 payouts.append(s)
-                if s.net_cents:
+                if s.net_cents and not is_advanced(s):
                     post(s.net_cents, f"{USD_CHANNEL_NAMES[s.platform_code]} settlement", "PG_SETTLE",
                          platform=s.platform_code)
-            post(-(seller.weekly_sales_cents // 10), f"{seller.supplier} inventory", "TRANSFER_OUT")
+            if stress_from and d >= stress_from + timedelta(days=14 * stress_loans):
+                post(seller.weekly_sales_cents * STRESS_PROCEEDS_PERCENT // 100,
+                     f"{STRESS_LENDERS[stress_loans % len(STRESS_LENDERS)]} loan proceeds", "TRANSFER_IN")
+                stress_loans += 1
+            post(-(seller.weekly_sales_cents * seller.inventory_percent // 500), f"{seller.supplier} inventory",
+                 "TRANSFER_OUT")
             if d.weekday() == 4:
+                for i in range(stress_loans):
+                    post(-(seller.weekly_sales_cents * STRESS_REPAYMENT_PERMILLE // 1000),
+                         f"{STRESS_LENDERS[i % len(STRESS_LENDERS)]} repayment", "AUTO_DEBIT")
                 post(-(seller.weekly_sales_cents // 10), "Staff payroll", "TRANSFER_OUT")
                 if balance > seller.weekly_sales_cents * 2:
                     post(seller.weekly_sales_cents * 2 - balance, "Owner withdrawal", "TRANSFER_OUT")
