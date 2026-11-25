@@ -42,8 +42,8 @@ def store_summary(store: MarketplaceStore | UsdMarketplace | None, as_of: date) 
              "return_rate_90d": round(money(p, "return_90d") / money(p, "gross_90d"), 4) if money(p, "gross_90d") else None,
              "cancel_rate_90d": round(money(p, "cancel_90d") / money(p, "gross_90d"), 4) if money(p, "gross_90d") else None,
              f"pending_settlement_{unit}": money(p, "pending_settlement"),
-             **({} if usd else {"orders_90d": p.orders_90d, "seller_grade": p.seller_grade,
-                                "assigned_pending_krw": p.assigned_pending_krw})}
+             "orders_90d": p.orders_90d, "seller_grade": p.seller_grade,
+             f"assigned_pending_{unit}": money(p, "assigned_pending")}
             for p in platforms
         ],
         "penalties": [{"platform": p.platform, "occurred_on": p.occurred_on.isoformat(), "kind": p.kind}
@@ -55,7 +55,7 @@ def store_summary(store: MarketplaceStore | UsdMarketplace | None, as_of: date) 
         "mkt_cancel_rate_90d": round(sum(money(p, "cancel_90d") for p in platforms) / gross, 4) if gross else None,
         "mkt_days_since_suspension": (as_of - max(suspensions)).days if suspensions else None,
         f"mkt_pending_settlement_{unit}": max(
-            0, sum(money(p, "pending_settlement") - (0 if usd else p.assigned_pending_krw) for p in platforms)),
+            0, sum(money(p, "pending_settlement") - money(p, "assigned_pending") for p in platforms)),
     }
 
 

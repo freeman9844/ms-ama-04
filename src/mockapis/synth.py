@@ -16,6 +16,7 @@ from mockapis.sellerdata.categories import TxnCategory
 from mockapis.sellerdata.costs import Event
 from mockapis.sellerdata.engine import simulate
 from mockapis.sellerdata.usd import simulate_usd
+from mockapis.sellerdata.usd_market import build_usd_market
 from mockapis.sellerdata.marketplace import (
     MARKETPLACE_SEED_OFFSET,
     StoreOverride,
@@ -26,7 +27,7 @@ from mockapis.sellerdata.personas import DEMO_PERSONAS, Persona, business_reg_no
 from shared.contracts import ApplicantProfile, MarketplaceStore, PgSettlement, TaxFiling, Transaction
 from shared.contracts import USD_V1, StorePenalty, UsdTransaction
 from shared.sellers import USD_SELLERS
-from shared.usd_source import UsdMarketplace, UsdOrderDay, UsdProfile, UsdSettlement, UsdStorePlatform, UsdTaxFiling
+from shared.usd_source import UsdMarketplace, UsdOrderDay, UsdProfile, UsdSettlement, UsdTaxFiling
 
 __all__ = ["INJECTION_TEXT", "Archetype", "Persona", "SyntheticCase", "TxnCategory", "generate_case", "load_persona",
            "UsdCase", "generate_usd_case"]
@@ -111,19 +112,10 @@ def generate_usd_case(applicant_id: str, as_of: date, seed: int) -> UsdCase:
                          representative_name=seller.representative, industry=seller.industry, region=seller.region,
                          business_age_months=seller.business_age_months,
                          business_reg_no=business_reg_no(random.Random(seed)))
-    platforms = []
-    for code, _ in seller.channel_percent:
-        recent = [o for o in books.orders if o.platform_code == code and o.order_on >= as_of - timedelta(days=90)]
-        platforms.append(UsdStorePlatform(**meta, platform_code=code, opened_on=as_of-timedelta(days=790),
-                                          rating=seller.rating, review_count=len(recent)*3,
-                                          gross_90d_cents=sum(o.gross_cents for o in recent),
-                                          return_90d_cents=sum(o.returns_cents for o in recent), cancel_90d_cents=0,
-                                          pending_settlement_cents=sum(s.net_cents for s in books.pending
-                                                                       if s.platform_code == code)))
     penalties = () if not seller.suspension_days_ago else (
-        StorePenalty(platform=platforms[0].platform_code, occurred_on=as_of-timedelta(days=seller.suspension_days_ago),
+        StorePenalty(platform=seller.channel_percent[0][0], occurred_on=as_of-timedelta(days=seller.suspension_days_ago),
                      kind="suspension"),)
-    market = UsdMarketplace(**meta, as_of=as_of, platforms=tuple(platforms), penalties=penalties)
+    market = build_usd_market(seller, as_of, seed, books.orders, books.pending, penalties)
     filings = []
     for month in range(seller.history_months):
         begin = date(*month_add(start.year, start.month, month), 1)

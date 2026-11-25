@@ -10,6 +10,7 @@ import pytest
 
 from agents import features
 from agents.classify import Category, classify
+from agents.marketplace import store_summary
 from mockapis import demo
 from mockapis.sellerdata.usd import simulate_usd
 from mockapis.synth import generate_usd_case
@@ -74,6 +75,35 @@ def test_usd_v1_verdicts_are_pinned(seller):
 @pytest.mark.parametrize("seller", sorted(V1_TABLE))
 def test_existing_seller_books_do_not_change(seller):
     assert books_digest(case_at(seller, AS_OF)) == DIGESTS[seller]
+
+
+def test_existing_sellers_have_diverse_marketplaces():
+    tenures, all_cancel = set(), []
+    for seller in V1_TABLE:
+        ps = case_at(seller, AS_OF).marketplace.platforms
+        if len(ps) > 1:
+            assert len({p.opened_on for p in ps}) > 1
+            assert len({(p.rating, p.review_count) for p in ps}) > 1
+        assert all(p.orders_90d > 0 and p.seller_grade for p in ps)
+        assigned = [p for p in ps if p.assigned_pending_cents > 0]
+        assert len(assigned) == (1 if seller == "seller-mugshop-21" else 0)
+        tenures.add(min(p.opened_on for p in ps))
+        summary = store_summary(case_at(seller, AS_OF).marketplace, AS_OF)
+        all_cancel.append(summary["mkt_cancel_rate_90d"])
+    assert len(tenures) >= 8 and all(0 < c <= 0.04 for c in all_cancel)
+
+
+V2_FINAL_EXTRA = {"seller-mugshop-21": {"R112"}}
+
+
+@pytest.mark.parametrize("seller", sorted(V1_TABLE))
+def test_existing_sellers_under_usd_v2(seller):
+    d = explain(underwrite_at(seller, AS_OF).features, rules_for_version("usd-v2")).decision
+    final, codes, cash, cash_codes = V1_TABLE[seller]
+    assert (d.decision, {r.code for r in d.reason_codes}) == (final, codes | V2_FINAL_EXTRA.get(seller, set()))
+    bank_codes = cash_codes - {"R107", "R108"}
+    bank = I if bank_codes & {"R001", "R002", "R003", "R004", "R901"} else R if bank_codes else E
+    assert (d.cash_only.decision, {r.code for r in d.cash_only.reason_codes}) == (bank, bank_codes)
 
 
 def test_usd_underwriting_carries_settlement_features():

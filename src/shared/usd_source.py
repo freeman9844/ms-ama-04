@@ -51,6 +51,9 @@ class UsdStorePlatform(UsdProduct):
     return_90d_cents: Cents
     cancel_90d_cents: Cents
     pending_settlement_cents: Cents
+    orders_90d: int = Field(default=0, ge=0)
+    seller_grade: str | None = None
+    assigned_pending_cents: Cents = 0
 
 
 class UsdPgFlow(UsdProduct):

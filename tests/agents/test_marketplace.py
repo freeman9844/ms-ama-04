@@ -1,7 +1,8 @@
 from datetime import date
 
 from agents.marketplace import features_of, store_summary
-from shared.contracts import MKT_FEATURES, MarketplaceStore, StorePenalty, StorePlatform
+from shared.contracts import MKT_FEATURES, USD_V1, MarketplaceStore, StorePenalty, StorePlatform
+from shared.usd_source import UsdMarketplace, UsdStorePlatform
 
 AS_OF = date(2026, 11, 17)
 
@@ -17,6 +18,22 @@ def _platform(**kw) -> StorePlatform:
 
 def _store(*platforms: StorePlatform, penalties: tuple[StorePenalty, ...] = ()) -> MarketplaceStore:
     return MarketplaceStore(as_of=AS_OF, platforms=platforms, penalties=penalties)
+
+
+def test_usd_platform_rows_carry_orders_grade_and_assigned_advance():
+    base = USD_V1.model_dump()
+    row = dict(platform_code="coupang", opened_on=date(2024, 1, 10), rating=4.6, review_count=200,
+               gross_90d_cents=1_000_000, return_90d_cents=20_000, cancel_90d_cents=10_000,
+               pending_settlement_cents=100_000)
+    store = UsdMarketplace(**base, as_of=AS_OF, penalties=(), platforms=(
+        UsdStorePlatform(**base, **row, orders_90d=250, seller_grade="Gold", assigned_pending_cents=85_000),
+        UsdStorePlatform(**base, **{**row, "platform_code": "own_store", "pending_settlement_cents": 40_000},
+                         orders_90d=90, seller_grade="Silver"),
+    ))
+    summary = store_summary(store, AS_OF)
+    assert [(p["orders_90d"], p["seller_grade"], p["assigned_pending_cents"]) for p in summary["platforms"]] == [
+        (250, "Gold", 85_000), (90, "Silver", 0)]
+    assert summary["mkt_pending_settlement_cents"] == 140_000 - 85_000
 
 
 def test_weighted_rating():
