@@ -420,3 +420,14 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
   table { display: block; overflow-x: auto; }
   thead th { white-space: nowrap; }
 }
+
+/* 데모 로그인 화면(장면용, ADR-007): 사이드바 없는 가운데 카드 */
+.login-page { display: grid; place-items: center; min-height: 100vh; padding: 1.5rem; background: var(--nav); }
+.login-card { width: 100%; max-width: 380px; padding: 2rem 2rem 1.5rem; background: var(--card); border-radius: var(--radius); box-shadow: 0 16px 40px rgba(0, 0, 0, .25); }
+.login-brand { display: flex; align-items: center; gap: .65rem; margin: 0 0 1.5rem; font-weight: 700; font-size: 1.1rem; line-height: 1.25; }
+.login-brand small { display: block; color: var(--muted); font-weight: 500; font-size: .8rem; }
+.login-form label { color: var(--fg-2); font-weight: 500; }
+.login-form button { width: 100%; margin-top: 1rem; padding: .7rem 1rem; }
+.login-hint { margin: .9rem 0 0; color: var(--muted); font-size: .85rem; text-align: center; }
+.login-card .lang-switch { margin-top: 1rem; color: var(--muted); text-align: center; }
+.login-card .lang-switch strong { color: var(--fg); }

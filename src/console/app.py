@@ -37,7 +37,19 @@ from agents.monitoring import WEEKS
 from agents.pretranslate import RawScope, active_scope, raw_container, translation_scope
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.assessment import assessment_panels
-from console.auth import PRINCIPAL_HEADER, Principal, csrf_token, parse_principal, verify_csrf
+from console.auth import (
+    DEMO_LOGIN_ID,
+    DEMO_SESSION_COOKIE,
+    DEMO_SESSION_TTL_S,
+    PRINCIPAL_HEADER,
+    Principal,
+    csrf_token,
+    demo_session_token,
+    parse_principal,
+    safe_next,
+    verify_csrf,
+    verify_demo_session,
+)
 from console.customer import APPLY_ERRORS, CONSENT_ITEMS, customer_status, parse_requested_usd_cents, validate_apply, validate_request
 from shared.portfolio import in_portfolio
 from console.dashboard import (
@@ -197,6 +209,8 @@ class ConsoleDeps:
     new_application_id: Callable[[], str] = field(default=_new_application_id)
     # 데모 모드(Easy Auth 끔): 운영자 IP 허용 목록만 남고 모든 요청을 이 주체로 처리한다.
     demo_principal: Principal | None = None
+    # 데모 모드의 장면용 로그인 화면(/login). 인증이 아니며 결정 기록 주체는 그대로 demo_principal이다(ADR-007).
+    demo_login: bool = False
     monitoring: MonitoringStore | None = None
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(KST))
     privacy: PrivacyStore | None = None
@@ -381,6 +395,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     templates.globals["mt_js_version"] = hashlib.sha256((HERE / "static" / "mt.js").read_bytes()).hexdigest()[:10]
     # 레플리카가 여러 개여도 같은 토큰을 쓰도록 가명처리 키에서 파생한다.
     csrf_key = hmac.new(deps.pseudonym_key, b"console-csrf", hashlib.sha256).digest()
+    login_key = hmac.new(deps.pseudonym_key, b"console-demo-login", hashlib.sha256).digest()
+    login_on = deps.demo_principal is not None and deps.demo_login
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     app.add_middleware(i18n.LocaleMiddleware)
 
@@ -400,6 +416,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
         def draw() -> str:
             return templates.get_template(name).render(user=user, csrf=csrf, demo=deps.demo_principal is not None,
+                                                       demo_login=login_on,
                                                        origination_open=deps.usd_origination_enabled, **ctx)
 
         if i18n.current() == i18n.SOURCE:
@@ -448,7 +465,19 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             mt_log.warning("raw unavailable for page texts owner=%s error=%s", owner, type(e).__name__)
             return None, False
 
+    def require_demo_session(request: Request) -> None:
+        if verify_demo_session(login_key, request.cookies.get(DEMO_SESSION_COOKIE), int(deps.clock().timestamp())):
+            return
+        if request.headers.get("HX-Request"):
+            raise HTTPException(401, "login required", headers={"HX-Redirect": "/login"})
+        if request.method == "GET":
+            target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            raise HTTPException(303, "login required", headers={"Location": "/login?next=" + quote(target, safe="/")})
+        raise HTTPException(401, "login required")
+
     def viewer(request: Request) -> Principal:
+        if login_on:
+            require_demo_session(request)
         user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
         if user is None:
             raise HTTPException(401, "login required")
@@ -520,6 +549,36 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
     @app.get("/healthz")
     def healthz() -> JSONResponse:
         return JSONResponse({"status": "ok"})
+
+    def login_page(next_url: str, status_code: int = 200, error: str | None = None) -> HTMLResponse:
+        return render("login.html", None, status_code, next_url=next_url, login_id=DEMO_LOGIN_ID, error=error)
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_form(next: str | None = None) -> HTMLResponse:
+        if not login_on:
+            raise HTTPException(404)
+        return login_page(safe_next(next))
+
+    @app.post("/login")
+    async def login_submit(request: Request):
+        if not login_on:
+            raise HTTPException(404)
+        form = await _form(request)
+        target = safe_next(form.get("next"))
+        if form.get("username", "").strip() != DEMO_LOGIN_ID or not form.get("password"):
+            return login_page(target, 422, error=_("아이디 또는 비밀번호가 올바르지 않습니다."))
+        response = RedirectResponse(target, status_code=303)
+        response.set_cookie(DEMO_SESSION_COOKIE, demo_session_token(login_key, int(deps.clock().timestamp())),
+                            max_age=DEMO_SESSION_TTL_S, path="/", secure=True, httponly=True, samesite="lax")
+        return response
+
+    @app.get("/logout")
+    def logout() -> RedirectResponse:
+        if not login_on:
+            raise HTTPException(404)
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(DEMO_SESSION_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
+        return response
 
     @app.get("/legacy", response_class=HTMLResponse)
     @app.get("/", response_class=HTMLResponse)

@@ -13,5 +13,10 @@
   "button|반려": "Reject",
   "button|수정 후 승인": "Approve with edits",
   "기계 번역 · 원문: %(t)s": "Machine translation · original: %(t)s",
-  "점선 밑줄 문구는 기계 번역입니다. 마우스를 올리면 원문이 보입니다. 원문이 기준입니다.": "Dotted-underlined text is machine-translated. Hover to see the Korean original, which is authoritative."
+  "점선 밑줄 문구는 기계 번역입니다. 마우스를 올리면 원문이 보입니다. 원문이 기준입니다.": "Dotted-underlined text is machine-translated. Hover to see the Korean original, which is authoritative.",
+  "아이디": "User ID",
+  "비밀번호": "Password",
+  "로그인": "Sign in",
+  "데모 계정이 미리 입력돼 있습니다.": "A demo account is pre-filled.",
+  "아이디 또는 비밀번호가 올바르지 않습니다.": "Incorrect user ID or password."
 }

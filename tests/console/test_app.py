@@ -1,13 +1,14 @@
 import base64
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from console.app import ConsoleDeps, create_app
 from console.auth import AUDITOR, CREDIT_MANAGER, CREDIT_OFFICER
+from journey.models import KST
 
 OID = "http://schemas.microsoft.com/identity/claims/objectidentifier"
 
@@ -391,6 +392,119 @@ def test_easy_auth_mode_has_no_demo_banner(env):
     client, _ = env
     page = client.get("/", headers=OFFICER).text
     assert "데모 모드" not in page and "/.auth/logout" in page
+
+
+# ── 데모 로그인 화면(CONSOLE_DEMO_LOGIN): 장면용 로그인. 인증이 아니며 주체는 그대로 데모 주체 ──
+
+@pytest.fixture
+def login_env(make_doc, raw, key):
+    from console.auth import Principal
+    now = {"t": datetime(2026, 11, 26, 9, 0, tzinfo=KST)}
+    demo = Principal(user_id="demo-operator", name="데모 사용자", roles=frozenset({CREDIT_OFFICER}))
+    deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key,
+                       demo_principal=demo, demo_login=True, clock=lambda: now["t"])
+    client = TestClient(create_app(deps), follow_redirects=False, base_url="https://testserver",
+                        cookies={"ama_locale_v2": "ko"})
+    return client, now
+
+
+def login(client, **fields):
+    return client.post("/login", data={"username": "demo.officer", "password": "x", "next": "/"} | fields)
+
+
+def test_demo_login_redirects_pages_to_login_with_next(login_env):
+    client, _ = login_env
+    resp = client.get("/applications/app-1?since=abc")
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/login?next=/applications/app-1%3Fsince%3Dabc"
+
+
+def test_demo_login_page_prefills_demo_account(login_env):
+    client, _ = login_env
+    page = client.get("/login?next=/loans")
+    assert page.status_code == 200
+    assert 'value="demo.officer"' in page.text and 'name="password"' in page.text
+    assert 'name="next" value="/loans"' in page.text and "sidebar" not in page.text
+
+
+def test_demo_login_sets_cookie_and_returns_to_next(login_env):
+    client, _ = login_env
+    resp = login(client, next="/loans")
+    assert resp.status_code == 303 and resp.headers["location"] == "/loans"
+    cookie = resp.headers["set-cookie"]
+    assert cookie.startswith("ama_demo_session=")
+    for attr in ("HttpOnly", "Secure", "SameSite=lax", "Path=/", "Max-Age=28800"):
+        assert attr.lower() in cookie.lower()
+    page = client.get("/")
+    assert page.status_code == 200 and 'href="/logout"' in page.text and "/.auth/logout" not in page.text
+
+
+@pytest.mark.parametrize("fields", [{"username": "someone"}, {"password": ""}])
+def test_demo_login_rejects_wrong_input(login_env, fields):
+    client, _ = login_env
+    resp = login(client, **fields)
+    assert resp.status_code == 422 and "아이디 또는 비밀번호가 올바르지 않습니다." in resp.text
+    assert "set-cookie" not in resp.headers
+
+
+def test_demo_login_ignores_external_next(login_env):
+    client, _ = login_env
+    assert login(client, next="//evil.example").headers["location"] == "/"
+
+
+def test_demo_login_expires_after_eight_hours(login_env):
+    client, now = login_env
+    login(client)
+    now["t"] += timedelta(hours=8)
+    assert client.get("/").status_code == 303
+
+
+def test_demo_login_rejects_tampered_cookie(login_env):
+    client, _ = login_env
+    login(client)
+    issued, sig = client.cookies["ama_demo_session"].split(".")
+    client.cookies.delete("ama_demo_session")
+    client.cookies.set("ama_demo_session", f"{int(issued) + 1}.{sig}")
+    assert client.get("/").status_code == 303
+
+
+def test_demo_login_htmx_gets_hx_redirect(login_env):
+    client, _ = login_env
+    resp = client.get("/applications/rows", headers={"HX-Request": "true"})
+    assert resp.status_code == 401 and resp.headers["hx-redirect"] == "/login"
+
+
+def test_demo_login_post_without_session_is_401(login_env):
+    client, _ = login_env
+    assert client.post("/applications", data={"csrf": "x"}).status_code == 401
+
+
+def test_demo_logout_clears_cookie(login_env):
+    client, _ = login_env
+    login(client)
+    resp = client.get("/logout")
+    assert resp.status_code == 303 and resp.headers["location"] == "/login"
+    assert client.get("/").status_code == 303
+
+
+def test_demo_login_leaves_customer_and_health_open(login_env):
+    client, _ = login_env
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/apply").headers["location"] == "/borrower"  # customer()를 통과해 사업자 선택으로
+
+
+def test_demo_login_page_in_english(login_env):
+    client, _ = login_env
+    client.cookies.set("ama_locale_v2", "en")
+    page = client.get("/login").text
+    assert "Sign in" in page and "아이디" not in page
+
+
+def test_login_routes_absent_when_demo_login_off(env, demo_env):
+    for client, headers in ((env[0], OFFICER), (demo_env[0], {})):
+        assert client.get("/login").status_code == 404
+        assert client.get("/logout").status_code == 404
+        assert 'href="/logout"' not in client.get("/", headers=headers).text
 
 
 def test_decision_sent_page_forwards_to_detail_until_the_decision_lands(env, make_doc):

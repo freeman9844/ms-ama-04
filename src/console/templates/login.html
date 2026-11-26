@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="{{ locale() }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ _("로그인") }} · AMA Lending {{ _("심사 콘솔") }}</title>
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body class="login-page">
+<main class="login-card">
+  <p class="login-brand"><svg class="logo-mark" aria-hidden="true" viewBox="0 0 32 32" width="32" height="32"><defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3182f6"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#logo-g)"/><text x="16" y="22" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">A</text></svg><span>AMA Lending <small>{{ _("심사 콘솔") }}</small></span></p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form class="login-form" method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label>{{ _("아이디") }} <input name="username" autocomplete="username" required value="{{ login_id }}"></label>
+    <label>{{ _("비밀번호") }} <input name="password" type="password" autocomplete="current-password" required value="demo"></label>
+    <button type="submit">{{ _("로그인") }}</button>
+  </form>
+  <p class="login-hint">{{ _("데모 계정이 미리 입력돼 있습니다.") }}</p>
+  {% include "_lang.html" %}
+</main>
+</body>
+</html>
