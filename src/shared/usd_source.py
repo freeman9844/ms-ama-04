@@ -66,3 +66,21 @@ class UsdMarketplace(UsdProduct):
     as_of: date
     platforms: tuple[UsdStorePlatform, ...]
     penalties: tuple[StorePenalty, ...]
+
+
+class UsdMarketWeek(UsdProduct):
+    """한 플랫폼의 한 주(월~일) 마켓 스냅샷. 사후 모니터링 재생용."""
+
+    week_end: date
+    platform_code: PlatformCode
+    orders: int = Field(ge=0)
+    gross_cents: Cents
+    cancel_cents: Cents
+    rating: float = Field(ge=1, le=5)
+    seller_grade: str
+    pending_settlement_cents: Cents
+    penalties: tuple[StorePenalty, ...] = ()
+
+
+class UsdMarketFlow(UsdProduct):
+    weeks: tuple[UsdMarketWeek, ...]

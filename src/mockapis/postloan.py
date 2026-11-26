@@ -38,10 +38,11 @@ from mockapis.sellerdata.engine import WARMUP_DAYS, simulate
 from mockapis.synth import RECEIPT_SEED_OFFSET, Archetype, SyntheticCase, TxnCategory
 from mockapis.synth import UsdCase
 from mockapis.sellerdata.usd import BASE_RETURN_RATE, UsdPayoutHold, simulate_usd
-from shared.contracts import AlertCause, PgFlow, PgOrderDay, PgSettlement, Transaction
+from mockapis.sellerdata.usd_market_flow import MarketHooks, build_usd_market_flow
+from shared.contracts import AlertCause, PgFlow, PgOrderDay, PgSettlement, StorePenalty, Transaction
 from shared.contracts import UsdTransaction
 from shared.sellers import USD_SELLERS
-from shared.usd_source import UsdOrderDay, UsdSettlement
+from shared.usd_source import UsdMarketWeek, UsdOrderDay, UsdSettlement
 from shared.money import MIN_REQUEST_CENTS, MAX_REQUEST_CENTS
 from shared.krcalendar import next_business_day
 from shared.repayment import LENDER_CREDIT, LENDER_DEBIT, due_dates
@@ -79,6 +80,15 @@ USD_POSTLOAN_ADVANCE_LABEL = "Marketplace payout"  # 계좌에는 플랫폼 정�
 PRIOR_YEAR_DAYS = 364  # 52주: 요일이 같다
 PRIOR_YEAR_LEAD_DAYS = 21  # 지난해 같은 시점의 대출 전 3주도 함께 준다
 
+# USD 주간 마켓 스냅샷 훅(build_usd_market_flow). Task 7이 조정할 수 있는 출발 값이다.
+USD_MARKET_LEAD_DAY = 7  # 정산 보류·블립의 취소율 상승은 대출 시작 이 날부터 반영한다
+USD_CANCEL_RISE_MULT = 3.0  # 취소율 배수(정산 보류·마켓 블립). 뷰티 업종처럼 기준 취소율이 낮은 셀러도
+# base+0.02 문턱을 넘도록 브리프 기본값(2.5)에서 조정했다(Task 1 자체 조정, Task 7이 다시 볼 수 있다)
+USD_RATING_DROP = -0.3  # 반품 급증 때 주력 플랫폼 평점 변화
+USD_RATING_FROM_DAY = 21  # 평점 하락 시작일
+USD_GRADE_DOWN_DAY = 28  # 매출 부진 때 등급이 한 단계 내려가는 날
+USD_BLIP_DAYS = (35, 41)  # 마켓 블립이 지속되는 구간(포함)
+
 
 class FlowScenario(StrEnum):
     STABLE = "stable"
@@ -87,6 +97,7 @@ class FlowScenario(StrEnum):
     RETURN_SPIKE = "return_spike"
     COST_SURGE = "cost_surge"
     ADVANCE_AFTER_LOAN = "advance_after_loan"  # USD 전용
+    MARKET_BLIP = "market_blip"  # USD 전용, 장부는 그대로고 마켓 취소율만 한 주 튄다
 
     @classmethod
     def _missing_(cls, value: object) -> "FlowScenario | None":
@@ -100,6 +111,7 @@ USD_POSTLOAN_SCENARIOS: dict[str, FlowScenario] = {
     "seller-linen-10": FlowScenario.RETURN_SPIKE,
     "seller-tangerine-15": FlowScenario.COST_SURGE,
     "seller-snackbox-22": FlowScenario.ADVANCE_AFTER_LOAN,
+    "seller-tint-17": FlowScenario.MARKET_BLIP,
 }
 
 
@@ -140,6 +152,7 @@ class UsdPostLoanFlow:
     pg_settlements: tuple[UsdSettlement, ...]
     # Case orders from start - 21d - 364d to end - 364d, dates unshifted; consumers add 364 days.
     prior_year_orders: tuple[UsdOrderDay, ...] = ()
+    market_weeks: tuple[UsdMarketWeek, ...] = ()
 
 
 def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str, amount_cents: int,
@@ -171,10 +184,20 @@ def generate_usd_postloan(case: UsdCase, start: date, seed: int, *, loan_id: str
     baseline = start - timedelta(days=PRE_LOAN_DAYS)
     year = timedelta(days=PRIOR_YEAR_DAYS)
     prior_from, prior_to = start - timedelta(days=PRIOR_YEAR_LEAD_DAYS) - year, end - year
-    return UsdPostLoanFlow(start, end, scenario,
-                           books.transactions, tuple(o for o in case.orders if baseline <= o.order_on < start) + books.orders,
-                           tuple(s for s in case.pg_settlements if baseline <= s.settled_on < start) + books.settlements,
-                           tuple(o for o in case.orders if prior_from <= o.order_on <= prior_to))
+    orders = tuple(o for o in case.orders if baseline <= o.order_on < start) + books.orders
+    pg_settlements = tuple(s for s in case.pg_settlements if baseline <= s.settled_on < start) + books.settlements
+    market_weeks = ()
+    if case.marketplace is not None:
+        market_weeks = build_usd_market_flow(
+            case.marketplace, start, orders, pg_settlements, _usd_market_hooks(scenario, seller, start),
+            seed=seed, industry=seller.industry).weeks
+    return UsdPostLoanFlow(start, end, scenario, books.transactions, orders, pg_settlements,
+                           tuple(o for o in case.orders if prior_from <= o.order_on <= prior_to), market_weeks)
+
+
+def _main_platform(seller) -> str:
+    """Main-share channel for one seller (same channel `build_usd_market` indexes as `platforms[0]`)."""
+    return max(seller.channel_percent, key=lambda c: c[1])[0]
 
 
 def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
@@ -184,8 +207,7 @@ def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
     if scenario is FlowScenario.SALES_SLUMP:
         return {"slump_on": start + timedelta(days=USD_SLUMP_ONSET_DAY)}
     if scenario is FlowScenario.SETTLEMENT_HOLD:
-        platform = max(seller.channel_percent, key=lambda c: c[1])[0]
-        return {"hold": UsdPayoutHold(platform, onset, start + timedelta(days=USD_HOLD_TO_DAY),
+        return {"hold": UsdPayoutHold(_main_platform(seller), onset, start + timedelta(days=USD_HOLD_TO_DAY),
                                       start + timedelta(days=USD_HOLD_RELEASE_DAY))}
     if scenario is FlowScenario.RETURN_SPIKE:
         spike_to = start + timedelta(days=USD_RETURN_TO_DAY)
@@ -201,6 +223,28 @@ def _usd_scenario(scenario: FlowScenario, seller, start: date) -> dict:
         # The lender keeps buying payouts that settle after the 13 weeks, so the last week still gets its advances.
         return {"advance_from": start + timedelta(days=USD_POSTLOAN_ADVANCE_DAY), "advance_to": date.max}
     return {}
+
+
+def _usd_market_hooks(scenario: FlowScenario, seller, start: date) -> MarketHooks:
+    """build_usd_market_flow hooks for one cause. Only touches the main platform's weekly snapshot;
+    the ledger/books hooks above are untouched, so MARKET_BLIP looks like STABLE in `_usd_scenario`."""
+    if scenario is FlowScenario.SETTLEMENT_HOLD:
+        rise_from, rise_to = start + timedelta(days=USD_MARKET_LEAD_DAY), start + timedelta(days=USD_HOLD_RELEASE_DAY)
+        warn_on = start + timedelta(days=USD_ONSET_DAY)
+        return MarketHooks(
+            cancel_mult=lambda d: USD_CANCEL_RISE_MULT if rise_from <= d < rise_to else 1.0,
+            penalties=(StorePenalty(platform=_main_platform(seller), occurred_on=warn_on, kind="warning"),))
+    if scenario is FlowScenario.RETURN_SPIKE:
+        drop_from, drop_to = start + timedelta(days=USD_RATING_FROM_DAY), start + timedelta(days=USD_RETURN_TO_DAY)
+        return MarketHooks(rating_delta=lambda d: USD_RATING_DROP if drop_from <= d <= drop_to else 0.0)
+    if scenario is FlowScenario.SALES_SLUMP:
+        down_from = start + timedelta(days=USD_GRADE_DOWN_DAY)
+        return MarketHooks(grade_steps=lambda d: 1 if d >= down_from else 0)
+    if scenario is FlowScenario.MARKET_BLIP:
+        blip_from = start + timedelta(days=USD_BLIP_DAYS[0])
+        blip_to = start + timedelta(days=USD_BLIP_DAYS[1])
+        return MarketHooks(cancel_mult=lambda d: USD_CANCEL_RISE_MULT if blip_from <= d <= blip_to else 1.0)
+    return MarketHooks()
 
 
 def _installments(dues: list[date], installment_krw: int) -> list[Event]:
