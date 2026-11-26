@@ -211,6 +211,13 @@ def test_detail_shows_substitution_and_compare(demo_cases):
     assert "대체 상한" in html and "후보 중 가장 작은 값을 10만 원 단위로 내림" in html
 
 
+def test_krw_policy_tab_has_no_change_explanation(demo_cases):
+    html = _seller_page(demo_cases, "seller-knitroom-04")
+    panel = html.split('id="tab-policy"')[1].split('id="tab-opinion"')[0]
+    assert "R001 대체됨(S001)" in panel
+    assert "판정이 달라진 이유" not in panel and "<th>설명</th>" not in panel
+
+
 def test_detail_shows_blocked_substitution(demo_cases):
     html = _seller_page(demo_cases, "seller-tint-17")
     assert "조건 충족, R002로 미적용" in html and "대체됨(S001)" not in html
