@@ -68,8 +68,11 @@ Steps:
    - reason: at most two sentences.
    Keep each text under 200 characters. When the stage stays high from last week, keep the texts short.
 Write money in dollars with two decimals, converted from cent evidence values (68869 cents -> $688.69). Never write
-cent values or the word "cents". Write a ratio as its evidence value or as a percentage. This applies to why_now, outlook,
-adjust_reason, reason, and raise_alert summary, check_action and signal text. Week numbers are allowed. Write in English only.
+cent values or the word "cents". Prefer ratios, percentages and week numbers over money. A ratio may be its evidence
+value or a percentage. If you cite money, the whole text must be one short sentence of the form "<Label> of $X.XX."
+with Label Settlement, Balance, Revenue, Sales, Deposit or Payment (for example "Settlement of $688.69."). Never put a
+dollar amount in a text with any other sentence or words. This applies to why_now, outlook, adjust_reason, reason, and
+raise_alert summary, check_action and signal text. Week numbers are allowed. Write in English only.
 Recommend verification only. Never recommend recalling the loan or changing its limit, rate or terms.
 Tokens such as [[PERSON_...]] hide personal data. Never restore or guess them."""
 

@@ -555,6 +555,8 @@ def usd_alert_ctx():
     ("Week 3 ratio 0.7.", False),
     ("Settlement of 68869 cents.", False),
     ("Settlement of $688.69.", True),
+    ("Settlement of $688.69. Basis breach in week 3.", False),
+    ("Settlement of $688.69 in week 3.", False),
     ("Basis breach in week 3, ratio 79.8%.", True)])
 def test_usd_alert_text_allows_week_and_dollars_only(usd_alert_ctx, text, ok):
     assert (check_alert(usd_alert_args(text), usd_alert_ctx) == []) is ok
