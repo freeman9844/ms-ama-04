@@ -537,6 +537,30 @@ def test_instructions_do_not_offer_basis_breached_as_citation_id():
     assert "basis_breached 필드" in INSTRUCTIONS
 
 
+def usd_alert_args(text, summary="Payouts fell behind."):
+    signal = {"kind": "settlement_assigned", "text": text, "metric_ids": ["W:3:recon_ratio", "W:3:unreconciled_payout_cents"],
+              "txn_ids": []}
+    return {"severity": "medium", "summary": summary, "check_action": "Review the weekly evidence.",
+            "recommended_action": "officer_review", "signals": [signal], "primary_cause": "", "secondary_causes": []}
+
+
+@pytest.fixture
+def usd_alert_ctx():
+    row = {**usd_week_row(week=3), "recon_ratio": 0.8, "unreconciled_payout_cents": 68869}
+    return usd_ctx(rows=[row], triggers=["basis_breach"])
+
+
+@pytest.mark.parametrize("text,ok", [
+    ("Basis breach in week 3.", True),
+    ("Week 3 ratio 0.7.", False),
+    ("Settlement of 68869 cents.", False),
+    ("Settlement of $688.69.", True),
+    ("Basis breach in week 3, ratio 79.8%.", True)])
+def test_usd_alert_text_allows_week_and_dollars_only(usd_alert_ctx, text, ok):
+    assert (check_alert(usd_alert_args(text), usd_alert_ctx) == []) is ok
+    assert (check_alert(usd_alert_args("Payouts fell behind.", summary=text), usd_alert_ctx) == []) is ok
+
+
 def test_usd_fallback_for_assigned_settlement_names_the_basis_breach():
     row = {**usd_week_row(week=3), "recon_ratio": 0.81, "basis_breached": ["S003"]}
     ctx = usd_ctx(rows=[row], triggers=["basis_breach"])

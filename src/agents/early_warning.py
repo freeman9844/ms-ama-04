@@ -405,6 +405,7 @@ def _ids(value: Any) -> list[str]:
 
 def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
     issues: list[str] = []
+    weeks = [row["week"] for row in ctx.rows if _is_num(row.get("week"))] if ctx.product else []
     signals = args.get("signals")
     if not isinstance(signals, list) or not signals:
         return ["signals: 신호가 하나 이상 필요하다"]
@@ -428,7 +429,8 @@ def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
         if ctx.product:
             amounts = [ctx.by_id[t].amount_cents for t in txn_ids if t in ctx.by_id]
             bad = usd_language.issues(text, amounts + [ctx.catalog[k] for k in metric_ids if k.endswith("_cents") and k in ctx.catalog],
-                                      [ctx.catalog[k] for k in metric_ids if not k.endswith("_cents") and _is_num(ctx.catalog.get(k))])
+                                      [ctx.catalog[k] for k in metric_ids if not k.endswith("_cents") and _is_num(ctx.catalog.get(k))]
+                                      + weeks)
         else:
             cited += [float(ctx.by_id[t].amount_krw) for t in txn_ids if t in ctx.by_id]
             bad = ungrounded(text, cited)
@@ -438,7 +440,7 @@ def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
     if ctx.product:
         for text in (args.get("summary", ""), args.get("check_action", "")):
             issues += usd_language.issues(str(text), [v for k, v in ctx.catalog.items() if k.endswith("_cents")],
-                                          [v for k, v in ctx.catalog.items() if not k.endswith("_cents") and _is_num(v)])
+                                          [v for k, v in ctx.catalog.items() if not k.endswith("_cents") and _is_num(v)] + weeks)
         issues += _check_cause(args, ctx, signals)
         return ["Invalid English alert, cause or cited evidence"] if issues else []
     if bad := ungrounded(str(args.get("summary", "")), catalog_values):
@@ -593,7 +595,8 @@ def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str,
     spec = ew_spec(model)
     if ctx.product:
         spec = usd_language.native_spec(spec, "Investigate only the supplied trigger evidence. Write in English. "
-                       "Monetary values are USD cents. Cite metric or transaction IDs in each signal. Use a candidate "
+                       "Monetary values are USD cents. Write money in dollars with two decimals converted from cents; "
+                       "never write cent values. Cite metric or transaction IDs in each signal. Use a candidate "
                        "cause and verify its evidence. Recommend verification only, never enforcement or new credit terms.")
         text = ctx.mask(f"Investigate week {ctx.week}: {', '.join(ctx.triggers)}.")
     run, error = session.run(spec, text, ctx.handlers())

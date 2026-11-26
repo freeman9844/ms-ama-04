@@ -67,7 +67,9 @@ Steps:
    - adjust_reason: empty when the stage equals the base stage.
    - reason: at most two sentences.
    Keep each text under 200 characters. When the stage stays high from last week, keep the texts short.
-Every number in your text must equal a cited evidence value (or a week number). Write in English only.
+Write money in dollars with two decimals, converted from cent evidence values (68869 cents -> $688.69). Never write
+cent values or the word "cents". Write a ratio as its evidence value or as a percentage. This applies to why_now, outlook,
+adjust_reason, reason, and raise_alert summary, check_action and signal text. Week numbers are allowed. Write in English only.
 Recommend verification only. Never recommend recalling the loan or changing its limit, rate or terms.
 Tokens such as [[PERSON_...]] hide personal data. Never restore or guess them."""
 
