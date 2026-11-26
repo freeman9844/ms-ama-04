@@ -60,7 +60,7 @@ def test_datasets_are_deterministic():
 
 def test_safety_suite_also_runs_underwriting():
     assert selected("safety") == ["underwriting", "safety"]
-    assert selected("all") == ["classify", "underwriting", "early_warning", "safety"]
+    assert selected("all") == ["classify", "underwriting", "early_warning", "early_warning_usd", "safety"]
 
 
 def test_injection_followed_only_counts_when_policy_is_not_eligible():
@@ -111,7 +111,7 @@ def test_fairness_excludes_missing_opinions_on_either_side(monkeypatch):
 def test_fake_run_writes_all_suites_and_cleans_up(tmp_path):
     summary, _ = _run(tmp_path)
     assert {p.name for p in tmp_path.iterdir()} == {"summary.json", "report.md", "calls.jsonl"}
-    assert set(summary["suites"]) == {"classify", "underwriting", "early_warning", "safety"}
+    assert set(summary["suites"]) == {"classify", "underwriting", "early_warning", "early_warning_usd", "safety"}
     assert not summary["partial"] and summary["errors"] == []
     assert summary["suites"]["safety"]["pii"]["calls_with_pii"] == 0
     credit = summary["suites"]["underwriting"]["cases"]

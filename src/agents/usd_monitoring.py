@@ -1,8 +1,9 @@
 """Weekly observations and a trailing cash-flow forecast for the synthetic USD product.
 
-Two tracks run side by side. The bank-only track reads the account alone (inflow drop and the trailing forecast).
-The full track adds the settlement ledger: order and payout signals, the approval basis the loan relied on, and a
-forecast that knows scheduled payouts. A bank-only signal that the ledger explains is not raised again."""
+The weekly observation starts from the bank account alone (inflow drop and the trailing forecast: `bank_only`), then
+adds the settlement ledger (order and payout signals, the approval basis the loan relied on, and a forecast that knows
+scheduled payouts) and the marketplace signals. A bank-only signal that the ledger explains is dropped from the
+triggers and kept in `explained`; `bank_only` stays on the observation as the input of that explanation."""
 
 import math
 from collections import defaultdict
@@ -66,11 +67,11 @@ _EVIDENCE = {
 
 class UsdObservation(NamedTuple):
     rows: list[dict]
-    triggers: list[str]  # full track
+    triggers: list[str]  # bank + ledger triggers after the explanation step
     candidates: list[CauseCandidate]
     cats: dict[str, Category]
-    proj: dict[str, Any]  # full-track forecast
-    bank_only: list[str]
+    proj: dict[str, Any]  # forecast with scheduled payouts
+    bank_only: list[str]  # bank-account triggers before the ledger explains any of them
     explained: list[dict]
     basis: list[dict]
     signals: tuple[dict, ...] = ()  # {"code", "source", "strength", "metric_ids"}, in SIGNALS order
@@ -308,6 +309,8 @@ def signal_list(codes, row, week: int) -> tuple[dict, ...]:
 
 
 def observe_usd(loan, visible, pg, week, dues, market: UsdMarketFlow | None = None) -> UsdObservation:
+    """One week's observation. Computes the bank-only triggers first, then (when a ledger exists) the ledger triggers,
+    the approval-basis check and the explanation of bank-only signals; market signals join the signal list."""
     mon, base = loan["monitoring"], loan["baseline"]
     start = date.fromisoformat(mon["flow_start"])
     lo, hi = week_window(start, week)

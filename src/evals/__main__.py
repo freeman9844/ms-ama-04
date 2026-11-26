@@ -20,9 +20,9 @@ from evals.backend import Backend, Models, azure_backend, fake_backend
 from evals.judge import Judge
 from evals.metering import Meter
 from evals.runner import EvalRunner
-from evals.suites import classify, early_warning, safety, underwriting
+from evals.suites import classify, early_warning, early_warning_usd, safety, underwriting
 
-SUITES = ("classify", "underwriting", "early_warning", "safety")
+SUITES = ("classify", "underwriting", "early_warning", "early_warning_usd", "safety")
 DEFAULT_BUDGET_USD = 5.0
 
 
@@ -66,6 +66,8 @@ def run_suites(names: list[str], *, backend: Backend, meter: Meter, runner: Eval
             pseudonym_key=key, judge=Judge(runner, models.judge)),
         "early_warning": lambda: early_warning.run(
             datasets.ew_paths(), [models.mini, models.full], meter=meter, runner=runner, pseudonym_key=key),
+        "early_warning_usd": lambda: early_warning_usd.run(
+            [models.mini, models.full], meter=meter, runner=runner, pseudonym_key=key),
         "safety": lambda: safety.run(
             datasets.counterfactual_cases(uw_cases), results.get("underwriting", {}).get("cases", []), models.full,
             reviewer_model=models.reviewer, meter=meter, runner=runner, pseudonym_key=key),
