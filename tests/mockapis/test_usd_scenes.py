@@ -11,7 +11,7 @@ import pytest
 from agents import features
 from agents.classify import Category, classify
 from agents.marketplace import store_summary
-from agents.usd_monitoring import approval_basis, observe_usd, track_summary, usd_baseline
+from agents.usd_monitoring import _market_week, approval_basis, observe_usd, track_summary, usd_baseline
 from mockapis import demo, postloan
 from mockapis.demo import SCENE_REQUEST_CENTS
 from mockapis.sellerdata.usd import simulate_usd
@@ -20,7 +20,7 @@ from policy.engine import explain
 from policy.rules import rules_for_version
 from shared.contracts import USD_V1, AlertCause
 from shared.sellers import USD_SELLERS
-from shared.usd_source import UsdMarketFlow, UsdPgFlow
+from shared.usd_source import UsdMarketFlow, UsdMarketWeek, UsdPgFlow
 
 AS_OF = date(2026, 11, 24)
 E, R, I = "eligible", "refer", "ineligible"
@@ -398,6 +398,35 @@ def test_no_market_means_no_market_fields_or_signals():
     obs, _ = replay("seller-gearstore-06", market=False)
     assert not any(k.startswith("mkt_") for k in obs[-1].rows[-1])
     assert all(codes(o, "market") == [] for o in obs)
+
+
+def _mkt_weeks(*, cancel_cents, grade, start=date(2026, 11, 24), pre_grade="Gold"):
+    def week(end, cancel, grade):
+        return UsdMarketWeek(**USD_V1.model_dump(), week_end=end, platform_code="coupang", orders=10,
+                             gross_cents=1_000_000, cancel_cents=cancel, rating=4.5, seller_grade=grade,
+                             pending_settlement_cents=0)
+
+    pre = [week(start - timedelta(days=7 * k + 1), 10_000, pre_grade) for k in range(8)]
+    hi = start + timedelta(days=6)
+    return UsdMarketFlow(**USD_V1.model_dump(), weeks=(*pre, week(hi, cancel_cents, grade))), start, hi
+
+
+def test_cancel_spike_supersedes_cancel_rise():
+    market, start, hi = _mkt_weeks(cancel_cents=90_000, grade="Gold")
+    assert _market_week({}, market, start, hi) == ["cancel_spike"]
+    market, start, hi = _mkt_weeks(cancel_cents=40_000, grade="Gold")
+    assert _market_week({}, market, start, hi) == ["cancel_rise"]
+
+
+def test_grade_down_fires_on_one_step_downgrade():
+    market, start, hi = _mkt_weeks(cancel_cents=10_000, grade="Silver")
+    assert _market_week({}, market, start, hi) == ["grade_down"]
+
+
+@pytest.mark.parametrize("pre_grade, grade", [("Gold", "Platinum"), ("Platinum", "Gold")])
+def test_unknown_grade_is_not_comparable(pre_grade, grade):
+    market, start, hi = _mkt_weeks(cancel_cents=10_000, grade=grade, pre_grade=pre_grade)
+    assert _market_week({}, market, start, hi) == []
 
 
 @pytest.mark.parametrize("seller", ["seller-gearstore-06", "seller-linen-10", "seller-dailylook-01",

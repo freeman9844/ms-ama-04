@@ -68,6 +68,9 @@ class UsdMarketplace(UsdProduct):
     penalties: tuple[StorePenalty, ...]
 
 
+GRADES = ("Standard", "Silver", "Gold", "Premium")  # seller grades, lowest first
+
+
 class UsdMarketWeek(UsdProduct):
     """한 플랫폼의 한 주(월~일) 마켓 스냅샷. 사후 모니터링 재생용."""
 

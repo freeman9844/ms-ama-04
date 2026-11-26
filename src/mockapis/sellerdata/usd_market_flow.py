@@ -14,9 +14,8 @@ from mockapis.sellerdata.usd_market import AVERAGE_ORDER_CENTS, DEFAULT_AVERAGE_
 from shared.contracts import USD_V1, StorePenalty
 from shared.krcalendar import add_business_days
 from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
-from shared.usd_source import UsdMarketFlow, UsdMarketplace, UsdMarketWeek, UsdOrderDay, UsdSettlement
+from shared.usd_source import GRADES, UsdMarketFlow, UsdMarketplace, UsdMarketWeek, UsdOrderDay, UsdSettlement
 
-GRADES = ("Standard", "Silver", "Gold", "Premium")
 PRE_LOAN_WEEKS = 7
 POST_LOAN_WEEKS = 13
 JITTER_PERCENT = (85, 115)

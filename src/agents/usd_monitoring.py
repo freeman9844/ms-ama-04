@@ -16,11 +16,10 @@ from agents.ledger_monitor import (CAUSE_FIELDS, CAUSE_OF_TRIGGER, COST_SURGE_PP
                                    PRE_LOAN_DAYS, RETURN_SPIKE_MULT, RETURN_SPIKE_PP, CauseCandidate)
 from agents.monitoring import week_window
 from agents.pg_ledger import weekly_reconciliation
-from mockapis.sellerdata.usd_market_flow import GRADES
 from shared.contracts import AlertCause
 from shared.krcalendar import add_business_days, is_business_day, next_business_day
 from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
-from shared.usd_source import UsdMarketFlow
+from shared.usd_source import GRADES, UsdMarketFlow
 
 _CENT_EVIDENCE = {"order_gross", "held", "advance_in", "returns", "deductions", "high_cost_lender", "loan_proceeds",
                   "unreconciled_payout"}
@@ -298,8 +297,12 @@ def _market_week(row, market, start: date, hi: date) -> list[str]:
     if row["mkt_rating"] is not None and base_ratings and (
             sum(base_ratings) / len(base_ratings) - row["mkt_rating"] >= RATING_DROP):
         fired.append("rating_drop")
-    if now is not None and pre_main and GRADES.index(now.seller_grade) < GRADES.index(pre_main[-1].seller_grade):
-        fired.append("grade_down")
+    if now is not None and pre_main:
+        # An unknown grade on either side is not comparable
+        now_rank = GRADES.index(now.seller_grade) if now.seller_grade in GRADES else None
+        base_rank = GRADES.index(pre_main[-1].seller_grade) if pre_main[-1].seller_grade in GRADES else None
+        if now_rank is not None and base_rank is not None and now_rank < base_rank:
+            fired.append("grade_down")
     if row["mkt_penalties"]:
         fired.append("account_warning")
     return fired
