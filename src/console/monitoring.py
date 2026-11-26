@@ -84,6 +84,25 @@ BASIS_METRIC_LABELS = {
     "recon_ratio": "정산 대사율",
     "orders_vs_prior_year": "작년 대비 주문",
 }
+# 감시 일지 증거 칩: 지표 이름(근거 ID의 마지막 조각) → (라벨, 단위). 단위는 pct·usd·text·rating·count.
+# USD 신호가 인용하는 지표 전부다(usd_monitoring._EVIDENCE·BASIS_METRICS). 표에 없는 지표는 ID와 값 그대로 보인다.
+EVIDENCE_LABELS = {
+    "orders_vs_expected": ("정산 주문 기대 대비", "pct"),
+    "revenue_vs_expected": ("은행 매출 기대 대비", "pct"),
+    "projected_min_balance_cents": ("예상 최저 잔액", "usd"),
+    "due_balance_cents": ("상환일 잔액", "usd"),
+    "order_gross_cents": ("주문액", "usd"),
+    "expected_orders_cents": ("기대 주문액", "usd"),
+    "held_cents": ("보류액", "usd"),
+    "mkt_grade": ("마켓 등급", "text"),
+    "mkt_cancel_rate": ("취소율", "pct"),
+    "return_rate": ("반품률", "pct"),
+    "deduction_rate": ("공제율", "pct"),
+    "mkt_rating": ("평점", "rating"),
+    "mkt_penalties": ("계정 경고", "count"),
+    "recon_ratio": (BASIS_METRIC_LABELS["recon_ratio"], "pct"),
+    "orders_vs_prior_year": (BASIS_METRIC_LABELS["orders_vs_prior_year"], "pct"),
+}
 # 재생을 멈춘 대기 항목(2026-11-11). 이 순서대로 멈춤 배너에 보인다(journey.holds.HOLD_ORDER와 같은 순서).
 HOLD_LABELS = {
     "collections_proposal": "추심 승인 대기",
@@ -335,12 +354,25 @@ def _journal_sources(watch: Mapping[str, Any], row: Mapping[str, Any], catalog: 
     for source in SOURCE_LABELS:
         signals = [
             {"code": s["code"], "strength": s.get("strength"),
-             "evidence": [(m, catalog.get(m)) for m in s.get("metric_ids", ())]}
+             "evidence": [_evidence(m, catalog.get(m)) for m in s.get("metric_ids", ())]}
             for s in watch.get("signals") or () if s.get("source") == source
         ]
         state = "signal" if signals else "missing" if source == "market" and market_missing else "normal"
         out.append({"source": source, "state": state, "signals": signals})
     return out
+
+
+def _evidence(metric_id: str, value: Any) -> dict[str, Any]:
+    metric = metric_id.split(":")[-1]
+    label, unit = EVIDENCE_LABELS.get(metric, (None, None))
+    return {"id": metric_id, "metric": metric, "label": label, "unit": unit, "value": value}
+
+
+def signal_metrics(weeks: list[dict[str, Any]]) -> dict[int, set[str]]:
+    """주차 → 그 주 일지 신호가 인용한 지표 이름(근거 ID의 마지막 조각). 신호·일지가 없는 주는 빈 집합."""
+    return {w["week"]: {m.split(":")[-1] for s in (w.get("watch") or {}).get("signals") or ()
+                        for m in s.get("metric_ids", ())}
+            for w in weeks}
 
 
 def stage_label(stage: str | None) -> str:

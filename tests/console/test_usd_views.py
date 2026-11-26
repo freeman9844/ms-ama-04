@@ -12,7 +12,7 @@ from console.adapters import CosmosApplications
 from console.adapters import CosmosMonitoring, CosmosOps, CosmosPrivacy
 from console.app import create_app
 from console.auth import AUDITOR, Principal
-from console.monitoring import load_monitoring_raw, loan_view
+from console.monitoring import load_monitoring_raw, loan_view, signal_metrics
 from consolepreview import fixtures
 from journey.entry import handle_decision, handle_start
 from journey.validation import validate_officer_decision
@@ -601,14 +601,44 @@ def test_journal_newest_first_with_source_chips():
     assert "Agent watch journal" in card
     assert re.findall(r'id="journal-w(\d+)"', card) == ["5", "4", "3", "2", "1"]
     assert "Open incident: High · since week 2" in card
-    for text in ("Market · Cancel rate up", "W:2:mkt_cancel_rate = 0.046", "Settlement · Settlement hold",
-                 "W:3:held_cents = $3800", "Market · Seller warning/suspension", "Bank · Projected shortfall",
-                 "F:5:projected_min_balance_cents = -$480", "Why now", "Outlook", "7/14 상환일 잔고 부족",
+    for text in ("Market · Cancel rate up", "Cancel rate 4.6%", "Settlement · Settlement hold",
+                 "Held $3800", "Market · Seller warning/suspension", "Account warnings 1", "Bank · Projected shortfall",
+                 "Projected min balance -$480", "Why now", "Outlook", "7/14 상환일 잔고 부족",
                  "No change · stage kept", "Cause updated"):
         assert text in card, text
     week1 = card[card.index('id="journal-w1"'):]
     assert week1.count("Normal") >= 4  # stage badge and three source chips
     assert 'href="#ew-5"' in card and 'href="#ew-3"' in card
+
+
+def test_journal_chips_hide_metric_ids():
+    card = _journal(_usd_page(_scene_weeks(), "usd-chipids"))
+    visible = re.sub(r"<[^>]+>", " ", card)
+    assert "W:" not in visible and "F:" not in visible
+    assert 'title="W:3:held_cents"' in card and 'title="F:5:projected_min_balance_cents"' in card
+
+
+def test_journal_unknown_metric_falls_back_to_id():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("cancel_rise", "market", "weak", "W:2:mystery_metric")]),
+                         mystery_metric=7)]
+    assert "W:2:mystery_metric = 7" in _journal(_usd_page(weeks, "usd-mystery"))
+
+
+def test_journal_chip_units():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("rating_drop", "market", "weak", "W:2:mkt_rating",
+                                                    "W:2:mkt_grade", "W:2:orders_vs_expected")]),
+                         mkt_rating=4.25, mkt_grade="B", orders_vs_expected=0.7)]
+    card = _journal(_usd_page(weeks, "usd-units"))
+    for text in ("Rating 4.25", "Market grade B", "Orders vs expected 70.0%"):
+        assert text in card, text
+
+
+def test_signal_metrics_by_week():
+    assert signal_metrics(_scene_weeks()) == {1: set(), 2: {"mkt_cancel_rate"},
+                                              3: {"held_cents", "mkt_penalties"}, 4: {"held_cents"},
+                                              5: {"projected_min_balance_cents"}}
 
 
 def test_journal_market_missing_shows_no_data_chip():
