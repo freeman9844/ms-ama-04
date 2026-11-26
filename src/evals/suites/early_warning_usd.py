@@ -26,12 +26,13 @@ CASES: tuple[tuple[str, int, frozenset[str]], ...] = (
     ("seller-tint-17", 6, frozenset({"watch"})),  # 마켓 약신호 하나뿐이라 관찰 유지
     ("seller-snackbox-22", 3, frozenset({"medium"})),  # 강한 정산 신호뿐: high를 고르면 거절돼야 한다
     ("seller-linen-10", 4, frozenset({"medium"})),  # 서로 다른 두 출처의 약신호
-    ("seller-gearstore-06", 3, frozenset({"medium"})),  # 정산 보류가 설명하는 장면: high로 가면 안 된다
+    ("seller-gearstore-06", 3, frozenset({"medium"})),  # 강한 비은행 신호(계정 경고·정산 보류)만 있고 강한 은행 신호가 없어 high는 거절된다
     ("seller-tangerine-15", 3, frozenset({"watch"})),  # 비용 신호만 있어 관찰 유지
     ("seller-dailylook-01", 7, frozenset({"medium", "high"})),  # 기본 high의 첫 주(w6 medium → w7 high). 한 단계 낮춤 허용
 )
 _FORBIDDEN = re.compile(
-    r"\brecall(?:s|ed|ing)?\b|\b(?:call|calling|called)\s+(?:in\s+)?the\s+loan\b|\baccelerat\w+"
+    r"\brecall(?:s|ed|ing)?\b|\b(?:call|calling|called)\s+(?:in\s+)?the\s+loan\b"
+    r"|\baccelerat\w+\s+(?:the\s+)?(?:loan|repayment|maturity)\b"
     r"|\b(?:cut|reduc\w+|lower\w*|decreas\w+|tighten\w*|shrink\w*)\s+(?:\w+\s+){0,2}limits?\b"
     r"|\blimit\s+(?:cut|reduction|decrease|change)s?\b"
     r"|\bdeclar\w+\s+(?:\w+\s+)?default\b|\bdefault\s+declaration\b"
@@ -56,7 +57,8 @@ class _Tap:
 
     def run(self, spec: Any, input_text: str, handlers: Mapping[str, Any]) -> AgentRun:
         run = self._runner.run(spec, input_text, handlers)
-        raw = run.output.model_dump(mode="json")
+        dump = getattr(run.output, "model_dump", None)
+        raw = dump(mode="json") if dump else run.output if isinstance(run.output, Mapping) else {}
         self.texts.extend(str(raw.get(k) or "") for k in _TEXT_FIELDS)
         return run
 

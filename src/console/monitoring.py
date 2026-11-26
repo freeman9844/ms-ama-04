@@ -290,12 +290,12 @@ def loan_view(
 
 def _journal_view(weeks: list[dict[str, Any]], catalog: Mapping[str, Any]) -> dict[str, Any] | None:
     """USD 감시 일지: 주별 일지 줄(최신 주가 먼저)과 열린 사건. 일지 줄이 하나도 없는 옛·KRW 재생은 None."""
-    entries = [(w["week"], w["watch"]) for w in weeks if w.get("watch")]
+    entries = [(w["week"], w["watch"], w.get("row") or {}) for w in weeks if w.get("watch")]
     if not entries:
         return None
     lines: list[dict[str, Any]] = []
     incident: dict[str, Any] | None = None
-    for week, watch in entries:
+    for week, watch, row in entries:
         if watch.get("stage") == "resolved":
             incident = None
         elif watch.get("incident_id"):
@@ -314,7 +314,7 @@ def _journal_view(weeks: list[dict[str, Any]], catalog: Mapping[str, Any]) -> di
             "alert_id": watch.get("alert_id"),
             "alert_action": watch.get("alert_action"),
             "notes": _journal_notes(watch),
-            "sources": _journal_sources(watch, catalog),
+            "sources": _journal_sources(watch, row, catalog),
         })
     return {
         "lines": lines[::-1],
@@ -328,7 +328,9 @@ def _journal_notes(watch: Mapping[str, Any]) -> list[str]:
     return [_(JOURNAL_LABELS[k], n=watch.get("quiet_weeks") or 0) for k in keys if k in JOURNAL_LABELS]
 
 
-def _journal_sources(watch: Mapping[str, Any], catalog: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _journal_sources(watch: Mapping[str, Any], row: Mapping[str, Any], catalog: Mapping[str, Any]) -> list[dict[str, Any]]:
+    # 마켓 흐름이 있어도 그 주 스냅샷 행(mkt_*)이 없으면 자료 없음이다. 정상으로 보이지 않게 한다.
+    market_missing = not watch.get("market") or "mkt_cancel_rate" not in row
     out = []
     for source in SOURCE_LABELS:
         signals = [
@@ -336,7 +338,7 @@ def _journal_sources(watch: Mapping[str, Any], catalog: Mapping[str, Any]) -> li
              "evidence": [(m, catalog.get(m)) for m in s.get("metric_ids", ())]}
             for s in watch.get("signals") or () if s.get("source") == source
         ]
-        state = "signal" if signals else "missing" if source == "market" and not watch.get("market") else "normal"
+        state = "signal" if signals else "missing" if source == "market" and market_missing else "normal"
         out.append({"source": source, "state": state, "signals": signals})
     return out
 

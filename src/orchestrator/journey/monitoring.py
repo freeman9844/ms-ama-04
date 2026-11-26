@@ -183,16 +183,18 @@ def _collect_market_flow(
 
 
 def _market(deps: Deps, mon: dict[str, Any]) -> UsdMarketFlow | None:
-    """저장된 마켓 흐름을 읽는다. 없거나 형식이 틀리면 경고만 남기고 None."""
+    """저장된 마켓 흐름을 읽는다. 없거나 형식이 틀리면 None. 경고는 재생마다 한 번만 남긴다."""
     raw = deps.raw.get_json(raw_container(mon["consent_id"]), "market_flow.json")
-    if raw is None:
-        log.warning("저장된 마켓 흐름 없음: %s", mon["consent_id"])
-        return None
-    try:
-        return UsdMarketFlow.model_validate(raw)
-    except ValidationError:
-        log.warning("저장된 마켓 흐름 형식이 올바르지 않음: %s", mon["consent_id"])
-        return None
+    market = None
+    if raw is not None:
+        try:
+            market = UsdMarketFlow.model_validate(raw)
+        except ValidationError:
+            pass
+    if market is None and not mon.get("market_missing_logged"):
+        mon["market_missing_logged"] = True
+        log.warning("저장된 마켓 흐름 없음 또는 형식이 올바르지 않음: %s", mon["consent_id"])
+    return market
 
 
 def _ledger_baseline(
@@ -720,6 +722,10 @@ def _watch_usd_week(
     다음 시도가 저장소에서 다시 읽으므로 같은 주가 사건 상태에 두 번 들어가지 않는다.
     """
     mon = loan["monitoring"]
+    # 이 브랜치 이전에 시작한 USD 재생 문서에는 watch가 없다. 이어 처리하는 주부터 새로 시작한다(앞 주차는 채우지 않는다).
+    # 이 문서가 process_week 끝에 저장될 때 함께 남는다.
+    if mon.get("watch") is None:
+        mon["watch"] = new_watch()
 
     def investigate(base: str | None) -> EwResult:
         return _investigate_usd_week(deps, loan, loan_id, replay_id, week, obs, visible, mask, pg_weeks, base)
@@ -1069,22 +1075,7 @@ def _repayment_week(
         entry["case_id"] = entry["case_ids"][0]
         if deps.store.read(ALERTS, case_id, loan_id):
             continue  # Case was already saved before a failed week commit.
-        recent = None
-        if mon["alert_ids"]:
-            a = deps.store.read(ALERTS, mon["alert_ids"][-1], loan_id)
-            if a:
-                recent = {
-                    "alert_id": a.get("alert_id") or a.get("id"),
-                    "week": a.get("week"),
-                    "severity": a.get("severity"),
-                    "summary": a.get("summary"),
-                    "signals": [s["kind"] for s in a.get("signals") or []],
-                    # 경보 원인은 추심 입력에 그대로 싣는다(스펙 §7.4). 옛 경보 문서엔 없어 None·[]가 된다.
-                    "primary_cause": a.get("primary_cause"),
-                    "secondary_causes": list(a.get("secondary_causes") or []),
-                    # 확인할 조치는 추심 제안서 근거에 싣는다. 옛 경보 문서엔 없어 None이 된다.
-                    "check_action": a.get("check_action"),
-                }
+        recent = _recent_alert(deps, loan, loan_id)
         deps.store.upsert(
             ALERTS,
             {
@@ -1114,6 +1105,32 @@ def _repayment_week(
         "reminders": [by_key[k]["no"] for k in ev.reminders],
         "paid": [by_key[k]["no"] for k, _ in ev.paid],
         "missed": [by_key[k]["no"] for k in ev.missed],
+    }
+
+
+def _recent_alert(deps: Deps, loan: dict[str, Any], loan_id: str) -> dict[str, Any] | None:
+    """미납 추심 건에 싣는 최근 경보. USD는 열린 사건의 가장 최근 경보만이다(없으면 None, 스펙 §7.4).
+    KRW는 재생이 올린 마지막 경보다."""
+    mon = loan["monitoring"]
+    if product_of(loan):
+        incident = (mon.get("watch") or {}).get("open")
+        alert_id = incident.get("alert_id") if incident else None
+    else:
+        alert_id = mon["alert_ids"][-1] if mon["alert_ids"] else None
+    a = deps.store.read(ALERTS, alert_id, loan_id) if alert_id else None
+    if not a:
+        return None
+    return {
+        "alert_id": a.get("alert_id") or a.get("id"),
+        "week": a.get("week"),
+        "severity": a.get("severity"),
+        "summary": a.get("summary"),
+        "signals": [s["kind"] for s in a.get("signals") or []],
+        # 경보 원인은 추심 입력에 그대로 싣는다(스펙 §7.4). 옛 경보 문서엔 없어 None·[]가 된다.
+        "primary_cause": a.get("primary_cause"),
+        "secondary_causes": list(a.get("secondary_causes") or []),
+        # 확인할 조치는 추심 제안서 근거에 싣는다. 옛 경보 문서엔 없어 None이 된다.
+        "check_action": a.get("check_action"),
     }
 
 

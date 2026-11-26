@@ -229,6 +229,23 @@ def _fallback_signal(ctx: EwContext, signal: Mapping[str, Any]) -> dict[str, Any
     return {"kind": kind, "text": text, "metric_ids": [m for m in ids if m in ctx.catalog] or ids, "txn_ids": []}
 
 
+def first_moved_source(ctx: EwContext) -> str | None:
+    """열린 사건에서 가장 먼저 신호가 난 데이터원. 사건이 열린 주의 신호가 한 데이터원뿐일 때만 정한다.
+    사건 일지가 그 주를 담지 않았거나(일지 창 밖) 여러 데이터원이 함께 시작했으면 None이다."""
+    match = re.search(r"-w(\d+)$", ctx.incident_id or "")
+    if match is None:
+        return None
+    opened = int(match.group(1))
+    if opened == ctx.week:
+        first = ctx.signals
+    else:
+        line = next((ln for ln in ctx.journal if ln.get("incident_id") == ctx.incident_id and ln.get("week") == opened),
+                    None)
+        first = (line or {}).get("signals") or []
+    sources = {s.get("source") for s in first if s.get("source")}
+    return next(iter(sources)) if len(sources) == 1 else None
+
+
 def usd_fallback_alert(ctx: EwContext, stage: str) -> EarlyWarningAlert:
     """탐지기 신호만으로 올리는 단계 경보. 문장에 숫자를 넣지 않아 grounding 문제가 없다."""
     picked = [s for s in ctx.signals if s.get("metric_ids")][:MAX_SIGNALS]
@@ -246,14 +263,14 @@ def usd_fallback_alert(ctx: EwContext, stage: str) -> EarlyWarningAlert:
         "secondary_causes": [c.cause.value for c in ctx.candidates[1:3]],
     }
     alert = build_alert(args, ctx, {"investigator": "detector_only"})
-    source = picked[0].get("source") if picked else None
+    source = first_moved_source(ctx)
     return _with_stage(alert, ctx, [s.get("source") for s in picked], why_now=WHY_NOW_FALLBACK.get(source, WHY_NOW_FALLBACK[None]),
                        outlook=OUTLOOK_FALLBACK[stage], adjust_reason=None, models={"investigator": "detector_only"})
 
 
 def fallback_stage(ctx: EwContext, reason: str) -> EwResult:
     stage = _base(ctx)
-    source = ctx.signals[0].get("source") if ctx.signals else None
+    source = first_moved_source(ctx)
     why_now = WHY_NOW_FALLBACK.get(source, WHY_NOW_FALLBACK[None])
     outlook = OUTLOOK_FALLBACK[stage]
     alert = usd_fallback_alert(ctx, stage) if stage in ("medium", "high") else None

@@ -115,6 +115,7 @@ Mock API는 우리 시스템 구성요소가 아니라 **외부 기관의 대역
 | `/mydata/profile`, `/mydata/transactions`, `/mydata/flow` | 마이데이터 사업자(은행 계좌 프로필·거래, 대출 후 거래) | 마이데이터 표준 API |
 | `/tax/filings` | 홈택스(세금 신고) | 세무 데이터 제공 경로 |
 | `/pg/settlements`, `/pg/flow` | PG사(카드·간편결제 정산, 대출 후 정산·주문) | PG사 정산 API |
+| `/marketplace/flow` | 마켓 플랫폼(USD 대출 후 주간 스냅샷: 주문·취소·평점·등급·미정산·패널티) | 마켓 플랫폼 판매자 API(실제 연동은 운영 전환 과제) |
 | `/admin/faults`, `FAULT_MODE` | 제공기관 장애(503 전부·원천별 첫 요청) | 없음(시연·장애 시나리오 전용) |
 
 동의 원장은 둘이다. **우리 쪽 원장**은 Cosmos `consents`(범위·만료·철회 상태)와 `deletion_proofs`(삭제 증명)로, 콘솔과 수명주기 오케스트레이션이 이것을 기준으로 삼는다. **제공기관 쪽 원장**은 전용 Blob 컨테이너 `consent-authority`에 동의 ID와 상태만 보관한다. 토큰의 HMAC 서명·만료·범위가 맞아도 매 접근 시 `active`를 확인하지 못하면 원천을 반환하지 않는다. 철회는 `revoked` 저장 후 응답하며 재시작·복제본 전환으로 되돌아가지 않는다. [전환 절차](runbook/usd-cutover.md), [ADR-009](adr/ADR-009-deletion-vs-explainability.md), [한계](limitations.md).
@@ -238,6 +239,7 @@ flowchart LR
 | `PgSettlement` v1 | 카드·PG 정산(`deduction_krw` 광고비·물류비 상계, `held_krw` 정산 보류, `released_krw` 보류 해제, 모두 기본값 0, `net = gross − fee − deduction − held + released`) |
 | `PgOrderDay` v1 | 플랫폼·일자별 주문 총액과 반품액(`returns ≤ gross`, 사후 원장) |
 | `PgFlow` v1 | 사후 PG 원장 묶음(`settlements`·`orders`, Mock `/pg/flow`) |
+| `UsdMarketFlow` v1 | USD 사후 마켓 주간 스냅샷 묶음(`weeks`: 플랫폼·주별 `UsdMarketWeek`, Mock `/marketplace/flow`). 없어도 재생은 계속된다 |
 | `CashFlowFeatures` v1 | 심사 지표(DSCR·버퍼·변동성 등) |
 | `PolicyDecision` v1 | 정책 판정(자격·한도·금리·`rules_version`·reason code) |
 | `CreditAssessment` v1 | 평가(추천·근거 `Claim`·`ProposedStructure`·`Counterfactual`) |

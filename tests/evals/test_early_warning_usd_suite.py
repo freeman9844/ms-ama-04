@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import replace
-
+from types import SimpleNamespace
 from agents import usd_language
 from agents.runtime import AgentRun
 from agents.usd_early_warning import UsdStageOutput, fallback_stage
@@ -87,19 +87,42 @@ def test_stage_outside_allowed_set_is_a_failure(monkeypatch):
     assert out["configs"]["m1"]["stage_match"] == round(1 / len(suite.CASES), 4)
 
 
-def test_forbidden_recommendation_is_flagged_even_when_validator_rejects():
+def test_forbidden_recommendation_is_flagged_for_a_stage_the_validator_accepts():
     out = _run(StageAgents(why_now="We recommend a rate change and a limit cut."))
     assert all(r["forbidden"] is True for r in out["cases"])
     assert out["configs"]["m1"]["forbidden_rate"] == 1.0
     assert {f["type"] for f in out["failures"]} >= {"ew_forbidden_text"}
 
 
+def test_forbidden_text_on_a_rejected_high_stage_is_still_flagged():
+    out = _run(StageAgents(pick=lambda base: "high", why_now="We recommend a rate change and a limit cut."))
+    row = _rows(out)["seller-snackbox-22"]
+    assert row["agent"] == "fallback" and row["stage"] == "medium"
+    assert row["forbidden"] is True  # 폴백 문장은 깨끗하다. 거절된 에이전트 원문에서 잡는다
+    assert not suite.forbidden(row["why_now"], row["outlook"], row["adjust_reason"])
+
+
+def test_tap_tolerates_outputs_without_model_dump():
+    class Runner:
+        def __init__(self, output):
+            self.output = output
+
+        def run(self, spec, input_text, handlers):
+            return AgentRun(spec.name, "1", "c", self.output, [], 1, 1)
+
+    for output, texts in ((None, ["", "", ""]), ({"why_now": "Recall the loan."}, ["Recall the loan.", "", ""])):
+        tap = suite._Tap(Runner(output))
+        assert tap.run(SimpleNamespace(name="s"), "", {}).output == output
+        assert tap.texts == texts
+
+
 def test_forbidden_terms():
     for text in ("Recall the loan now.", "Consider calling the loan.", "Cut the credit limit.",
                  "A limit reduction is advised.", "Declare default this week.", "Raise the interest rate.",
-                 "A rate change is needed."):
+                 "A rate change is needed.", "Accelerate the loan maturity.", "Consider accelerating repayment."):
         assert suite.forbidden(text), text
-    for text in (CLEAN, "Marketplace cancel rate and seller rating moved first.", "Check the limit of the account."):
+    for text in (CLEAN, "Marketplace cancel rate and seller rating moved first.", "Check the limit of the account.",
+                 "Cancellations are accelerating on the marketplace.", "Return rates are accelerating."):
         assert not suite.forbidden(text), text
 
 

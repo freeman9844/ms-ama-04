@@ -573,7 +573,7 @@ def _journal(page):
 
 def _scene_weeks():
     return [
-        _watch_week(1, _watch("normal", "normal")),
+        _watch_week(1, _watch("normal", "normal"), mkt_cancel_rate=0.031),
         _watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
                               signals=[_signal("cancel_rise", "market", "weak", "W:2:mkt_cancel_rate")]),
                     mkt_cancel_rate=0.046),
@@ -613,11 +613,14 @@ def test_journal_newest_first_with_source_chips():
 
 def test_journal_market_missing_shows_no_data_chip():
     weeks = [_watch_week(1, _watch("normal", "normal", market=False)),
-             _watch_week(2, _watch("normal", "normal", market=True))]
+             _watch_week(2, _watch("normal", "normal", market=True), mkt_cancel_rate=0.031),
+             _watch_week(3, _watch("normal", "normal", market=True))]  # 마켓 흐름은 있으나 이 주 스냅샷 행이 없다
     card = _journal(_usd_page(weeks, "usd-nomarket"))
     week1 = card[card.index('id="journal-w1"'):]
     assert "Market · No data" in week1 and "Bank · Normal" in week1 and "Settlement · Normal" in week1
     assert "No data" not in card[card.index('id="journal-w2"'):card.index('id="journal-w1"')]
+    week3 = card[card.index('id="journal-w3"'):card.index('id="journal-w2"')]
+    assert "Market · No data" in week3 and "Market · Normal" not in week3
 
 
 def test_journal_labels_for_every_kind():

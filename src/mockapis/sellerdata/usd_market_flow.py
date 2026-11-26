@@ -16,7 +16,7 @@ from shared.krcalendar import add_business_days
 from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
 from shared.usd_source import GRADES, UsdMarketFlow, UsdMarketplace, UsdMarketWeek, UsdOrderDay, UsdSettlement
 
-PRE_LOAN_WEEKS = 7
+PRE_LOAN_WEEKS = 7  # 반복은 k=-7..0이라 대출 전 주는 8주다(k=0은 대출 시작 전날에 끝나는 주). 이름은 -7까지의 거리다
 POST_LOAN_WEEKS = 13
 JITTER_PERCENT = (85, 115)
 

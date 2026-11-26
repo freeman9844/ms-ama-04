@@ -943,9 +943,11 @@ def test_market_flow_failure_keeps_replaying(run_journey, monkeypatch, caplog):
     assert mon["market"] == "missing"
     assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
     assert sentinel not in caplog.text
+    assert caplog.text.count("저장된 마켓 흐름 없음") == 1
 
 
 def test_usd_week_entry_records_both_tracks(run_journey):
+
     deps, outbox, registration, meta = usd_registration(run_journey)
     register_monitoring(deps, registration)
     assert replay(deps, **meta)["replay_id"]
@@ -1113,6 +1115,74 @@ def test_usd_watch_retry_does_not_duplicate_alert(run_journey, monkeypatch):
     mon = loan(deps)["monitoring"]
     assert len(alerts(deps)) == 1 and mon["alert_ids"] == [alert_id]
     assert len(mon["watch"]["stages"]) == week and mon["watch"]["open"]["alert_id"] == alert_id
+
+
+@pytest.mark.parametrize("stage_sent", ["stage1", "stage2"])
+def test_usd_high_week_retry_does_not_duplicate_alert_or_outreach(run_journey, monkeypatch, stage_sent):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-dailylook-01")
+    register_monitoring(deps, registration)
+    deps = replace(deps, agents=StageAgents())
+    rid = replay(deps, **meta)["replay_id"]
+    real, failed = deps.store.upsert, []
+
+    def flaky(container, document):
+        mon = document.get("monitoring") or {}
+        sent = (mon.get("escalation") or {}).get(stage_sent)
+        if container == LOANS and sent and mon["weeks"][-1]["watch"]["stage"] == "high" and not failed:
+            failed.append(mon["weeks"][-1]["week"])  # 경보·연락을 쓴 뒤 대출 문서를 쓰다 실패한다
+            raise RuntimeError("Cosmos 503")
+        return real(container, document)
+
+    monkeypatch.setattr(deps.store, "upsert", flaky)
+    for week in range(1, WEEKS + 1):
+        try:
+            process_week(deps, LOAN, rid, week)
+        except RuntimeError:
+            break
+    (week,) = failed
+    ref = f"{rid}-s{stage_sent[-1]}"
+    before_alerts, before_contacts = len(alerts(deps)), [c["ref"] for c in contacts(deps, rid)]
+    assert ref in before_contacts and loan(deps)["monitoring"]["processed_week"] == week - 1
+    entry = process_week(deps, LOAN, rid, week)
+    assert entry["watch"]["stage"] == "high"
+    mon = loan(deps)["monitoring"]
+    assert mon["processed_week"] == week and mon["escalation"][stage_sent]["status"] == "sent"
+    assert len(alerts(deps)) == before_alerts and [c["ref"] for c in contacts(deps, rid)] == before_contacts
+    assert len(set(mon["alert_ids"])) == len(mon["alert_ids"])
+
+
+def test_usd_replay_without_watch_key_resumes_from_resume_week(run_journey):
+    # 이 브랜치 이전에 시작한 USD 재생 문서에는 monitoring.watch가 없다. 이어 처리하면 그 주부터 사건 상태를 새로 시작한다.
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-dailylook-01")
+    register_monitoring(deps, registration)
+    deps = replace(deps, agents=StageAgents())
+    rid = replay(deps, **meta)["replay_id"]
+    doc = loan(deps)
+    del doc["monitoring"]["watch"]
+    deps.store.upsert(LOANS, doc)
+    entry = process_week(deps, LOAN, rid, 1)
+    mon = loan(deps)["monitoring"]
+    assert entry["watch"]["stage"] and mon["weeks"][0]["watch"] == entry["watch"]
+    assert mon["watch"]["stages"] == [entry["watch"]["stage"]] and mon["processed_week"] == 1
+    process_week(deps, LOAN, rid, 2)
+    assert len(loan(deps)["monitoring"]["watch"]["stages"]) == 2
+
+
+def test_usd_recent_alert_is_the_open_incidents_own(mock_app):
+    from shared.contracts import USD_V1
+    deps, meta = make_deps(mock_app), USD_V1.model_dump()
+    for alert_id, week in (("ew-old", 3), ("ew-open", 5), ("ew-latest-other", 7)):
+        deps.store.upsert(ALERTS, dict(id=alert_id, loan_id=LOAN, week=week, severity="high", summary=alert_id,
+                                       signals=[], **meta))
+
+    def doc(watch):
+        return dict(meta, id=LOAN, monitoring={"alert_ids": ["ew-old", "ew-open", "ew-latest-other"], "watch": watch})
+
+    recent = monitoring_module._recent_alert
+    assert recent(deps, doc({**new_watch(), "open": {"id": "inc-1", "alert_id": "ew-open"}}), LOAN)["alert_id"] == "ew-open"
+    assert recent(deps, doc(new_watch()), LOAN) is None
+    assert recent(deps, doc({**new_watch(), "open": {"id": "inc-2", "alert_id": None}}), LOAN) is None
+    assert recent(deps, doc(None), LOAN) is None
 
 
 def test_replay_restart_resets_watch(run_journey, mock_app):

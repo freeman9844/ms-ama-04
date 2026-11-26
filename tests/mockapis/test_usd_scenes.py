@@ -10,7 +10,7 @@ import pytest
 from agents.classify import Category, classify
 from agents.marketplace import store_summary
 from agents.runtime import AgentRun
-from agents.usd_early_warning import investigate_usd, usd_fallback_alert
+from agents.usd_early_warning import fallback_stage, investigate_usd, usd_fallback_alert
 from agents.usd_monitoring import _market_week, approval_basis, observe_usd
 from evals.usd_scenes import case_at, prepare, scene_context, scene_replay, underwrite_at
 from mockapis import postloan
@@ -365,6 +365,25 @@ def test_dailylook_agent_lowers_first_high_to_medium():
     first_high = next(line for line in lines if line["called"] and line["base_stage"] == "high")
     assert (first_high["agent"], first_high["stage"]) == ("agent", "medium")  # the lowered stage passed the checks
     assert first_high["adjust_reason"] and all(line["agent"] == "agent" for line in lines if line["called"])
+
+
+@pytest.mark.parametrize("seller,first", [("seller-gearstore-06", "Marketplace"), ("seller-dailylook-01", "Settlement"),
+                                          ("seller-snackbox-22", "Settlement")])
+def test_fallback_why_now_names_the_source_that_moved_first(seller, first):
+    called = [line for line in scene_replay(seller) if line["called"]]
+    assert called and all(line["agent"] == "fallback" for line in called)
+    assert all(line["why_now"].startswith(f"{first} data moved first") for line in called), \
+        [(line["week"], line["why_now"]) for line in called]
+
+
+def test_fallback_why_now_is_neutral_when_first_source_is_unknown():
+    ctx = scene_context("seller-dailylook-01", 6)
+    assert not usd_fallback_alert(ctx, "medium").why_now.startswith("Bank")
+    no_incident = replace(ctx, incident_id=None)
+    truncated = replace(ctx, journal=[line for line in ctx.journal if line["week"] > 4])
+    for unknown in (no_incident, truncated):
+        result = fallback_stage(unknown, "agents_disabled")
+        assert "moved first" not in result.why_now and "moved first" not in result.alert.why_now
 
 
 def test_market_missing_still_detects_settlement_and_bank():
