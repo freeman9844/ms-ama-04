@@ -28,9 +28,11 @@ from pydantic import ValidationError
 
 from agents.collections import MAX_CONTACTS_PER_7_DAYS, CollectionsContext, RepaymentCase, act, build_proposal, fair_check, remind, settle_proposal
 from agents.data_assembly import build_pseudonymizer
-from agents.early_warning import EwContext, investigate
+from agents.early_warning import EwContext, EwResult, investigate
+from agents.incident import incident_id, new_watch, watch_week
 from agents.pretranslate import load_case_raw
-from agents.usd_monitoring import observe_usd
+from agents.usd_early_warning import investigate_usd
+from agents.usd_monitoring import UsdObservation, observe_usd
 from shared.contracts import UsdProduct
 from shared.money import format_usd
 from shared.usd_source import UsdMarketFlow, UsdPgFlow, UsdProfile
@@ -255,6 +257,8 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         "ledger_baseline": None,
         "alert_severities": [],
         "escalation": {"stage1": None, "stage2": None},
+        # USD 사건·단계 감시 상태(incident.py). 재생마다 새로 시작한다. KRW는 쓰지 않는다.
+        "watch": new_watch() if product_of(loan) else None,
     }
     loan["updated_at"] = now
     if not deps.store.replace(LOANS, loan, loan.get("_etag")):
@@ -583,7 +587,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         raw = deps.raw.get_json(raw_container(mon["consent_id"]), "pg_flow.json")
         pg = UsdPgFlow.model_validate(raw) if raw is not None else None
         baseline, classification, lb = loan["baseline"], None, None
-        obs = observe_usd(loan, visible, pg, week, due_amounts)
+        market = _market(deps, mon)
+        obs = observe_usd(loan, visible, pg, week, due_amounts, market=market)
         rows, triggers, candidates, cats, proj = obs[:5]
         pg_weeks = [{k: r[k] for k in ("week", "order_gross_cents", "returns_cents", "held_cents", "deductions_cents",
                                        "settle_net_cents") if k in r} for r in rows] if pg else None
@@ -620,18 +625,22 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
         "repayment": None,
         "case_id": None,
     }
-    if product_of(loan):
+    usd = bool(product_of(loan))
+    if usd:
         entry.update(bank_only_triggers=list(obs.bank_only), explained=obs.explained, basis=obs.basis)
+        mon["seen_triggers"].extend(new)
+        _watch_usd_week(deps, loan, loan_id, replay_id, week, entry, obs, market, visible, mask, pg_weeks, hi, pg)
     alert_id = f"ew-{replay_id}-w{week:02d}"
     # 재시도한 주차: 앞선 시도가 경보를 쓴 뒤 실패했으면 다시 조사하지 않고 저장된 경보(진행 상태 포함)를 쓴다.
-    stored = deps.store.read(ALERTS, alert_id, loan_id) if new else None
+    stored = deps.store.read(ALERTS, alert_id, loan_id) if new and not usd else None
     if stored is not None:
         mon["seen_triggers"].extend(new)
         entry["investigation"] = {"decision": "alert", "reason": "existing_alert", "record": {}}
         entry["alert_id"] = alert_id
         mon["alert_ids"].append(alert_id)
-        _escalate(deps, loan_id, replay_id, loan, alert_id, stored["severity"], rows[-1], hi, week, pg, lb)
-    elif new:
+        mon.setdefault("alert_severities", []).append(stored["severity"])
+        _escalate(deps, loan_id, replay_id, loan, alert_id, mon["alert_severities"], rows[-1], hi, week, pg, lb)
+    elif new and not usd:
         ctx = EwContext(
             alert_id=alert_id,
             loan_id=loan_id,
@@ -669,7 +678,8 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
             )
             entry["alert_id"] = alert_id
             mon["alert_ids"].append(alert_id)
-            _escalate(deps, loan_id, replay_id, loan, alert_id, result.alert.severity.value, rows[-1], hi, week, pg, lb)
+            mon.setdefault("alert_severities", []).append(result.alert.severity.value)
+            _escalate(deps, loan_id, replay_id, loan, alert_id, mon["alert_severities"], rows[-1], hi, week, pg, lb)
     _repayment_week(deps, loan_id, replay_id, loan, visible, lo, hi, week, entry)
     mon["processed_week"] = week
     if (mon.get("pending_resume") or {}).get("week") == week:
@@ -685,28 +695,163 @@ def process_week(deps: Deps, loan_id: str, replay_id: str, week: int) -> dict[st
     return entry
 
 
+JOURNAL_LINES = 6  # 조사 에이전트에 주는 최근 사건 일지 줄 수(evals.usd_scenes와 같다)
+
+
+def _watch_usd_week(
+    deps: Deps,
+    loan: dict[str, Any],
+    loan_id: str,
+    replay_id: str,
+    week: int,
+    entry: dict[str, Any],
+    obs: UsdObservation,
+    market: UsdMarketFlow | None,
+    visible: list[Transaction],
+    mask: Callable[[str], str],
+    pg_weeks: list[dict[str, Any]] | None,
+    hi: date,
+    pg: PgFlow | None,
+) -> None:
+    """USD 주간 감시(스펙 §5.4): 신호 → 사건·단계(incident.py) → 단계가 오르면 경보 문서, 원인이 바뀌면 같은 문서 갱신
+    → 높음이면 에스컬레이션. 관찰·해소 주는 경보·연락을 만들지 않는다.
+
+    사건 상태는 이번 호출이 읽은 대출 문서(mon["watch"])에서만 바뀌고 process_week 끝에 함께 저장된다. 저장이 실패하면
+    다음 시도가 저장소에서 다시 읽으므로 같은 주가 사건 상태에 두 번 들어가지 않는다.
+    """
+    mon = loan["monitoring"]
+
+    def investigate(base: str | None) -> EwResult:
+        return _investigate_usd_week(deps, loan, loan_id, replay_id, week, obs, visible, mask, pg_weeks, base)
+
+    journal, result = watch_week(
+        mon["watch"], list(obs.signals), week=week, replay_id=replay_id,
+        high_recheck=not isinstance(mon["escalation"].get("stage2"), dict),
+        explained=bool(obs.explained), market=market is not None, investigate=investigate,
+    )
+    incident = mon["watch"]["open"]
+    if result is not None:
+        entry["investigation"] = {"decision": result.decision, "reason": result.reason, "record": result.record}
+    if journal["stage_up"] and result is not None and result.alert is not None:
+        alert_id = f"ew-{replay_id}-w{week:02d}"
+        if result.agent != "stored":  # 재시도: 앞선 시도가 쓴 문서(진행 상태 포함)를 그대로 둔다
+            deps.store.upsert(ALERTS, {
+                "id": alert_id,
+                **result.alert.model_dump(mode="json"),
+                "incident_id": incident["id"],
+                "replay_id": replay_id,
+                "status": "open",
+                "created_at": deps.clock().isoformat(),
+                "collections": None,
+                "restructure": None,
+                "event_error": None,
+            })
+        incident["alert_id"] = alert_id
+        mon["alert_ids"].append(alert_id)
+        entry["alert_id"] = alert_id
+        journal.update(alert_id=alert_id, alert_action="created")
+    elif (result is not None and result.alert is not None and result.agent != "stored"
+          and incident is not None and incident.get("alert_id")):
+        if _update_alert_causes(deps, loan_id, incident["alert_id"], result.alert):
+            journal.update(alert_id=incident["alert_id"], alert_action="updated")
+    entry["watch"] = journal
+    if journal["stage"] == "high":
+        _escalate(deps, loan_id, replay_id, loan, incident["alert_id"], mon["watch"]["stages"], entry["row"], hi,
+                  week, pg, None)
+
+
+def _investigate_usd_week(
+    deps: Deps,
+    loan: dict[str, Any],
+    loan_id: str,
+    replay_id: str,
+    week: int,
+    obs: UsdObservation,
+    visible: list[Transaction],
+    mask: Callable[[str], str],
+    pg_weeks: list[dict[str, Any]] | None,
+    base: str | None,
+) -> EwResult:
+    """이번 주 USD 단계 조사. 이번 주 경보 문서가 이미 있으면(재시도) 부르지 않고 저장된 경보로 결과를 만든다.
+    문맥 필드는 evals.usd_scenes의 오프라인 재생과 같게 만든다."""
+    mon = loan["monitoring"]
+    alert_id = f"ew-{replay_id}-w{week:02d}"
+    if (stored := deps.store.read(ALERTS, alert_id, loan_id)) is not None:
+        return EwResult(stored, "alert", "existing_alert", {}, [], stage=stored["severity"], agent="stored",
+                        why_now=stored.get("why_now"), outlook=stored.get("outlook"),
+                        adjust_reason=stored.get("adjust_reason"))
+    incident = mon["watch"]["open"]
+    journal = [{**w["watch"], "week": w["week"], "called": w["investigation"] is not None}
+               for w in mon["weeks"] if w.get("watch")][-JOURNAL_LINES:]
+    product = product_of(loan)
+    ctx = EwContext(
+        alert_id=alert_id,
+        loan_id=loan_id,
+        week=week,
+        start=date.fromisoformat(mon["flow_start"]),
+        industry=loan["industry"],
+        triggers=obs.triggers,
+        rows=obs.rows,
+        baseline=loan["baseline"],
+        transactions=visible,
+        categories=obs.cats,
+        mask=mask,
+        terms={**product.model_dump(), "amount_cents": loan["amount_cents"], "tenor_months": loan["tenor_months"]},
+        candidates=obs.candidates,
+        pg_weeks=pg_weeks,
+        signals=obs.signals,
+        base_stage=base,
+        journal=journal,
+        # 새 사건이면 incident.py가 이 주에 여는 사건의 ID
+        incident_id=incident["id"] if incident else incident_id(replay_id, week),
+    )
+    return run_consent_agent(deps, mon["consent_id"], investigate_usd, ctx, model=deps.ew_model)
+
+
+def _causes(alert: dict[str, Any]) -> set[str]:
+    return {c for c in (alert.get("primary_cause"), *(alert.get("secondary_causes") or ())) if c}
+
+
+def _update_alert_causes(deps: Deps, loan_id: str, alert_id: str, alert: Any) -> bool:
+    """사건의 현재 경보 문서 원인을 같은 ID로 갱신한다(스펙 §5.4 원인 갱신). 원인 집합이 같으면 쓰지 않는다.
+    alert.raised는 다시 발행하지 않는다. 갱신했으면 True."""
+    fresh = alert.model_dump(mode="json")
+    changed = False
+
+    def mutate(doc: dict[str, Any]) -> bool | None:
+        nonlocal changed
+        changed = _causes(doc) != _causes(fresh)
+        if not changed:
+            return False
+        doc.update({k: fresh.get(k) for k in ("primary_cause", "secondary_causes", "why_now", "outlook")})
+        return None
+
+    update_doc(deps.store, ALERTS, alert_id, loan_id, mutate)
+    return changed
+
+
 def _escalate(
     deps: Deps,
     loan_id: str,
     replay_id: str,
     loan: dict[str, Any],
     alert_id: str,
-    severity: str,
+    history: list[str],
     row: dict[str, Any],
     hi: date,
     week: int,
     pg: PgFlow | None,
     lb: LedgerBaseline | None,
 ) -> None:
-    """경보 심각도로 조기경보 단계(스펙 §5)를 정해 자동 안내를 보낸다. 2단계가 나가면 셀프 상환 플랜 제안을 연다.
+    """단계 이력으로 조기경보 단계(스펙 §5)를 정해 자동 안내를 보낸다. 2단계가 나가면 셀프 상환 플랜 제안을 연다.
 
+    history는 KRW면 이 재생 경보의 심각도, USD면 사건 일지의 주별 단계다(이번 것 포함, 순서대로).
     다음 예정 회차가 없으면 보내지 않고 단계도 쓰지 않는다. 2단계에 유지 말고 고를 옵션이 없으면 보내지 않고
     skipped(no_options)로 남긴다. 같은 주차가 다시 오면(재시도) 같은 ref 연락을 다시 쓰지 않는다.
     """
     mon, led = loan["monitoring"], loan.get("repayment")
-    mon.setdefault("alert_severities", []).append(severity)
     escalation = mon.setdefault("escalation", {"stage1": None, "stage2": None})
-    stage = next_stage(mon["alert_severities"], escalation)
+    stage = next_stage(history, escalation)
     if stage is None or not led:
         return
     upcoming = sorted(

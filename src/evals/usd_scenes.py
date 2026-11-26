@@ -12,7 +12,7 @@ from typing import Any, NamedTuple
 from agents import features
 from agents.early_warning import EwContext, EwResult
 from agents.escalation import next_stage
-from agents.incident import new_watch, watch_week
+from agents.incident import incident_id, new_watch, watch_week
 from agents.usd_early_warning import fallback_stage
 from agents.usd_monitoring import approval_basis, observe_usd, usd_baseline
 from mockapis import demo, postloan
@@ -111,7 +111,7 @@ def _replay(seller: str, decide: Decide, market: bool, as_of: date, last_week: i
                 pg_weeks=[{k: r[k] for k in _PG_WEEK_FIELDS if k in r} for r in obs.rows],
                 signals=obs.signals, base_stage=base, journal=lines[-JOURNAL_LINES:],
                 # 새 사건이면 incident.py가 이 주에 여는 사건의 ID
-                incident_id=incident["id"] if incident else f"in-{replay_id}-w{week:02d}",
+                incident_id=incident["id"] if incident else incident_id(replay_id, week),
             ))
 
         line, result = watch_week(

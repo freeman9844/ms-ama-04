@@ -23,6 +23,10 @@ def new_watch() -> dict:
     return {"open": None, "closed": [], "suppressed": [], "suppress_quiet": 0, "stages": []}
 
 
+def incident_id(replay_id: str, week: int) -> str:
+    return f"in-{replay_id}-w{week:02d}"
+
+
 def base_stage(signals: list[dict]) -> str | None:
     if not signals:
         return None
@@ -119,7 +123,7 @@ def _apply_call(watch: dict, plan: WeekPlan, signals: list[dict], week: int, rep
         watch["suppressed"] = []
         watch["suppress_quiet"] = 0
         incident = {
-            "id": f"in-{replay_id}-w{week:02d}", "opened_week": week, "stage": plan.base,
+            "id": incident_id(replay_id, week), "opened_week": week, "stage": plan.base,
             "last_key": [], "quiet": 0, "alert_id": None,
         }
         watch["open"] = incident

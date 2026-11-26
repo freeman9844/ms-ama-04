@@ -16,6 +16,9 @@ FEE = {"naver_smart_store": Decimal(".066"), "coupang": Decimal(".1155"),
 
 
 BASE_RETURN_RATE = Decimal(".02")
+# 사후 매출 부진(slump_on 이후): 영업일 주문이 평소의 이 비율로 줄고, 주문을 되살리려는 광고비가 영업일마다 나간다.
+SLUMP_SALES_PERCENT = 25
+SLUMP_AD_PERMILLE = 26  # 영업일 광고비(주 매출 대비 천분율)
 # KRW STRESSED·ASSIGNED 원형(mockapis.synth)과 같은 레버. 난수를 쓰지 않아 다른 셀러의 흐름은 그대로다.
 STRESS_SALES_PERCENT = 60
 STRESS_PROCEEDS_PERCENT = 22  # 주 매출 대비 2주마다 받는 고비용 차입액(월 매출의 약 5%)
@@ -97,7 +100,7 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
         if is_business_day(d):
             daily = seller.weekly_sales_cents * rng.randint(90, 110) // 500
             if slump_on and d >= slump_on:
-                daily //= 4
+                daily = daily * SLUMP_SALES_PERCENT // 100
             if stress_from and d >= stress_from:
                 daily = daily * STRESS_SALES_PERCENT // 100
             daily = scaled(daily)
@@ -137,6 +140,8 @@ def simulate_usd(seller: UsdSeller, key: str, start: date, end: date, seed: int,
                 post(seller.weekly_sales_cents * STRESS_PROCEEDS_PERCENT // 100,
                      f"{STRESS_LENDERS[stress_loans % len(STRESS_LENDERS)]} loan proceeds", "TRANSFER_IN")
                 stress_loans += 1
+            if slump_on and d >= slump_on:
+                post(-(seller.weekly_sales_cents * SLUMP_AD_PERMILLE // 1000), "Marketplace ads", "AUTO_DEBIT")
             post(-scaled(seller.weekly_sales_cents * seller.inventory_percent // 500), f"{seller.supplier} inventory",
                  "TRANSFER_OUT")
             if d.weekday() == 4:

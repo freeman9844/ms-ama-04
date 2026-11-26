@@ -272,7 +272,7 @@ def ladder(lines):
 STAGE_SCENES = {  # spec section 7; weeks may move by one
     "seller-gearstore-06": [("watch", 2), ("medium", 3), ("resolved", 8)],
     "seller-linen-10": [("watch", 3), ("medium", 4), ("resolved", 10)],
-    "seller-dailylook-01": [("watch", 4), ("medium", 5), ("high", 9)],
+    "seller-dailylook-01": [("watch", 4), ("medium", 5), ("high", 7)],
     "seller-tangerine-15": [("watch", 3)],
     "seller-snackbox-22": [("medium", 3)],
     "seller-tint-17": [("watch", 6), ("resolved", 8)],
