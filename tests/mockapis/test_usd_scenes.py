@@ -20,7 +20,7 @@ from policy.engine import explain
 from policy.rules import rules_for_version
 from shared.contracts import USD_V1, AlertCause
 from shared.sellers import USD_SELLERS
-from shared.usd_source import UsdPgFlow
+from shared.usd_source import UsdMarketFlow, UsdPgFlow
 
 AS_OF = date(2026, 11, 24)
 E, R, I = "eligible", "refer", "ineligible"
@@ -249,7 +249,7 @@ def test_scene_substitution_conditions_keep_margin(seller):
         assert clears(c.field, c.op, v, c.threshold), (sub.code, c.field, v, c.threshold)
 
 
-def replay(seller, *, basis=None, ledger=True, prior_year=True):
+def replay(seller, *, basis=None, ledger=True, prior_year=True, market=True):
     """Book the loan as a usd-v2 approval and observe 13 weeks. Returns (UsdObservation per week, week entries)."""
     uw = underwrite_at(seller, AS_OF)
     stored = {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly}
@@ -258,6 +258,7 @@ def replay(seller, *, basis=None, ledger=True, prior_year=True):
                                           loan_id="loan-usd", amount_cents=500_000, installment_cents=84_000)
     pg = UsdPgFlow(**USD_V1.model_dump(), settlements=flow.pg_settlements, orders=flow.orders,
                    prior_year_orders=flow.prior_year_orders if prior_year else ())
+    mkt = UsdMarketFlow(**USD_V1.model_dump(), weeks=flow.market_weeks) if market else None
     mon = {"flow_start": flow.start.isoformat(), "weeks": []}
     loan = {"monitoring": mon, "baseline": usd_baseline(stored),
             "approval_basis": approval_basis(decision.applied_substitutions, stored["features"])
@@ -265,7 +266,7 @@ def replay(seller, *, basis=None, ledger=True, prior_year=True):
     out = []
     for week in range(1, 14):
         hi = flow.start + timedelta(days=7 * week - 1)
-        obs = observe_usd(loan, [t for t in flow.transactions if t.booked_on <= hi], pg if ledger else None, week, {})
+        obs = observe_usd(loan, [t for t in flow.transactions if t.booked_on <= hi], pg if ledger else None, week, {}, mkt)
         mon["weeks"].append({"week": week, "row": obs.rows[-1], "triggers": obs.triggers,
                              "bank_only_triggers": obs.bank_only, "explained": obs.explained})
         out.append(obs)
@@ -359,3 +360,55 @@ def test_missing_prior_year_keeps_flat_expectation():
 def test_no_substitution_loan_has_empty_basis():
     assert approval_basis((), {"pg_reconciliation_ratio": .99}) == []
     assert all(o.basis == [] for o in replay("seller-bakery-20")[0])
+
+
+def codes(o, source=None):
+    return [s["code"] for s in o.signals if source is None or s["source"] == source]
+
+
+def test_gearstore_market_signal_comes_first():
+    obs, _ = replay("seller-gearstore-06")
+    assert codes(obs[1]) == ["cancel_rise"]
+    assert {s["code"]: s["strength"] for s in obs[2].signals if s["code"] in ("account_warning", "settlement_hold")} \
+        == {"account_warning": "strong", "settlement_hold": "strong"}
+
+
+def test_single_week_signal_dropped_when_persistent_fires():
+    obs, _ = replay("seller-linen-10")
+    spiked = [o for o in obs if "return_spike" in codes(o)]
+    assert spiked and all("returns_rising" not in codes(o) for o in spiked)
+
+
+def test_explained_inflow_is_not_a_signal():
+    obs, _ = replay("seller-campgear-23")
+    explained = [o for o in obs if o.explained]
+    assert explained and all("inflow_drop" not in codes(o) for o in explained)
+
+
+def test_seasonal_scene_raises_no_signal():
+    assert all(o.signals == () for o in replay("seller-campgear-23")[0])
+
+
+def test_linen_rating_drop_is_a_market_signal():
+    obs, _ = replay("seller-linen-10")
+    assert any("rating_drop" in codes(o, "market") for o in obs)
+
+
+def test_no_market_means_no_market_fields_or_signals():
+    obs, _ = replay("seller-gearstore-06", market=False)
+    assert not any(k.startswith("mkt_") for k in obs[-1].rows[-1])
+    assert all(codes(o, "market") == [] for o in obs)
+
+
+@pytest.mark.parametrize("seller", ["seller-gearstore-06", "seller-linen-10", "seller-dailylook-01",
+                                    "seller-tangerine-15", "seller-snackbox-22", "seller-tint-17",
+                                    "seller-campgear-23"])
+def test_signal_metric_ids_exist_in_rows(seller):
+    obs, _ = replay(seller)
+    for week, o in enumerate(obs, 1):
+        row = o.rows[-1]
+        for s in o.signals:
+            assert s["metric_ids"]
+            for mid in s["metric_ids"]:
+                kind, n, field = mid.split(":")
+                assert kind in ("W", "F") and int(n) == week and field in row, (week, s["code"], mid)

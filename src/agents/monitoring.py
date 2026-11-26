@@ -80,6 +80,13 @@ WEEK_FIELDS = (
     "orders_vs_prior_year",
     "recon_ratio",
     "unreconciled_payout",
+    # 마켓 주간 스냅샷 지표(USD 행에 마켓 흐름이 있을 때만 채운다)
+    "mkt_gross",
+    "mkt_cancel_rate",
+    "mkt_rating",
+    "mkt_grade",
+    "mkt_penalties",
+    "mkt_pending",
 )
 FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date", "next_due_on", "due_balance")
 ADVANCE_KEYWORD = "선정산"  # 정산 양도 선지급 입금 적요. 매출도 신규 차입도 아니다(스펙 §5.5)

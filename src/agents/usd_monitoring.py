@@ -16,9 +16,11 @@ from agents.ledger_monitor import (CAUSE_FIELDS, CAUSE_OF_TRIGGER, COST_SURGE_PP
                                    PRE_LOAN_DAYS, RETURN_SPIKE_MULT, RETURN_SPIKE_PP, CauseCandidate)
 from agents.monitoring import week_window
 from agents.pg_ledger import weekly_reconciliation
+from mockapis.sellerdata.usd_market_flow import GRADES
 from shared.contracts import AlertCause
 from shared.krcalendar import add_business_days, is_business_day, next_business_day
 from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
+from shared.usd_source import UsdMarketFlow
 
 _CENT_EVIDENCE = {"order_gross", "held", "advance_in", "returns", "deductions", "high_cost_lender", "loan_proceeds",
                   "unreconciled_payout"}
@@ -36,6 +38,32 @@ BASIS_METRICS = {
 }
 _SETTLEMENT_BASIS = {"S003", "S005"}
 
+# Signal code -> (data source, strength), in the order signals are listed.
+SIGNALS: dict[str, tuple[str, str]] = {
+    "inflow_drop": ("bank", "weak"), "projected_shortfall": ("bank", "strong"), "due_shortfall": ("bank", "strong"),
+    "orders_dip": ("settlement", "weak"), "returns_rising": ("settlement", "weak"),
+    "deductions_rising": ("settlement", "weak"), "sales_slump": ("settlement", "weak"),
+    "return_spike": ("settlement", "weak"), "cost_surge": ("settlement", "weak"),
+    "settlement_hold": ("settlement", "strong"), "basis_breach": ("settlement", "strong"),
+    "cancel_rise": ("market", "weak"), "rating_drop": ("market", "weak"), "grade_down": ("market", "weak"),
+    "cancel_spike": ("market", "strong"), "account_warning": ("market", "strong"),
+}
+ORDERS_DIP_RATIO = 0.75  # this week's orders vs expected below this: orders_dip (single week); 0.80 caught campgear's seasonal week 11
+CANCEL_RISE_MULT = 1.8  # main-platform weekly cancel rate vs pre-loan baseline, and at least CANCEL_RISE_PP more
+CANCEL_RISE_PP = 0.02
+CANCEL_SPIKE_RATE = 0.08  # same bar as underwriting R111
+RATING_DROP = 0.1  # order-weighted rating this far under the baseline; the 0.2 bar missed linen's -0.3 on one of two platforms
+_SINGLE_WEEK_OF = {"orders_dip": "sales_slump", "returns_rising": "return_spike", "deductions_rising": "cost_surge"}
+_EVIDENCE = {
+    "inflow_drop": ("W:revenue_vs_expected",), "projected_shortfall": ("F:projected_min_balance_cents",),
+    "due_shortfall": ("F:due_balance_cents",), "orders_dip": ("W:order_gross_cents", "W:expected_orders_cents"),
+    "returns_rising": ("W:return_rate",), "return_spike": ("W:return_rate",),
+    "deductions_rising": ("W:deduction_rate",), "cost_surge": ("W:deduction_rate",),
+    "sales_slump": ("W:orders_vs_expected",), "settlement_hold": ("W:held_cents",),
+    "cancel_rise": ("W:mkt_cancel_rate",), "cancel_spike": ("W:mkt_cancel_rate",),
+    "rating_drop": ("W:mkt_rating",), "grade_down": ("W:mkt_grade",), "account_warning": ("W:mkt_penalties",),
+}
+
 
 class UsdObservation(NamedTuple):
     rows: list[dict]
@@ -46,6 +74,7 @@ class UsdObservation(NamedTuple):
     bank_only: list[str]
     explained: list[dict]
     basis: list[dict]
+    signals: tuple[dict, ...] = ()  # {"code", "source", "strength", "metric_ids"}, in SIGNALS order
 
 
 def _rate(part, whole):
@@ -160,7 +189,8 @@ def _forecast_fields(row, proj, with_due=True):
 
 
 def _ledger_week(row, rows, recent, pg, visible, start, lo, hi):
-    """Settlement-ledger fields for this week's row; returns the ledger triggers in their fixed order."""
+    """Settlement-ledger fields for this week's row; returns the persistent ledger triggers in their fixed order and
+    this week's single-week signals."""
     pre = start - timedelta(days=PRE_LOAN_DAYS)
     historical = [o for o in pg.orders if pre <= o.order_on < start]
     paid = [s for s in pg.settlements if pre <= s.settled_on < start]
@@ -207,18 +237,87 @@ def _ledger_week(row, rows, recent, pg, visible, start, lo, hi):
         triggers.append("sales_slump")
     if weekly_net > 0 and row["held_cents"] >= HOLD_SHARE * weekly_net:
         triggers.append("settlement_hold")
+    spike = max(RETURN_SPIKE_MULT * base_returns, base_returns + RETURN_SPIKE_PP)
+    cost_bar = base_deductions + COST_SURGE_PP
     last = rows[-PERSIST_WEEKS:]
     if len(last) == PERSIST_WEEKS:
-        spike = max(RETURN_SPIKE_MULT * base_returns, base_returns + RETURN_SPIKE_PP)
         if all((r.get("return_rate") or 0) >= spike for r in last):
             triggers.append("return_spike")
-        if all(r.get("deduction_rate") is not None and r["deduction_rate"] >= base_deductions + COST_SURGE_PP
-               for r in last):
+        if all(r.get("deduction_rate") is not None and r["deduction_rate"] >= cost_bar for r in last):
             triggers.append("cost_surge")
-    return triggers
+    single = []
+    if row["expected_orders_cents"] and row["order_gross_cents"] < ORDERS_DIP_RATIO * row["expected_orders_cents"]:
+        single.append("orders_dip")
+    if (row["return_rate"] or 0) >= spike:
+        single.append("returns_rising")
+    if row["deduction_rate"] is not None and row["deduction_rate"] >= cost_bar:
+        single.append("deductions_rising")
+    return triggers, single
 
 
-def observe_usd(loan, visible, pg, week, dues) -> UsdObservation:
+def _market_week(row, market, start: date, hi: date) -> list[str]:
+    """Fills the row's mkt_* fields from this week's marketplace snapshot and returns the market signals. The
+    baseline is the weeks before the loan: main platform (largest pre-loan gross) cancel rate and grade, and the
+    order-weighted rating."""
+    this = [w for w in market.weeks if w.week_end == hi]
+    pre = [w for w in market.weeks if w.week_end < start]
+    if not this or not pre:
+        return []
+    gross_by_platform: dict[str, int] = defaultdict(int)
+    for w in pre:
+        gross_by_platform[w.platform_code] += w.gross_cents
+    main = max(sorted(gross_by_platform), key=gross_by_platform.get)
+
+    def weighted_rating(weeks):
+        gross = sum(w.gross_cents for w in weeks)
+        return sum(w.rating * w.gross_cents for w in weeks) / gross if gross else None
+
+    def cancel_rate(w):
+        return w.cancel_cents / w.gross_cents if w.gross_cents else None
+
+    now = next((w for w in this if w.platform_code == main), None)
+    rating = weighted_rating(this)
+    row["mkt_gross_cents"] = sum(w.gross_cents for w in this)
+    row["mkt_cancel_rate"] = None if now is None or cancel_rate(now) is None else round(cancel_rate(now), 4)
+    row["mkt_rating"] = None if rating is None else round(rating, 2)
+    row["mkt_grade"] = now.seller_grade if now else None
+    row["mkt_penalties"] = sum(len(w.penalties) for w in this)
+    row["mkt_pending_cents"] = sum(w.pending_settlement_cents for w in this)
+
+    pre_main = sorted((w for w in pre if w.platform_code == main), key=lambda w: w.week_end)
+    base_rates = [r for w in pre_main if (r := cancel_rate(w)) is not None]
+    base_ratings = [r for end in sorted({w.week_end for w in pre})
+                    if (r := weighted_rating([w for w in pre if w.week_end == end])) is not None]
+    fired = []
+    if row["mkt_cancel_rate"] is not None and base_rates:
+        base = sum(base_rates) / len(base_rates)
+        if row["mkt_cancel_rate"] > CANCEL_SPIKE_RATE:
+            fired.append("cancel_spike")
+        elif row["mkt_cancel_rate"] >= max(CANCEL_RISE_MULT * base, base + CANCEL_RISE_PP):
+            fired.append("cancel_rise")
+    if row["mkt_rating"] is not None and base_ratings and (
+            sum(base_ratings) / len(base_ratings) - row["mkt_rating"] >= RATING_DROP):
+        fired.append("rating_drop")
+    if now is not None and pre_main and GRADES.index(now.seller_grade) < GRADES.index(pre_main[-1].seller_grade):
+        fired.append("grade_down")
+    if row["mkt_penalties"]:
+        fired.append("account_warning")
+    return fired
+
+
+def signal_list(codes, row, week: int) -> tuple[dict, ...]:
+    """Signals in SIGNALS order, each citing the week-row or forecast fields that fired it."""
+    out = []
+    for code, (source, strength) in SIGNALS.items():
+        if code not in codes:
+            continue
+        refs = (f"W:{BASIS_METRICS[row['basis_breached'][0]][0]}",) if code == "basis_breach" else _EVIDENCE[code]
+        out.append({"code": code, "source": source, "strength": strength,
+                    "metric_ids": [f"{ref.split(':')[0]}:{week}:{ref.split(':')[1]}" for ref in refs]})
+    return tuple(out)
+
+
+def observe_usd(loan, visible, pg, week, dues, market: UsdMarketFlow | None = None) -> UsdObservation:
     mon, base = loan["monitoring"], loan["baseline"]
     start = date.fromisoformat(mon["flow_start"])
     lo, hi = week_window(start, week)
@@ -238,10 +337,12 @@ def observe_usd(loan, visible, pg, week, dues) -> UsdObservation:
     bank_only = [t for t, fired in (("inflow_drop", len(recent) == 3 and expected and row["revenue_vs_expected"] < .75),
                                     ("projected_shortfall", bank_low["balance_cents"] < 0),
                                     ("due_shortfall", due_short)) if fired]
+    market_codes = _market_week(row, market, start, hi) if market is not None else []
     if pg is None:
-        return UsdObservation(rows, list(bank_only), [], cats, bank_proj, bank_only, [], [])
+        return UsdObservation(rows, list(bank_only), [], cats, bank_proj, bank_only, [], [],
+                              signal_list({*bank_only, *market_codes}, row, week))
 
-    ledger = _ledger_week(row, rows, recent, pg, visible, start, lo, hi)
+    ledger, single = _ledger_week(row, rows, recent, pg, visible, start, lo, hi)
     basis = []
     for item in loan.get("approval_basis") or []:
         value = row.get(item["metric"])
@@ -270,4 +371,6 @@ def observe_usd(loan, visible, pg, week, dues) -> UsdObservation:
     if due_short:
         triggers.append("due_shortfall")
     candidates = _candidates([*mon["weeks"], {"week": week, "triggers": triggers}], rows)
-    return UsdObservation(rows, triggers, candidates, cats, proj, bank_only, explained, basis)
+    codes = {*triggers, *(c for c in single if _SINGLE_WEEK_OF[c] not in triggers), *market_codes}
+    return UsdObservation(rows, triggers, candidates, cats, proj, bank_only, explained, basis,
+                          signal_list(codes, row, week))

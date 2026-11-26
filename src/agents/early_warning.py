@@ -77,7 +77,7 @@ _USD_TRIGGERS = {
 }
 _CENT_FIELDS = frozenset("revenue expected_revenue operating_out debt_service high_cost_lender loan_proceeds "
                          "unclassified_in end_balance advance_in order_gross held returns deductions "
-                         "settle_net projected_min_balance due_balance expected_orders unreconciled_payout".split())
+                         "settle_net projected_min_balance due_balance expected_orders unreconciled_payout mkt_gross mkt_pending".split())
 
 
 def _usd_field(name):
