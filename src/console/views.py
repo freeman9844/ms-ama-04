@@ -318,8 +318,10 @@ def _policy_change(policy: Any, trace: Mapping[str, Any], features: Mapping[str,
 
     notes = []
     limit = (trace or {}).get("limit") or {}
-    if (limit and isinstance(low, int) and isinstance(high, int) and high > low
-            and (limit.get("settlement_cap_cents") or 0) > (limit.get("inflow_cap_cents") or 0)):
+    inflow = limit.get("inflow_cap_cents") or 0
+    # 정산 예정금이 실제로 한도를 끌어올렸을 때만(신청액·상품 상한·대체 상한이 정한 한도가 아닐 때) 설명한다.
+    if limit and (limit.get("settlement_cap_cents") or 0) > inflow and (limit.get("before_rounding_cents") or 0) > min(
+            inflow, limit.get("requested_amount_cents") or 0, limit.get("product_max_cents") or 0):
         notes.append({"kind": "settlement", "avg": limit.get("avg_monthly_inflow_cents"),
                       "multiplier": f"{limit.get('inflow_multiplier'):g}", "inflow": limit.get("inflow_cap_cents"),
                       "pending": features.get("mkt_pending_settlement_cents"),

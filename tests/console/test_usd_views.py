@@ -857,6 +857,16 @@ def test_v2_change_explains_settlement_limit():
     assert "average monthly deposits $2000 × 1.5 = $3000, but 80% of net expected settlements $10000 is $8000" in policy
 
 
+def test_v2_change_skips_settlement_note_when_request_sets_the_limit():
+    deps = _v2_bakery(months_of_history=4, mkt_tenure_months=40, mkt_rating=4.8, mkt_review_count=500,
+                      mkt_return_rate_90d=0.02, avg_monthly_inflow_cents=400_000, requested_amount_cents=200_000,
+                      mkt_pending_settlement_cents=2_000_000)
+    policy = detail_panels(page_for(deps, "en"))["tab-policy"]
+    assert "S001 conditions are met, so the case goes to officer review instead of being declined." in policy
+    assert "expected settlements set the limit" not in policy
+    assert "A decline reason was substituted with seller data, so the limit is capped at $5000." in policy
+
+
 
 @pytest.mark.parametrize("usd", [True, False], ids=["usd", "legacy"])
 def test_servicing_decisions_keep_the_original_officer_reason(usd):
