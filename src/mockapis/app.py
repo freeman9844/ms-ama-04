@@ -13,7 +13,7 @@ from mockapis.demo import FlowStore
 from mockapis.postloan import LoanTerms, PostLoanFlow
 from mockapis.synth import SyntheticCase, UsdCase
 from shared.contracts import USD_V1, UsdConsentGrant, UsdProduct, UsdTransaction
-from shared.usd_source import UsdMarketplace, UsdPgFlow, UsdProfile, UsdSettlement, UsdTaxFiling
+from shared.usd_source import UsdMarketFlow, UsdMarketplace, UsdPgFlow, UsdProfile, UsdSettlement, UsdTaxFiling
 from shared.contracts import (
     ApplicantProfile,
     ConsentScope,
@@ -208,6 +208,27 @@ def create_app(
                 if (start is None or o.order_on >= start) and (end is None or o.order_on <= end)
             ),
         )
+
+    @app.get("/marketplace/flow")
+    def get_marketplace_flow(
+        authorization: AuthHeader = None,
+        start: date | None = None,
+        end: date | None = None,
+        amount_krw: int | None = None,
+        installment_krw: int | None = None,
+        amount_cents: int | None = None, installment_cents: int | None = None, loan_id: str | None = None,
+        tenor_months: int | None = None,
+    ) -> UsdMarketFlow:
+        """대출 실행 이후 주간 마켓 스냅샷(USD 전용, 조기경보 재생용). start·end는 week_end 포함 구간이다."""
+        case = authorize(authorization, ConsentScope.MARKETPLACE, "/marketplace/flow")
+        if not isinstance(case, UsdCase):
+            raise _error(404, "no_flow")
+        flow = product_flow(case, amount_krw, installment_krw, amount_cents, installment_cents, loan_id, tenor_months)
+        if flow is None:
+            raise _error(404, "no_flow")
+        return UsdMarketFlow(**USD_V1.model_dump(),
+                             weeks=tuple(w for w in flow.market_weeks
+                                         if (not start or start <= w.week_end) and (not end or w.week_end <= end)))
 
     @app.get("/tax/filings")
     def get_tax_filings(authorization: AuthHeader = None) -> list[TaxFiling | UsdTaxFiling]:
