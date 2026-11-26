@@ -98,6 +98,7 @@ def test_orders_single_week_drops_before_three_week():
     assert one["y"] > c["ratio"]["threshold_y"]
     assert _point(lines["orders3"], 4)["y"] < c["ratio"]["threshold_y"]
     assert c["ratio"]["threshold_y"] == pytest.approx(_ratio_y(c, 0.75), abs=0.01)
+    assert c["ratio"]["threshold_text"] == "75%"
     assert [t["text"] for t in c["ratio"]["ticks"]] == ["0%", "50%", "100%"]
 
 
@@ -148,6 +149,17 @@ def test_grade_chip_missing_market_row():
     assert (grades[6]["grade"], grades[6]["signal"]) == (None, False)
     assert (grades[5]["grade"], grades[5]["signal"]) == ("Silver", True)
     assert grades[4]["signal"] is False
+
+
+def test_grade_chip_fits_slot():
+    weeks, lines = _dailylook()
+    weeks[0]["row"]["mkt_grade"] = "Standard"
+    c = _chart(weeks, lines)
+    g = c["grades"][0]
+    assert g["w"] == pytest.approx(c["slots"][0]["w"] - 8, abs=0.01) and g["w"] > 44
+    assert g["fit_w"] is None
+    narrow = watch_chart(weeks, lines, [], total=13, width=480)["grades"][0]
+    assert narrow["fit_w"] == pytest.approx(narrow["w"] - 4, abs=0.01)
 
 
 def test_due_marks_only_inside_window():

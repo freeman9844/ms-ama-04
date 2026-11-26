@@ -147,7 +147,7 @@
 {# USD 감시 일지 두 단 그래프. 좌표는 console/watch_chart.py가 낸다. 처리된 주의 요소는 그 주 일지 줄로 링크한다. #}
 {% macro _watch_series(l, line_cls, dot_cls, r=3.5, scaled=true) -%}
 {% for d in l.segments %}<path class="line {{ line_cls }}" d="{{ d }}"{% if scaled %} pathLength="100"{% endif %}></path>{% endfor %}
-{% for p in l.points %}<a href="#journal-w{{ p.week }}"><circle class="dot {{ dot_cls }}" cx="{{ p.x }}" cy="{{ p.y }}" r="{{ r }}"><title>{{ caller(p) }}</title></circle></a>{% endfor %}
+{% for p in l.points %}<a href="#journal-w{{ p.week }}" tabindex="-1"><circle class="dot {{ dot_cls }}" cx="{{ p.x }}" cy="{{ p.y }}" r="{{ r }}"><title>{{ caller(p) }}</title></circle></a>{% endfor %}
 {%- endmacro %}
 
 {% macro watch_chart(c, label) -%}
@@ -155,30 +155,30 @@
 <svg class="chart watch-chart" viewBox="0 0 {{ c.width }} {{ c.height }}" role="group" aria-label="{{ label }}">
   {% for s in c.slots if s.current %}<rect class="slot-current" x="{{ s.x }}" y="{{ top }}" width="{{ s.w }}" height="{{ c.height - top }}"></rect>{% endfor %}
   {% for t in c.ratio.ticks %}<line class="gridline" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"></line><text class="axis-label" x="{{ c.x0 - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.text }}</text>{% endfor %}
-  <line class="ref-dashed" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ c.ratio.threshold_y }}" y2="{{ c.ratio.threshold_y }}"></line><text class="ref-label" x="{{ c.x1 }}" y="{{ c.ratio.threshold_y - 4 }}" text-anchor="end">{{ _("탐지 기준 %(v)s", v="75%") }}</text>
+  <line class="ref-dashed" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ c.ratio.threshold_y }}" y2="{{ c.ratio.threshold_y }}"></line><text class="ref-label" x="{{ c.x1 }}" y="{{ c.ratio.threshold_y - 4 }}" text-anchor="end">{{ _("탐지 기준 %(v)s", v=c.ratio.threshold_text) }}</text>
   {% for t in c.cash.ticks %}<line class="gridline" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"></line><text class="axis-label" x="{{ c.x0 - 6 }}" y="{{ t.y + 4 }}" text-anchor="end">{{ t.text_cents|usd_tick }}</text>{% endfor %}
   <line class="ref-dashed" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ c.cash.zero_y }}" y2="{{ c.cash.zero_y }}"></line>
   {% for s in c.slots %}
   {% if s.done %}<a href="{{ s.href }}"><rect class="slot-hit" x="{{ s.x }}" y="{{ top }}" width="{{ s.w }}" height="{{ c.height - top }}"></rect><rect class="stage-{{ s.stage or 'none' }}" x="{{ s.x + 1 }}" y="{{ c.band.y }}" width="{{ s.w - 2 }}" height="{{ c.band.h }}" rx="3"><title>{{ _("%(week)s주차 · %(stage)s", week=s.week, stage=s.stage|stage_label) }}</title></rect>{% if s.alert_stage %}<text class="alert-mark" x="{{ s.cx }}" y="{{ c.band.y - 5 }}" text-anchor="middle">🔔 {{ s.alert_stage|stage_label }}</text>{% endif %}<text class="axis-label{% if s.current %} axis-current{% endif %}" x="{{ s.cx }}" y="{{ c.label_y }}" text-anchor="middle">{{ _("%(n)s주", n=s.week) }}</text></a>
   {% else %}<rect class="slot-empty" x="{{ s.x + 1 }}" y="{{ c.band.y }}" width="{{ s.w - 2 }}" height="{{ c.band.h }}" rx="3"></rect><text class="axis-label" x="{{ s.cx }}" y="{{ c.label_y }}" text-anchor="middle">{{ _("%(n)s주", n=s.week) }}</text>{% endif %}
   {% endfor %}
-  {% for b in c.cash.bars %}<a href="#journal-w{{ b.week }}"><rect class="bar-v {{ 'bar-outline stroke-orange' if b.kind == 'orders' else 'fill-blue' }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"><title>{% if b.kind == "orders" %}{{ _("%(week)s주차 PG 주문 %(v)s", week=b.week, v=b.value|usd_cents) }}{% else %}{{ _("%(week)s주차 은행 입금 %(v)s", week=b.week, v=b.value|usd_cents) }}{% endif %}</title></rect></a>{% endfor %}
+  {% for b in c.cash.bars %}<a href="#journal-w{{ b.week }}" tabindex="-1"><rect class="bar-v {{ 'bar-outline stroke-orange' if b.kind == 'orders' else 'fill-blue' }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"><title>{% if b.kind == "orders" %}{{ _("%(week)s주차 PG 주문 %(v)s", week=b.week, v=b.value|usd_cents) }}{% else %}{{ _("%(week)s주차 은행 입금 %(v)s", week=b.week, v=b.value|usd_cents) }}{% endif %}</title></rect></a>{% endfor %}
   {% call(p) _watch_series(c.ratio.lines.orders1, "stroke-orange line-dotted line-faint", "fill-orange line-faint", 2.5, false) %}{{ _("%(week)s주차 정산 주문(한 주) %(v)s", week=p.week, v=p.value|pct) }}{% endcall %}
   {% call(p) _watch_series(c.ratio.lines.revenue3, "stroke-blue", "fill-blue") %}{{ _("%(week)s주차 은행 매출(3주) %(v)s", week=p.week, v=p.value|pct) }}{% endcall %}
   {% call(p) _watch_series(c.ratio.lines.orders3, "stroke-orange", "fill-orange") %}{{ _("%(week)s주차 정산 주문(3주) %(v)s", week=p.week, v=p.value|pct) }}{% endcall %}
   {% for d in c.cash.balance.segments %}<path class="line stroke-purple" d="{{ d }}" pathLength="100"></path>{% endfor %}
-  {% for p in c.cash.balance.points %}<a href="#journal-w{{ p.week }}"><circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ _("%(week)s주차 예상 최저 잔액 %(v)s", week=p.week, v=p.value|usd_cents) }}{% if p.shortfall_date %} · {{ _("%(date)s 부족", date=p.shortfall_date) }}{% endif %}</title></circle></a>{% endfor %}
-  {% for g in c.grades %}<a href="#journal-w{{ g.week }}"><g class="grade-chip{% if g.signal %} grade-signal{% endif %}"><rect x="{{ g.cx - 22 }}" y="{{ g.y - 8 }}" width="44" height="16" rx="8"></rect><text x="{{ g.cx }}" y="{{ g.y + 4 }}" text-anchor="middle">{{ g.grade or "–" }}</text><title>{{ _("%(week)s주차 마켓 등급 %(v)s", week=g.week, v=g.grade or "–") }}</title></g></a>{% endfor %}
+  {% for p in c.cash.balance.points %}<a href="#journal-w{{ p.week }}" tabindex="-1"><circle class="dot fill-{{ 'red' if p.negative else 'purple' }}" cx="{{ p.x }}" cy="{{ p.y }}" r="3.5"><title>{{ _("%(week)s주차 예상 최저 잔액 %(v)s", week=p.week, v=p.value|usd_cents) }}{% if p.shortfall_date %} · {{ _("%(date)s 부족", date=p.shortfall_date) }}{% endif %}</title></circle></a>{% endfor %}
+  {% for g in c.grades %}<a href="#journal-w{{ g.week }}" tabindex="-1"><g class="grade-chip{% if g.signal %} grade-signal{% endif %}"><rect x="{{ (g.cx - g.w / 2)|round(2) }}" y="{{ g.y - 8 }}" width="{{ g.w }}" height="16" rx="8"></rect><text x="{{ g.cx }}" y="{{ g.y + 4 }}" text-anchor="middle"{% if g.fit_w %} textLength="{{ g.fit_w }}" lengthAdjust="spacingAndGlyphs"{% endif %}>{{ g.grade or "–" }}</text><title>{{ _("%(week)s주차 마켓 등급 %(v)s", week=g.week, v=g.grade or "–") }}</title></g></a>{% endfor %}
   {% for d in c.dues %}<text class="due-mark due-{{ d.state }}" x="{{ d.cx }}" y="{{ c.due_y }}" text-anchor="middle">💵 {{ (d.due_on|string)[5:10] }}<title>{{ _("%(date)s 상환", date=d.due_on) }}{% if d.state != "future" %} · {{ d.state|repayment_label }}{% endif %}</title></text>{% endfor %}
 </svg>
 {%- endmacro %}
 
-{% macro watch_legend() -%}
+{% macro watch_legend(c) -%}
 <ul class="legend watch-legend">
 <li><span class="swatch swatch-line bg-orange"></span>{{ _("정산 주문(3주 합)") }}</li>
 <li><span class="swatch swatch-line swatch-dotted"></span>{{ _("정산 주문(한 주)") }}</li>
 <li><span class="swatch swatch-line bg-blue"></span>{{ _("은행 매출(3주 합)") }}</li>
-<li><span class="swatch swatch-line swatch-dashed"></span>{{ _("탐지 기준 %(v)s", v="75%") }}</li>
+<li><span class="swatch swatch-line swatch-dashed"></span>{{ _("탐지 기준 %(v)s", v=c.ratio.threshold_text) }}</li>
 <li><span class="swatch swatch-outline"></span>{{ _("PG 주문") }}</li>
 <li><span class="swatch bg-blue"></span>{{ _("은행 입금") }}</li>
 <li><span class="swatch swatch-line bg-purple"></span>{{ _("예상 최저 잔액") }}</li>

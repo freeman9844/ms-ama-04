@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from console.adapters import CosmosApplications
 from console.adapters import CosmosMonitoring, CosmosOps, CosmosPrivacy
-from console.app import create_app
+from console.app import create_app, state_tag
 from console.auth import AUDITOR, Principal
 from console.monitoring import load_monitoring_raw, loan_view, signal_metrics
 from consolepreview import fixtures
@@ -540,14 +540,17 @@ def test_usd_loan_s004_basis_has_no_approved_value_and_never_renders_none():
     assert "None" not in page and "Approved" not in page
 
 
-def _usd_page(weeks, loan_id, alerts=(), lang="en"):
+def _usd_page(weeks, loan_id, alerts=(), lang="en", query="", watching=False):
+    """watching=True면 결정 반영을 기다리는 화면(?since=<지금 지문>)을 연다."""
     deps = fixtures.build_deps()
     loan = dict(USD, id=loan_id, application_id=loan_id, applicant_id=SELLER, industry="Food",
                 amount_cents=500001, tenor_months=6, decision="approve",
                 baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
                 monitoring={"status": "completed", "replay_id": "rp", "processed_week": len(weeks), "weeks": weeks})
     deps.monitoring = fixtures.MemoryMonitoring([loan], list(alerts))
-    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang={lang}").text
+    if watching:
+        query += "&since=" + state_tag(deps.monitoring.get_loan(loan_id), deps.monitoring.list_alerts(loan_id, "rp"))
+    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang={lang}{query}").text
 
 
 def _watch(stage, kind="call", **fields):
@@ -631,8 +634,15 @@ def test_journal_chip_units():
                                                     "W:2:mkt_grade", "W:2:orders_vs_expected")]),
                          mkt_rating=4.25, mkt_grade="B", orders_vs_expected=0.7)]
     card = _journal(_usd_page(weeks, "usd-units"))
-    for text in ("Rating 4.25", "Market grade B", "Orders vs expected 70.0%"):
+    for text in ("Rating 4.25", "Market grade B", "Settlement orders vs expected 70.0%"):
         assert text in card, text
+
+
+def test_journal_rating_chip_non_numeric():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("rating_drop", "market", "weak", "W:2:mkt_rating")]),
+                         mkt_rating="4.5")]
+    assert "Rating 4.5" in _journal(_usd_page(weeks, "usd-rating-str"))
 
 
 def test_signal_metrics_by_week():
@@ -696,6 +706,26 @@ def test_ledger_folded_with_signal_cells():
     assert page.count("cell-warn") == 5
     assert all(warn not in cell for table in (flow, pg, market) for cell in table[0])
     assert 'aria-label="Weekly revenue and cash buffer"' not in page
+
+
+def test_ledger_open_flag_survives_refresh():
+    closed = _usd_page(_ledger_scene(), "usd-ledger")
+    assert re.search(r'<details id="ledger-all" class="card"><summary><a href="/loans/usd-ledger\?lang=en&amp;ledger=open#ledger-all">',
+                     closed)
+    opened = _usd_page(_ledger_scene(), "usd-ledger", query="&ledger=open")
+    assert re.search(r'<details id="ledger-all" class="card" open><summary><a href="/loans/usd-ledger\?lang=en#ledger-all">',
+                     opened)
+    waiting = _usd_page(_ledger_scene(), "usd-ledger", query="&ledger=open", watching=True)
+    refresh = re.search(r'http-equiv="refresh" content="\d+;url=([^"]+)"', waiting).group(1)
+    assert "since=" in refresh and "ledger=open" in refresh
+
+
+def test_watch_chart_one_tab_stop_per_week():
+    card = _journal(_usd_page(_ledger_scene(), "usd-tabs"))
+    chart = card[card.index("<svg"):card.index("</svg>")]
+    links = re.findall(r"<a [^>]*>", chart)
+    assert len(links) > 5
+    assert [a for a in links if 'tabindex="-1"' not in a] == [f'<a href="#journal-w{n}">' for n in range(1, 6)]
 
 
 def test_krw_and_legacy_usd_layout_unchanged():

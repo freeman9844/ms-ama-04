@@ -230,14 +230,14 @@
 <section id="watch-journal" class="card">
 <h2>{{ _("에이전트 감시 일지") }}{% if jn.open %} <small class="status {{ 'sev-high' if jn.open.stage == 'high' else 'sev-medium' if jn.open.stage == 'medium' else 'sev-low' }}">{{ _("열린 사건: %(stage)s · %(week)s주차부터", stage=jn.open.stage|stage_label, week=jn.open.since) }}</small>{% endif %}</h2>
 {% if folded %}{{ ch.watch_chart(ui.watch_chart, _("주간 신호와 현금 여력")) }}
-{{ ch.watch_legend() }}
+{{ ch.watch_legend(ui.watch_chart) }}
 {% endif %}
 <ul class="claims">
 {% for j in jn.lines %}
   <li id="journal-w{{ j.week }}"><strong>{{ _("%(n)s주차", n=j.week) }}</strong> <span class="status {{ 'sev-high' if j.stage == 'high' else 'sev-medium' if j.stage == 'medium' else 'sev-low' if j.stage == 'watch' else 'ok' if j.stage == 'resolved' else '' }}">{{ j.stage|stage_label }}</span>
     {% if j.notes %}<small>{{ j.notes|join(" · ") }}</small>{% endif %}
     {% if j.alert_id %}<a href="#{{ j.alert_id }}">{{ _("경보 카드") }}</a>{% endif %}
-    <div>{% for s in j.sources %}{% if s.state == "signal" %}{% for g in s.signals %}<span class="chip warn">{{ s.source|source_label }} · {{ g.code|signal_label }}</span>{% for e in g.evidence %}{% set val = e.value %}<span class="chip{% if val is none %} warn{% endif %}" title="{{ e.id }}">{% if e.label %}{{ _(e.label) }} {% if val is none %}{{ _("없음") }}{% elif e.unit == "pct" %}{{ val|pct }}{% elif e.unit == "usd" %}{{ val|usd_cents }}{% elif e.unit == "rating" %}{{ "%.2f"|format(val) }}{% else %}{{ val }}{% endif %}{% else %}{{ e.id }} = {{ val|usd_cents if e.id.endswith('_cents') else val if val is not none else _("없음") }}{% endif %}</span>{% endfor %}{% endfor %}
+    <div>{% for s in j.sources %}{% if s.state == "signal" %}{% for g in s.signals %}<span class="chip warn">{{ s.source|source_label }} · {{ g.code|signal_label }}</span>{% for e in g.evidence %}{% set val = e.value %}<span class="chip{% if val is none %} warn{% endif %}" title="{{ e.id }}">{% if e.label %}{{ _(e.label) }} {% if val is none %}{{ _("없음") }}{% elif e.unit == "pct" %}{{ val|pct }}{% elif e.unit == "usd" %}{{ val|usd_cents }}{% elif e.unit == "rating" %}{{ "%.2f"|format(val) if val is number else val }}{% else %}{{ val }}{% endif %}{% else %}{{ e.id }} = {{ val|usd_cents if e.id.endswith('_cents') else val if val is not none else _("없음") }}{% endif %}</span>{% endfor %}{% endfor %}
       {% else %}<span class="chip">{{ s.source|source_label }} · {% if s.state == "missing" %}{{ pgettext("journal", "자료 없음") }}{% else %}{{ _("정상") }}{% endif %}</span>{% endif %}{% endfor %}</div>
     {% if j.why_now or j.outlook %}<div>{% if j.why_now %}<strong>{{ _("왜 지금") }}</strong> {{ j.why_now|mt }} {% endif %}{% if j.outlook %}<strong>{{ _("다음 예상") }}</strong> {{ j.outlook|mt }}{% endif %}</div>{% endif %}
     {% if j.adjust_reason %}<div><strong>{{ _("조정 이유") }}</strong> {{ j.adjust_reason|mt }}</div>{% endif %}
@@ -260,7 +260,7 @@
 </ul>
 </section>
 {% endif %}
-{% if folded %}<details id="ledger-all" class="card"><summary>{{ _("원장 전체 보기") }}</summary>
+{% if folded %}<details id="ledger-all" class="card"{% if ledger_open %} open{% endif %}><summary><a href="{{ ledger_toggle_url }}#ledger-all">{{ _("원장 전체 보기") }}</a></summary>
 {{ ledger_sections(true) }}
 </details>{% else %}{{ ledger_sections(false) }}{% endif %}
 {% if l.repayment %}

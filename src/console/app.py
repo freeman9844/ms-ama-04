@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -802,8 +802,15 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                   **ctx: Any) -> HTMLResponse:
         mon = loan.get("monitoring") or {}
         alerts = loan_alerts(loan) if alerts is None else alerts
+        path = f"/loans/{quote(loan['id'], safe='')}"
+        # 접힌 원장의 열림 상태는 ?ledger=open으로 들고 다녀 새로 고침에도 남게 한다.
+        query = [(k, val) for k, val in (request.query_params.multi_items() if request else ()) if k != "ledger"]
+        ledger_open = request is not None and request.query_params.get("ledger") == "open"
         if request is not None:
-            ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
+            url = watch_url(request, path, state_tag(loan, alerts))
+            ctx["watch_url"] = f"{url}&ledger=open" if url and ledger_open else url
+        toggle = query if ledger_open else [*query, ("ledger", "open")]
+        ctx.update(ledger_open=ledger_open, ledger_toggle_url=f"{path}?{urlencode(toggle)}" if toggle else path)
         raw = (read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])[0] if i18n.current() != i18n.SOURCE
                else load_monitoring_raw(deps.raw, loan))
         contacts = monitoring_store().get_contacts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else None

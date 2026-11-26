@@ -19,6 +19,7 @@ DUE_Y = CASH_BASE + 18
 LABEL_Y = DUE_Y + 20
 HEIGHT = LABEL_Y + 8
 TICK_GAP = 10
+CHIP_GAP, CHIP_PAD, GLYPH_W = 8, 4, 6.5  # 마켓 등급 칩: 칸과의 여백, 칩 안쪽 여백, 굵은 10px 글자 한 자 폭 어림
 
 
 def _orders1(row: Mapping[str, Any]) -> Any:
@@ -96,6 +97,7 @@ def watch_chart(weeks: list[dict[str, Any]], lines: list[dict[str, Any]], instal
         "top": RATIO_TOP, "base": RATIO_BASE,
         "ticks": [{"y": ratio_y(f), "text": f"{f:.0%}"} for f in (0.0, 0.5, 1.0)],
         "threshold_y": ratio_y(THRESHOLD),
+        "threshold_text": f"{THRESHOLD:.0%}",
         "lines": {k: _polyline(((n, get(rows[n])) for n in done), cx, ratio_y, clipped=clipped)
                   for k, get in series.items()},
     }
@@ -104,7 +106,15 @@ def watch_chart(weeks: list[dict[str, Any]], lines: list[dict[str, Any]], instal
         sources = (by_week.get(week) or {}).get("sources") or ()
         return any(s.get("source") == "market" and s.get("state") == "signal" for s in sources)
 
-    grades = [{"week": n, "cx": cx(n), "y": GRADE_Y, "grade": rows[n].get("mkt_grade"), "signal": market_signal(n)}
+    chip_w = _r(slot - CHIP_GAP)
+
+    def chip_fit(grade: Any) -> float | None:
+        """글자 폭 어림이 칩 안쪽을 넘으면 그 폭으로 눌러 맞출 값. 맞으면 None."""
+        inner = _r(chip_w - CHIP_PAD)
+        return inner if grade and len(str(grade)) * GLYPH_W > inner else None
+
+    grades = [{"week": n, "cx": cx(n), "y": GRADE_Y, "w": chip_w, "fit_w": chip_fit(rows[n].get("mkt_grade")),
+               "grade": rows[n].get("mkt_grade"), "signal": market_signal(n)}
               for n in done]
 
     bar_keys = (("orders", "order_gross_cents"), ("inflow", "revenue_cents"))
