@@ -324,5 +324,22 @@
   "조정 이유": "Adjustment reason",
   "주간 마켓 스냅샷": "Weekly market snapshot",
   "정산 대기": "Pending settlement",
-  "마켓 자료 없음": "No marketplace data"
+  "마켓 자료 없음": "No marketplace data",
+  "주간 신호와 현금 여력": "Weekly signals and cash headroom",
+  "원장 전체 보기": "Full ledger",
+  "정산 주문(3주 합)": "Settlement orders (3 wks)",
+  "정산 주문(한 주)": "Settlement orders (1 wk)",
+  "은행 매출(3주 합)": "Bank revenue (3 wks)",
+  "탐지 기준 %(v)s": "Detection threshold %(v)s",
+  "PG 주문": "PG orders",
+  "은행 입금": "Bank inflow",
+  "%(week)s주차 정산 주문(3주) %(v)s": "Week %(week)s settlement orders (3 wks) %(v)s",
+  "%(week)s주차 정산 주문(한 주) %(v)s": "Week %(week)s settlement orders (1 wk) %(v)s",
+  "%(week)s주차 은행 매출(3주) %(v)s": "Week %(week)s bank revenue (3 wks) %(v)s",
+  "%(week)s주차 PG 주문 %(v)s": "Week %(week)s PG orders %(v)s",
+  "%(week)s주차 은행 입금 %(v)s": "Week %(week)s bank inflow %(v)s",
+  "%(week)s주차 예상 최저 잔액 %(v)s": "Week %(week)s projected min balance %(v)s",
+  "%(week)s주차 마켓 등급 %(v)s": "Week %(week)s market grade %(v)s",
+  "%(date)s 상환": "Due %(date)s",
+  "%(week)s주차 · %(stage)s": "Week %(week)s · %(stage)s"
 }

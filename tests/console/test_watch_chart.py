@@ -128,7 +128,13 @@ def test_cash_axis_signed():
     for b in cash["bars"]:
         assert b["h"] >= 0
         assert b["y"] + b["h"] == pytest.approx(cash["zero_y"], abs=0.01)
-    assert {t["text_cents"] for t in cash["ticks"]} == {-25400, 0, 1240000}
+
+
+def test_cash_tick_near_zero_dropped():
+    assert [t["text_cents"] for t in _chart()["cash"]["ticks"]] == [0, 1240000]  # -$254 sits 2.4px from $0
+    weeks, lines = _dailylook()
+    weeks[6]["row"]["projected_min_balance_cents"] = -400000
+    assert [t["text_cents"] for t in _chart(weeks, lines)["cash"]["ticks"]] == [-400000, 0, 1240000]
 
 
 def test_grade_chip_missing_market_row():

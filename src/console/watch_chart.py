@@ -18,6 +18,7 @@ CASH_TOP, CASH_BASE = GRADE_Y + 24, GRADE_Y + 144
 DUE_Y = CASH_BASE + 18
 LABEL_Y = DUE_Y + 20
 HEIGHT = LABEL_Y + 8
+TICK_GAP = 10
 
 
 def _orders1(row: Mapping[str, Any]) -> Any:
@@ -130,8 +131,9 @@ def watch_chart(weeks: list[dict[str, Any]], lines: list[dict[str, Any]], instal
                          "y": top, "w": _r(bw * 0.9), "h": _r(bottom - top), "value": v})
     cash = {
         "top": CASH_TOP, "base": CASH_BASE, "zero_y": zero_y,
+        # $0 눈금과 10px 안으로 붙는 끝 눈금은 글자가 겹쳐 뺀다.
         "ticks": [{"y": cash_y(t), "text_cents": int(t) if float(t).is_integer() else t}
-                  for t in sorted({lo, 0.0, hi})],
+                  for t in sorted({lo, 0.0, hi}) if t == 0 or abs(cash_y(t) - zero_y) >= TICK_GAP],
         "bars": bars,
         "balance": _polyline(((n, rows[n].get("projected_min_balance_cents")) for n in done), cx, cash_y,
                              negative=lambda _week, v: v < 0,

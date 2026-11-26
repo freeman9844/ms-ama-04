@@ -302,6 +302,7 @@ def loan_view(
         "market_rows": market_rows,
         "market_note": _("마켓 자료 없음") if usd and weeks and not market_rows else None,
         "basis_cards": _basis_cards(loan, weeks),
+        **({"signal_hits": signal_metrics(weeks)} if usd else {}),
         **_plan_view(loan.get("repayment") or {}),
         "holds": sorted(mon.get("holds") or (), key=lambda h: list(HOLD_LABELS).index(h) if h in HOLD_LABELS else 99),
     }

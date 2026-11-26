@@ -641,6 +641,73 @@ def test_signal_metrics_by_week():
                                               5: {"projected_min_balance_cents"}}
 
 
+_PG_ROW = {"order_gross_cents": 600000, "expected_orders_cents": 584400, "returns_cents": 12000, "held_cents": 0,
+           "deductions_cents": 9000, "settle_net_cents": 579000}
+
+
+def _ledger_scene():
+    weeks = _scene_weeks()
+    for w in weeks:
+        w["row"] = {**_PG_ROW, **_market_row(w["week"]), **w["row"]}
+    return weeks
+
+
+def _table_cells(html):
+    """표마다 tbody 행의 `<td …>` 속성 목록."""
+    return [[re.findall(r"<td([^>]*)>", tr) for tr in re.findall(r"<tr>(.*?)</tr>", table.split("<tbody>")[1], re.S)]
+            for table in re.findall(r"<table>.*?</table>", html, re.S)]
+
+
+def test_watch_chart_inside_journal_card():
+    card = _journal(_usd_page(_scene_weeks(), "usd-chart"))
+    assert 'class="chart watch-chart"' in card
+    assert card.index('class="chart watch-chart"') < card.index('id="journal-w')
+    assert 'aria-label="Weekly signals and cash headroom"' in card
+    for n in range(1, 6):
+        assert f'href="#journal-w{n}"' in card
+    assert 'href="#journal-w6"' not in card
+    assert card.count('class="slot-empty"') == 8
+    assert 'class="stage-high"' in card and "🔔 High" in card
+    for text in ("Settlement orders (3 wks)", "Settlement orders (1 wk)", "Bank revenue (3 wks)",
+                 "Projected min balance", "Week 5 projected min balance -$480", "Week 3 · Medium"):
+        assert text in card, text
+
+
+def test_watch_chart_slot_without_journal_line():
+    weeks = [{"week": 1, "row": {"week": 1, "revenue_cents": 404123}, "triggers": []},
+             _watch_week(2, _watch("normal", "normal"))]
+    card = _journal(_usd_page(weeks, "usd-nostage"))
+    assert 'class="stage-none"' in card and 'href="#journal-w1"' in card
+
+
+def test_ledger_folded_with_signal_cells():
+    page = _usd_page(_ledger_scene(), "usd-fold")
+    match = re.search(r'(<details id="ledger-all"[^>]*>)(.*?)</details>', page, re.S)
+    assert match and " open" not in match.group(1)
+    ledger = match.group(2)
+    for text in ("Full ledger", "Weekly flow and detectors", "Weekly settlement (PG ledger)", "Weekly market snapshot"):
+        assert text in ledger, text
+    assert page.index('id="watch-journal"') < page.index('id="ledger-all"')
+    flow, pg, market = _table_cells(ledger)
+    warn = ' class="cell-warn"'
+    assert flow[4][6] == warn  # 5주차 전망 최저 잔고
+    assert pg[2][3] == warn and pg[3][3] == warn  # 3·4주차 보류
+    assert market[1][2] == warn and market[2][5] == warn  # 2주차 취소율, 3주차 경고
+    assert page.count("cell-warn") == 5
+    assert all(warn not in cell for table in (flow, pg, market) for cell in table[0])
+    assert 'aria-label="Weekly revenue and cash buffer"' not in page
+
+
+def test_krw_and_legacy_usd_layout_unchanged():
+    weeks = [_track_week(1, [], [], []), _track_week(2, [], ["inflow_drop"], [{"trigger": "inflow_drop"}]),
+             _track_week(3, ["basis_breach"], [], [])]
+    krw = TestClient(create_app(fixtures.build_deps())).get("/loans/app-20261103-p03?lang=en").text
+    for page in (_usd_page(weeks, "usd-legacy-layout"), krw):
+        for text in ("watch-chart", "ledger-all", "<details", "cell-warn"):
+            assert text not in page, text
+        assert "Weekly flow and detectors" in page and 'aria-label="Weekly revenue and cash buffer"' in page
+
+
 def test_journal_market_missing_shows_no_data_chip():
     weeks = [_watch_week(1, _watch("normal", "normal", market=False)),
              _watch_week(2, _watch("normal", "normal", market=True), mkt_cancel_rate=0.031),
