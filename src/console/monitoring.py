@@ -13,7 +13,6 @@ from agents.ledger_monitor import LedgerBaseline, ledger_catalog
 from agents.monitoring import Baseline, evidence_catalog
 from agents.pretranslate import load_case_raw
 from agents.repayment import item_amount, item_key
-from agents.usd_monitoring import track_summary
 from console import i18n
 from console.i18n import _
 from console.views import RawData, RawStore, _map_strings, _text_functions
@@ -49,6 +48,31 @@ TRIGGER_LABELS = {
     "basis_breach": "승인 근거 훼손",
 }
 REPAYMENT_LABELS = {"scheduled": "예정", "paid": "납부", "partial": "부분납", "missed": "미납"}
+# USD 감시 일지(단계형 조기경보).
+STAGE_LABELS = {"normal": "정상", "watch": "관찰", "medium": "중간", "high": "높음", "resolved": "해소"}
+SOURCE_LABELS = {"bank": "은행", "settlement": "정산", "market": "마켓"}
+SIGNAL_LABELS = TRIGGER_LABELS | {
+    "orders_dip": "주문 일시 감소",
+    "returns_rising": "반품률 상승",
+    "deductions_rising": "공제율 상승",
+    "cancel_rise": "취소율 상승",
+    "cancel_spike": "취소율 급등",
+    "rating_drop": "평점 하락",
+    "grade_down": "등급 강등",
+    "account_warning": "판매 경고·정지",
+}
+# 일지 줄의 설명. 키는 incident.py의 kind(explained·suppressed·hold·quiet·resolved_quiet·resolved_agent)와
+# 줄의 에이전트(fallback)·경보 처리(updated). normal·call은 신호와 판단이 줄을 채워 따로 설명하지 않는다.
+JOURNAL_LABELS = {
+    "explained": "정상 · 은행 입금 감소는 정산 예정표로 설명됨",
+    "suppressed": "정상 · 해소된 신호가 이어짐",
+    "hold": "변화 없음 · 단계 유지",
+    "quiet": "신호 없음 %(n)s주째",
+    "resolved_quiet": "해소 · 2주 연속 신호 없음",
+    "resolved_agent": "해소 · 에이전트 판단",
+    "fallback": "에이전트 미응답 · 규칙 단계",
+    "updated": "원인 갱신",
+}
 # 승인 근거 코드(USD 정산·마켓 신호) → 승인 당시 근거 설명.
 BASIS_LABELS = {
     "S003": "빠르고 정확한 정산",
@@ -120,6 +144,8 @@ MONITORING_FILTERS = {
     "borrower_plan_label": BORROWER_PLAN_LABELS,
     "basis_label": BASIS_LABELS,
     "basis_metric_label": BASIS_METRIC_LABELS,
+    "source_label": SOURCE_LABELS,
+    "signal_label": SIGNAL_LABELS,
 }
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
 CAUSE_LABELS = {
@@ -133,7 +159,8 @@ CAUSE_LABELS = {
 NO_CAUSE_LABEL = "—"
 NO_LEDGER_LABEL = "정산 원장 없음"
 # collections·restructure는 미납 추심 전환 전에 경보 문서에 붙던 필드다(옛 문서 표시용).
-_SHOWN_FIELDS = ("summary", "check_action", "signals", "collections", "restructure")
+_SHOWN_FIELDS = ("summary", "check_action", "signals", "collections", "restructure", "why_now", "outlook", "adjust_reason")
+_JOURNAL_TEXT = ("why_now", "outlook", "adjust_reason")
 _CASE_FIELDS = ("recent_alert", "collections", "restructure")
 # 제안서에서 가명 토큰을 복원할 필드. 고객 문구(text·sent_text)는 토큰이 없어 그대로 보인다.
 _PROPOSAL_FIELDS = ("reason", "hardship", "evidence")
@@ -181,6 +208,10 @@ def loan_view(
     ledger_rows = ([r for r in rows if "order_gross_cents" in r] if usd else
                    [{k: r[k] for k in _LEDGER_ROW_FIELDS} for r in rows if "order_gross" in r])
     ledger_note = _(NO_LEDGER_LABEL) if weeks and not ledger_rows else None
+    journal = _journal_view(weeks, catalog)
+    for line in journal["lines"] if journal else ():
+        line.update(_map_strings({k: line[k] for k in _JOURNAL_TEXT}, model_text))
+    market_rows = [r for r in rows if "mkt_cancel_rate" in r] if usd else []
     shown: list[dict[str, Any]] = []
     cases: list[dict[str, Any]] = []
     wanted: dict[str, None] = {}
@@ -211,6 +242,7 @@ def loan_view(
                     "text": s["text"],
                     "evidence": [(m, catalog.get(m)) for m in s.get("metric_ids", ())],
                     "txn_ids": list(s.get("txn_ids", ())),
+                    "source": s.get("source"),
                 }
             )
             for t in s.get("txn_ids", ()):
@@ -247,27 +279,74 @@ def loan_view(
         "pii": pii,
         "ledger_rows": ledger_rows,
         "ledger_note": ledger_note,
-        "track": _track_view(weeks),
+        "journal": journal,
+        "market_rows": market_rows,
+        "market_note": _("마켓 자료 없음") if usd and weeks and not market_rows else None,
         "basis_cards": _basis_cards(loan, weeks),
         **_plan_view(loan.get("repayment") or {}),
         "holds": sorted(mon.get("holds") or (), key=lambda h: list(HOLD_LABELS).index(h) if h in HOLD_LABELS else 99),
     }
 
 
-def _track_view(weeks: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """USD 두 트랙(은행만·정산/마켓) 비교. 트랙 키가 없는 옛·KRW 재생은 None."""
-    summary = track_summary(weeks)
-    if summary is None:
+def _journal_view(weeks: list[dict[str, Any]], catalog: Mapping[str, Any]) -> dict[str, Any] | None:
+    """USD 감시 일지: 주별 일지 줄(최신 주가 먼저)과 열린 사건. 일지 줄이 하나도 없는 옛·KRW 재생은 None."""
+    entries = [(w["week"], w["watch"], w.get("row") or {}) for w in weeks if w.get("watch")]
+    if not entries:
         return None
-    timeline = []
-    for w in weeks:
-        full, bank = w.get("triggers"), w.get("bank_only_triggers")
-        timeline.append({
-            "week": w["week"],
-            "bank": "trigger" if bank and full else "bank_only" if bank else "",
-            "full": "trigger" if full else "explained" if w.get("explained") else "",
+    lines: list[dict[str, Any]] = []
+    incident: dict[str, Any] | None = None
+    for week, watch, row in entries:
+        if watch.get("stage") == "resolved":
+            incident = None
+        elif watch.get("incident_id"):
+            if incident is None or incident["id"] != watch["incident_id"]:
+                incident = {"id": watch["incident_id"], "since": week}
+            incident["stage"] = watch["stage"]
+        lines.append({
+            "week": week,
+            "stage": watch["stage"],
+            "kind": watch.get("kind"),
+            "quiet_weeks": watch.get("quiet_weeks") or 0,
+            "agent": watch.get("agent"),
+            "why_now": watch.get("why_now"),
+            "outlook": watch.get("outlook"),
+            "adjust_reason": watch.get("adjust_reason"),
+            "alert_id": watch.get("alert_id"),
+            "alert_action": watch.get("alert_action"),
+            "notes": _journal_notes(watch),
+            "sources": _journal_sources(watch, row, catalog),
         })
-    return {**summary, "timeline": timeline}
+    return {
+        "lines": lines[::-1],
+        "open": {"stage": incident["stage"], "since": incident["since"]} if incident else None,
+    }
+
+
+def _journal_notes(watch: Mapping[str, Any]) -> list[str]:
+    keys = [watch.get("kind"), "fallback" if watch.get("agent") == "fallback" else None,
+            "updated" if watch.get("alert_action") == "updated" else None]
+    return [_(JOURNAL_LABELS[k], n=watch.get("quiet_weeks") or 0) for k in keys if k in JOURNAL_LABELS]
+
+
+def _journal_sources(watch: Mapping[str, Any], row: Mapping[str, Any], catalog: Mapping[str, Any]) -> list[dict[str, Any]]:
+    # 마켓 흐름이 있어도 그 주 스냅샷 행(mkt_*)이 없으면 자료 없음이다. 정상으로 보이지 않게 한다.
+    market_missing = not watch.get("market") or "mkt_cancel_rate" not in row
+    out = []
+    for source in SOURCE_LABELS:
+        signals = [
+            {"code": s["code"], "strength": s.get("strength"),
+             "evidence": [(m, catalog.get(m)) for m in s.get("metric_ids", ())]}
+            for s in watch.get("signals") or () if s.get("source") == source
+        ]
+        state = "signal" if signals else "missing" if source == "market" and market_missing else "normal"
+        out.append({"source": source, "state": state, "signals": signals})
+    return out
+
+
+def stage_label(stage: str | None) -> str:
+    text = STAGE_LABELS.get(stage or "", stage or "-")
+    # "관찰"은 조치 라벨(Monitor)과 영어가 달라 문맥을 둔다.
+    return i18n.pgettext("stage", text) if stage == "watch" else _(text)
 
 
 def _basis_cards(loan: Mapping[str, Any], weeks: list[dict[str, Any]]) -> list[dict[str, Any]]:

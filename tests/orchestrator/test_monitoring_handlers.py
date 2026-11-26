@@ -11,6 +11,7 @@ from agents.data_assembly import SourceError
 from agents.early_warning import _TRIGGER_TEXT, EW_AGENT
 from agents.escalation import plan_link, stage_message
 from agents.features import monthly_installment
+from agents.incident import new_watch
 from agents.monitoring import WEEKS
 from agents.repayment import item_key
 from agents.runtime import AgentRun
@@ -34,6 +35,7 @@ from journey.monitoring import (
 from mockapis.app import create_app as create_mock_app
 from mockapis.demo import FlowStore, build_demo_cases
 from shared.repayment import LENDER_DEBIT, due_dates
+from shared.usd_source import UsdMarketFlow
 
 AS_OF = date(2026, 11, 2)
 SECRET = b"s" * 32
@@ -662,22 +664,67 @@ def test_usd_final_week_resolved_before_hold_does_not_publish_week_fourteen(mock
     assert not deps.events.sent and loan(deps)["monitoring"]["status"] == "completed"
 
 
-class EnglishHigh:
+class StageAgents:
+    """USD EW: get_baseline의 기본 단계를 그대로 쓰고, medium·high면 raise_alert(영어, 첫 원인 후보·신호 근거)를 먼저 부른다.
+    호출 수를 센다. Collections는 오프라인 폴백이다."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def stage(self, base):
+        return base["base_stage"]
+
+    def adjust(self, base, stage):
+        return ""
+
     def run(self, spec, input_text, handlers):
         if spec.name != EW_AGENT:
             raise RuntimeError("Offline collections fallback")
+        self.calls += 1
         base = handlers["get_baseline"]({})
-        cause = next(iter(base["cause_candidates"]), {})
-        evidence = cause.get("evidence_ids") or [f"W:{base['current_week']}:revenue_vs_expected"]
-        out = handlers["raise_alert"](dict(severity="high", summary="Receipts are under pressure.",
-            check_action="Check available funds.", recommended_action="contact_borrower",
-            primary_cause=cause.get("cause", ""), secondary_causes=[], signals=[dict(
-                kind="inflow_drop", text="Check recent receipts.", metric_ids=evidence, txn_ids=[])]))
-        assert out["accepted"], out
-        return AgentRun(spec.name, "1", "offline", spec.output_model.model_validate(
-            dict(decision="alert", reason="Review the payment schedule.")), [], 1, 1)
+        stage = self.stage(base)
+        if stage in ("medium", "high"):
+            candidates = base["cause_candidates"]
+            cause = candidates[0] if candidates else None
+            signals = [dict(kind=CAUSE_SIGNAL.get(cause["cause"], "other"), text="The main cause metric moved first.",
+                            metric_ids=list(cause["evidence_ids"]), txn_ids=[])] if cause else []
+            signals += [dict(kind="other", text="The detector flagged this signal.", metric_ids=list(s["metric_ids"]),
+                             txn_ids=[]) for s in base["signals"] if s.get("metric_ids")]
+            out = handlers["raise_alert"](dict(
+                severity=stage, summary="Cash flow is under pressure.", check_action="Check available funds.",
+                recommended_action="officer_review", primary_cause=cause["cause"] if cause else "",
+                secondary_causes=[c["cause"] for c in candidates[1:3]], signals=signals[:6]))
+            assert out["accepted"], out
+        return AgentRun(spec.name, "1", f"conv-{self.calls}", spec.output_model.model_validate(dict(
+            stage=stage, why_now="Settlement data moved first and bank receipts followed.",
+            outlook="An officer should review the evidence before the next update.",
+            adjust_reason=self.adjust(base, stage),
+            reason="The stage follows the detector signals.")), [], 1, 1)
 
 
+class EnglishHigh(StageAgents):
+    """check_stage가 받아 주는 가장 높은 단계: 은행 강한 신호가 있으면 high, 아니면 기본 단계."""
+
+    def stage(self, base):
+        bank_strong = any(s["source"] == "bank" and s["strength"] == "strong" for s in base["signals"])
+        return "high" if bank_strong else base["base_stage"]
+
+
+class HoldMedium(StageAgents):
+    """높음 기본 단계를 마켓 근거(W:n:mkt_*)를 인용해 중간으로 한 단계 낮춘다(check_stage 통과). 그 밖에는 기본 단계."""
+
+    def stage(self, base):
+        return "medium" if base["base_stage"] == "high" else base["base_stage"]
+
+    def adjust(self, base, stage):
+        if stage == base["base_stage"]:
+            return ""
+        market = next(m for s in base["signals"] if s["source"] == "market" for m in s["metric_ids"])
+        return f"The marketplace grade in {market} still lets the seller sell, so the shortfall is checked first."
+
+
+# 스트레스(높음 아님) 변형은 HoldMedium으로 사건을 중간에 묶어 추심 제안·7일 7회 경로를 본다. 에이전트 없이도
+# 스펙 §5.4 폴백이 스스로 에스컬레이션하며, 그 경로는 test_usd_agents_disabled_still_escalates가 본다.
 @pytest.mark.parametrize("seller,stress,high", [("seller-bakery-20", False, False),
     ("seller-dailylook-01", True, False), ("seller-dailylook-01", True, True)])
 def test_usd_officer_to_servicing(run_journey, seller, stress, high):
@@ -732,6 +779,8 @@ def test_usd_officer_to_servicing(run_journey, seller, stress, high):
     rid = started["replay_id"]
     if high:
         deps = replace(deps, agents=EnglishHigh())
+    elif stress:
+        deps = replace(deps, agents=HoldMedium())
     pump(deps, outbox)
     if high:
         mon = loan(deps)["monitoring"]
@@ -753,6 +802,8 @@ def test_usd_officer_to_servicing(run_journey, seller, stress, high):
         assert not officer_contacts(deps, rid)
         if not high:
             assert mon["paused_week"] == 13
+            assert {w["watch"]["stage"] for w in mon["weeks"]} <= {"normal", "watch", "medium"}
+            assert all(w["watch"]["agent"] == "agent" for w in mon["weeks"] if w["watch"]["agent"])
             assert cases(deps)[0]["proposal"]["evidence"]["amount_cents"] == 83333
             assert cases(deps)[0]["proposal"]["evidence"]["contacts_7d"] == 7
         while (mon := loan(deps)["monitoring"])["status"] == "paused":
@@ -790,7 +841,7 @@ def test_usd_officer_to_servicing(run_journey, seller, stress, high):
             monitoring_module.start_replay(replace(deps, mock=WrongLoanFeed()), LOAN)
 
 
-def usd_registration(run_journey, substitutions=None, ratio=None):
+def usd_registration(run_journey, substitutions=None, ratio=None, seller="seller-dailylook-01"):
     """USD 승인 후 이미 등록된 대출을 지우고, 심사 근거(정책 대체 규칙·대사 비율)를 바꿔 다시 등록할 입력을 만든다."""
     import asyncio
     from functools import partial
@@ -802,7 +853,7 @@ def usd_registration(run_journey, substitutions=None, ratio=None):
     from policy.rules import load_rules
     from shared.contracts import USD_V1
 
-    day, seller = date(2026, 11, 24), "seller-dailylook-01"
+    day = date(2026, 11, 24)
     sellers = build_demo_cases(day)
     outbox = Outbox()
     now = NOW.replace(day=day.day)
@@ -854,7 +905,49 @@ def test_register_krw_loan_has_no_approval_basis(mock_app):
     assert "approval_basis" not in loan(deps)
 
 
+def test_usd_monitoring_consent_includes_marketplace(run_journey):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-bakery-20")
+    register_monitoring(deps, registration)
+    assert replay(deps, **meta)["replay_id"]
+    mon = loan(deps)["monitoring"]
+    consent = deps.store.read("consents", mon["consent_id"], mon["consent_id"])
+    assert consent["scopes"] == ["account", "pg", "marketplace"]
+    assert deps.raw.get_json(f"consent-{mon['consent_id']}", "market_flow.json")
+    assert mon["market"] == "ok"
+
+
+def test_krw_monitoring_consent_scopes_unchanged(mock_app):
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    mon = loan(deps)["monitoring"]
+    consent = deps.store.read("consents", mon["consent_id"], mon["consent_id"])
+    assert consent["scopes"] == ["account", "pg"]
+    assert "market" not in mon
+    assert deps.raw.get_json(f"consent-{mon['consent_id']}", "market_flow.json") is None
+
+
+def test_market_flow_failure_keeps_replaying(run_journey, monkeypatch, caplog):
+    deps, outbox, registration, meta = usd_registration(run_journey, seller="seller-bakery-20")
+    register_monitoring(deps, registration)
+    fetch = deps.mock.fetch
+    sentinel = "SYNTHETIC-PRIVATE-MARKET-VALUE"
+    def corrupt(source, token, params=None):
+        if source == "market_flow":
+            return {"weeks": [{"week_end": sentinel}]}
+        return fetch(source, token, params)
+    monkeypatch.setattr(deps.mock, "fetch", corrupt)
+    assert replay(deps, **meta)["replay_id"]
+    pump(deps, outbox)
+    mon = loan(deps)["monitoring"]
+    assert mon["market"] == "missing"
+    assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
+    assert sentinel not in caplog.text
+    assert caplog.text.count("저장된 마켓 흐름 없음") == 1
+
+
 def test_usd_week_entry_records_both_tracks(run_journey):
+
     deps, outbox, registration, meta = usd_registration(run_journey)
     register_monitoring(deps, registration)
     assert replay(deps, **meta)["replay_id"]
@@ -873,6 +966,250 @@ def test_replay_restart_keeps_approval_basis(run_journey):
     replay(deps, **meta)
     replay(deps, **meta)
     assert loan(deps)["approval_basis"] == basis
+
+
+def finish_usd(deps, outbox, meta, rid):
+    """Service Bus 흉내로 USD 재생을 끝까지 돌린다. 대기 항목은 승인·유지로 풀고 재개한다."""
+    pump(deps, outbox)
+    while (mon := loan(deps)["monitoring"])["status"] in ("paused", "awaiting_customer", "awaiting_resume"):
+        if mon["status"] == "awaiting_resume":
+            assert replay(deps, action="resume", replay_id=rid, **meta)
+            pump(deps, outbox)
+        elif mon["holds"][0] == "collections_proposal":
+            assert decide_collections(deps, mon["pause_case_id"], **meta)
+        elif mon["holds"][0] == "customer_response":
+            offer_id = loan(deps)["repayment"]["offer"]["offer_id"]
+            assert handle_restructure_decision(deps, json.dumps(dict(meta, kind="plan_choice", loan_id=LOAN,
+                                                                      offer_id=offer_id, option="keep")))
+        else:
+            raise AssertionError(mon["holds"])
+    assert loan(deps)["monitoring"]["status"] == "completed"
+
+
+def usd_watch_replay(run_journey, seller, agents):
+    deps, outbox, registration, meta = usd_registration(run_journey, seller=seller)
+    register_monitoring(deps, registration)
+    deps = replace(deps, agents=agents)
+    rid = replay(deps, **meta)["replay_id"]
+    finish_usd(deps, outbox, meta, rid)
+    return deps, outbox, rid, loan(deps)["monitoring"]
+
+
+def ladder(mon):
+    """일지 단계가 바뀐 (단계, 첫 주). 정상 줄은 뺀다."""
+    out = []
+    for w in mon["weeks"]:
+        stage = w["watch"]["stage"]
+        if stage != "normal" and (not out or out[-1][0] != stage):
+            out.append((stage, w["week"]))
+    return out
+
+
+def ew_contacts_in(deps, rid, week):
+    row = week["row"]
+    return [c for c in contacts(deps, rid) if c["by"] == "early_warning" and row["start"] <= c["on"] <= row["end"]]
+
+
+def test_usd_watch_journal_and_alerts(run_journey):
+    agents = StageAgents()
+    deps, outbox, rid, mon = usd_watch_replay(run_journey, "seller-dailylook-01", agents)
+    weeks = mon["weeks"]
+    assert [w["week"] for w in weeks] == list(range(1, WEEKS + 1)) and all(w["watch"] for w in weeks)
+    stages = [s for s, _ in ladder(mon)]
+    assert stages[:3] == ["watch", "medium", "high"]
+    ups = [w for w in weeks if w["watch"]["stage_up"]]
+    assert len(alerts(deps)) == len(ups) and len(outbox.bodies(TOPIC_ALERT)) == len(alerts(deps))
+    assert all(w["alert_id"] and w["watch"]["alert_action"] == "created" for w in ups)
+    for w in weeks:
+        if w["watch"]["stage"] == "watch":
+            assert w["alert_id"] is None and w["watch"]["alert_action"] is None and not ew_contacts_in(deps, rid, w)
+    first_high = next(w for w in weeks if w["watch"]["stage"] == "high")
+    s1 = next(c for c in contacts(deps, rid) if c["ref"] == f"{rid}-s1")
+    assert s1["on"] == first_high["row"]["end"]
+    assert mon["escalation"]["stage1"]["alert_id"] == first_high["watch"]["alert_id"]
+    assert all(w["investigation"] is None for w in weeks if w["watch"]["agent"] is None)
+    assert 0 < agents.calls <= 8
+    assert mon["watch"]["stages"] == [w["watch"]["stage"] for w in weeks]
+
+
+def test_usd_gearstore_resolves_without_escalation(run_journey):
+    agents = StageAgents()
+    deps, _, rid, mon = usd_watch_replay(run_journey, "seller-gearstore-06", agents)
+    assert [s for s, _ in ladder(mon)] == ["watch", "medium", "resolved"]
+    assert alerts(deps) and any(w["watch"]["kind"] == "resolved_quiet" for w in mon["weeks"])
+    assert not [c for c in contacts(deps, rid) if c["ref"] in (f"{rid}-s1", f"{rid}-s2")]
+    assert mon["escalation"] == {"stage1": None, "stage2": None}
+    assert agents.calls <= 8
+
+
+def test_usd_cause_update_keeps_alert_id_and_does_not_republish(run_journey, monkeypatch):
+    # 장면마다 원인 후보가 하나뿐이라(dailylook은 sales_slump) 첫 경보가 다른 원인으로 저장된 것처럼 꾸민다.
+    deps, outbox, registration, meta = usd_registration(run_journey, seller="seller-dailylook-01")
+    register_monitoring(deps, registration)
+    agents = StageAgents()
+    deps = replace(deps, agents=agents)
+    real, seeded = deps.store.upsert, []
+
+    def stale_first_alert(container, document):
+        if container == ALERTS and document["id"].startswith("ew-") and not seeded:
+            seeded.append(document["id"])
+            document = dict(document, primary_cause="settlement_hold", secondary_causes=[])
+        return real(container, document)
+
+    monkeypatch.setattr(deps.store, "upsert", stale_first_alert)
+    rid = replay(deps, **meta)["replay_id"]
+    finish_usd(deps, outbox, meta, rid)
+    mon = loan(deps)["monitoring"]
+    created = [w["watch"]["alert_id"] for w in mon["weeks"] if w["watch"]["alert_action"] == "created"]
+    updated = [w for w in mon["weeks"] if w["watch"]["alert_action"] == "updated"]
+    assert len(updated) == 1 and updated[0]["alert_id"] is None and updated[0]["watch"]["stage_up"] is False
+    alert_id = updated[0]["watch"]["alert_id"]
+    assert alert_id == seeded[0] == created[0]
+    doc = deps.store.read(ALERTS, alert_id, LOAN)
+    assert doc["primary_cause"] == "sales_slump" and doc["id"] == alert_id and doc["why_now"]
+    assert len(alerts(deps)) == len(created)
+    published = [json.loads(b)["alert_id"] for b in outbox.bodies(TOPIC_ALERT)]
+    assert published == created and published.count(alert_id) == 1
+    assert agents.calls <= 8
+
+
+def test_usd_agents_disabled_still_escalates(run_journey):
+    deps, _, rid, mon = usd_watch_replay(run_journey, "seller-dailylook-01", None)
+    called = [w["watch"] for w in mon["weeks"] if w["watch"]["agent"] is not None]
+    assert called and all(line["agent"] == "fallback" for line in called)
+    assert [s for s, _ in ladder(mon)][:3] == ["watch", "medium", "high"]
+    first_high = next(w for w in mon["weeks"] if w["watch"]["stage"] == "high")
+    s1 = next(c for c in contacts(deps, rid) if c["ref"] == f"{rid}-s1")
+    assert (s1["on"], s1["status"]) == (first_high["row"]["end"], "sent")
+
+
+def test_usd_watch_retry_does_not_duplicate_alert(run_journey, monkeypatch):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-dailylook-01")
+    register_monitoring(deps, registration)
+    agents = StageAgents()
+    deps = replace(deps, agents=agents)
+    rid = replay(deps, **meta)["replay_id"]
+    real, failed = deps.store.upsert, []
+
+    def flaky(container, document):
+        weeks = (document.get("monitoring") or {}).get("weeks") or [{}]
+        if container == LOANS and weeks[-1].get("alert_id") and not failed:
+            failed.append(weeks[-1]["week"])  # 경보를 쓴 뒤 대출 문서를 쓰다 실패한다
+            raise RuntimeError("Cosmos 503")
+        return real(container, document)
+
+    monkeypatch.setattr(deps.store, "upsert", flaky)
+    for week in range(1, WEEKS + 1):
+        try:
+            process_week(deps, LOAN, rid, week)
+        except RuntimeError:
+            break
+    (week,) = failed
+    alert_id = f"ew-{rid}-w{week:02d}"
+    assert deps.store.read(ALERTS, alert_id, LOAN) and loan(deps)["monitoring"]["processed_week"] == week - 1
+    calls = agents.calls
+    entry = process_week(deps, LOAN, rid, week)
+    assert agents.calls == calls
+    assert entry["watch"]["agent"] == "stored" and entry["watch"]["stage_up"] and entry["alert_id"] == alert_id
+    assert entry["watch"]["alert_action"] == "created"
+    mon = loan(deps)["monitoring"]
+    assert len(alerts(deps)) == 1 and mon["alert_ids"] == [alert_id]
+    assert len(mon["watch"]["stages"]) == week and mon["watch"]["open"]["alert_id"] == alert_id
+
+
+@pytest.mark.parametrize("stage_sent", ["stage1", "stage2"])
+def test_usd_high_week_retry_does_not_duplicate_alert_or_outreach(run_journey, monkeypatch, stage_sent):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-dailylook-01")
+    register_monitoring(deps, registration)
+    deps = replace(deps, agents=StageAgents())
+    rid = replay(deps, **meta)["replay_id"]
+    real, failed = deps.store.upsert, []
+
+    def flaky(container, document):
+        mon = document.get("monitoring") or {}
+        sent = (mon.get("escalation") or {}).get(stage_sent)
+        if container == LOANS and sent and mon["weeks"][-1]["watch"]["stage"] == "high" and not failed:
+            failed.append(mon["weeks"][-1]["week"])  # 경보·연락을 쓴 뒤 대출 문서를 쓰다 실패한다
+            raise RuntimeError("Cosmos 503")
+        return real(container, document)
+
+    monkeypatch.setattr(deps.store, "upsert", flaky)
+    for week in range(1, WEEKS + 1):
+        try:
+            process_week(deps, LOAN, rid, week)
+        except RuntimeError:
+            break
+    (week,) = failed
+    ref = f"{rid}-s{stage_sent[-1]}"
+    before_alerts, before_contacts = len(alerts(deps)), [c["ref"] for c in contacts(deps, rid)]
+    assert ref in before_contacts and loan(deps)["monitoring"]["processed_week"] == week - 1
+    entry = process_week(deps, LOAN, rid, week)
+    assert entry["watch"]["stage"] == "high"
+    mon = loan(deps)["monitoring"]
+    assert mon["processed_week"] == week and mon["escalation"][stage_sent]["status"] == "sent"
+    assert len(alerts(deps)) == before_alerts and [c["ref"] for c in contacts(deps, rid)] == before_contacts
+    assert len(set(mon["alert_ids"])) == len(mon["alert_ids"])
+
+
+def test_usd_replay_without_watch_key_resumes_from_resume_week(run_journey):
+    # 이 브랜치 이전에 시작한 USD 재생 문서에는 monitoring.watch가 없다. 이어 처리하면 그 주부터 사건 상태를 새로 시작한다.
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-dailylook-01")
+    register_monitoring(deps, registration)
+    deps = replace(deps, agents=StageAgents())
+    rid = replay(deps, **meta)["replay_id"]
+    doc = loan(deps)
+    del doc["monitoring"]["watch"]
+    deps.store.upsert(LOANS, doc)
+    entry = process_week(deps, LOAN, rid, 1)
+    mon = loan(deps)["monitoring"]
+    assert entry["watch"]["stage"] and mon["weeks"][0]["watch"] == entry["watch"]
+    assert mon["watch"]["stages"] == [entry["watch"]["stage"]] and mon["processed_week"] == 1
+    process_week(deps, LOAN, rid, 2)
+    assert len(loan(deps)["monitoring"]["watch"]["stages"]) == 2
+
+
+def test_usd_recent_alert_is_the_open_incidents_own(mock_app):
+    from shared.contracts import USD_V1
+    deps, meta = make_deps(mock_app), USD_V1.model_dump()
+    for alert_id, week in (("ew-old", 3), ("ew-open", 5), ("ew-latest-other", 7)):
+        deps.store.upsert(ALERTS, dict(id=alert_id, loan_id=LOAN, week=week, severity="high", summary=alert_id,
+                                       signals=[], **meta))
+
+    def doc(watch):
+        return dict(meta, id=LOAN, monitoring={"alert_ids": ["ew-old", "ew-open", "ew-latest-other"], "watch": watch})
+
+    recent = monitoring_module._recent_alert
+    assert recent(deps, doc({**new_watch(), "open": {"id": "inc-1", "alert_id": "ew-open"}}), LOAN)["alert_id"] == "ew-open"
+    assert recent(deps, doc(new_watch()), LOAN) is None
+    assert recent(deps, doc({**new_watch(), "open": {"id": "inc-2", "alert_id": None}}), LOAN) is None
+    assert recent(deps, doc(None), LOAN) is None
+
+
+def test_replay_restart_resets_watch(run_journey, mock_app):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-bakery-20")
+    register_monitoring(deps, registration)
+    first = replay(deps, **meta)["replay_id"]
+    doc = loan(deps)
+    assert doc["monitoring"]["watch"] == new_watch()
+    doc["monitoring"].update(status="completed", watch={**new_watch(), "stages": ["watch", "medium"]})
+    deps.store.upsert(LOANS, doc)
+    assert replay(deps, **meta)["replay_id"] != first
+    assert loan(deps)["monitoring"]["watch"] == new_watch()
+    krw = make_deps(mock_app)
+    approved_loan(krw)
+    replay(krw)
+    assert loan(krw)["monitoring"]["watch"] is None
+
+
+def test_market_reader_returns_stored_flow_or_none(run_journey):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-bakery-20")
+    register_monitoring(deps, registration)
+    replay(deps, **meta)
+    mon = loan(deps)["monitoring"]
+    assert isinstance(monitoring_module._market(deps, mon), UsdMarketFlow)
+    assert monitoring_module._market(deps, {**mon, "consent_id": "absent"}) is None
+    deps.raw.put_json(f"consent-{mon['consent_id']}", "market_flow.json", {"weeks": "bad"})
+    assert monitoring_module._market(deps, mon) is None
 
 
 def alerts(deps):

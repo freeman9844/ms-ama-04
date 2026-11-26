@@ -77,7 +77,7 @@ _USD_TRIGGERS = {
 }
 _CENT_FIELDS = frozenset("revenue expected_revenue operating_out debt_service high_cost_lender loan_proceeds "
                          "unclassified_in end_balance advance_in order_gross held returns deductions "
-                         "settle_net projected_min_balance due_balance expected_orders unreconciled_payout".split())
+                         "settle_net projected_min_balance due_balance expected_orders unreconciled_payout mkt_gross mkt_pending".split())
 
 
 def _usd_field(name):
@@ -261,6 +261,11 @@ class EwContext:
     candidates: Sequence[CauseCandidate] = ()
     pg_weeks: Sequence[Mapping[str, Any]] | None = None
     ledger_baseline: LedgerBaseline | None = None
+    # USD 단계형 감시(Task 6): 이번 주 신호, 기본 단계, 사건 일지(최근 6줄), 사건 ID.
+    signals: Sequence[Mapping[str, Any]] = ()
+    base_stage: str | None = None
+    journal: Sequence[Mapping[str, Any]] = ()
+    incident_id: str | None = None
     catalog: dict[str, int | float | str] = field(init=False)
     by_id: dict[str, Transaction | UsdTransaction] = field(init=False)
     product: UsdProduct | None = field(init=False)
@@ -316,13 +321,18 @@ class EwContext:
         }
 
     def get_baseline(self, _: dict[str, Any]) -> dict[str, Any]:
-        return {
+        out = {
             "metrics": {k: v for k, v in self.catalog.items() if k.startswith("B:") and not k.startswith("B:cohort:")},
             "current_week": self.week,
             "triggers": list(self.triggers),
             "loan": dict(self.terms),
             "cause_candidates": [c.to_dict() for c in self.candidates],
         }
+        if self.product:
+            out["signals"] = [dict(s) for s in self.signals]
+            out["base_stage"] = self.base_stage
+            out["journal"] = [dict(line) for line in self.journal][-6:]
+        return out
 
     def get_peer_cohort(self, _: dict[str, Any]) -> dict[str, Any]:
         return {"industry": self.industry, "metrics": {k: v for k, v in self.catalog.items() if k.startswith("B:cohort:")}}
@@ -395,6 +405,7 @@ def _ids(value: Any) -> list[str]:
 
 def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
     issues: list[str] = []
+    weeks = [row["week"] for row in ctx.rows if _is_num(row.get("week"))] if ctx.product else []
     signals = args.get("signals")
     if not isinstance(signals, list) or not signals:
         return ["signals: 신호가 하나 이상 필요하다"]
@@ -418,7 +429,8 @@ def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
         if ctx.product:
             amounts = [ctx.by_id[t].amount_cents for t in txn_ids if t in ctx.by_id]
             bad = usd_language.issues(text, amounts + [ctx.catalog[k] for k in metric_ids if k.endswith("_cents") and k in ctx.catalog],
-                                      [ctx.catalog[k] for k in metric_ids if not k.endswith("_cents") and _is_num(ctx.catalog.get(k))])
+                                      [ctx.catalog[k] for k in metric_ids if not k.endswith("_cents") and _is_num(ctx.catalog.get(k))]
+                                      + weeks)
         else:
             cited += [float(ctx.by_id[t].amount_krw) for t in txn_ids if t in ctx.by_id]
             bad = ungrounded(text, cited)
@@ -428,7 +440,7 @@ def check_alert(args: Mapping[str, Any], ctx: EwContext) -> list[str]:
     if ctx.product:
         for text in (args.get("summary", ""), args.get("check_action", "")):
             issues += usd_language.issues(str(text), [v for k, v in ctx.catalog.items() if k.endswith("_cents")],
-                                          [v for k, v in ctx.catalog.items() if not k.endswith("_cents") and _is_num(v)])
+                                          [v for k, v in ctx.catalog.items() if not k.endswith("_cents") and _is_num(v)] + weeks)
         issues += _check_cause(args, ctx, signals)
         return ["Invalid English alert, cause or cited evidence"] if issues else []
     if bad := ungrounded(str(args.get("summary", "")), catalog_values):
@@ -562,6 +574,12 @@ class EwResult:
     reason: str
     record: dict[str, Any]
     conversations: list[str]
+    # USD 단계형 감시(Task 6). 기존 investigate는 채우지 않는다.
+    stage: str | None = None
+    agent: str | None = None
+    why_now: str | None = None
+    outlook: str | None = None
+    adjust_reason: str | None = None
 
 
 def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str,
@@ -577,7 +595,12 @@ def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str,
     spec = ew_spec(model)
     if ctx.product:
         spec = usd_language.native_spec(spec, "Investigate only the supplied trigger evidence. Write in English. "
-                       "Monetary values are USD cents. Cite metric or transaction IDs in each signal. Use a candidate "
+                       "Monetary values are USD cents; never write cent values. Summary and check_action must not cite "
+                       "money: use ratios, percentages and week numbers. Money may appear only in a signal text, which "
+                       "must then be exactly one short sentence of the form \"<Label> of $X.XX.\" with Label Settlement, "
+                       "Balance, Revenue, Sales, Deposit or Payment, in dollars with two decimals converted from cents "
+                       "(e.g. \"Settlement of $688.69.\"); never add other words to such a text. "
+                       "Cite metric or transaction IDs in each signal. Use a candidate "
                        "cause and verify its evidence. Recommend verification only, never enforcement or new credit terms.")
         text = ctx.mask(f"Investigate week {ctx.week}: {', '.join(ctx.triggers)}.")
     run, error = session.run(spec, text, ctx.handlers())

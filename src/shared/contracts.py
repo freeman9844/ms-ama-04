@@ -504,6 +504,8 @@ class AlertSignal(Claim):
     """조기경보 신호 1개. Claim처럼 근거(W:·B: 지표 ID 또는 거래 ID)가 하나 이상 있어야 한다."""
 
     kind: SignalKind
+    # USD 단계형 감시(2026-11-26): 신호의 데이터원. 옛 경보는 None.
+    source: Literal["bank", "settlement", "market"] | None = None
 
 
 class EarlyWarningAlert(Contract):
@@ -525,6 +527,11 @@ class EarlyWarningAlert(Contract):
     secondary_causes: tuple[AlertCause, ...] = Field(default=(), max_length=2)
     # 확인할 조치 문장(2026-11-11). summary가 이유다. 옛 경보는 None.
     check_action: str | None = Field(default=None, min_length=1, max_length=200)
+    # USD 단계형 감시(2026-11-26): 사건 ID와 단계 설명. 옛 경보는 None.
+    incident_id: str | None = None
+    why_now: str | None = Field(default=None, min_length=1, max_length=200)
+    outlook: str | None = Field(default=None, min_length=1, max_length=200)
+    adjust_reason: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def _action(self) -> "EarlyWarningAlert":

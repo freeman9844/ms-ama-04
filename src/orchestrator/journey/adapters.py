@@ -41,6 +41,7 @@ SOURCE_PATHS = {
     "marketplace": "/marketplace/store",
     "flow": "/mydata/flow",
     "pg_flow": "/pg/flow",
+    "market_flow": "/marketplace/flow",
 }
 
 
