@@ -50,7 +50,7 @@ SIGNALS: dict[str, tuple[str, str]] = {
 ORDERS_DIP_RATIO = 0.75  # this week's orders vs expected below this: orders_dip (single week); 0.80 caught campgear's seasonal week 11
 CANCEL_RISE_MULT = 1.8  # main-platform weekly cancel rate vs pre-loan baseline, and at least CANCEL_RISE_PP more
 CANCEL_RISE_PP = 0.02
-CANCEL_SPIKE_RATE = 0.08  # same bar as underwriting R111
+CANCEL_SPIKE_RATE = 0.08  # same bar as underwriting R111; a spike also needs the cancel_rise condition
 RATING_DROP = 0.1  # order-weighted rating this far under the baseline; the 0.2 bar missed linen's -0.3 on one of two platforms
 _SINGLE_WEEK_OF = {"orders_dip": "sales_slump", "returns_rising": "return_spike", "deductions_rising": "cost_surge"}
 _EVIDENCE = {
@@ -290,10 +290,9 @@ def _market_week(row, market, start: date, hi: date) -> list[str]:
     fired = []
     if row["mkt_cancel_rate"] is not None and base_rates:
         base = sum(base_rates) / len(base_rates)
-        if row["mkt_cancel_rate"] > CANCEL_SPIKE_RATE:
-            fired.append("cancel_spike")
-        elif row["mkt_cancel_rate"] >= max(CANCEL_RISE_MULT * base, base + CANCEL_RISE_PP):
-            fired.append("cancel_rise")
+        # A seller approved with a high cancel rate is judged against its own baseline: no rise, no signal.
+        if row["mkt_cancel_rate"] >= max(CANCEL_RISE_MULT * base, base + CANCEL_RISE_PP):
+            fired.append("cancel_spike" if row["mkt_cancel_rate"] > CANCEL_SPIKE_RATE else "cancel_rise")
     if row["mkt_rating"] is not None and base_ratings and (
             sum(base_ratings) / len(base_ratings) - row["mkt_rating"] >= RATING_DROP):
         fired.append("rating_drop")
@@ -358,7 +357,8 @@ def observe_usd(loan, visible, pg, week, dues, market: UsdMarketFlow | None = No
 
     explained = []
     inflow = "inflow_drop" in bank_only
-    if (inflow and "sales_slump" not in ledger
+    # A held payout is a risk, not an explanation: the drop stays a signal while settlement_hold fires.
+    if (inflow and "sales_slump" not in ledger and "settlement_hold" not in ledger
             and (row["settle_coverage"] or 0) >= EXPLAIN_COVERAGE
             and (row["orders_per_day_vs_expected"] or 0) >= EXPLAIN_ORDERS):
         inflow = False
