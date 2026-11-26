@@ -261,6 +261,11 @@ class EwContext:
     candidates: Sequence[CauseCandidate] = ()
     pg_weeks: Sequence[Mapping[str, Any]] | None = None
     ledger_baseline: LedgerBaseline | None = None
+    # USD 단계형 감시(Task 6): 이번 주 신호, 기본 단계, 사건 일지(최근 6줄), 사건 ID.
+    signals: Sequence[Mapping[str, Any]] = ()
+    base_stage: str | None = None
+    journal: Sequence[Mapping[str, Any]] = ()
+    incident_id: str | None = None
     catalog: dict[str, int | float | str] = field(init=False)
     by_id: dict[str, Transaction | UsdTransaction] = field(init=False)
     product: UsdProduct | None = field(init=False)
@@ -316,13 +321,18 @@ class EwContext:
         }
 
     def get_baseline(self, _: dict[str, Any]) -> dict[str, Any]:
-        return {
+        out = {
             "metrics": {k: v for k, v in self.catalog.items() if k.startswith("B:") and not k.startswith("B:cohort:")},
             "current_week": self.week,
             "triggers": list(self.triggers),
             "loan": dict(self.terms),
             "cause_candidates": [c.to_dict() for c in self.candidates],
         }
+        if self.product:
+            out["signals"] = [dict(s) for s in self.signals]
+            out["base_stage"] = self.base_stage
+            out["journal"] = [dict(line) for line in self.journal][-6:]
+        return out
 
     def get_peer_cohort(self, _: dict[str, Any]) -> dict[str, Any]:
         return {"industry": self.industry, "metrics": {k: v for k, v in self.catalog.items() if k.startswith("B:cohort:")}}
@@ -562,6 +572,12 @@ class EwResult:
     reason: str
     record: dict[str, Any]
     conversations: list[str]
+    # USD 단계형 감시(Task 6). 기존 investigate는 채우지 않는다.
+    stage: str | None = None
+    agent: str | None = None
+    why_now: str | None = None
+    outlook: str | None = None
+    adjust_reason: str | None = None
 
 
 def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str,
