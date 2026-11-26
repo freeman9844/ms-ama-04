@@ -90,7 +90,8 @@ def test_demo_session_roundtrip_and_expiry():
     assert not verify_demo_session(K, token, 999)  # 미래 발급
 
 
-@pytest.mark.parametrize("token", [None, "", "abc", "x.y", "1000.", "1000." + "0" * 64])
+@pytest.mark.parametrize("token", [None, "", "abc", "x.y", "1000.", "1000." + "0" * 64,
+                                   pytest.param("1" * 5000 + ".abc", id="too-many-digits")])
 def test_demo_session_rejects_malformed(token):
     assert not verify_demo_session(K, token, 1_000)
 

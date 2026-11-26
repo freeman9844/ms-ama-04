@@ -88,7 +88,7 @@ def demo_session_token(key: bytes, issued_at: int) -> str:
 
 def verify_demo_session(key: bytes, token: str | None, now: int) -> bool:
     issued, _, signature = (token or "").partition(".")
-    if not (issued.isascii() and issued.isdigit()) or not signature:
+    if not (issued.isascii() and issued.isdigit()) or len(issued) > 12 or not signature:
         return False
     issued_at = int(issued)
     return hmac.compare_digest(_demo_signature(key, issued_at), signature) and 0 <= now - issued_at < DEMO_SESSION_TTL_S

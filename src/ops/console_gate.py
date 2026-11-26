@@ -30,7 +30,8 @@ def _check_demo_console(base: str, fetch: Fetch) -> str:
         raise OpsError(_IP_BLOCKED)
     if status == 200:
         raise OpsError(f"{url}: 데모 로그인 화면이 꺼져 있습니다(CONSOLE_DEMO_LOGIN). "
-                       "`python -m ops window open`으로 다시 프로비저닝하세요.")
+                       "`python -m ops window open`으로 다시 프로비저닝하거나, 이미 했다면 "
+                       "`python -m ops deploy console`로 새 이미지를 배포하세요.")
     if status in (301, 302, 303, 307, 308):
         target = urllib.parse.urlsplit(urllib.parse.urljoin(url, location or ""))
         if target.hostname != urllib.parse.urlsplit(base).hostname or target.path != "/login":
@@ -39,6 +40,8 @@ def _check_demo_console(base: str, fetch: Fetch) -> str:
     else:
         raise OpsError(f"{url}: 예상하지 못한 응답 HTTP {status}")
     login_status, _ = fetch(base + "/login")
+    if login_status == 403:
+        raise OpsError(_IP_BLOCKED)
     if login_status != 200:
         raise OpsError(f"{base}/login: 예상하지 못한 응답 HTTP {login_status}")
     return ("데모 모드: Entra 로그인 꺼짐, 운영자 IP에서 App Gateway(WAF)를 거쳐 데모 로그인 화면(/login)으로 들어갑니다"

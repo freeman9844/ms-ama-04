@@ -148,6 +148,8 @@ def test_gate_in_demo_mode_accepts_absolute_login_redirect_on_same_host():
     ({"/": (302, LOGIN)}, "Easy Auth"),
     ({"/": (303, "https://evil.example/login")}, "Easy Auth"),
     ({"/": (200, None)}, "CONSOLE_DEMO_LOGIN"),
+    ({"/": (200, None)}, "deploy console"),
+    ({"/": (303, "/login?next=/"), "/login": (403, None)}, "window open"),
     ({"/": (303, "/login?next=/"), "/login": (500, None)}, "HTTP 500"),
     ({"/": (500, None)}, "HTTP 500"),
 ])

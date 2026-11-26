@@ -94,7 +94,7 @@ azd env get-value CONSOLE_URL
 테넌트 정책 때문에 Entra 로그인을 쓸 수 없을 때(예: 사용자 동의가 막혀 "관리자 승인 필요")의 데모 전용 스위치입니다.
 Easy Auth를 끄고, 콘솔은 모든 요청을 고정 데모 사용자(`CONSOLE_DEMO_ROLE`, 기본 `CreditOfficer`)로 처리합니다.
 진입 통제는 WAF 운영자 IP 규칙(`CONSOLE_IP`/32)만 남습니다. 화면 상단에 "데모 모드" 배너가 보입니다.
-심사역 화면 앞에는 장면용 데모 로그인 화면(`/login`, 아이디 `demo.officer` 미리 입력, 비밀번호 검사 없음, 8시간 유지)이 뜹니다(`CONSOLE_DEMO_LOGIN=true`). 인증이 아니며 결정 기록은 그대로 `demo-operator`입니다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
+심사역 화면 앞에는 장면용 데모 로그인 화면(`/login`, 아이디 `demo.officer` 미리 입력, 비밀번호는 비어 있지만 않으면 통과, 8시간 유지)이 뜹니다(`CONSOLE_DEMO_LOGIN=true`). 인증이 아니며 결정 기록은 그대로 `demo-operator`입니다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
 
 ```powershell
 azd env set CONSOLE_AUTH_ENABLED false     # 다시 켜려면 true
