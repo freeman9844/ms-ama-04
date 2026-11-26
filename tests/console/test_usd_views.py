@@ -804,6 +804,58 @@ def test_v1_decision_keeps_cash_flow_label_and_trace():
     policy = detail_panels(page_for(deps, "ko"))["tab-policy"]
     assert "현금흐름만 볼 때" in policy and "셀러 데이터 반영" in policy
     assert "은행·세무 기록만 볼 때" not in policy and "정산·마켓 데이터 반영" not in policy
+    assert "판정이 달라진 이유" not in policy
+
+
+def _v2_bakery(**overrides):
+    from policy.engine import evaluate
+    from policy.rules import rules_for_version
+    from tests.policy.conftest import usd_features
+
+    f = usd_features(**overrides)
+    deps = fixtures.build_deps()
+    doc = deps.store.docs["preview-usd-bakery"]
+    doc["requested_amount_cents"] = f.requested_amount_cents
+    doc["underwriting"]["features"] = f.model_dump(mode="json")
+    doc["policy"] = evaluate(f, rules_for_version("usd-v2")).model_dump(mode="json")
+    return deps
+
+
+@pytest.mark.parametrize("lang", ["ko", "en"])
+def test_v2_change_explains_substituted_reason_with_conditions(lang):
+    deps = _v2_bakery(cash_buffer_days=6.0, pg_reconciliation_ratio=1.0, pg_cash_conversion_days=6.0,
+                      pg_top_platform_share=0.6, mkt_tenure_months=30)
+    policy = detail_panels(page_for(deps, lang))["tab-policy"]
+    ko = lang == "ko"
+    assert ("판정이 달라진 이유" if ko else "Why the decision changed") in policy
+    assert ("약점을 보완해 판정이 나아졌습니다(심사역 회부 → 적격)" if ko
+            else "offset weaknesses in the bank and tax records, so the decision improved (Refer to officer → Eligible)") in policy
+    assert ("S003 조건을 충족해 이 사유를 지웠습니다." if ko else "S003 conditions are met, so this reason no longer applies.") in policy
+    assert ("현금 완충일수 6.0일 · 기준 10.0일 미만" if ko else "Cash buffer days 6.0 days · Threshold below 10.0 days") in policy
+    sub = policy.split("<h4>")[-1]
+    assert "Fast, fully reconciled settlements offset a thin cash buffer" in sub and "Insufficient cash buffer" in sub
+    assert ("정산금이 빠짐없이 계좌로 들어오고" if ko else "settlements reach the bank account in full") in sub
+    assert ("✓ 정산금 계좌 입금 비율 100.0% (기준 98.0% 이상)" if ko
+            else "✓ Settlement deposit ratio 100.0% (Threshold 98.0% or more)") in sub
+    assert ("✓ 현금화 일수 6.0일 (기준 10.0일 이하)" if ko else "✓ Days to cash 6.0 days (Threshold 10.0 days or less)") in sub
+
+
+def test_v2_change_names_new_marketplace_risk():
+    deps = _v2_bakery(mkt_cancel_rate_90d=0.13)
+    policy = detail_panels(page_for(deps, "en"))["tab-policy"]
+    assert "revealed risks that the bank and tax records did not show, so the decision tightened (Eligible → Refer to officer)" in policy
+    assert "<strong>R111</strong> Order cancellations spiked in the last 90 days" in policy
+    assert "A new risk found in settlement and marketplace data" in policy
+    assert "Marketplace cancel rate 13.0% · Threshold above 8.0%" in policy
+
+
+def test_v2_change_explains_settlement_limit():
+    deps = _v2_bakery(avg_monthly_inflow_cents=200_000, requested_amount_cents=800_000,
+                      mkt_pending_settlement_cents=1_000_000)
+    policy = detail_panels(page_for(deps, "en"))["tab-policy"]
+    assert "The decision is unchanged (Eligible), and settlement and marketplace data raised the limit ($3000 → $8000)" in policy
+    assert "average monthly deposits $2000 × 1.5 = $3000, but 80% of net expected settlements $10000 is $8000" in policy
+
 
 
 @pytest.mark.parametrize("usd", [True, False], ids=["usd", "legacy"])

@@ -11,7 +11,7 @@ from typing import Any, Protocol
 from agents.data_assembly import build_pseudonymizer, case_entities
 from agents.pretranslate import load_case_raw
 from agents.evidence import build_catalog
-from console.i18n import CATALOGS, _
+from console.i18n import CATALOGS, _, label
 from console.officer_chat import verified_policy
 from policy.rules import UsdRuleSet, rules_for_version
 from shared.contracts import ApplicantProfile, Transaction, UsdProduct, UsdTransaction
@@ -178,6 +178,7 @@ def detail_view(doc: Mapping[str, Any], raw: RawData | None, key: bytes, *, rest
         f"max_amount_{unit}": (policy or {}).get(f"max_amount_{unit}"),
         "policy_blocked": (policy or {}).get("decision") not in ("eligible", "refer"),
         "policy_compare": _policy_compare(policy, unit),
+        "policy_change": _policy_change(policy, trace, uw.get("features") or {}) if product else None,
         "verified_policy": checked,
         "substitutions": _substitutions(trace),
     }
@@ -209,6 +210,9 @@ USD_REASON_UNITS: dict[str, Callable[[float], str]] = {
     "mkt_days_since_suspension": lambda v: _("%(v)s일", v=f"{v:.0f}"),
     "pg_reconciliation_ratio": lambda v: f"{v * 100:.1f}%",
     "tax_bank_match_ratio": lambda v: f"{v * 100:.1f}%",
+    "cash_buffer_days": lambda v: _("%(v)s일", v=f"{v:.1f}"),
+    "mkt_tenure_months": lambda v: _("%(v)s개월", v=f"{v:.0f}"),
+    "mkt_review_count": lambda v: _("%(v)s건", v=f"{v:.0f}"),
 }
 
 
@@ -220,13 +224,108 @@ def reason_text(field: str | None, value: Any, usd: bool = False) -> str | None:
     return units[field](value)
 
 
+DECISION_RANK = {"ineligible": 0, "refer": 1, "eligible": 2}
+OP_LABELS = {"lt": "%(t)s 미만", "le": "%(t)s 이하", "gt": "%(t)s 초과", "ge": "%(t)s 이상"}
+POLICY_FIELD_LABELS = {
+    "months_of_history": "거래 이력(개월)", "dscr": "DSCR", "tax_bank_match_ratio": "세금·계좌 일치율",
+    "revenue_volatility": "매출 변동성", "cash_buffer_days": "현금 완충일수", "business_age_months": "업력(개월)",
+    "high_cost_lender_count": "고비용 대출 상환 거래 수", "revenue_trend_ratio": "최근 매출 추세",
+    "pg_top_platform_share": "최대 채널 비중", "pg_reconciliation_ratio": "정산금 계좌 입금 비율",
+    "pg_cash_conversion_days": "현금화 일수", "pg_advance_suspected_count": "선정산 추정 건수",
+    "pg_offset_rate_trend_pp": "광고비 상계율 변화(%p)", "max_amount_cents": "정책 한도",
+    "mkt_tenure_months": "마켓 판매 기간", "mkt_rating": "마켓 평점", "mkt_review_count": "마켓 리뷰 수",
+    "mkt_return_rate_90d": "마켓 반품률", "mkt_cancel_rate_90d": "마켓 취소율",
+    "mkt_days_since_suspension": "판매정지 후 경과일",
+}
+# 대체 규칙이 왜 원래 사유를 덮을 수 있는지 심사역에게 풀어 쓴다. 기준 숫자는 조건 행이 보여 준다.
+SUBSTITUTION_NOTE_LABELS = {
+    "S001": "계좌 거래 이력은 짧지만, 오랜 마켓 판매 기간과 좋은 평판이 실제 영업 기간을 보여 줍니다. "
+            "이력이 짧은 위험이 남아 있어 탈락 대신 심사역 검토로 넘깁니다.",
+    "S002": "사업자 업력은 짧지만, 마켓 판매 기간과 평점이 그 전부터 이어진 실제 영업을 보여 주므로 이 사유를 지웁니다.",
+    "S003": "계좌 잔고 여유는 적지만, 정산금이 빠짐없이 계좌로 들어오고 빨리 현금이 되어 "
+            "상환 재원이 자주 채워집니다. 잔고가 얇아도 단기 유동성이 끊기지 않는다고 보고 이 사유를 지웁니다.",
+    "S004": "월 매출 변동은 크지만, 긴 판매 기간과 많은 리뷰·높은 평점이 수요가 꾸준하다는 것을 보여 줍니다. "
+            "변동을 계절 요인으로 보고 이 사유를 지웁니다.",
+    "S005": "세금 신고 매출이 계좌 입금보다 적지만, 정산 원장과 계좌 입금이 맞아 실제 매출은 확인됩니다. "
+            "신고 누락 위험이 남아 있어 탈락 대신 심사역 검토로 넘깁니다.",
+}
+
+
+def _condition(field: Any, op: Any, observed: Any, threshold: Any) -> dict[str, Any]:
+    return {"field": field, "label": label(POLICY_FIELD_LABELS, field), "op": OP_LABELS.get(op),
+            "observed": observed, "threshold": threshold}
+
+
 def _substitutions(trace: Mapping[str, Any]) -> list[dict[str, Any]]:
     """대상 규칙에 걸린 셀러 데이터 대체(S0xx)만 고른다. 계산 과정을 만들 수 없으면 빈 목록."""
+    checks = {c.get("code"): c for c in trace.get("checks") or () if isinstance(c, Mapping)}
     rows = []
     for s in trace.get("substitutions") or ():
         if not s.get("target_hit"):
             continue
         state = "applied" if s.get("applied") else ("blocked" if s.get("conditions_met") else "unmet")
         rows.append({"code": s.get("code"), "replaces": s.get("replaces"), "state": state,
-                     "blocked_by": list(s.get("blocked_by") or ())})
+                     "blocked_by": list(s.get("blocked_by") or ()), "message": s.get("message"),
+                     "outcome": s.get("outcome"), "note": SUBSTITUTION_NOTE_LABELS.get(s.get("code")),
+                     "replaces_message": (checks.get(s.get("replaces")) or {}).get("message"),
+                     "conditions": [_condition(c.get("field"), c.get("op"), c.get("observed"), c.get("threshold"))
+                                    | {"met": c.get("result") == "hit"} for c in s.get("conditions") or ()]})
     return rows
+
+
+def _policy_change(policy: Any, trace: Mapping[str, Any], features: Mapping[str, Any]) -> dict[str, Any] | None:
+    """usd-v2~ 판정에서 '은행·세무 기록만 볼 때'와 최종 판정이 왜 다른지 사유 코드별로 풀어 쓴다.
+
+    저장된 두 판정의 사유 코드와 적용된 대체만으로 만든다. 한도 설명은 다시 계산한 과정(trace)이 있을 때만 붙인다.
+    """
+    compare = _policy_compare(policy, "cents")
+    if not compare or not compare["bank_tax"]:
+        return None
+    rules = rules_for_version(policy.get("rules_version"))
+    cash = policy["cash_only"]
+    ops = {c.code: c.op for c in (*rules.knockouts, *rules.refers)} | {"R900": "lt", "R901": "lt"}
+    subs = {s.code: s for s in rules.substitutions}
+    applied = {subs[c].replaces: subs[c] for c in policy.get("applied_substitutions") or () if c in subs}
+    final = [r for r in policy.get("reason_codes") or () if isinstance(r, Mapping)]
+    final_codes = {r.get("code") for r in final}
+
+    def step(r: Mapping[str, Any], kind: str, by: str | None = None) -> dict[str, Any]:
+        return {"code": r.get("code"), "message": r.get("message"), "kind": kind, "by": by,
+                **_condition(r.get("field"), ops.get(r.get("code")), r.get("observed"), r.get("threshold"))}
+
+    steps = []
+    for r in cash.get("reason_codes") or ():
+        if not isinstance(r, Mapping):
+            continue
+        sub = applied.get(r.get("code"))
+        if r.get("code") in final_codes:
+            steps.append(step(r, "kept"))
+        elif sub:
+            steps.append(step(r, "softened" if sub.outcome == "refer" else "cleared", sub.code))
+        else:
+            steps.append(step(r, "resolved"))
+    cash_codes = {s["code"] for s in steps}
+    steps += [step(r, "added") for r in final if r.get("code") not in cash_codes and r.get("code") not in subs]
+
+    before, after = cash.get("decision"), policy.get("decision")
+    low, high = cash.get("max_amount_cents"), policy.get("max_amount_cents")
+    if before != after:
+        headline = "up" if DECISION_RANK.get(after, -1) > DECISION_RANK.get(before, -1) else "down"
+    elif isinstance(low, int) and isinstance(high, int) and low != high:
+        headline = "limit_up" if high > low else "limit_down"
+    else:
+        headline = "reasons" if any(s["kind"] != "kept" for s in steps) else "same"
+
+    notes = []
+    limit = (trace or {}).get("limit") or {}
+    if (limit and isinstance(low, int) and isinstance(high, int) and high > low
+            and (limit.get("settlement_cap_cents") or 0) > (limit.get("inflow_cap_cents") or 0)):
+        notes.append({"kind": "settlement", "avg": limit.get("avg_monthly_inflow_cents"),
+                      "multiplier": f"{limit.get('inflow_multiplier'):g}", "inflow": limit.get("inflow_cap_cents"),
+                      "pending": features.get("mkt_pending_settlement_cents"),
+                      "ratio": f"{limit.get('pending_settlement_ratio') * 100:g}%",
+                      "settlement": limit.get("settlement_cap_cents")})
+    if limit.get("substituted_cap_cents") is not None and after != "ineligible":
+        notes.append({"kind": "substituted", "cap": limit["substituted_cap_cents"]})
+    return {"headline": headline, "before": before, "after": after, "low": low, "high": high,
+            "steps": steps, "limit_notes": notes}

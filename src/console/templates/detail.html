@@ -224,6 +224,33 @@
 <p>{{ _("은행·세무 기록만 볼 때") if v.policy_compare.bank_tax else _("현금흐름만 볼 때") }} <strong>{{ v.policy_compare.cash.decision|policy_label }}</strong> · {{ money(v.policy_compare.cash.max) }}
   → {{ _("정산·마켓 데이터 반영") if v.policy_compare.bank_tax else _("셀러 데이터 반영") }} <strong>{{ v.policy_compare.seller.decision|policy_label }}</strong> · {{ money(v.policy_compare.seller.max) }}</p>
 {% endif %}
+{% set pc = v.policy_change %}
+{% if usd and pc %}
+<div class="policy-change">
+<h4>{{ _("판정이 달라진 이유") }}</h4>
+<p>{% if pc.headline == "up" %}{{ _("정산·마켓 데이터가 은행·세무 기록의 약점을 보완해 판정이 나아졌습니다(%(before)s → %(after)s).", before=pc.before|policy_label, after=pc.after|policy_label) }}
+{%- elif pc.headline == "down" %}{{ _("은행·세무 기록에는 보이지 않던 위험이 정산·마켓 데이터에서 드러나 판정이 엄격해졌습니다(%(before)s → %(after)s).", before=pc.before|policy_label, after=pc.after|policy_label) }}
+{%- elif pc.headline == "limit_up" %}{{ _("판정은 같고(%(decision)s), 정산·마켓 데이터를 반영해 한도가 늘었습니다(%(low)s → %(high)s).", decision=pc.after|policy_label, low=money(pc.low), high=money(pc.high)) }}
+{%- elif pc.headline == "limit_down" %}{{ _("판정은 같고(%(decision)s), 정산·마켓 데이터를 반영해 한도가 줄었습니다(%(low)s → %(high)s).", decision=pc.after|policy_label, low=money(pc.low), high=money(pc.high)) }}
+{%- elif pc.headline == "reasons" %}{{ _("판정과 한도는 같지만, 정산·마켓 데이터를 반영하면서 걸린 사유가 달라졌습니다.") }}
+{%- else %}{{ _("정산·마켓 데이터를 반영해도 판정과 한도가 같습니다.") }}{% endif %}</p>
+{% if pc.steps %}
+<ul class="policy-steps">{% for s in pc.steps %}{% set threshold = reason_value(s.field, s.threshold) %}
+<li><strong>{{ s.code }}</strong> {{ s.message|mt }} —
+  {% if s.kind == "kept" %}{{ _("정산·마켓 데이터로도 해소되지 않아 그대로 남았습니다.") }}
+  {%- elif s.kind == "cleared" %}{{ _("%(by)s 조건을 충족해 이 사유를 지웠습니다.", by=s.by) }}
+  {%- elif s.kind == "softened" %}{{ _("%(by)s 조건을 충족해 탈락 대신 심사역 검토로 넘겼습니다.", by=s.by) }}
+  {%- elif s.kind == "resolved" %}{{ _("정산·마켓 데이터를 반영한 뒤에는 더 이상 걸리지 않습니다.") }}
+  {%- else %}{{ _("은행·세무 기록에는 없고 정산·마켓 데이터에서 새로 드러난 위험입니다.") }}{% endif %}
+  <br><small>{{ s.label }} {{ reason_value(s.field, s.observed) }} · {{ _("기준") }} {{ _(s.op, t=threshold) if s.op else threshold }}</small></li>
+{% endfor %}</ul>
+{% endif %}
+{% for n in pc.limit_notes %}
+<p class="note">{% if n.kind == "settlement" %}{{ _("한도: 은행 기록만으로는 월평균 입금 %(avg)s × %(multiplier)s = %(inflow)s이지만, 순정산 예정금 %(pending)s의 %(ratio)s인 %(settlement)s가 더 커서 정산 예정금을 한도 근거로 썼습니다.", avg=money(n.avg), multiplier=n.multiplier, inflow=money(n.inflow), pending=money(n.pending), ratio=n.ratio, settlement=money(n.settlement)) }}
+{%- else %}{{ _("탈락 사유를 셀러 데이터로 대체한 신청이라 한도 상한은 %(cap)s입니다.", cap=money(n.cap)) }}{% endif %}</p>
+{% endfor %}
+</div>
+{% endif %}
 {% for m in ui.markers %}
 <div class="marker-row">
   <span class="marker-code">{{ m.code }}</span>
@@ -241,12 +268,13 @@
 {% if v.substitutions %}
 <h4>{{ _("셀러 데이터 대체") }}</h4>
 <table>
-  <thead><tr><th>{{ _("코드") }}</th><th>{{ _("대상 규칙") }}</th><th>{{ _("상태") }}</th></tr></thead>
-  <tbody>{% for s in v.substitutions %}<tr><td>{{ s.code }}</td><td>{{ s.replaces }}</td><td>
+  <thead><tr><th>{{ _("코드") }}</th><th>{{ _("대상 규칙") }}</th><th>{{ _("상태") }}</th>{% if usd %}<th>{{ _("설명") }}</th>{% endif %}</tr></thead>
+  <tbody>{% for s in v.substitutions %}<tr><td>{{ s.code }}</td><td>{{ s.replaces }}{% if usd and s.replaces_message %}<br><small>{{ s.replaces_message|mt }}</small>{% endif %}</td><td>
   {%- if s.state == "applied" %}{{ _("%(rule)s 대체됨(%(code)s)", rule=s.replaces, code=s.code) }}
   {%- elif s.state == "blocked" %}{{ _("조건 충족, %(rule)s로 미적용", rule=s.blocked_by[0] if s.blocked_by else "-") }}
   {%- else %}{{ _("조건 미충족") }}{% endif -%}
-  </td></tr>{% endfor %}</tbody>
+  </td>{% if usd %}<td><strong>{{ s.message|mt }}</strong>{% if s.note %}<br>{{ _(s.note) }}{% endif %}
+  <ul class="sub-conditions">{% for c in s.conditions %}{% set threshold = reason_value(c.field, c.threshold) %}<li>{{ "✓" if c.met else "✗" }} {{ c.label }} {{ reason_value(c.field, c.observed) }} ({{ _("기준") }} {{ _(c.op, t=threshold) if c.op else threshold }})</li>{% endfor %}</ul></td>{% endif %}</tr>{% endfor %}</tbody>
 </table>
 {% endif %}
 </section>
