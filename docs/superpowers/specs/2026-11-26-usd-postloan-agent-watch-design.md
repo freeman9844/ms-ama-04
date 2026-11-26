@@ -8,7 +8,7 @@
   - 사후 합성 흐름: `mockapis\postloan.py`, `mockapis\app.py`
   - 콘솔 대출 화면: `console\monitoring.py`, `console\templates\loan.html`
 - 선행 설계: `2026-11-25-usd-postloan-alt-data-monitoring-design.md`(PR #7). 이 설계는 그 설계의 "감시 비교" 화면을 걷어내고, 알람 시점을 다시 짠다.
-- 상태: 설계 승인 대기
+- 상태: 설계 승인
 
 ## 1. 의도와 이유
 
