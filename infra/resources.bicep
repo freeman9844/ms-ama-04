@@ -650,6 +650,8 @@ module caConsole 'modules/container-app.bicep' = {
     ], consoleAuthEnabled ? [] : [
       { name: 'CONSOLE_AUTH_MODE', value: 'demo' }
       { name: 'CONSOLE_DEMO_ROLE', value: consoleDemoRole }
+      // 데모 장면용 로그인 화면(/login). 인증이 아니며 접근 차단은 WAF 운영자 IP 규칙입니다(ADR-007).
+      { name: 'CONSOLE_DEMO_LOGIN', value: 'true' }
     ])
   }
 }

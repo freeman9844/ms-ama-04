@@ -157,8 +157,11 @@ def test_console_easy_auth_can_be_switched_off_for_demo(console_app_noauth, expa
     assert _deployment(demo, "ca-console")["authEnabled"] is False
     env = {e["name"]: e.get("value") for e in demo.one(CA, "ca-console")["properties"]["template"]["containers"][0]["env"]}
     assert env["CONSOLE_AUTH_MODE"] == "demo"
+    assert env["CONSOLE_DEMO_LOGIN"] == "true"
     default = expand_azd({"OPERATOR_IP": "closed"})
     assert _deployment(default, "ca-console")["authEnabled"] is True
+    default_env = {e["name"] for e in default.one(CA, "ca-console")["properties"]["template"]["containers"][0]["env"]}
+    assert "CONSOLE_DEMO_LOGIN" not in default_env
 
 
 def test_console_demo_role_reaches_the_container(expand_azd):

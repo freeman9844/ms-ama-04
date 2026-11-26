@@ -275,7 +275,7 @@ flowchart LR
 | 항목 | 데모 | 운영 전환 시 |
 |---|---|---|
 | 외부 진입 | Application Gateway WAF v2(Prevention, DRS 2.1, 운영자 IP만), 자체 서명 인증서([ADR-011](adr/ADR-011-appgw-waf-entry.md)). 데모: Easy Auth 꺼짐([ADR-007](adr/ADR-007-demo-auth-mode.md)) | 공인 CA 인증서·사용자 도메인, 운영자 IP 규칙 대신 Entra 단일 진입 |
-| 심사역 인증 | Easy Auth implicit id_token, `consoleAuthEnabled=false` 시 데모 역할 | Entra 로그인 복원(비밀 또는 FIC 기반 인증 코드 흐름, [ADR-007](adr/ADR-007-demo-auth-mode.md)) |
+| 심사역 인증 | Easy Auth implicit id_token, `consoleAuthEnabled=false` 시 데모 역할 + 장면용 데모 로그인 화면(`/login`, 인증 아님) | Entra 로그인 복원(비밀 또는 FIC 기반 인증 코드 흐름, [ADR-007](adr/ADR-007-demo-auth-mode.md)) |
 | 서킷 브레이커 | 프로세스(Flex 인스턴스) 단위 | 분산 서킷(공유 상태) |
 | 가용성 | 단일 리전 | 다중 리전 DR |
 | 모델 배포 | Global Standard | Data Zone / PTU([ADR-002](adr/ADR-002-model-deployment.md)) |
