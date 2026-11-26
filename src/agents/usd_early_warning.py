@@ -63,16 +63,17 @@ Steps:
 3. Final output:
    - stage.
    - why_now: which data source moved first and what followed, in one sentence.
-   - outlook: what to expect over the next few weeks, in one sentence. Do not write week counts as digits.
+   - outlook: what to expect over the next few weeks, in one sentence. Refer to a week only as "week N" with N a week
+     number from the evidence; write no other week counts or durations as digits.
    - adjust_reason: empty when the stage equals the base stage.
    - reason: at most two sentences.
    Keep each text under 200 characters. When the stage stays high from last week, keep the texts short.
-Write money in dollars with two decimals, converted from cent evidence values (68869 cents -> $688.69). Never write
-cent values or the word "cents". Prefer ratios, percentages and week numbers over money. A ratio may be its evidence
-value or a percentage. If you cite money, the whole text must be one short sentence of the form "<Label> of $X.XX."
-with Label Settlement, Balance, Revenue, Sales, Deposit or Payment (for example "Settlement of $688.69."). Never put a
-dollar amount in a text with any other sentence or words. This applies to why_now, outlook, adjust_reason, reason, and
-raise_alert summary, check_action and signal text. Week numbers are allowed. Write in English only.
+Never write cent values or the word "cents". why_now, outlook, adjust_reason, reason and the raise_alert summary and
+check_action must not cite money: use ratios (as the evidence value or a percentage) and week numbers instead. Money may
+appear only in a raise_alert signal text, and then that text must be exactly one short sentence of the form
+"<Label> of $X.XX." with Label Settlement, Balance, Revenue, Sales, Deposit or Payment, in dollars with two decimals
+converted from cent evidence values (68869 cents -> "Settlement of $688.69."). Never add other words to such a text.
+Write in English only.
 Recommend verification only. Never recommend recalling the loan or changing its limit, rate or terms.
 Tokens such as [[PERSON_...]] hide personal data. Never restore or guess them."""
 

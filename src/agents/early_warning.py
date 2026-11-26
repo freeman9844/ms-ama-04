@@ -595,11 +595,11 @@ def investigate(ctx: EwContext, *, runner: AgentRunner | None, model: str,
     spec = ew_spec(model)
     if ctx.product:
         spec = usd_language.native_spec(spec, "Investigate only the supplied trigger evidence. Write in English. "
-                       "Monetary values are USD cents. Write money in dollars with two decimals converted from cents; "
-                       "never write cent values. Prefer ratios, percentages and week numbers over money. If you cite "
-                       "money, the whole text must be one short sentence of the form \"<Label> of $X.XX.\" with Label "
-                       "Settlement, Balance, Revenue, Sales, Deposit or Payment (e.g. \"Settlement of $688.69.\"); never "
-                       "put a dollar amount in a text with any other sentence or words. "
+                       "Monetary values are USD cents; never write cent values. Summary and check_action must not cite "
+                       "money: use ratios, percentages and week numbers. Money may appear only in a signal text, which "
+                       "must then be exactly one short sentence of the form \"<Label> of $X.XX.\" with Label Settlement, "
+                       "Balance, Revenue, Sales, Deposit or Payment, in dollars with two decimals converted from cents "
+                       "(e.g. \"Settlement of $688.69.\"); never add other words to such a text. "
                        "Cite metric or transaction IDs in each signal. Use a candidate "
                        "cause and verify its evidence. Recommend verification only, never enforcement or new credit terms.")
         text = ctx.mask(f"Investigate week {ctx.week}: {', '.join(ctx.triggers)}.")
