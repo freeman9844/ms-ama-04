@@ -498,7 +498,7 @@ def _track_week(n, full, bank, explained, basis=()):
             "bank_only_triggers": bank, "explained": explained, "basis": list(basis)}
 
 
-def test_usd_loan_shows_track_comparison_and_basis():
+def test_usd_loan_shows_basis_card():
     deps = fixtures.build_deps()
     breach = {"code": "S003", "metric": "recon_ratio", "approved": 0.99, "floor": 0.95,
               "value": 0.81, "status": "breach"}
@@ -515,11 +515,12 @@ def test_usd_loan_shows_track_comparison_and_basis():
              "primary_cause": "settlement_assigned", "models": {}}
     deps.monitoring = fixtures.MemoryMonitoring([loan], [alert])
     page = TestClient(create_app(deps)).get("/loans/usd-track?lang=en").text
-    for text in ("Monitoring comparison", "Alt data detected 1 week(s) earlier", "Approval basis",
-                 "Broken (week 3)", "Approved 0.99", "Floor 0.95", "Week 3 0.81", "Reconciliation ratio",
-                 "Settlement assignment", "Approval basis broken", "Fast, accurate settlements", "Explained"):
+    for text in ("Approval basis", "Broken (week 3)", "Approved 0.99", "Floor 0.95", "Week 3 0.81",
+                 "Reconciliation ratio", "Settlement assignment", "Approval basis broken",
+                 "Fast, accurate settlements", "Explained"):
         assert text in page
     assert "settlement_on_time_rate" not in page and "recon_ratio" not in page
+    assert "Monitoring comparison" not in page
 
 
 def test_usd_loan_s004_basis_has_no_approved_value_and_never_renders_none():
@@ -539,30 +540,174 @@ def test_usd_loan_s004_basis_has_no_approved_value_and_never_renders_none():
     assert "None" not in page and "Approved" not in page
 
 
-def _usd_track_page(weeks, loan_id):
+def _usd_page(weeks, loan_id, alerts=(), lang="en"):
     deps = fixtures.build_deps()
     loan = dict(USD, id=loan_id, application_id=loan_id, applicant_id=SELLER, industry="Food",
                 amount_cents=500001, tenor_months=6, decision="approve",
                 baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
                 monitoring={"status": "completed", "replay_id": "rp", "processed_week": len(weeks), "weeks": weeks})
-    deps.monitoring = fixtures.MemoryMonitoring([loan], [])
-    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang=en").text
+    deps.monitoring = fixtures.MemoryMonitoring([loan], list(alerts))
+    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang={lang}").text
 
 
-def test_track_view_timeline_cells():
-    page = _usd_track_page([_track_week(1, [], ["inflow_drop"], []), _track_week(2, [], [], [{"trigger": "inflow_drop"}]),
-                            _track_week(3, ["inflow_drop"], ["inflow_drop"], [])], "usd-tl")
-    rows = re.findall(r"<tr><th>(Bank only|Settlement \+ marketplace)</th>((?:<td>.*?</td>)+)</tr>", page)
-    cells = {name: re.findall(r"<td>(.*?)</td>", tds) for name, tds in rows}
-    assert cells == {"Bank only": ["○", "", "●"], "Settlement + marketplace": ["", "✓", "●"]}
-    assert "Bank only: not detected" not in page
+def _watch(stage, kind="call", **fields):
+    return {"stage": stage, "kind": kind, "incident_id": None, "base_stage": None, "quiet_weeks": 0,
+            "stage_up": False, "signals": [], "market": True, "agent": None, "why_now": None, "outlook": None,
+            "adjust_reason": None, "alert_id": None, "alert_action": None, **fields}
 
 
-def test_track_view_says_bank_only_did_not_detect():
-    page = _usd_track_page([_track_week(1, [], [], []), _track_week(2, ["basis_breach"], [], [])], "usd-nd")
-    assert "Bank only: not detected" in page
+def _signal(code, source, strength, *metric_ids):
+    return {"code": code, "source": source, "strength": strength, "metric_ids": list(metric_ids)}
 
 
+def _watch_week(n, watch, **row):
+    return {"week": n, "row": {"week": n, "revenue_cents": 404123, "buffer_days": 7, **row}, "triggers": [],
+            "watch": watch}
+
+
+def _journal(page):
+    match = re.search(r'<section id="watch-journal".*?</section>', page, re.S)
+    assert match, "journal card missing"
+    return match.group(0)
+
+
+def _scene_weeks():
+    return [
+        _watch_week(1, _watch("normal", "normal")),
+        _watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                              signals=[_signal("cancel_rise", "market", "weak", "W:2:mkt_cancel_rate")]),
+                    mkt_cancel_rate=0.046),
+        _watch_week(3, _watch("medium", incident_id="in-rp-w02", base_stage="medium", stage_up=True, agent="agent",
+                              signals=[_signal("settlement_hold", "settlement", "strong", "W:3:held_cents"),
+                                       _signal("account_warning", "market", "strong", "W:3:mkt_penalties")],
+                              why_now="취소율 상승 뒤 정산 보류가 겹쳤습니다.", outlook="2주 안에 입금 감소",
+                              alert_id="ew-3", alert_action="created"),
+                    held_cents=380000, mkt_penalties=1),
+        _watch_week(4, _watch("medium", "hold", incident_id="in-rp-w02", base_stage="medium",
+                              signals=[_signal("settlement_hold", "settlement", "strong", "W:4:held_cents")]),
+                    held_cents=380000),
+        _watch_week(5, _watch("high", incident_id="in-rp-w02", base_stage="high", stage_up=True, agent="agent",
+                              signals=[_signal("projected_shortfall", "bank", "strong",
+                                               "F:5:projected_min_balance_cents")],
+                              why_now="보류가 이어져 입금이 줄었습니다.", outlook="7/14 상환일 잔고 부족",
+                              alert_id="ew-5", alert_action="updated"),
+                    projected_min_balance_cents=-48000),
+    ]
+
+
+def test_journal_newest_first_with_source_chips():
+    page = _usd_page(_scene_weeks(), "usd-journal")
+    card = _journal(page)
+    assert "Agent watch journal" in card
+    assert re.findall(r'id="journal-w(\d+)"', card) == ["5", "4", "3", "2", "1"]
+    assert "Open incident: High · since week 2" in card
+    for text in ("Market · Cancel rate up", "W:2:mkt_cancel_rate = 0.046", "Settlement · Settlement hold",
+                 "W:3:held_cents = $3800", "Market · Seller warning/suspension", "Bank · Projected shortfall",
+                 "F:5:projected_min_balance_cents = -$480", "Why now", "Outlook", "7/14 상환일 잔고 부족",
+                 "No change · stage kept", "Cause updated"):
+        assert text in card, text
+    week1 = card[card.index('id="journal-w1"'):]
+    assert week1.count("Normal") >= 4  # stage badge and three source chips
+    assert 'href="#ew-5"' in card and 'href="#ew-3"' in card
+
+
+def test_journal_market_missing_shows_no_data_chip():
+    weeks = [_watch_week(1, _watch("normal", "normal", market=False)),
+             _watch_week(2, _watch("normal", "normal", market=True))]
+    card = _journal(_usd_page(weeks, "usd-nomarket"))
+    week1 = card[card.index('id="journal-w1"'):]
+    assert "Market · No data" in week1 and "Bank · Normal" in week1 and "Settlement · Normal" in week1
+    assert "No data" not in card[card.index('id="journal-w2"'):card.index('id="journal-w1"')]
+
+
+def test_journal_labels_for_every_kind():
+    kinds = {"explained": "Normal · bank inflow dip explained by the payout schedule",
+             "suppressed": "Normal · resolved signal continues",
+             "quiet": "No signals for 1 week(s)", "resolved_quiet": "Resolved · no signals for 2 weeks in a row",
+             "resolved_agent": "Resolved · agent decision"}
+    weeks = [_watch_week(n, _watch("resolved" if kind.startswith("resolved") else "normal", kind, quiet_weeks=1))
+             for n, kind in enumerate(kinds, 1)]
+    card = _journal(_usd_page(weeks, "usd-kinds"))
+    for text in kinds.values():
+        assert text in card, text
+
+
+def test_fallback_line_label():
+    weeks = [_watch_week(1, _watch("medium", agent="fallback", incident_id="in-rp-w01", alert_id="ew-1",
+                                   alert_action="created"))]
+    page = _usd_page(weeks, "usd-fallback")
+    assert "Agent unavailable · rule stage" in _journal(page)
+    assert "에이전트 미응답 · 규칙 단계" in _journal(_usd_page(weeks, "usd-fallback", lang="ko"))
+
+
+def test_old_replay_hides_journal_and_comparison():
+    weeks = [_track_week(1, [], [], []), _track_week(2, [], ["inflow_drop"], [{"trigger": "inflow_drop"}]),
+             _track_week(3, ["basis_breach"], [], [])]
+    loan = dict(USD, id="usd-oldtrack", application_id="usd-oldtrack", applicant_id=SELLER, industry="Food",
+                amount_cents=500001, tenor_months=6, decision="approve",
+                baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
+                monitoring={"status": "completed", "replay_id": "rp", "processed_week": 3, "weeks": weeks})
+    assert loan_view(loan, [], None, b"k", restore=False)["journal"] is None
+    for lang in ("ko", "en"):
+        page = _usd_page(weeks, "usd-oldtrack", lang=lang)
+        for text in ("감시 비교", "Monitoring comparison", "에이전트 감시 일지", "Agent watch journal"):
+            assert text not in page
+
+
+def test_usd_loan_page_has_no_comparison_copy():
+    for lang in ("ko", "en"):
+        page = _usd_page(_scene_weeks(), "usd-nocompare", lang=lang)
+        for text in ("은행만", "Bank only", "bank-only", "감시 비교", "Monitoring comparison", "먼저 감지",
+                     "detected 1 week(s) earlier"):
+            assert text not in page, text
+
+
+def test_alert_card_shows_why_now_outlook_and_source():
+    new = {"id": "ew-3", "alert_id": "ew-3", "loan_id": "usd-alert", "replay_id": "rp", "week": 3,
+           "severity": "high", "recommended_action": "check", "status": "open", "summary": "s",
+           "primary_cause": "settlement_hold", "models": {}, "incident_id": "in-rp-w02",
+           "why_now": "정산 보류가 2주째 이어졌습니다.", "outlook": "7/14 상환일 잔고 부족",
+           "adjust_reason": "마켓 근거로 한 단계 낮춤",
+           "signals": [{"kind": "settlement_hold", "text": "보류", "metric_ids": ["W:3:held_cents"],
+                        "source": "settlement"}]}
+    old = dict(new, id="ew-2", alert_id="ew-2", week=2, signals=[{"kind": "inflow_drop", "text": "감소",
+                                                                  "metric_ids": ["W:2:revenue_cents"]}])
+    for key in ("incident_id", "why_now", "outlook", "adjust_reason"):
+        del old[key]
+    weeks = [_watch_week(2, _watch("normal", "normal")), _watch_week(3, _watch("normal", "normal"),
+                                                                     held_cents=380000)]
+    page = _usd_page(weeks, "usd-alert", [old, new])
+    cards = {m.group(1): m.group(0) for m in re.finditer(r'<section id="(ew-\d)".*?</section>', page, re.S)}
+    assert "Why now" not in cards["ew-2"] and "Outlook" not in cards["ew-2"] and "Adjustment reason" not in cards["ew-2"]
+    assert '<span class="chip">Settlement</span>' not in cards["ew-2"]
+    for text in ("Why now", "Outlook", "Adjustment reason", "7/14 상환일 잔고 부족"):
+        assert text in cards["ew-3"]
+    source_chip = cards["ew-3"].index('<span class="chip">Settlement</span>')
+    assert source_chip < cards["ew-3"].index("W:3:held_cents")
+
+
+def _market_row(n, **fields):
+    return {"mkt_gross_cents": 1200000 + n, "mkt_cancel_rate": 0.02, "mkt_rating": 4.6, "mkt_grade": "A",
+            "mkt_penalties": 0, "mkt_pending_cents": 90000, **fields}
+
+
+def test_market_snapshot_table_rows():
+    weeks = [_watch_week(n, _watch("normal", "normal"), **_market_row(n)) for n in range(1, 13)]
+    weeks.append(_watch_week(13, _watch("watch"), **_market_row(13, mkt_cancel_rate=0.046, mkt_rating=4.25,
+                                                                mkt_grade="B", mkt_penalties=2)))
+    page = _usd_page(weeks, "usd-market")
+    card = re.search(r'<section id="market-snapshot".*?</section>', page, re.S).group(0)
+    assert "Weekly market snapshot" in card
+    rows = re.findall(r"<tr>(.*?)</tr>", card.split("<tbody>")[1], re.S)
+    assert len(rows) == 13
+    assert all(f"<td>{cell}</td>" in rows[-1] for cell in ("13", "4.6%", "4.25", "B", "2", "$900"))
+    assert "2.0%" in rows[0] and "No marketplace data" not in page
+
+
+def test_market_snapshot_note_without_market_data():
+    page = _usd_page([_watch_week(n, _watch("normal", "normal")) for n in (1, 2)], "usd-nomkt")
+    assert "No marketplace data" in page and 'id="market-snapshot"' not in page
+    assert "마켓 자료 없음" in _usd_page([_watch_week(1, _watch("normal", "normal"))], "usd-nomkt", lang="ko")
 def test_old_usd_replay_hides_track_cards():
     deps = fixtures.build_deps()
     loan = dict(USD, id="usd-old", application_id="usd-old", applicant_id=SELLER, industry="Food",

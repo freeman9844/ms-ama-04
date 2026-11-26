@@ -127,18 +127,6 @@ def approval_basis(substitutions: Sequence[str], features: Mapping[str, Any]) ->
     return out
 
 
-def track_summary(weeks: Sequence[Mapping]) -> dict | None:
-    """First alert week per track; None unless every week was recorded with both tracks (older or mixed replays)."""
-    if not weeks or not all("bank_only_triggers" in w for w in weeks):
-        return None
-    bank = next((w["week"] for w in weeks if w.get("bank_only_triggers")), None)
-    full = next((w["week"] for w in weeks if w.get("triggers")), None)
-    return {"bank_first_week": bank, "full_first_week": full,
-            "lead_weeks": bank - full if bank is not None and full is not None else None,
-            "explained_weeks": sum(1 for w in weeks if any(e.get("trigger") == "inflow_drop" for e in w.get("explained") or ())),
-            "bank_only_weeks": sum(1 for w in weeks if w.get("bank_only_triggers") and not w.get("triggers"))}
-
-
 def _scheduled(pg, hi: date, recon: float | None) -> dict[str, tuple[date, dict[date, int]]]:
     """Payouts the ledger already shows within each platform's payout lag, discounted by the recent reconciliation
     ratio. Hold releases are one-offs and stay out. A payout dated on a non-business day rolls to the next business

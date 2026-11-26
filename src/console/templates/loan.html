@@ -162,21 +162,21 @@
 {% else %}<p class="pii">{{ _("가명 표시 중.") }}</p>{% endif %}
 
 {% if v.weeks %}
-{% if v.track %}{% set tk = v.track %}
-<section class="card">
-<h2>{{ _("감시 비교") }}</h2>
-<p><small>{{ _("은행만 트랙은 탐지기 기준, 실제 경보는 정산·마켓 트랙과 조사 에이전트 판단") }}</small></p>
-{% if tk.lead_weeks and tk.lead_weeks > 0 %}<p class="ok">{{ _("정산·마켓 데이터가 %(n)s주 먼저 감지", n=tk.lead_weeks) }}</p>{% endif %}
-{% if tk.bank_first_week is none and tk.full_first_week is not none %}<p class="error">{{ _("은행만: 미감지") }}</p>{% endif %}
-{% if tk.explained_weeks and tk.explained_weeks > 0 %}<p>{{ _("설명된 입금 감소 %(n)s주", n=tk.explained_weeks) }}</p>{% endif %}
-<table>
-  <thead><tr><th>{{ _("주차") }}</th>{% for t in tk.timeline %}<th>{{ t.week }}</th>{% endfor %}</tr></thead>
-  <tbody>
-    <tr><th>{{ _("은행만") }}</th>{% for t in tk.timeline %}<td>{{ "●" if t.bank == "trigger" else "○" if t.bank == "bank_only" else "" }}</td>{% endfor %}</tr>
-    <tr><th>{{ _("정산·마켓") }}</th>{% for t in tk.timeline %}<td>{{ "●" if t.full == "trigger" else "✓" if t.full == "explained" else "" }}</td>{% endfor %}</tr>
-  </tbody>
-</table>
-<p><small>{{ _("● 트리거 ○ 은행만 트리거 ✓ 정산 예정표로 설명됨") }}</small></p>
+{% if v.journal %}{% set jn = v.journal %}
+<section id="watch-journal" class="card">
+<h2>{{ _("에이전트 감시 일지") }}{% if jn.open %} <small class="status {{ 'sev-high' if jn.open.stage == 'high' else 'sev-medium' if jn.open.stage == 'medium' else 'sev-low' }}">{{ _("열린 사건: %(stage)s · %(week)s주차부터", stage=jn.open.stage|stage_label, week=jn.open.since) }}</small>{% endif %}</h2>
+<ul class="claims">
+{% for j in jn.lines %}
+  <li id="journal-w{{ j.week }}"><strong>{{ _("%(n)s주차", n=j.week) }}</strong> <span class="status {{ 'sev-high' if j.stage == 'high' else 'sev-medium' if j.stage == 'medium' else 'sev-low' if j.stage == 'watch' else 'ok' if j.stage == 'resolved' else '' }}">{{ j.stage|stage_label }}</span>
+    {% if j.notes %}<small>{{ j.notes|join(" · ") }}</small>{% endif %}
+    {% if j.alert_id %}<a href="#{{ j.alert_id }}">{{ _("경보 카드") }}</a>{% endif %}
+    <div>{% for s in j.sources %}{% if s.state == "signal" %}{% for g in s.signals %}<span class="chip warn">{{ s.source|source_label }} · {{ g.code|signal_label }}</span>{% for id, val in g.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val|usd_cents if id.endswith('_cents') else val if val is not none else _("없음") }}</span>{% endfor %}{% endfor %}
+      {% else %}<span class="chip">{{ s.source|source_label }} · {% if s.state == "missing" %}{{ pgettext("journal", "자료 없음") }}{% else %}{{ _("정상") }}{% endif %}</span>{% endif %}{% endfor %}</div>
+    {% if j.why_now or j.outlook %}<div>{% if j.why_now %}<strong>{{ _("왜 지금") }}</strong> {{ j.why_now|mt }} {% endif %}{% if j.outlook %}<strong>{{ _("다음 예상") }}</strong> {{ j.outlook|mt }}{% endif %}</div>{% endif %}
+    {% if j.adjust_reason %}<div><strong>{{ _("조정 이유") }}</strong> {{ j.adjust_reason|mt }}</div>{% endif %}
+  </li>
+{% endfor %}
+</ul>
 </section>
 {% endif %}
 {% if v.basis_cards %}
@@ -233,6 +233,26 @@
 </table>
 {% else %}<p class="note">{{ v.ledger_note }}</p>{% endif %}
 </section>
+{% if v.market_rows %}
+<section id="market-snapshot" class="card">
+<h2>{{ _("주간 마켓 스냅샷") }}</h2>
+<table>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("취소율") }}</th><th>{{ _("평점") }}</th><th>{{ _("등급") }}</th><th>{{ _("경고") }}</th><th>{{ _("정산 대기") }}</th></tr></thead>
+  <tbody>
+{% for r in v.market_rows %}
+<tr>
+  <td>{{ r.week }}</td><td>{{ r.mkt_gross_cents|usd_cents if r.mkt_gross_cents is number else "-" }}</td><td>{{ r.mkt_cancel_rate|pct }}</td><td>{{ r.mkt_rating if r.mkt_rating is number else "-" }}</td><td>{{ r.mkt_grade or "-" }}</td><td>{{ r.mkt_penalties if r.mkt_penalties is number else "-" }}</td><td>{{ r.mkt_pending_cents|usd_cents if r.mkt_pending_cents is number else "-" }}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+</section>
+{% elif v.market_note %}
+<section class="card">
+<h2>{{ _("주간 마켓 스냅샷") }}</h2>
+<p class="note">{{ v.market_note }}</p>
+</section>
+{% endif %}
 {% if l.repayment %}
 <section class="card">
 <h2>{{ _("상환 원장") }}</h2>
@@ -375,10 +395,13 @@
   <div><h3>{{ _("확인할 조치") }}</h3><p>{{ a.check_action|mt }}</p></div>
 </div>
 {% else %}<p class="summary">{{ a.summary|mt }}</p>{% endif %}
+{% if a.why_now %}<p><strong>{{ _("왜 지금") }}</strong> {{ a.why_now|mt }}</p>{% endif %}
+{% if a.outlook %}<p><strong>{{ _("다음 예상") }}</strong> {{ a.outlook|mt }}</p>{% endif %}
+{% if a.adjust_reason %}<p><strong>{{ _("조정 이유") }}</strong> {{ a.adjust_reason|mt }}</p>{% endif %}
 <ul class="claims">
 {% for s in a.signals %}
   <li><strong>{{ s.kind }}</strong> {{ s.text|mt }}
-    <div>{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val|usd_cents if usd and id.endswith('_cents') else val if val is not none else _("없음") }}</span>{% endfor %}
+    <div>{% if s.source %}<span class="chip">{{ s.source|source_label }}</span>{% endif %}{% for id, val in s.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val|usd_cents if usd and id.endswith('_cents') else val if val is not none else _("없음") }}</span>{% endfor %}
     {% for t in s.txn_ids %}<span class="chip txn">{{ t }}</span>{% endfor %}</div>
   </li>
 {% endfor %}

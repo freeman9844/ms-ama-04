@@ -64,6 +64,7 @@ from console.monitoring import (
     installment_label,
     load_monitoring_raw,
     loan_view,
+    stage_label,
 )
 from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
 from console.opinion import opinion_panel, policy_cents_ids, review_history
@@ -274,6 +275,7 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: i18n.label(SEVERITY_LABELS, s)
     env.filters["action_label"] = lambda s: i18n.label(ACTION_LABELS, s)
     env.filters["trigger_label"] = lambda s: i18n.label(TRIGGER_LABELS, s)
+    env.filters["stage_label"] = stage_label
     env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
     env.filters["seller_label"] = lambda s: data_label(seller_label(s))
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
