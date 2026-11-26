@@ -790,7 +790,7 @@ def test_usd_officer_to_servicing(run_journey, seller, stress, high):
             monitoring_module.start_replay(replace(deps, mock=WrongLoanFeed()), LOAN)
 
 
-def usd_registration(run_journey, substitutions=None, ratio=None):
+def usd_registration(run_journey, substitutions=None, ratio=None, seller="seller-dailylook-01"):
     """USD 승인 후 이미 등록된 대출을 지우고, 심사 근거(정책 대체 규칙·대사 비율)를 바꿔 다시 등록할 입력을 만든다."""
     import asyncio
     from functools import partial
@@ -802,7 +802,7 @@ def usd_registration(run_journey, substitutions=None, ratio=None):
     from policy.rules import load_rules
     from shared.contracts import USD_V1
 
-    day, seller = date(2026, 11, 24), "seller-dailylook-01"
+    day = date(2026, 11, 24)
     sellers = build_demo_cases(day)
     outbox = Outbox()
     now = NOW.replace(day=day.day)
@@ -852,6 +852,46 @@ def test_register_krw_loan_has_no_approval_basis(mock_app):
     deps = make_deps(mock_app)
     approved_loan(deps)
     assert "approval_basis" not in loan(deps)
+
+
+def test_usd_monitoring_consent_includes_marketplace(run_journey):
+    deps, _, registration, meta = usd_registration(run_journey, seller="seller-bakery-20")
+    register_monitoring(deps, registration)
+    assert replay(deps, **meta)["replay_id"]
+    mon = loan(deps)["monitoring"]
+    consent = deps.store.read("consents", mon["consent_id"], mon["consent_id"])
+    assert consent["scopes"] == ["account", "pg", "marketplace"]
+    assert deps.raw.get_json(f"consent-{mon['consent_id']}", "market_flow.json")
+    assert mon["market"] == "ok"
+
+
+def test_krw_monitoring_consent_scopes_unchanged(mock_app):
+    deps = make_deps(mock_app)
+    approved_loan(deps)
+    replay(deps)
+    mon = loan(deps)["monitoring"]
+    consent = deps.store.read("consents", mon["consent_id"], mon["consent_id"])
+    assert consent["scopes"] == ["account", "pg"]
+    assert "market" not in mon
+    assert deps.raw.get_json(f"consent-{mon['consent_id']}", "market_flow.json") is None
+
+
+def test_market_flow_failure_keeps_replaying(run_journey, monkeypatch, caplog):
+    deps, outbox, registration, meta = usd_registration(run_journey, seller="seller-bakery-20")
+    register_monitoring(deps, registration)
+    fetch = deps.mock.fetch
+    sentinel = "SYNTHETIC-PRIVATE-MARKET-VALUE"
+    def corrupt(source, token, params=None):
+        if source == "market_flow":
+            return {"weeks": [{"week_end": sentinel}]}
+        return fetch(source, token, params)
+    monkeypatch.setattr(deps.mock, "fetch", corrupt)
+    assert replay(deps, **meta)["replay_id"]
+    pump(deps, outbox)
+    mon = loan(deps)["monitoring"]
+    assert mon["market"] == "missing"
+    assert mon["status"] == "completed" and mon["processed_week"] == WEEKS
+    assert sentinel not in caplog.text
 
 
 def test_usd_week_entry_records_both_tracks(run_journey):

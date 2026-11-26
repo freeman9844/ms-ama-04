@@ -33,7 +33,7 @@ from agents.pretranslate import load_case_raw
 from agents.usd_monitoring import observe_usd
 from shared.contracts import UsdProduct
 from shared.money import format_usd
-from shared.usd_source import UsdPgFlow, UsdProfile
+from shared.usd_source import UsdMarketFlow, UsdPgFlow, UsdProfile
 from shared.product_context import product_of
 from agents.escalation import TEMPLATES, auto_contact, next_stage, plan_link, sim_now, stage_message
 from agents.features import monthly_installment
@@ -60,6 +60,7 @@ from journey.models import (
     CONSENT_TTL_DAYS,
     MONITORING_PURPOSE,
     MONITORING_SCOPES,
+    USD_MONITORING_SCOPES,
     OFFICER_MESSAGE,
     AlertRaised,
     CollectionsDecision,
@@ -164,6 +165,34 @@ def _collect_pg_flow(
     raise ValueError("invalid_usd_pg_flow")
 
 
+def _collect_market_flow(
+    deps: Deps, token: str, terms: dict[str, Any], consent_id: str, loan_id: str
+) -> UsdMarketFlow | None:
+    """사후 마켓 흐름(선택 입력)을 받아 원본 그대로 저장한다. 실패해도 경고만 남기고 재생을 계속한다."""
+    try:
+        raw = deps.mock.fetch("market_flow", token, terms)
+        market = UsdMarketFlow.model_validate(raw)
+    except Exception as e:
+        _drop_if_consent_ended(deps, consent_id, raw_container(consent_id))
+        log.warning("Optional market flow unavailable: %s %s", loan_id, type(e).__name__)
+        return None
+    put_consent_raw(deps, consent_id, "market_flow.json", raw)
+    return market
+
+
+def _market(deps: Deps, mon: dict[str, Any]) -> UsdMarketFlow | None:
+    """저장된 마켓 흐름을 읽는다. 없거나 형식이 틀리면 경고만 남기고 None."""
+    raw = deps.raw.get_json(raw_container(mon["consent_id"]), "market_flow.json")
+    if raw is None:
+        log.warning("저장된 마켓 흐름 없음: %s", mon["consent_id"])
+        return None
+    try:
+        return UsdMarketFlow.model_validate(raw)
+    except ValidationError:
+        log.warning("저장된 마켓 흐름 형식이 올바르지 않음: %s", mon["consent_id"])
+        return None
+
+
 def _ledger_baseline(
     deps: Deps, loan: dict[str, Any], pg: PgFlow | None, flow_start: date
 ) -> dict[str, Any] | None:
@@ -232,8 +261,8 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         log.warning("동시 재생 요청 무시: %s", loan_id)
         return None
     try:
-        scopes = list(MONITORING_SCOPES)
         product = product_of(loan)
+        scopes = list(USD_MONITORING_SCOPES if product else MONITORING_SCOPES)
         purpose = "Post-loan monitoring" if product else MONITORING_PURPOSE
         grant = deps.mock.create_consent(loan["applicant_id"], scopes, purpose, CONSENT_TTL_DAYS,
                                          **({"product": product} if product else {}))
@@ -273,11 +302,13 @@ def start_replay(deps: Deps, loan_id: str) -> dict[str, Any] | None:
         put_consent_raw(deps, consent_id, "flow.json", flow)
         flow_start = min(t.booked_on for t in txns)
         pg = _collect_pg_flow(deps, grant["token"], terms, consent_id, loan_id)
+        market = _collect_market_flow(deps, grant["token"], terms, consent_id, loan_id) if product else None
         loan["monitoring"].update(
             consent_id=consent_id,
             flow_start=flow_start.isoformat(),
             pg="ok" if pg is not None else "missing",
             ledger_baseline=None if product else _ledger_baseline(deps, loan, pg, flow_start),
+            **({"market": "ok" if market is not None else "missing"} if product else {}),
         )
         # 재생마다 원장을 새로 만든다(이전 재생의 납부·미납 판정을 지운다). 상환액은 Mock에 넘긴 값과 같아야 한다.
         loan["repayment"] = (usd_schedule(flow_start, loan["amount_cents"], loan["tenor_months"]) if product
