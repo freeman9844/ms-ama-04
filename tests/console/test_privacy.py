@@ -184,7 +184,7 @@ def test_borrower_index_lists_demo_applicants(env):
     page = client.get("/borrower", headers=CUSTOMER).text
     for seller in ("seller-dailylook-01", "seller-candle-05"):
         url = f"/apply?applicant_id={seller}"
-        assert f'href="{url}"' in page
+        assert (f'href="{url}"' in page) == (seller == "seller-dailylook-01")
         form = client.get(url, headers=CUSTOMER)
         assert form.status_code == 200 and f'name="applicant_id" value="{seller}"' in form.text
     assert '<li class="n-status active"><a href="/borrower">사업자 선택</a>' in page

@@ -1240,6 +1240,18 @@ def test_usd_only_seller_is_listed_and_accepted_by_apply():
     assert client.get("/apply?applicant_id=seller-snackbox-22", follow_redirects=False).status_code == 200
 
 
+def test_pickers_list_only_scene_sellers_but_hidden_sellers_still_apply():
+    client = TestClient(create_app(fixtures.build_deps()))
+    picker = client.get("/borrower").text
+    listed = re.findall(r'href="/apply\?applicant_id=([^"]+)"', picker)
+    assert len(listed) == 15 and "seller-gearstore-06" in listed and "seller-popup-29" in listed
+    assert "Daejeon Bakery" not in picker and "Haeundae Beauty Lab" not in picker
+    new = client.get("/applications/new").text
+    assert re.findall(r'<option value="(seller-[^"]+)"', new) == listed
+    assert client.get("/apply?applicant_id=seller-bakery-20", follow_redirects=False).status_code == 200
+    assert "/legacy/borrower/seller-bakery-20" in client.get("/legacy/borrower").text
+
+
 def test_usd_only_sellers_are_in_usd_picker_with_name_initial_but_not_in_legacy_picker():
     client = TestClient(create_app(fixtures.build_deps()))
     usd = client.get("/borrower").text

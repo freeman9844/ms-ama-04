@@ -304,7 +304,7 @@ def test_form_must_be_urlencoded_and_small(env):
 def test_new_application_is_enqueued_and_redirects(env):
     client, queue = env
     form_page = client.get("/applications/new", headers=OFFICER).text
-    assert "seller-dailylook-01" in form_page and "seller-candle-05" in form_page
+    assert "seller-dailylook-01" in form_page and "seller-candle-05" not in form_page
     token = csrf(client, OFFICER, "/applications/new")
     resp = client.post("/applications", headers=OFFICER, data={
         "csrf": token, "applicant_id": "seller-dailylook-01", "requested_amount_usd": "10,000",

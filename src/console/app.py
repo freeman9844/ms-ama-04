@@ -142,6 +142,11 @@ LIST_LIMIT = 50
 # 홈 신청 목록 건수(테스트 신청 제외). 홈 통계는 건수 제한 없이 모든 신청을 집계한다.
 HOME_LIST_LIMIT = 20
 DEMO_APPLICANTS = (*(s.applicant_id for s in DEMO_SELLERS), *USD_ONLY_SELLER_IDS)
+# 업체 선택·새 신청 목록에는 심사·사후 시연 장면이 있는 업체만 보인다. 나머지도 직접 주소와 신청 검증에서는 받는다.
+SCENE_APPLICANTS = tuple(a for a in DEMO_APPLICANTS if a in {
+    "seller-snackbox-22", "seller-campgear-23", "seller-teahouse-24", "seller-knitroom-04", "seller-leather-14",
+    "seller-tint-17", "seller-phonecase-25", "seller-popup-29", "seller-toyland-26", "seller-vitamin-27",
+    "seller-golfgear-28", "seller-gearstore-06", "seller-linen-10", "seller-dailylook-01", "seller-tangerine-15"})
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
 # 신청 상세(/applications/{id})의 모든 자동 새로 고침 주기.
 DETAIL_REFRESH_SECONDS = 10
@@ -309,7 +314,7 @@ def _templates() -> Environment:
     env.filters["usd"] = lambda v: f"${v:,.4f}" if isinstance(v, int | float) else "-"
     env.filters["num"] = lambda v, d=1: f"{v:.{d}f}" if isinstance(v, int | float) else "-"
     env.globals.update(
-        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS,
+        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=SCENE_APPLICANTS, demo_actions=DEMO_ACTIONS,
         monitoring_refresh_seconds=MONITORING_REFRESH_SECONDS, detail_refresh_seconds=DETAIL_REFRESH_SECONDS,
         locale=i18n.current, lang_url=i18n.lang_url,
     )
@@ -1136,7 +1141,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         user = customer(request)
         privacy()
         legacy = request.url.path.startswith("/legacy/")
-        applicants = tuple(a for a in DEMO_APPLICANTS if a not in USD_ONLY_SELLER_IDS) if legacy else DEMO_APPLICANTS
+        applicants = tuple(a for a in DEMO_APPLICANTS if a not in USD_ONLY_SELLER_IDS) if legacy else SCENE_APPLICANTS
         return render("customer_select.html", user, prefix="/legacy" if legacy else "", applicants=applicants)
 
     @app.get("/legacy/borrower/{applicant_id}", response_class=HTMLResponse)
