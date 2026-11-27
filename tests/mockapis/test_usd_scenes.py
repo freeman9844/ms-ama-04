@@ -271,7 +271,7 @@ def ladder(lines):
 
 STAGE_SCENES = {  # spec section 7; weeks may move by one
     "seller-gearstore-06": [("watch", 2), ("medium", 3), ("resolved", 8)],
-    "seller-linen-10": [("watch", 3), ("medium", 4), ("resolved", 10)],
+    "seller-linen-10": [("medium", 3), ("resolved", 10)],  # returns move settlement and market score together (spec 4.2)
     "seller-dailylook-01": [("watch", 4), ("medium", 5), ("high", 7)],
     "seller-tangerine-15": [("watch", 3)],
     "seller-snackbox-22": [("medium", 3)],
@@ -438,7 +438,7 @@ def codes(o, source=None):
 
 def test_gearstore_market_signal_comes_first():
     obs, _ = replay("seller-gearstore-06")
-    assert codes(obs[1]) == ["cancel_rise"]
+    assert codes(obs[1]) == ["market_score_drop"]
     assert {s["code"]: s["strength"] for s in obs[2].signals if s["code"] in ("account_warning", "settlement_hold")} \
         == {"account_warning": "strong", "settlement_hold": "strong"}
 
@@ -459,9 +459,9 @@ def test_seasonal_scene_raises_no_signal():
     assert all(o.signals == () for o in replay("seller-campgear-23")[0])
 
 
-def test_linen_rating_drop_is_a_market_signal():
+def test_linen_quality_drop_is_a_market_signal():
     obs, _ = replay("seller-linen-10")
-    assert any("rating_drop" in codes(o, "market") for o in obs)
+    assert any("market_score_drop" in codes(o, "market") for o in obs)
 
 
 def test_no_market_means_no_market_fields_or_signals():
@@ -481,23 +481,56 @@ def _mkt_weeks(*, cancel_cents, grade, start=date(2026, 11, 24), pre_grade="Gold
     return UsdMarketFlow(**USD_V1.model_dump(), weeks=(*pre, week(hi, cancel_cents, grade))), start, hi
 
 
-def test_cancel_spike_supersedes_cancel_rise():
-    market, start, hi = _mkt_weeks(cancel_cents=90_000, grade="Gold")
-    assert _market_week({}, market, start, hi) == ["cancel_spike"]
-    market, start, hi = _mkt_weeks(cancel_cents=40_000, grade="Gold")
-    assert _market_week({}, market, start, hi) == ["cancel_rise"]
+def test_market_week_writes_score_and_drop():
+    market, start, hi = _mkt_weeks(cancel_cents=40_000, grade="Gold")  # 1% -> 4%: 18점
+    row = {}
+    assert _market_week(row, market, start, hi) == ["market_score_drop"]
+    assert (row["mkt_score"], row["mkt_worst_score"], row["mkt_worst_platform"]) == (82, 82, "coupang")
+    assert row["mkt_score_parts"][0]["metric"] == "cancel" and row["mkt_cancel_rate"] == 0.04
 
 
-def test_cancel_spike_needs_a_rise_over_the_baseline():
-    market, start, hi = _mkt_weeks(cancel_cents=160_000, grade="Gold", pre_cancel_cents=150_000)
-    assert _market_week({}, market, start, hi) == []
-    market, start, hi = _mkt_weeks(cancel_cents=200_000, grade="Gold", pre_cancel_cents=60_000)
-    assert _market_week({}, market, start, hi) == ["cancel_spike"]
+def test_market_score_crash_supersedes_drop():
+    market, start, hi = _mkt_weeks(cancel_cents=100_000, grade="Gold")  # 상한 40 -> 60
+    assert _market_week({}, market, start, hi) == ["market_score_crash"]
 
 
-def test_grade_down_fires_on_one_step_downgrade():
+def test_one_grade_step_is_a_drop():
     market, start, hi = _mkt_weeks(cancel_cents=10_000, grade="Silver")
-    assert _market_week({}, market, start, hi) == ["grade_down"]
+    assert _market_week({}, market, start, hi) == ["market_score_drop"]
+
+
+def _flow(start, hi, plan):
+    """plan: platform -> (gross, pre cancel, gross this week, cancel this week); 8 pre-loan weeks and `hi`."""
+    def week(end, platform, gross, cancel):
+        return UsdMarketWeek(**USD_V1.model_dump(), week_end=end, platform_code=platform, orders=10,
+                             gross_cents=gross, cancel_cents=cancel, rating=4.5, seller_grade="Gold",
+                             pending_settlement_cents=0)
+
+    weeks = [week(start - timedelta(days=7 * k + 1), p, gross, cancel)
+             for p, (gross, cancel, _, _) in plan.items() for k in range(8)]
+    weeks += [week(hi, p, gross, cancel) for p, (_, _, gross, cancel) in plan.items()]
+    return UsdMarketFlow(**USD_V1.model_dump(), weeks=tuple(weeks))
+
+
+def test_worst_major_market_alone_fires_drop():
+    start = date(2026, 11, 24)
+    hi = start + timedelta(days=6)
+    # naver (30%) cancel 1% -> 4%: 82 points; weighted 0.7 * 100 + 0.3 * 82 = 95
+    market = _flow(start, hi, {"coupang": (700_000, 7_000, 700_000, 7_000),
+                               "naver_smart_store": (300_000, 3_000, 300_000, 12_000)})
+    row = {}
+    assert _market_week(row, market, start, hi) == ["market_score_drop"]
+    assert row["mkt_score"] > 85 and row["mkt_worst_platform"] == "naver_smart_store"
+    assert row["mkt_worst_score"] <= 85
+
+
+def test_no_preloan_sales_writes_no_score():
+    start = date(2026, 11, 24)
+    hi = start + timedelta(days=6)
+    market = _flow(start, hi, {"coupang": (0, 0, 1_000_000, 90_000)})
+    row = {}
+    fired = _market_week(row, market, start, hi)
+    assert "mkt_score" not in row and not any(c.startswith("market_score") for c in fired)
 
 
 @pytest.mark.parametrize("pre_grade, grade", [("Gold", "Platinum"), ("Platinum", "Gold")])

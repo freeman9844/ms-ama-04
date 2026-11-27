@@ -116,6 +116,21 @@ def test_ungrounded_number_in_why_now_rejected():
     assert check_stage(out("medium", why_now="Orders fell before receipts moved in week 4."), ctx) == []
 
 
+def test_market_score_texts_may_cite_score_breakdown():
+    row = {**ROW, "mkt_score": 76, "mkt_worst_score": 64, "mkt_worst_platform": "coupang",
+           "mkt_platform_scores": {"coupang": {"score": 64, "share": 0.6}, "naver": {"score": 94, "share": 0.4}},
+           "mkt_score_parts": [{"platform": "coupang", "metric": "cancel", "points": 18.0, "value": 0.08,
+                                "baseline": 0.02}]}
+    ctx = accept(usd_ctx([SETTLE_STRONG, RATING_DROP], "medium", rows=[row]), "medium")
+    for why_now in ("The marketplace score fell to 76 (100 at loan) after cancellations rose.",
+                    "Naver held at 94 while Coupang scored 64 in week 4.",
+                    "Coupang lost 18.0 points on cancellations before receipts moved."):
+        assert check_stage(out("medium", why_now=why_now), ctx) == [], why_now
+    assert check_stage(out("medium", why_now="Coupang lost 37.5 points on cancellations."), ctx)
+    assert check_stage(out("medium", why_now="The score was 100 at loan."),
+                       accept(usd_ctx([SETTLE_STRONG, RATING_DROP], "medium"), "medium"))
+
+
 def test_alert_severity_must_match_stage():
     ctx = usd_ctx([BANK_STRONG, RATING_DROP], "high")
     runner = ScriptedStage(out("high").model_dump(), {**ALERT_ARGS, "severity": "medium"})
@@ -170,3 +185,10 @@ def test_old_alert_documents_still_validate():
     }
     alert = EarlyWarningAlert.model_validate(doc)
     assert alert.incident_id is None and alert.why_now is None and alert.signals[0].source is None
+
+
+def test_market_score_signals_have_fallback_text():
+    from agents.usd_early_warning import _SIGNAL_TEXT
+    assert _SIGNAL_TEXT["market_score_drop"][0] == "The marketplace score fell below its pre-loan level."
+    assert _SIGNAL_TEXT["market_score_crash"][0] == "The marketplace score fell sharply."
+    assert _SIGNAL_TEXT["market_score_drop"][1] == "Check the score breakdown on the marketplace accounts."

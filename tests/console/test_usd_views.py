@@ -2,12 +2,14 @@ import asyncio
 import json
 import re
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
+import console
 from console.adapters import CosmosApplications
 from console.adapters import CosmosMonitoring, CosmosOps, CosmosPrivacy
 from console.app import create_app, state_tag
@@ -685,6 +687,28 @@ def test_watch_chart_inside_journal_card():
     assert "Projected min balance (28-day forecast, not the actual balance)</li>" in card
 
 
+def test_watch_chart_score_chip_tooltip_and_legend():
+    weeks = _scene_weeks()
+    weeks[1]["row"].update(mkt_score=93, mkt_worst_score=83, mkt_worst_platform="coupang",
+                           mkt_platform_scores={"coupang": {"score": 83, "share": 0.85},
+                                                "naver_smart_store": {"score": 100, "share": 0.15}},
+                           mkt_score_parts=[
+        {"platform": "coupang", "metric": "cancel", "points": 9.0, "value": 0.046, "baseline": 0.02}])
+    weeks[1]["watch"]["signals"] = [_signal("market_score_drop", "market", "weak", "W:2:mkt_score", "W:2:mkt_worst_score")]
+    weeks[2]["row"].update(mkt_score=99, mkt_worst_score=99, mkt_worst_platform="coupang")
+    card = _journal(_usd_page(weeks, "usd-score"))
+    assert "Week 2 market score 93 · Coupang 83 (share 85%)" in card
+    assert "Coupang cancel rate −9.0" in card
+    assert "Market score (100 = at loan)</li>" in card
+    assert "market-chip tone-warn" in card
+    assert 'class="market-chip tone-ok grade-signal"' in card  # week 3: account warning only
+    css = (Path(console.__file__).parent / "static" / "console.css").read_text(encoding="utf-8")
+    assert ".market-chip.grade-signal rect" in css
+    ko = _journal(_usd_page(weeks, "usd-score", lang="ko"))
+    assert "쿠팡 83(비중 85%)" in ko and "쿠팡 취소율 −9.0" in ko
+    assert "metric|" not in ko
+
+
 def test_watch_chart_slot_without_journal_line():
     weeks = [{"week": 1, "row": {"week": 1, "revenue_cents": 404123}, "triggers": []},
              _watch_week(2, _watch("normal", "normal"))]
@@ -704,7 +728,7 @@ def test_ledger_folded_with_signal_cells():
     warn = ' class="cell-warn"'
     assert flow[4][6] == warn  # 5주차 전망 최저 잔고
     assert pg[2][3] == warn and pg[3][3] == warn  # 3·4주차 보류
-    assert market[1][2] == warn and market[2][5] == warn  # 2주차 취소율, 3주차 경고
+    assert market[1][3] == warn and market[2][6] == warn  # 2주차 취소율, 3주차 경고(점수 열 다음)
     assert page.count("cell-warn") == 5
     assert all(warn not in cell for table in (flow, pg, market) for cell in table[0])
     assert 'aria-label="Weekly revenue and cash buffer"' not in page
@@ -840,6 +864,36 @@ def test_market_snapshot_note_without_market_data():
     page = _usd_page([_watch_week(n, _watch("normal", "normal")) for n in (1, 2)], "usd-nomkt")
     assert "No marketplace data" in page and 'id="market-snapshot"' not in page
     assert "마켓 자료 없음" in _usd_page([_watch_week(1, _watch("normal", "normal"))], "usd-nomkt", lang="ko")
+
+
+def test_journal_market_score_signal_chips():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("market_score_drop", "market", "weak",
+                                                    "W:2:mkt_score", "W:2:mkt_worst_score")]),
+                         mkt_score=93, mkt_worst_score=83),
+             _watch_week(3, _watch("medium", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("market_score_crash", "market", "strong",
+                                                    "W:3:mkt_score", "W:3:mkt_worst_score")]),
+                         mkt_score=58, mkt_worst_score=41)]
+    card = _journal(_usd_page(weeks, "usd-score-chip"))
+    for text in ("Market · Market score drop", "Market score 93", "Lowest major market score 83",
+                 "Market · Market score crash", "Market score 58", "Lowest major market score 41"):
+        assert text in card, text
+    assert "market_score_" not in card
+
+
+def test_market_snapshot_score_column():
+    weeks = [_watch_week(n, _watch("normal", "normal"), **_market_row(n)) for n in range(1, 3)]
+    weeks.append(_watch_week(3, _watch("watch", signals=[_signal("market_score_drop", "market", "weak",
+                                                                 "W:3:mkt_score", "W:3:mkt_worst_score")]),
+                             **_market_row(3, mkt_score=82, mkt_worst_score=82)))
+    page = _usd_page(weeks, "usd-score-col")
+    card = re.search(r'<section id="market-snapshot".*?</section>', page, re.S).group(0)
+    assert "<th>Score</th>" in card
+    rows = re.findall(r"<tr>(.*?)</tr>", card.split("<tbody>")[1], re.S)
+    assert '<td class="cell-warn">82</td>' in rows[-1] and "<td>-</td>" in rows[0]
+
+
 def test_old_usd_replay_hides_track_cards():
     deps = fixtures.build_deps()
     loan = dict(USD, id="usd-old", application_id="usd-old", applicant_id=SELLER, industry="Food",

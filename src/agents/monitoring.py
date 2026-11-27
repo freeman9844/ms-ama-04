@@ -87,6 +87,8 @@ WEEK_FIELDS = (
     "mkt_grade",
     "mkt_penalties",
     "mkt_pending",
+    "mkt_score",
+    "mkt_worst_score",
 )
 FORECAST_FIELDS = ("projected_min_balance", "projected_min_date", "shortfall_date", "next_due_on", "due_balance")
 ADVANCE_KEYWORD = "선정산"  # 정산 양도 선지급 입금 적요. 매출도 신규 차입도 아니다(스펙 §5.5)

@@ -77,11 +77,11 @@
 <section id="market-snapshot" class="{{ card }}">
 <{{ h }}>{{ _("주간 마켓 스냅샷") }}</{{ h }}>
 <table>
-  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("취소율") }}</th><th>{{ _("평점") }}</th><th>{{ _("등급") }}</th><th>{{ _("경고") }}</th><th>{{ _("정산 대기") }}</th></tr></thead>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("점수") }}</th><th>{{ _("주문액") }}</th><th>{{ _("취소율") }}</th><th>{{ _("평점") }}</th><th>{{ _("등급") }}</th><th>{{ _("경고") }}</th><th>{{ _("정산 대기") }}</th></tr></thead>
   <tbody>
 {% for r in v.market_rows %}{% set hits = signal_hits.get(r.week, ()) %}
 <tr>
-  <td>{{ r.week }}</td><td>{{ r.mkt_gross_cents|usd_cents if r.mkt_gross_cents is number else "-" }}</td><td{{ cell_warn(hits, "mkt_cancel_rate") }}>{{ r.mkt_cancel_rate|pct }}</td><td{{ cell_warn(hits, "mkt_rating") }}>{{ r.mkt_rating if r.mkt_rating is number else "-" }}</td><td{{ cell_warn(hits, "mkt_grade") }}>{{ r.mkt_grade or "-" }}</td><td{{ cell_warn(hits, "mkt_penalties") }}>{{ r.mkt_penalties if r.mkt_penalties is number else "-" }}</td><td>{{ r.mkt_pending_cents|usd_cents if r.mkt_pending_cents is number else "-" }}</td>
+  <td>{{ r.week }}</td><td{{ cell_warn(hits, "mkt_score", "mkt_worst_score") }}>{{ r.mkt_score if r.mkt_score is number else "-" }}</td><td>{{ r.mkt_gross_cents|usd_cents if r.mkt_gross_cents is number else "-" }}</td><td{{ cell_warn(hits, "mkt_cancel_rate") }}>{{ r.mkt_cancel_rate|pct }}</td><td{{ cell_warn(hits, "mkt_rating") }}>{{ r.mkt_rating if r.mkt_rating is number else "-" }}</td><td{{ cell_warn(hits, "mkt_grade") }}>{{ r.mkt_grade or "-" }}</td><td{{ cell_warn(hits, "mkt_penalties") }}>{{ r.mkt_penalties if r.mkt_penalties is number else "-" }}</td><td>{{ r.mkt_pending_cents|usd_cents if r.mkt_pending_cents is number else "-" }}</td>
 </tr>
 {% endfor %}
   </tbody>
