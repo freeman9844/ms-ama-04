@@ -3,16 +3,17 @@ import json
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
-from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
-from agents import features
 from agents.classify import Category, classify
 from agents.marketplace import store_summary
-from agents.usd_monitoring import approval_basis, observe_usd, track_summary, usd_baseline
-from mockapis import demo, postloan
+from agents.runtime import AgentRun
+from agents.usd_early_warning import fallback_stage, investigate_usd, usd_fallback_alert
+from agents.usd_monitoring import _market_week, approval_basis, observe_usd
+from evals.usd_scenes import case_at, prepare, scene_context, scene_replay, underwrite_at
+from mockapis import postloan
 from mockapis.demo import SCENE_REQUEST_CENTS
 from mockapis.sellerdata.usd import simulate_usd
 from mockapis.synth import generate_usd_case
@@ -20,7 +21,7 @@ from policy.engine import explain
 from policy.rules import rules_for_version
 from shared.contracts import USD_V1, AlertCause
 from shared.sellers import USD_SELLERS
-from shared.usd_source import UsdPgFlow
+from shared.usd_source import UsdMarketFlow, UsdMarketWeek
 
 AS_OF = date(2026, 11, 24)
 E, R, I = "eligible", "refer", "ineligible"
@@ -40,24 +41,6 @@ V1_TABLE = {
     "seller-mugshop-21": (I, F({"R002", "R106", "R108", "R901"}), I, F({"R002", "R106", "R108", "R901"})),
 }
 DIGESTS = json.loads((Path(__file__).parent / "usd_books_digest.json").read_text(encoding="utf-8"))
-
-
-@lru_cache(maxsize=None)
-def _cases(as_of):
-    return demo.build_usd_cases(as_of)
-
-
-def case_at(seller, as_of):
-    return _cases(as_of)[seller]
-
-
-def underwrite_at(seller, as_of, principal=500_000):
-    case = case_at(seller, as_of)
-    return features.compute_usd_underwriting(
-        "app-demo", case.profile, case.transactions, case.tax_filings, as_of=as_of,
-        requested_amount_cents=principal, requested_tenor_months=6,
-        pg_settlements=case.pg_settlements, marketplace=case.marketplace,
-    )
 
 
 def books_digest(case) -> str:
@@ -249,35 +232,25 @@ def test_scene_substitution_conditions_keep_margin(seller):
         assert clears(c.field, c.op, v, c.threshold), (sub.code, c.field, v, c.threshold)
 
 
-def replay(seller, *, basis=None, ledger=True, prior_year=True):
+def replay(seller, *, basis=None, ledger=True, prior_year=True, market=True):
     """Book the loan as a usd-v2 approval and observe 13 weeks. Returns (UsdObservation per week, week entries)."""
-    uw = underwrite_at(seller, AS_OF)
-    stored = {"features": uw.features.model_dump(mode="json"), "monthly": uw.monthly}
-    decision = explain(uw.features, rules_for_version("usd-v2")).decision
-    flow = postloan.generate_usd_postloan(case_at(seller, AS_OF), AS_OF, 1001,
-                                          loan_id="loan-usd", amount_cents=500_000, installment_cents=84_000)
-    pg = UsdPgFlow(**USD_V1.model_dump(), settlements=flow.pg_settlements, orders=flow.orders,
-                   prior_year_orders=flow.prior_year_orders if prior_year else ())
-    mon = {"flow_start": flow.start.isoformat(), "weeks": []}
-    loan = {"monitoring": mon, "baseline": usd_baseline(stored),
-            "approval_basis": approval_basis(decision.applied_substitutions, stored["features"])
-            if basis is None else basis}
+    scene = prepare(seller, basis=basis, prior_year=prior_year, market=market)
+    mon = scene.loan["monitoring"]
     out = []
     for week in range(1, 14):
-        hi = flow.start + timedelta(days=7 * week - 1)
-        obs = observe_usd(loan, [t for t in flow.transactions if t.booked_on <= hi], pg if ledger else None, week, {})
+        obs = observe_usd(scene.loan, scene.visible(week), scene.pg if ledger else None, week, {}, scene.market)
         mon["weeks"].append({"week": week, "row": obs.rows[-1], "triggers": obs.triggers,
                              "bank_only_triggers": obs.bank_only, "explained": obs.explained})
         out.append(obs)
     return out, mon["weeks"]
 
 
-def test_scene1_assignment_breaks_s003_basis():
-    obs, weeks = replay("seller-snackbox-22")
-    s = track_summary(weeks)
-    assert s["bank_first_week"] is None  # bank-only: never detected
-    assert s["full_first_week"] in (3, 4) and "basis_breach" in obs[s["full_first_week"] - 1].triggers
-    assert obs[s["full_first_week"] - 1].candidates[0].cause is AlertCause.SETTLEMENT_ASSIGNED
+def test_snackbox_assignment_breaks_s003_basis():
+    obs, _ = replay("seller-snackbox-22")
+    assert not any(o.bank_only for o in obs)  # bank-only: never detected
+    first = next(n for n, o in enumerate(obs, 1) if o.triggers)
+    assert first in (3, 4) and "basis_breach" in obs[first - 1].triggers
+    assert obs[first - 1].candidates[0].cause is AlertCause.SETTLEMENT_ASSIGNED
 
 
 def test_stable_s003_loan_never_breaches(monkeypatch):
@@ -287,23 +260,137 @@ def test_stable_s003_loan_never_breaches(monkeypatch):
     assert all(o.basis for o in obs)  # the S003 basis is computed from week 1 (Review Focus 2)
 
 
-SCENE2 = {"seller-dailylook-01": (6, 5), "seller-gearstore-06": (5, 3), "seller-linen-10": (None, 4)}
-# (bank-only first week, full first week), measured in Task 4 Step 4.
+def ladder(lines):
+    """(stage, first week) without normal weeks and without consecutive repeats."""
+    out = []
+    for line in lines:
+        if line["stage"] != "normal" and (not out or out[-1][0] != line["stage"]):
+            out.append((line["stage"], line["week"]))
+    return out
 
 
-@pytest.mark.parametrize("seller", sorted(SCENE2))
-def test_scene2_full_track_detects_first(seller):
-    s = track_summary(replay(seller)[1])
-    assert s["full_first_week"] is not None
-    assert s["bank_first_week"] is None or s["full_first_week"] < s["bank_first_week"]
-    assert (s["bank_first_week"], s["full_first_week"]) == SCENE2[seller]
+STAGE_SCENES = {  # spec section 7; weeks may move by one
+    "seller-gearstore-06": [("watch", 2), ("medium", 3), ("resolved", 8)],
+    "seller-linen-10": [("watch", 3), ("medium", 4), ("resolved", 10)],
+    "seller-dailylook-01": [("watch", 4), ("medium", 5), ("high", 7)],
+    "seller-tangerine-15": [("watch", 3)],
+    "seller-snackbox-22": [("medium", 3)],
+    "seller-tint-17": [("watch", 6), ("resolved", 8)],
+}
 
 
-def test_scene3_seasonal_drop_is_explained():
-    obs, weeks = replay("seller-campgear-23")
-    s = track_summary(weeks)
-    assert s["full_first_week"] is None and s["bank_only_weeks"] >= 3 and s["explained_weeks"] >= 3
-    assert all(b["status"] != "breach" for o in obs for b in o.basis)
+@pytest.mark.parametrize("seller", sorted(STAGE_SCENES))
+def test_scene_stage_ladder(seller):
+    got = ladder(scene_replay(seller))
+    assert [s for s, _ in got] == [s for s, _ in STAGE_SCENES[seller]], got
+    assert all(abs(w - e) <= 1 for (_, w), (_, e) in zip(got, STAGE_SCENES[seller])), got
+
+
+def test_gearstore_sources_spread_market_then_settlement_then_bank():
+    first = {}
+    for line in scene_replay("seller-gearstore-06"):
+        for s in line["signals"]:
+            first.setdefault(s["source"], line["week"])
+    assert first["market"] < first["settlement"] < first["bank"], first
+
+
+def test_campgear_explained_and_no_incident():
+    lines = scene_replay("seller-campgear-23")
+    assert all(line["stage"] == "normal" for line in lines)
+    assert sum(line["kind"] == "explained" for line in lines) >= 3
+
+
+def test_tint_blip_never_alerts():
+    assert all(line["stage"] in ("normal", "watch", "resolved") for line in scene_replay("seller-tint-17"))
+
+
+STABLE_SELLERS = sorted(s for s in USD_SELLERS
+                        if postloan.USD_POSTLOAN_SCENARIOS.get(s, postloan.FlowScenario.STABLE)
+                        is postloan.FlowScenario.STABLE and case_at(s, AS_OF).marketplace is not None)
+
+
+@pytest.mark.parametrize("seller", STABLE_SELLERS)
+def test_stable_sellers_open_no_incident(seller):
+    lines = scene_replay(seller)
+    assert all(line["stage"] == "normal" for line in lines), [(l["week"], l["signals"]) for l in lines if l["signals"]]
+
+
+@pytest.mark.parametrize("seller", sorted(STAGE_SCENES) + ["seller-campgear-23"])
+def test_scene_agent_calls_at_most_eight(seller):
+    assert sum(line["called"] for line in scene_replay(seller)) <= 8
+
+
+def test_scene_context_only_on_call_weeks():
+    lines = scene_replay("seller-gearstore-06")
+    call = next(line for line in lines if line["called"])
+    ctx = scene_context("seller-gearstore-06", call["week"])
+    assert ctx.week == call["week"] and ctx.base_stage == call["base_stage"] and ctx.signals
+    assert ctx.incident_id == call["incident_id"] and ctx.mask("x") == "x"
+    with pytest.raises(ValueError):
+        scene_context("seller-gearstore-06", next(line["week"] for line in lines if not line["called"]))
+
+
+class KeepMediumAgent:
+    """Lowers a high base to medium citing this week's marketplace grade; otherwise keeps the base stage."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    def run(self, spec, input_text, handlers):
+        ctx = self.ctx
+        stage, adjust = ctx.base_stage, ""
+        if stage == "high":
+            stage = "medium"
+            adjust = (f"The marketplace grade in W:{ctx.week}:mkt_grade still lets the seller sell, so the "
+                      "projected shortfall can be checked before it becomes high.")
+        if stage in ("medium", "high"):
+            alert = usd_fallback_alert(ctx, stage).model_dump(mode="json")
+            args = {k: alert[k] for k in ("summary", "check_action", "recommended_action", "primary_cause",
+                                          "secondary_causes")}
+            args["signals"] = [{k: s[k] for k in ("kind", "text", "metric_ids", "txn_ids")} for s in alert["signals"]]
+            reply = handlers["raise_alert"]({**args, "severity": stage})
+            assert reply["accepted"], reply
+        output = {"stage": stage, "why_now": "Orders moved first and bank receipts followed.",
+                  "outlook": "Cash may keep falling unless orders recover.",
+                  "adjust_reason": adjust, "reason": "Evidence supports the stage."}
+        return AgentRun(spec.name, "1", "conv-1", spec.output_model.model_validate(output), [], 1, 1)
+
+    def delete_container(self, container_id):
+        return True
+
+
+def test_dailylook_agent_lowers_first_high_to_medium():
+    lines = scene_replay("seller-dailylook-01",
+                         decide=lambda ctx: investigate_usd(ctx, runner=KeepMediumAgent(ctx), model="fake"))
+    first_high = next(line for line in lines if line["called"] and line["base_stage"] == "high")
+    assert (first_high["agent"], first_high["stage"]) == ("agent", "medium")  # the lowered stage passed the checks
+    assert first_high["adjust_reason"] and all(line["agent"] == "agent" for line in lines if line["called"])
+
+
+@pytest.mark.parametrize("seller,first", [("seller-gearstore-06", "Marketplace"), ("seller-dailylook-01", "Settlement"),
+                                          ("seller-snackbox-22", "Settlement")])
+def test_fallback_why_now_names_the_source_that_moved_first(seller, first):
+    called = [line for line in scene_replay(seller) if line["called"]]
+    assert called and all(line["agent"] == "fallback" for line in called)
+    assert all(line["why_now"].startswith(f"{first} data moved first") for line in called), \
+        [(line["week"], line["why_now"]) for line in called]
+
+
+def test_fallback_why_now_is_neutral_when_first_source_is_unknown():
+    ctx = scene_context("seller-dailylook-01", 6)
+    assert not usd_fallback_alert(ctx, "medium").why_now.startswith("Bank")
+    no_incident = replace(ctx, incident_id=None)
+    truncated = replace(ctx, journal=[line for line in ctx.journal if line["week"] > 4])
+    for unknown in (no_incident, truncated):
+        result = fallback_stage(unknown, "agents_disabled")
+        assert "moved first" not in result.why_now and "moved first" not in result.alert.why_now
+
+
+def test_market_missing_still_detects_settlement_and_bank():
+    lines = scene_replay("seller-gearstore-06", market=False)
+    sources = {s["source"] for line in lines for s in line["signals"]}
+    assert all(not line["market"] for line in lines) and sources == {"settlement", "bank"}
+    assert "medium" in {line["stage"] for line in lines}
 
 
 def test_due_fields_stay_with_the_bank_forecast(monkeypatch):
@@ -316,22 +403,6 @@ def test_due_fields_stay_with_the_bank_forecast(monkeypatch):
     rows = [w["row"] for w in replay("seller-campgear-23")[1]]
     assert {r["due_balance_cents"] for r in rows} == {100}
     assert {r["projected_min_balance_cents"] for r in rows} == {999}
-
-
-def _weeks(*specs):
-    return [{"week": n, "row": {}, "triggers": full, "explained": explained,
-             **({"bank_only_triggers": bank} if bank is not None else {})} for n, full, bank, explained in specs]
-
-
-def test_track_summary_needs_two_track_keys_on_every_week():
-    assert track_summary(_weeks((1, [], None, []), (2, ["inflow_drop"], ["inflow_drop"], []))) is None
-    assert track_summary([]) is None
-    assert track_summary(_weeks((1, [], [], []))) is not None
-
-
-def test_explained_weeks_count_only_inflow_drop_explanations():
-    s = track_summary(_weeks((1, [], [], [{"trigger": "inflow_drop"}]), (2, [], [], [{"trigger": "other"}]), (3, [], [], [])))
-    assert s["explained_weeks"] == 1
 
 
 @pytest.mark.parametrize("seller", ["seller-campgear-23", "seller-dailylook-01"])
@@ -359,3 +430,91 @@ def test_missing_prior_year_keeps_flat_expectation():
 def test_no_substitution_loan_has_empty_basis():
     assert approval_basis((), {"pg_reconciliation_ratio": .99}) == []
     assert all(o.basis == [] for o in replay("seller-bakery-20")[0])
+
+
+def codes(o, source=None):
+    return [s["code"] for s in o.signals if source is None or s["source"] == source]
+
+
+def test_gearstore_market_signal_comes_first():
+    obs, _ = replay("seller-gearstore-06")
+    assert codes(obs[1]) == ["cancel_rise"]
+    assert {s["code"]: s["strength"] for s in obs[2].signals if s["code"] in ("account_warning", "settlement_hold")} \
+        == {"account_warning": "strong", "settlement_hold": "strong"}
+
+
+def test_single_week_signal_dropped_when_persistent_fires():
+    obs, _ = replay("seller-linen-10")
+    spiked = [o for o in obs if "return_spike" in codes(o)]
+    assert spiked and all("returns_rising" not in codes(o) for o in spiked)
+
+
+def test_explained_inflow_is_not_a_signal():
+    obs, _ = replay("seller-campgear-23")
+    explained = [o for o in obs if o.explained]
+    assert explained and all("inflow_drop" not in codes(o) for o in explained)
+
+
+def test_seasonal_scene_raises_no_signal():
+    assert all(o.signals == () for o in replay("seller-campgear-23")[0])
+
+
+def test_linen_rating_drop_is_a_market_signal():
+    obs, _ = replay("seller-linen-10")
+    assert any("rating_drop" in codes(o, "market") for o in obs)
+
+
+def test_no_market_means_no_market_fields_or_signals():
+    obs, _ = replay("seller-gearstore-06", market=False)
+    assert not any(k.startswith("mkt_") for k in obs[-1].rows[-1])
+    assert all(codes(o, "market") == [] for o in obs)
+
+
+def _mkt_weeks(*, cancel_cents, grade, start=date(2026, 11, 24), pre_grade="Gold", pre_cancel_cents=10_000):
+    def week(end, cancel, grade):
+        return UsdMarketWeek(**USD_V1.model_dump(), week_end=end, platform_code="coupang", orders=10,
+                             gross_cents=1_000_000, cancel_cents=cancel, rating=4.5, seller_grade=grade,
+                             pending_settlement_cents=0)
+
+    pre = [week(start - timedelta(days=7 * k + 1), pre_cancel_cents, pre_grade) for k in range(8)]
+    hi = start + timedelta(days=6)
+    return UsdMarketFlow(**USD_V1.model_dump(), weeks=(*pre, week(hi, cancel_cents, grade))), start, hi
+
+
+def test_cancel_spike_supersedes_cancel_rise():
+    market, start, hi = _mkt_weeks(cancel_cents=90_000, grade="Gold")
+    assert _market_week({}, market, start, hi) == ["cancel_spike"]
+    market, start, hi = _mkt_weeks(cancel_cents=40_000, grade="Gold")
+    assert _market_week({}, market, start, hi) == ["cancel_rise"]
+
+
+def test_cancel_spike_needs_a_rise_over_the_baseline():
+    market, start, hi = _mkt_weeks(cancel_cents=160_000, grade="Gold", pre_cancel_cents=150_000)
+    assert _market_week({}, market, start, hi) == []
+    market, start, hi = _mkt_weeks(cancel_cents=200_000, grade="Gold", pre_cancel_cents=60_000)
+    assert _market_week({}, market, start, hi) == ["cancel_spike"]
+
+
+def test_grade_down_fires_on_one_step_downgrade():
+    market, start, hi = _mkt_weeks(cancel_cents=10_000, grade="Silver")
+    assert _market_week({}, market, start, hi) == ["grade_down"]
+
+
+@pytest.mark.parametrize("pre_grade, grade", [("Gold", "Platinum"), ("Platinum", "Gold")])
+def test_unknown_grade_is_not_comparable(pre_grade, grade):
+    market, start, hi = _mkt_weeks(cancel_cents=10_000, grade=grade, pre_grade=pre_grade)
+    assert _market_week({}, market, start, hi) == []
+
+
+@pytest.mark.parametrize("seller", ["seller-gearstore-06", "seller-linen-10", "seller-dailylook-01",
+                                    "seller-tangerine-15", "seller-snackbox-22", "seller-tint-17",
+                                    "seller-campgear-23"])
+def test_signal_metric_ids_exist_in_rows(seller):
+    obs, _ = replay(seller)
+    for week, o in enumerate(obs, 1):
+        row = o.rows[-1]
+        for s in o.signals:
+            assert s["metric_ids"]
+            for mid in s["metric_ids"]:
+                kind, n, field = mid.split(":")
+                assert kind in ("W", "F") and int(n) == week and field in row, (week, s["code"], mid)

@@ -1042,3 +1042,43 @@ python -m ops smoke
 - PR #9 머지 커밋 `da4fb2f`를 `git archive`로 묶어 콘솔만 배포했다. ACR 창을 열어 빌드(태그 `console:da4fb2f`, `sha256:cf07e705b750b2a6d5afe58fe7e8d63fad6afcd305cb729e7a60438194770448`)한 뒤 닫았고(공용 접근 Disabled 확인), `ca-console--0000059`가 트래픽 100%로 Healthy다. 되돌릴 대상은 `ca-console--0000058`(`sha256:f2bf1060…`)이다. 정책·오케스트레이터는 바뀌지 않아 접수 차단은 하지 않았다.
 - USD usd-v2 판정의 정책 탭에 "판정이 달라진 이유"(사유 코드별 유지·대체로 해소·심사역 검토로 완화·새로 드러난 위험, 관측값과 기준), 정산 예정금이 한도를 올린 경우의 한도 설명, 셀러 데이터 대체 표의 설명 열(대체 규칙 풀이, 조건별 ✓/✗)을 추가했다. KRW 화면은 그대로다.
 - 운영 확인: `app-20261126-108ca0`(R103 → S003, 심사역 회부 → 적격), toyland `app-20261126-64989a`(R111 새 위험, 적격 → 심사역 회부), popup `app-20261125-18b2a8`(한도 $6,100 → $7,900, 순정산 예정금의 80%)에서 한국어·영어 문구를 확인했다.
+
+## 2026-11-26 USD 사후 단계형 조기 경보(에이전트 감시 일지) 배포
+
+- PR #11 브랜치 `feat/usd-postloan-agent-watch`의 `6536c3b`를 `git archive`로 묶어 배포했다. ACR 창을 열어 빌드한 뒤 닫았다(공용 접근 Disabled 확인).
+  - 모의 API `ca-mockapi--0000025`(`mockapi:pr11-6536c3b`, `sha256:b18c056129a25c09b5d82db9da7481abfff7f9f5b8be4cb9aa8b8e500df6c831`). 되돌릴 대상은 `ca-mockapi--0000024`다.
+  - 오케스트레이터 Functions ZIP 활성 배포 `66b89512-59fb-4780-a327-4cfc22a66601`(직전 `d9b5b37d-e6be-424f-af2e-b79d86ee4f2a`).
+  - 콘솔 `ca-console--0000060`(`console:pr11-6536c3b`, `sha256:b9ea9e00a3189ef79bc04f83e5c77b0b32d14f177f0303681951f18784a5cbc6`). 되돌릴 대상은 `ca-console--0000059`다. 정책 `ca-policy--0000024`는 바뀌지 않았다.
+- Functions SCM 창: 운영자 아웃바운드 NAT가 여러 IP(211.234.227.9, .54 등)를 써서 /32 규칙은 `403 Ip Forbidden`이었다. 배포 동안만 `211.234.227.0/24` 허용 규칙(`demo-pr11-window`, 우선순위 135)을 열고 `finally`에서 공용 접근 Disabled·Allow 규칙 0개로 되돌린 것을 확인했다. SCM은 여전히 Entra 인증이 필요하다.
+- 외부 URL은 WAF 허용 목록 밖이라 403이었고 허용 목록은 바꾸지 않았다. 확인은 VNet 안 job-ops에서 했다.
+- 장면 재생: 신규 신청 tangerine-15 `app-20261126-b55cdd`, tint-17 `app-20261126-c5780d`를 승인하고 7건을 한 건씩 13주 재생했다. 단계 사다리는 설계 §7과 모두 같다.
+
+| 셀러 | 단계 사다리(주차) | 조사 호출 | 경보 |
+|---|---|---|---|
+| snackbox `app-20261125-5ea829` | 중간 3 | 3 | 1 |
+| campgear `app-20261125-a64c65` | 관찰 11 → 해소 13 | 1 | 0 |
+| dailylook `app-20261124-803ef5` | 관찰 4 → 중간 5 → 높음 7(1단계·2단계 연락) | 7 | 2 |
+| gearstore `app-20261124-d96249` | 관찰 2 → 중간 3 → 해소 8 → 관찰 11 → 해소 13 | 6 | 1 |
+| linen `app-20261125-baae81` | 관찰 3 → 중간 4 → 해소 10 → 관찰 11 → 해소 13 | 3 | 1 |
+| tangerine `app-20261126-b55cdd` | 관찰 3(13주까지 유지) | 4 | 0 |
+| tint `app-20261126-c5780d` | 관찰 6 → 해소 8 → 관찰 11 → 해소 13 | 2 | 0 |
+
+- 동의 화면은 모든 대출에서 "Account transactions \| Card and PG settlements \| Marketplace sales performance" 세 범위를 보여 주고, Cosmos 동의 범위도 `[account, pg, marketplace]`다.
+- 11주차 관찰: campgear·gearstore·linen·tint가 11주차에 약한 정산 `orders_dip` 신호로 관찰에 들어갔다가 2주 조용해 해소됐다. 2027년 설 연휴(2월 초)로 영업일이 줄어든 주로 보인다. 관찰 단계라 경보·연락은 없다.
+- 조사 에이전트 폴백: 첫 재생에서 조사 호출 29회 중 22회(76%)가 고정 문구로 대체됐다(`invalid_output`). 원인은 두 가지였다. 모델이 금액을 센트 숫자로 써서 USD 문장 검사가 거부했고, `raise_alert` USD 검사가 "week 3" 같은 주차 숫자를 근거 없는 숫자로 거부했다. 금액이 든 문장은 반대 제안 방지 검사(`has_proposal`) 때문에 "<Label> of $X.XX." 한 문장이어야 한다.
+- 수정 `8e213f4`(`ffa7ce0`·`0e630b5` 포함): USD `raise_alert` 검사에 증거 행의 주차 번호를 허용하고, USD 프롬프트가 금액 대신 비율·백분율·주차를 쓰고 금액은 신호 문장의 "<Label> of $X.XX." 형식으로만 쓰게 했다. `has_proposal`은 바꾸지 않았다. 오케스트레이터만 다시 배포했다(활성 배포 `c4b892a8-b0f4-4835-932a-6409fc748db1`, 직전 `66b89512-59fb-4780-a327-4cfc22a66601`, 같은 /24 창). 콘솔은 이 코드로 조사를 돌리지 않아 다시 빌드하지 않았다. 에이전트 정의는 지시문이 바뀌면 실행 때 새 버전이 만들어진다.
+- 재측정: 같은 7건을 다시 재생했다(기준 시각은 `monitoring.started_at`과 같은 KST로 비교). 단계 사다리·경보·dailylook 1·2단계 연락은 첫 재생과 같고, 폴백은 26회 중 6회(23%)로 줄었다. 남은 폴백은 주로 단계가 오르는 주(snackbox 3, gearstore 3, linen 4, dailylook 7·8)와 dailylook 13주차다. 폴백 주에도 결정적 단계·경보는 그대로이고 문장만 고정 문구다.
+
+## 2026-11-27 USD 감시 일지 두 단 그래프(콘솔만)
+
+- PR #13 브랜치 `feat/usd-watch-chart`의 `6d3d7e5`를 `git archive`로 묶어 콘솔만 빌드했다(`console:pr13-6d3d7e5`, `sha256:40fbbef41b641f8e6585764b64215c4f7cc71e3434873ee82cba777a54249aa1`). 최종 리비전은 `ca-console--0000063`(트래픽 100%, Healthy)이고 되돌릴 대상은 `ca-console--0000060`이다. ACR은 공용 접근 Disabled·IP 규칙 0개로 닫힌 것을 확인했다.
+- 첫 provision은 `RoleAssignmentExists`로 실패했다. 11-24에 Bicep 밖에서 만든 `id-mockapi`의 AcrPull(ACR 범위, `d99baee8…`)과 Storage Blob Data Contributor(`consent-authority` 컨테이너, `6ddbc399…`)가 Bicep의 같은 권한과 이름만 달랐다. 두 할당을 지우고 다시 provision해 Bicep 이름(`6a5b5597…`, `aea61b92…`)으로 다시 만들었다.
+- **azd env 드리프트**: 이전 배포가 `az containerapp update`로 이미지·`USD_ORIGINATION_ENABLED`를 바꾸고 azd env는 갱신하지 않아, provision이 mockapi(`39497881…`)·policy(`71149ac1…`)를 옛 이미지로, `USD_ORIGINATION_ENABLED`를 `false`로 되돌렸다. azd env를 운영 값(mockapi `b18c0561…`, policy `d741def6…`, 콘솔 digest 고정, `USD_ORIGINATION_ENABLED=true`)으로 맞추고 다시 provision해 `ca-mockapi--0000027`, `ca-policy--0000026`, `ca-console--0000063`으로 복구했다. 콘솔 환경 변수는 `0000060`과 같다. **provision 전에는 운영 리비전 이미지·설정과 azd env를 먼저 비교한다.**
+- `agw-amalend`가 다시 `Stopped`(외부 자동화, 00:53 KST)라 시작한 뒤 `ops smoke` 성공(`job-smoke-xfab56x`, 콘솔 관문 정상).
+- 운영 확인: dailylook `app-20261126-373b6b`에서 두 단 그래프(관찰 4 → 중간 5–6 → 높음 7–13 단계 띠, 75% 기준선, 등급 칩 13개, 13주차 미납 💵), 주차 칸 → `#journal-wN` 링크, 원장 기본 닫힘·`?ledger=open`일 때 열림을 확인했다. KRW 대출 화면에는 그래프·원장 접기가 없다.
+
+## 2026-11-27 감시 일지 그래프 세로 확대·28일 전망 표기(콘솔만)
+
+- `1538cc8`: 비율 단과 현금 단을 각각 120px에서 180px로 늘렸다(viewBox 높이 506). 잔액 범례와 주차별 잔액 툴팁에 "(28일 전망, 실제 잔고 아님)"을 붙였다(영문 "28-day forecast, not the actual balance").
+- azd env와 운영 리비전 이미지가 같은 것을 확인한 뒤 `ops window open --acr` → `console:pr13-1538cc8` 배포 → azd env 콘솔 이미지를 digest(`sha256:3943ecda29a30bb0ab78d539879c3a5f372433d1bcacf8dcb8d7e66eae0a0a5b`)로 고정 → `ops window close` 순서로 진행했다. 최종 `ca-console--0000065`(100%, Healthy), mockapi `0000027`·policy `0000026` 유지, ACR Disabled·IP 규칙 0개. 되돌릴 대상은 `ca-console--0000063`.
+- 운영 확인: dailylook 화면에서 범례 1개와 13주 툴팁 모두 새 문구가 나온다.

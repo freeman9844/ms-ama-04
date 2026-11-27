@@ -17,11 +17,12 @@ from journey.activities import ACTIVITIES
 from journey.adapters import HttpPolicyApi
 from journey.entry import handle_decision, handle_start
 from journey.metering import STEPS, run_metered
-from journey.monitoring import handle_replay
+from journey.monitoring import handle_replay, handle_restructure_decision
 from mockapis.app import create_app as mock_app
 from mockapis.demo import FlowStore, build_demo_cases
 from policy.app import create_app as policy_app
 from policy.rules import load_rules
+from shared.contracts import USD_V1
 from tests.console.test_usd_views import token
 from tests.orchestrator.conftest import FakeContext, drive
 from tests.orchestrator.test_monitoring_handlers import NOW, SECRET, Outbox, make_deps, pump
@@ -135,10 +136,19 @@ def test_four_seller_cutover(seller, policy, codes, decision):
     queue, msg = ui.queue.sent[-1]
     assert queue == "monitoring-replay" and handle_replay(worker, json.dumps(msg))
     pump(worker, outbox)
+    bakery = seller == "seller-bakery-20"
+    if not bakery:  # 폴백도 스펙 §5.4대로 높음 다음 주(8주)에 상환 플랜을 제안한다. 유지로 답하고 이어 간다.
+        loan = worker.store.read("loans", app_id, app_id)
+        assert (loan["monitoring"]["status"], loan["monitoring"]["holds"]) == ("awaiting_customer", ["customer_response"])
+        assert handle_restructure_decision(worker, json.dumps(dict(USD_V1.model_dump(), kind="plan_choice", loan_id=app_id,
+                                                                   offer_id=loan["repayment"]["offer"]["offer_id"],
+                                                                   option="keep")))
+        assert worker.store.read("loans", app_id, app_id)["monitoring"]["status"] == "awaiting_resume"
+        assert handle_replay(worker, json.dumps(dict(msg, action="resume", replay_id=loan["monitoring"]["replay_id"])))
+        pump(worker, outbox)
     loan = worker.store.read("loans", app_id, app_id)
     schedule = loan["repayment"]["schedule"]
     assert [i["amount_cents"] for i in schedule] == [83333] * 5 + [83335]
-    bakery = seller == "seller-bakery-20"
     assert sum(i["paid_cents"] for i in schedule) == (249999 if bakery else 166666)
     assert loan["monitoring"]["processed_week"] == 13
     assert loan["monitoring"]["status"] == ("completed" if bakery else "paused")

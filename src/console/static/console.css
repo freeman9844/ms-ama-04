@@ -421,6 +421,41 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
   thead th { white-space: nowrap; }
 }
 
+/* USD 감시 일지 두 단 그래프(_charts.html watch_chart). 단계 색은 일지 배지(.sev-*, .ok)와 같은 계열이다. */
+.stage-normal { fill: var(--c-grey); background: var(--c-grey); }
+.stage-watch { fill: #9ec5fb; background: #9ec5fb; }
+.stage-medium { fill: var(--c-amber); background: var(--c-amber); }
+.stage-high { fill: var(--c-red); background: var(--c-red); }
+.stage-resolved { fill: var(--c-green); background: var(--c-green); }
+.stage-none { fill: #f2f4f6; stroke: var(--c-grey); }
+.slot-empty { fill: none; stroke: var(--c-grey); stroke-dasharray: 3 3; }
+.slot-hit { fill: var(--accent); fill-opacity: 0; cursor: pointer; }
+.slot-hit:hover { fill-opacity: .05; }
+.slot-current { fill: var(--accent-soft); pointer-events: none; }
+.axis-current { font-weight: 700; fill: var(--fg); }
+.alert-mark { font-size: 10px; font-weight: 600; fill: var(--bad); }
+.line.line-dotted { stroke-width: 2; stroke-dasharray: 2 4; stroke-linecap: round; animation: none; }
+.line-faint { opacity: .6; }
+.ref-dashed { stroke: var(--c-neutral); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.bar-outline { fill: #fff; stroke-width: 1.5; }
+.grade-chip rect { fill: #fff; stroke: var(--c-grey); }
+.grade-chip text { font-size: 10px; fill: var(--fg-2); }
+.grade-chip.grade-signal rect { fill: #fff6e0; stroke: var(--c-amber); stroke-width: 2; }
+.grade-chip.grade-signal text { fill: var(--warn); font-weight: 700; }
+.due-mark { font-size: 11px; }
+.due-paid, .due-scheduled { fill: var(--fg-2); }
+.due-partial { fill: var(--warn); }
+.due-missed { fill: var(--bad); font-weight: 700; }
+.due-future { fill: var(--c-neutral); opacity: .7; }
+.watch-legend .swatch-line { height: 3px; width: 1rem; vertical-align: middle; }
+.watch-legend .swatch-dotted { height: 0; background: none; border-top: 2px dotted var(--c-orange); }
+.watch-legend .swatch-dashed { height: 0; background: none; border-top: 2px dashed var(--c-neutral); }
+.watch-legend .swatch-outline { background: #fff; border: 1.5px solid var(--c-orange); }
+.watch-legend + .claims { margin-top: 1rem; }
+#ledger-all > summary { font-size: 1rem; font-weight: 600; }
+.ledger-part { margin-top: 1rem; }
+td.cell-warn { background: #fff6e0; color: var(--warn); font-weight: 600; }
+
 /* 데모 로그인 화면(장면용, ADR-007): 사이드바 없는 가운데 카드 */
 .login-page { display: grid; place-items: center; min-height: 100vh; padding: 1.5rem; background: var(--nav); }
 .login-card { width: 100%; max-width: 380px; padding: 2rem 2rem 1.5rem; background: var(--card); border-radius: var(--radius); box-shadow: 0 16px 40px rgba(0, 0, 0, .25); }

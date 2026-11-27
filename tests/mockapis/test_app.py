@@ -236,6 +236,62 @@ def test_half_terms_rejected(client_with_store):
     assert r.status_code == 422
 
 
+def test_marketplace_flow_requires_marketplace_scope(client_with_store):
+    h_account = _auth(_consent(client_with_store, scopes=("account",))["token"])
+    assert client_with_store.get("/marketplace/flow", headers=h_account).status_code == 403
+    h_pg = _auth(_consent(client_with_store, scopes=("pg",))["token"])
+    assert client_with_store.get("/marketplace/flow", headers=h_pg).status_code == 403
+
+
+@pytest.fixture
+def usd_client(clock):
+    from mockapis import demo
+
+    cases = demo.build_usd_cases(AS_OF)
+    store = demo.FlowStore(cases, AS_OF)
+    return TestClient(create_app(cases, SECRET, clock, flows=store))
+
+
+def _usd_consent(client, applicant_id, scopes=("marketplace",)):
+    r = client.post(
+        "/consents",
+        json={
+            "applicant_id": applicant_id, "scopes": list(scopes), "purpose": "loan-application",
+            "product_version": "usd-v1", "currency": "USD", "language": "en",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_marketplace_flow_returns_usd_weeks(usd_client):
+    from mockapis import demo
+
+    seller = "seller-dailylook-01"
+    platforms = demo.build_usd_cases(AS_OF)[seller].marketplace.platforms
+    h = _auth(_usd_consent(usd_client, seller)["token"])
+    params = {"loan_id": "loan-usd", "amount_cents": 500_000, "installment_cents": 84_000}
+    r = usd_client.get("/marketplace/flow", headers=h, params=params)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["currency"] == "USD"
+    assert len(body["weeks"]) == 21 * len(platforms)
+
+    flow_start = next_business_day(AS_OF)
+    week = usd_client.get(
+        "/marketplace/flow", headers=h, params=params | {"start": flow_start.isoformat()}
+    ).json()
+    assert len(week["weeks"]) == 13 * len(platforms)
+    assert all(w["week_end"] >= flow_start.isoformat() for w in week["weeks"])
+
+
+def test_marketplace_flow_krw_case_is_404(client_with_store):
+    h = _auth(_consent(client_with_store, scopes=("marketplace",))["token"])
+    r = client_with_store.get("/marketplace/flow", headers=h)
+    assert r.status_code == 404
+    assert r.json()["detail"] == {"code": "no_flow"}
+
+
 def test_dict_flows_still_work(clock):
     case = generate_case("a1", Archetype.HEALTHY_SEASONAL, AS_OF, 1)
     flow = generate_postloan(case, FlowScenario.SALES_SLUMP, AS_OF, 1)

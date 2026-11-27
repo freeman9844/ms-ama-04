@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs, quote, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -76,6 +76,7 @@ from console.monitoring import (
     installment_label,
     load_monitoring_raw,
     loan_view,
+    stage_label,
 )
 from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
 from console.opinion import opinion_panel, policy_cents_ids, review_history
@@ -288,6 +289,7 @@ def _templates() -> Environment:
     env.filters["severity_label"] = lambda s: i18n.label(SEVERITY_LABELS, s)
     env.filters["action_label"] = lambda s: i18n.label(ACTION_LABELS, s)
     env.filters["trigger_label"] = lambda s: i18n.label(TRIGGER_LABELS, s)
+    env.filters["stage_label"] = stage_label
     env.filters["repayment_label"] = lambda s: i18n.label(REPAYMENT_LABELS, s)
     env.filters["seller_label"] = lambda s: data_label(seller_label(s))
     env.filters["seller_name"] = lambda s: translate.data(seller_name(s))
@@ -859,8 +861,15 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                   **ctx: Any) -> HTMLResponse:
         mon = loan.get("monitoring") or {}
         alerts = loan_alerts(loan) if alerts is None else alerts
+        path = f"/loans/{quote(loan['id'], safe='')}"
+        # 접힌 원장의 열림 상태는 ?ledger=open으로 들고 다녀 새로 고침에도 남게 한다.
+        query = [(k, val) for k, val in (request.query_params.multi_items() if request else ()) if k != "ledger"]
+        ledger_open = request is not None and request.query_params.get("ledger") == "open"
         if request is not None:
-            ctx["watch_url"] = watch_url(request, f"/loans/{quote(loan['id'], safe='')}", state_tag(loan, alerts))
+            url = watch_url(request, path, state_tag(loan, alerts))
+            ctx["watch_url"] = f"{url}&ledger=open" if url and ledger_open else url
+        toggle = query if ledger_open else [*query, ("ledger", "open")]
+        ctx.update(ledger_open=ledger_open, ledger_toggle_url=f"{path}?{urlencode(toggle)}" if toggle else path)
         raw = (read_raw(lambda: load_monitoring_raw(deps.raw, loan), loan["id"])[0] if i18n.current() != i18n.SOURCE
                else load_monitoring_raw(deps.raw, loan))
         contacts = monitoring_store().get_contacts(loan["id"], mon["replay_id"]) if mon.get("replay_id") else None
