@@ -1128,3 +1128,27 @@ python -m ops smoke
   - 콘솔 `ca-console--0000073`(`sha256:665bc4a57c2c04a7b9cec7fb3ae63f5f2f0fb6891fe06473aaadcf4c9f83b43f`). 되돌릴 대상은 `ca-console--0000070`(`91c029a2…`). 모의 API·정책은 바뀌지 않았습니다.
   - `ops smoke` 성공(`job-smoke-brt91sg`). 창을 닫으면서 WAF `allowOperatorOnly`가 창 IP 하나로 바뀌어 211.234.206.213·167.220.233.25를 다시 더했습니다.
 - **되돌릴 때:** 콘솔 → 오케스트레이터 순서로 합니다. 옛 콘솔은 7초마다 새로 고칠 뿐이라 두 서비스를 따로 되돌려도 호환됩니다.
+
+## 2026-11-27 배포 단축과 WAF IP 규칙 끄기(테스트 기간)
+
+- `feat/deploy-speedup`의 `9c2421c`를 `git archive`로 묶어 배포했습니다. azd는 `.azure`가 정션이면 거부해서 사본을 쓰고, 단계마다 `.env`를 원본으로 되돌려 복사했습니다.
+- **측정 시간:**
+
+| 단계 | 이전 | 이번 |
+|---|---|---|
+| `ops window open --acr`(빠른 경로, PATCH만) | 약 4~5분(프로비저닝) | 32초 |
+| `ops deploy console`(이미지 교체) | 빌드 + 약 4~5분(프로비저닝) | 83초(빌드 44초 포함) |
+| `ops deploy orchestrator` | 패키징 약 250초 + SCM 403 수동 대응 | 첫 실행 392초(캐시 채움), 캐시 적중 156초 |
+| `ops window close`(빠른 경로) | 약 4~5분(프로비저닝) | 28초 |
+| `ops waf ip-filter off`(1회만 프로비저닝) | - | 271초 |
+
+- 빠른 경로 열기·닫기 뒤 Foundry 계정 `networkInjections`(`snet-agents`)가 그대로였고, 닫은 뒤 Functions(공용 Disabled·`Deny all`만), Foundry(Disabled·IP 0개), ACR(Disabled·Deny)이 배포 전 기준 상태와 같았습니다.
+- 회사망 SCM 출구 IP가 167.220.232.7로 또 바뀌었는데, 배포 명령이 `x-ms-forbidden-ip`를 읽어 임시 규칙 `operator-egress`를 넣고 배포 뒤 지웠습니다. 두 번 모두 규칙이 남지 않은 것을 확인했습니다.
+- 첫 콘솔 빌드는 창을 연 직후 ACR 토큰 오류로 푸시에 실패했고, 다시 실행해 성공했습니다(공용 접근 전파 지연으로 보임).
+- **결과:**
+  - 콘솔 `ca-console--0000075`(`console:20261127092642`, `sha256:a9de96522bd7007eae4cd10767aaf3b503ba36c936cf6a24d6166a58a4d588ec`). 데모 비밀번호 비밀 `console-demo-password`가 붙었습니다. azd env는 이 digest로 고정했고, ACR이 닫혀 있어 이미지 잠금은 다음 창에서 합니다. 되돌릴 대상은 `ca-console--0000073`(`665bc4a5…`)입니다.
+  - 오케스트레이터 Functions ZIP 배포 `822c0f1e-1cca-4aab-a810-fbf5a405cf84`(같은 코드로 `b11b41be-9e41-424e-94b5-a8ac7a74e0f5`를 먼저 배포). 코드 변경은 없고 직전은 `ac5da0e0-372e-46a3-a2f1-353d64aaf997`입니다.
+  - WAF `allowOperatorOnly`는 Disabled(관리 규칙은 그대로)이고 azd env `WAF_IP_FILTER=false`입니다. 프로비저닝이 허용 목록을 `CONSOLE_IP`(167.220.232.89) 하나로 되돌렸으므로, 다시 켤 때 `--ip`로 현재 IP를 넘깁니다.
+  - 허용 목록에 없는 IP(167.220.233.71)에서 `/`·`/apply`·`/borrower`는 `/login`으로 넘어가고, 틀린 비밀번호는 422, 맞는 비밀번호는 303 뒤 홈 200이었습니다. `/healthz`만 로그인 없이 열립니다.
+  - `ops smoke` 성공(`job-smoke-ddivld5`).
+- **다시 켤 때:** `python -m ops waf ip-filter on --ip <운영자 IP>`(프로비저닝 1회). 데모 비밀번호는 `azd env get-value CONSOLE_DEMO_PASSWORD`로 봅니다.
