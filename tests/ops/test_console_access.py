@@ -1,4 +1,5 @@
 import io
+import secrets
 import json
 
 import pytest
@@ -10,6 +11,7 @@ from ops.console_access import (MIN_PASSWORD, ip_filter_off, ip_filter_on, ip_fi
 ENV = {"AZURE_SUBSCRIPTION_ID": "sub-1", "AZURE_RESOURCE_GROUP": "rg-amalend", "APPGW_NAME": "agw-x",
        "CONSOLE_APP_NAME": "ca-console", "CONSOLE_AUTH_ENABLED": "false", "CONSOLE_IP": "20.30.40.50"}
 GATEWAY = json.dumps({"firewallPolicy": {"id": "/subscriptions/sub-1/resourceGroups/rg/providers/x/waf-amalend"}})
+EXISTING = secrets.token_hex(10)  # 코드에 비밀번호 문자열을 남기지 않습니다(비밀 탐지 오탐 방지).
 RULE_UPDATE = ("az", "network", "application-gateway", "waf-policy", "custom-rule", "update")
 
 
@@ -49,14 +51,14 @@ def test_off_generates_password_deploys_it_then_disables_rule(fake_runner):
 
 
 def test_off_reuses_deployed_password_without_provision(fake_runner):
-    runner = waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": "Existing0123456789"})
-    assert ip_filter_off(runner) == "Existing0123456789"
+    runner = waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": EXISTING})
+    assert ip_filter_off(runner) == EXISTING
     assert runner.commands("azd", "provision") == []
     assert len(runner.commands(*RULE_UPDATE)) == 1
 
 
 def test_off_provisions_when_console_lacks_existing_password(fake_runner):
-    runner = waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": "Existing0123456789"}, has_password=False)
+    runner = waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": EXISTING}, has_password=False)
     ip_filter_off(runner)
     assert len(runner.commands("azd", "provision")) == 1
 
@@ -93,18 +95,18 @@ def test_on_rejects_private_ip(fake_runner):
 
 def test_status_reads_rule(fake_runner):
     rule = json.dumps({"state": "Disabled", "matchConditions": [{"matchValues": ["20.30.40.50/32"]}]})
-    runner = (waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": "Existing0123456789"})
+    runner = (waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": EXISTING})
               .on("az", "network", "application-gateway", "waf-policy", "custom-rule", "show", results=[rule]))
     status = ip_filter_status(runner)
     assert (status.state, status.allowed, status.password_set) == ("Disabled", ["20.30.40.50/32"], True)
 
 
 def test_cli_off_prints_password_and_how_to_turn_back_on(fake_runner):
-    runner = waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": "Existing0123456789"})
+    runner = waf_runner(fake_runner, {**ENV, "CONSOLE_DEMO_PASSWORD": EXISTING})
     out = io.StringIO()
     assert main(["waf", "ip-filter", "off"], runner=runner, out=out) == 0
     text = out.getvalue()
-    assert "demo.officer / Existing0123456789" in text and "waf ip-filter on" in text
+    assert f"demo.officer / {EXISTING}" in text and "waf ip-filter on" in text
 
 
 def test_cli_on_uses_detected_ip(fake_runner):
