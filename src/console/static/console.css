@@ -442,6 +442,18 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
 .grade-chip text { font-size: 10px; fill: var(--fg-2); }
 .grade-chip.grade-signal rect { fill: #fff6e0; stroke: var(--c-amber); stroke-width: 2; }
 .grade-chip.grade-signal text { fill: var(--warn); font-weight: 700; }
+/* 마켓 점수 칩(옛 행은 위 등급 칩). 색은 그 주 마켓 신호: 없음 녹, 하락 황, 급락 적. */
+.market-chip rect { fill: #fff; stroke-width: 1.5; }
+.market-chip text { font-size: 10px; font-weight: 700; }
+.market-chip.tone-ok rect { stroke: var(--c-green); }
+.market-chip.tone-ok text { fill: var(--good); }
+/* 마켓 신호(예: 판매 경고)만 선 주도 등급 칩처럼 테두리를 강조한다. 황·적 칩은 아래 자기 테두리를 쓴다. */
+.market-chip.grade-signal rect { stroke: var(--c-amber); stroke-width: 2; }
+.market-chip.tone-warn rect { fill: #fff6e0; stroke: var(--c-amber); stroke-width: 2; }
+.market-chip.tone-warn text { fill: var(--warn); }
+.market-chip.tone-bad rect { fill: #ffebee; stroke: var(--c-red); stroke-width: 2; }
+.market-chip.tone-bad text { fill: var(--bad); }
+.watch-legend .swatch-chip { width: auto; height: auto; padding: 0 .35rem; border: 1.5px solid var(--c-green); border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1.3; color: var(--good); background: #fff; }
 .due-mark { font-size: 11px; }
 .due-paid, .due-scheduled { fill: var(--fg-2); }
 .due-partial { fill: var(--warn); }

@@ -17,10 +17,11 @@ from agents.ledger_monitor import (CAUSE_FIELDS, CAUSE_OF_TRIGGER, COST_SURGE_PP
                                    PRE_LOAN_DAYS, RETURN_SPIKE_MULT, RETURN_SPIKE_PP, CauseCandidate)
 from agents.monitoring import week_window
 from agents.pg_ledger import weekly_reconciliation
+from agents.usd_market_score import SCORE_CRASH, SCORE_DROP, market_score
 from shared.contracts import AlertCause
 from shared.krcalendar import add_business_days, is_business_day, next_business_day
 from shared.sellers import USD_PAYOUT_BUSINESS_DAYS
-from shared.usd_source import GRADES, UsdMarketFlow
+from shared.usd_source import UsdMarketFlow
 
 _CENT_EVIDENCE = {"order_gross", "held", "advance_in", "returns", "deductions", "high_cost_lender", "loan_proceeds",
                   "unreconciled_payout"}
@@ -45,14 +46,10 @@ SIGNALS: dict[str, tuple[str, str]] = {
     "deductions_rising": ("settlement", "weak"), "sales_slump": ("settlement", "weak"),
     "return_spike": ("settlement", "weak"), "cost_surge": ("settlement", "weak"),
     "settlement_hold": ("settlement", "strong"), "basis_breach": ("settlement", "strong"),
-    "cancel_rise": ("market", "weak"), "rating_drop": ("market", "weak"), "grade_down": ("market", "weak"),
-    "cancel_spike": ("market", "strong"), "account_warning": ("market", "strong"),
+    "market_score_drop": ("market", "weak"), "market_score_crash": ("market", "strong"),
+    "account_warning": ("market", "strong"),
 }
 ORDERS_DIP_RATIO = 0.75  # this week's orders vs expected below this: orders_dip (single week); 0.80 caught campgear's seasonal week 11
-CANCEL_RISE_MULT = 1.8  # main-platform weekly cancel rate vs pre-loan baseline, and at least CANCEL_RISE_PP more
-CANCEL_RISE_PP = 0.02
-CANCEL_SPIKE_RATE = 0.08  # same bar as underwriting R111; a spike also needs the cancel_rise condition
-RATING_DROP = 0.1  # order-weighted rating this far under the baseline; the 0.2 bar missed linen's -0.3 on one of two platforms
 _SINGLE_WEEK_OF = {"orders_dip": "sales_slump", "returns_rising": "return_spike", "deductions_rising": "cost_surge"}
 _EVIDENCE = {
     "inflow_drop": ("W:revenue_vs_expected",), "projected_shortfall": ("F:projected_min_balance_cents",),
@@ -60,8 +57,8 @@ _EVIDENCE = {
     "returns_rising": ("W:return_rate",), "return_spike": ("W:return_rate",),
     "deductions_rising": ("W:deduction_rate",), "cost_surge": ("W:deduction_rate",),
     "sales_slump": ("W:orders_vs_expected",), "settlement_hold": ("W:held_cents",),
-    "cancel_rise": ("W:mkt_cancel_rate",), "cancel_spike": ("W:mkt_cancel_rate",),
-    "rating_drop": ("W:mkt_rating",), "grade_down": ("W:mkt_grade",), "account_warning": ("W:mkt_penalties",),
+    "market_score_drop": ("W:mkt_score", "W:mkt_worst_score"),
+    "market_score_crash": ("W:mkt_score", "W:mkt_worst_score"), "account_warning": ("W:mkt_penalties",),
 }
 
 
@@ -245,8 +242,8 @@ def _ledger_week(row, rows, recent, pg, visible, start, lo, hi):
 
 def _market_week(row, market, start: date, hi: date) -> list[str]:
     """Fills the row's mkt_* fields from this week's marketplace snapshot and returns the market signals. The
-    baseline is the weeks before the loan: main platform (largest pre-loan gross) cancel rate and grade, and the
-    order-weighted rating."""
+    display fields follow the main platform (largest pre-loan gross) and the order-weighted rating; the signals come
+    from the market score against the pre-loan weeks."""
     this = [w for w in market.weeks if w.week_end == hi]
     pre = [w for w in market.weeks if w.week_end < start]
     if not this or not pre:
@@ -272,25 +269,17 @@ def _market_week(row, market, start: date, hi: date) -> list[str]:
     row["mkt_penalties"] = sum(len(w.penalties) for w in this)
     row["mkt_pending_cents"] = sum(w.pending_settlement_cents for w in this)
 
-    pre_main = sorted((w for w in pre if w.platform_code == main), key=lambda w: w.week_end)
-    base_rates = [r for w in pre_main if (r := cancel_rate(w)) is not None]
-    base_ratings = [r for end in sorted({w.week_end for w in pre})
-                    if (r := weighted_rating([w for w in pre if w.week_end == end])) is not None]
     fired = []
-    if row["mkt_cancel_rate"] is not None and base_rates:
-        base = sum(base_rates) / len(base_rates)
-        # A seller approved with a high cancel rate is judged against its own baseline: no rise, no signal.
-        if row["mkt_cancel_rate"] >= max(CANCEL_RISE_MULT * base, base + CANCEL_RISE_PP):
-            fired.append("cancel_spike" if row["mkt_cancel_rate"] > CANCEL_SPIKE_RATE else "cancel_rise")
-    if row["mkt_rating"] is not None and base_ratings and (
-            sum(base_ratings) / len(base_ratings) - row["mkt_rating"] >= RATING_DROP):
-        fired.append("rating_drop")
-    if now is not None and pre_main:
-        # An unknown grade on either side is not comparable
-        now_rank = GRADES.index(now.seller_grade) if now.seller_grade in GRADES else None
-        base_rank = GRADES.index(pre_main[-1].seller_grade) if pre_main[-1].seller_grade in GRADES else None
-        if now_rank is not None and base_rank is not None and now_rank < base_rank:
-            fired.append("grade_down")
+    score = market_score(market.weeks, start, hi)
+    if score is not None:
+        row["mkt_score"], row["mkt_worst_score"] = score.score, score.worst_score
+        row["mkt_worst_platform"] = score.worst_platform
+        row["mkt_platform_scores"], row["mkt_score_parts"] = score.platforms, score.parts
+        low = min(score.score, score.worst_score)
+        if low <= SCORE_CRASH:
+            fired.append("market_score_crash")
+        elif low <= SCORE_DROP:
+            fired.append("market_score_drop")
     if row["mkt_penalties"]:
         fired.append("account_warning")
     return fired

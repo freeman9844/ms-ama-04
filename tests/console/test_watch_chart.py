@@ -172,3 +172,32 @@ def test_none_without_journal():
     weeks, _lines = _dailylook()
     assert watch_chart(weeks, [], []) is None
     assert watch_chart([], [], []) is None
+
+
+def _scored(weeks, lines, n, score, worst, codes, parts=()):
+    weeks[n - 1]["row"].update(mkt_score=score, mkt_worst_score=worst, mkt_worst_platform="coupang",
+                               mkt_score_parts=list(parts))
+    line = next(ln for ln in lines if ln["week"] == n)
+    line["sources"][2] = {"source": "market", "state": "signal" if codes else "normal",
+                          "signals": [{"code": c} for c in codes]}
+
+
+def test_market_chip_score_tone_follows_signal():
+    weeks, lines = _dailylook()
+    parts = [{"platform": "coupang", "metric": m, "points": p, "value": 0, "baseline": 0}
+             for m, p in (("cancel", 9.0), ("grade", 6.8), ("rating", 2.0), ("returns", 1.0))]
+    _scored(weeks, lines, 4, 93, 83, ["market_score_drop"], parts)
+    _scored(weeks, lines, 5, 58, 50, ["market_score_crash"])
+    _scored(weeks, lines, 6, 99, 99, [])
+    chips = {g["week"]: g for g in _chart(weeks, lines)["grades"]}
+    assert (chips[4]["score"], chips[4]["tone"], chips[4]["worst"]) == (93, "warn", {"platform": "coupang", "score": 83})
+    assert [p["metric"] for p in chips[4]["parts"]] == ["cancel", "grade", "rating"]
+    assert (chips[5]["tone"], chips[6]["tone"], chips[6]["worst"]) == ("bad", "ok", None)
+
+
+def test_market_chip_falls_back_to_grade_for_old_rows():
+    weeks, lines = _dailylook()
+    _scored(weeks, lines, 7, 90, 90, [])
+    chips = {g["week"]: g for g in _chart(weeks, lines)["grades"]}
+    assert (chips[1]["score"], chips[1]["tone"], chips[1]["grade"]) == (None, None, "Gold")
+    assert chips[7]["score"] == 90
