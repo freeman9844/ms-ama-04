@@ -447,6 +447,8 @@ h4 { margin: 1rem 0 .4rem; font-size: .95rem; }
 .market-chip text { font-size: 10px; font-weight: 700; }
 .market-chip.tone-ok rect { stroke: var(--c-green); }
 .market-chip.tone-ok text { fill: var(--good); }
+/* 마켓 신호(예: 판매 경고)만 선 주도 등급 칩처럼 테두리를 강조한다. 황·적 칩은 아래 자기 테두리를 쓴다. */
+.market-chip.grade-signal rect { stroke: var(--c-amber); stroke-width: 2; }
 .market-chip.tone-warn rect { fill: #fff6e0; stroke: var(--c-amber); stroke-width: 2; }
 .market-chip.tone-warn text { fill: var(--warn); }
 .market-chip.tone-bad rect { fill: #ffebee; stroke: var(--c-red); stroke-width: 2; }
