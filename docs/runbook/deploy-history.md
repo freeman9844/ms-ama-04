@@ -1082,3 +1082,11 @@ python -m ops smoke
 - `1538cc8`: 비율 단과 현금 단을 각각 120px에서 180px로 늘렸다(viewBox 높이 506). 잔액 범례와 주차별 잔액 툴팁에 "(28일 전망, 실제 잔고 아님)"을 붙였다(영문 "28-day forecast, not the actual balance").
 - azd env와 운영 리비전 이미지가 같은 것을 확인한 뒤 `ops window open --acr` → `console:pr13-1538cc8` 배포 → azd env 콘솔 이미지를 digest(`sha256:3943ecda29a30bb0ab78d539879c3a5f372433d1bcacf8dcb8d7e66eae0a0a5b`)로 고정 → `ops window close` 순서로 진행했다. 최종 `ca-console--0000065`(100%, Healthy), mockapi `0000027`·policy `0000026` 유지, ACR Disabled·IP 규칙 0개. 되돌릴 대상은 `ca-console--0000063`.
 - 운영 확인: dailylook 화면에서 범례 1개와 13주 툴팁 모두 새 문구가 나온다.
+
+## 2026-11-27 데모 로그인 화면(PR #12, 콘솔) · 운영 기준점
+
+- main `bb50765`의 전체 테스트(7448 통과, 141 건너뜀)를 확인한 뒤 `git archive`로 콘솔만 빌드했다(`console:main-bb50765`, `sha256:78ccdfe1e84989f3c4503dae48668a6cce133496ff29c8f87dc30178dbc74ded`). azd env 콘솔 이미지를 이 digest로 고정했고, 최종 리비전은 `ca-console--0000068`(100%, Healthy, `CONSOLE_DEMO_LOGIN=true`)이다. 되돌릴 대상은 `ca-console--0000065`(기준점 `demo-2026-11-27`).
+- `ops smoke` 성공(`job-smoke-mgxjkl5`). 운영자 IP에서 `/`는 `/login?next=/`로 303, `/login`은 200이다.
+- 운영 기준점: 태그·GitHub 릴리스 `demo-2026-11-27`(`db492ce`)과 `demo-2026-11-27b`(`bb50765`)에 서비스별 digest, Function App 배포 `c4b892a8`, 비밀값을 뺀 설정 플래그를 기록했다. 비밀값이 든 azd env 사본은 운영 PC `.azure\amalend\snapshots\`(git 제외)에만 둔다.
+- ACR 잠금: 기준점 이미지(console `3943ecda`·`78ccdfe1`, mockapi `b18c0561`, policy `d741def6`, eval `6022d5f4`)를 `deleteEnabled=false`, `writeEnabled=false`로 잠갔다.
+- 11:38–11:59 KST APIM 플랫폼 업그레이드(리소스 상태 Unavailable) 중에는 provision이 `ServiceLocked`로 실패했다. 업그레이드가 끝난 뒤 `ops window close`를 다시 실행해 닫았다.
