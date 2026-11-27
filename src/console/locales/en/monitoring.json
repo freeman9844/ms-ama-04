@@ -288,6 +288,7 @@
   "정산 주문 기대 대비": "Settlement orders vs expected",
   "은행 매출 기대 대비": "Bank revenue vs expected",
   "예상 최저 잔액": "Projected min balance",
+  "28일 전망, 실제 잔고 아님": "28-day forecast, not the actual balance",
   "상환일 잔액": "Balance on due date",
   "기대 주문액": "Expected orders",
   "보류액": "Held",

@@ -681,6 +681,8 @@ def test_watch_chart_inside_journal_card():
     for text in ("Settlement orders (3 wks)", "Settlement orders (1 wk)", "Bank revenue (3 wks)",
                  "Projected min balance", "Week 5 projected min balance -$480", "Week 3 · Medium"):
         assert text in card, text
+    assert "Week 5 projected min balance -$480 (28-day forecast, not the actual balance)</title>" in card
+    assert "Projected min balance (28-day forecast, not the actual balance)</li>" in card
 
 
 def test_watch_chart_slot_without_journal_line():
