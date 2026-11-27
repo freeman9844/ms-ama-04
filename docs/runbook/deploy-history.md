@@ -1076,3 +1076,9 @@ python -m ops smoke
 - **azd env 드리프트**: 이전 배포가 `az containerapp update`로 이미지·`USD_ORIGINATION_ENABLED`를 바꾸고 azd env는 갱신하지 않아, provision이 mockapi(`39497881…`)·policy(`71149ac1…`)를 옛 이미지로, `USD_ORIGINATION_ENABLED`를 `false`로 되돌렸다. azd env를 운영 값(mockapi `b18c0561…`, policy `d741def6…`, 콘솔 digest 고정, `USD_ORIGINATION_ENABLED=true`)으로 맞추고 다시 provision해 `ca-mockapi--0000027`, `ca-policy--0000026`, `ca-console--0000063`으로 복구했다. 콘솔 환경 변수는 `0000060`과 같다. **provision 전에는 운영 리비전 이미지·설정과 azd env를 먼저 비교한다.**
 - `agw-amalend`가 다시 `Stopped`(외부 자동화, 00:53 KST)라 시작한 뒤 `ops smoke` 성공(`job-smoke-xfab56x`, 콘솔 관문 정상).
 - 운영 확인: dailylook `app-20261126-373b6b`에서 두 단 그래프(관찰 4 → 중간 5–6 → 높음 7–13 단계 띠, 75% 기준선, 등급 칩 13개, 13주차 미납 💵), 주차 칸 → `#journal-wN` 링크, 원장 기본 닫힘·`?ledger=open`일 때 열림을 확인했다. KRW 대출 화면에는 그래프·원장 접기가 없다.
+
+## 2026-11-27 감시 일지 그래프 세로 확대·28일 전망 표기(콘솔만)
+
+- `1538cc8`: 비율 단과 현금 단을 각각 120px에서 180px로 늘렸다(viewBox 높이 506). 잔액 범례와 주차별 잔액 툴팁에 "(28일 전망, 실제 잔고 아님)"을 붙였다(영문 "28-day forecast, not the actual balance").
+- azd env와 운영 리비전 이미지가 같은 것을 확인한 뒤 `ops window open --acr` → `console:pr13-1538cc8` 배포 → azd env 콘솔 이미지를 digest(`sha256:3943ecda29a30bb0ab78d539879c3a5f372433d1bcacf8dcb8d7e66eae0a0a5b`)로 고정 → `ops window close` 순서로 진행했다. 최종 `ca-console--0000065`(100%, Healthy), mockapi `0000027`·policy `0000026` 유지, ACR Disabled·IP 규칙 0개. 되돌릴 대상은 `ca-console--0000063`.
+- 운영 확인: dailylook 화면에서 범례 1개와 13주 툴팁 모두 새 문구가 나온다.
