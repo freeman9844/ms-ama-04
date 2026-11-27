@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+import secrets
 from datetime import datetime, timedelta
 
 import pytest
@@ -504,20 +505,21 @@ def test_demo_password_required_when_configured(make_doc, raw, key):
     # WAF IP 규칙을 끈 테스트 기간: 설정된 비밀번호와 같아야 들어오고, 화면에 미리 채우지 않습니다.
     from console.auth import Principal
     demo = Principal(user_id="demo-operator", name="데모 사용자", roles=frozenset({CREDIT_OFFICER}))
+    pw = secrets.token_urlsafe(16)  # 코드에 비밀번호 문자열을 남기지 않습니다(비밀 탐지 오탐 방지).
     deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key,
-                       demo_principal=demo, demo_login=True, demo_password="s3cret-pass-123")
+                       demo_principal=demo, demo_login=True, demo_password=pw)
     client = TestClient(create_app(deps), follow_redirects=False, base_url="https://testserver",
                         cookies={"ama_locale_v2": "ko"})
     page = client.get("/login").text
     assert 'value="demo"' not in page and "데모 비밀번호는 운영자에게 받으세요." in page
-    for wrong in ("x", "demo", "s3cret-pass-12", ""):
+    for wrong in ("x", "demo", pw[:-1], pw + "x", ""):
         resp = login(client, password=wrong)
         assert resp.status_code == 422 and "set-cookie" not in resp.headers
     assert client.get("/").status_code == 303
     for path in ("/apply", "/borrower"):  # 고객 화면도 비밀번호 없이 열리면 안 됩니다.
         assert client.get(path).headers["location"].startswith("/login?next=")
     assert client.post("/apply", data={}).status_code == 401
-    resp = login(client, password="s3cret-pass-123")
+    resp = login(client, password=pw)
     assert resp.status_code == 303 and resp.headers["set-cookie"].startswith("ama_demo_session=")
     assert client.get("/").status_code == 200
     assert client.get("/apply").headers["location"] == "/borrower"

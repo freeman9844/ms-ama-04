@@ -1,4 +1,5 @@
 import json
+import secrets
 
 import pytest
 
@@ -17,6 +18,8 @@ from console.adapters import (
     StorageQueueSender,
     build_deps,
 )
+
+DEMO_PW = secrets.token_hex(8)  # 코드에 비밀번호 문자열을 남기지 않습니다(비밀 탐지 오탐 방지).
 
 
 class FakeContainer:
@@ -242,7 +245,7 @@ def test_build_deps_demo_login_flag(monkeypatch, value, expected):
     assert build_deps(env).demo_login is expected
 
 
-@pytest.mark.parametrize("value, expected", [(None, None), ("", None), ("pw-0123456789", "pw-0123456789")])
+@pytest.mark.parametrize("value, expected", [(None, None), ("", None), (DEMO_PW, DEMO_PW)])
 def test_build_deps_demo_password(monkeypatch, value, expected):
     monkeypatch.setattr("console.adapters.ManagedIdentityCredential", lambda **kw: None)
     monkeypatch.setattr("console.adapters._cosmos_database", lambda *a: FakeDbAny())
