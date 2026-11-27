@@ -500,6 +500,29 @@ def test_demo_login_page_in_english(login_env):
     assert "Sign in" in page and "아이디" not in page
 
 
+def test_demo_password_required_when_configured(make_doc, raw, key):
+    # WAF IP 규칙을 끈 테스트 기간: 설정된 비밀번호와 같아야 들어오고, 화면에 미리 채우지 않습니다.
+    from console.auth import Principal
+    demo = Principal(user_id="demo-operator", name="데모 사용자", roles=frozenset({CREDIT_OFFICER}))
+    deps = ConsoleDeps(store=FakeStore([make_doc()]), raw=raw, queue=FakeQueue(), pseudonym_key=key,
+                       demo_principal=demo, demo_login=True, demo_password="s3cret-pass-123")
+    client = TestClient(create_app(deps), follow_redirects=False, base_url="https://testserver",
+                        cookies={"ama_locale_v2": "ko"})
+    page = client.get("/login").text
+    assert 'value="demo"' not in page and "데모 비밀번호는 운영자에게 받으세요." in page
+    for wrong in ("x", "demo", "s3cret-pass-12", ""):
+        resp = login(client, password=wrong)
+        assert resp.status_code == 422 and "set-cookie" not in resp.headers
+    assert client.get("/").status_code == 303
+    for path in ("/apply", "/borrower"):  # 고객 화면도 비밀번호 없이 열리면 안 됩니다.
+        assert client.get(path).headers["location"].startswith("/login?next=")
+    assert client.post("/apply", data={}).status_code == 401
+    resp = login(client, password="s3cret-pass-123")
+    assert resp.status_code == 303 and resp.headers["set-cookie"].startswith("ama_demo_session=")
+    assert client.get("/").status_code == 200
+    assert client.get("/apply").headers["location"] == "/borrower"
+
+
 def test_login_routes_absent_when_demo_login_off(env, demo_env):
     for client, headers in ((env[0], OFFICER), (demo_env[0], {})):
         assert client.get("/login").status_code == 404

@@ -232,6 +232,8 @@ class ConsoleDeps:
     demo_principal: Principal | None = None
     # 데모 모드의 장면용 로그인 화면(/login). 인증이 아니며 결정 기록 주체는 그대로 demo_principal이다(ADR-007).
     demo_login: bool = False
+    # 데모 로그인 비밀번호(CONSOLE_DEMO_PASSWORD). 있으면 일치해야 들어옵니다(WAF IP 규칙을 끈 테스트 기간의 진입 차단).
+    demo_password: str | None = None
     monitoring: MonitoringStore | None = None
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(KST))
     privacy: PrivacyStore | None = None
@@ -575,7 +577,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         return JSONResponse({"status": "ok"})
 
     def login_page(next_url: str, status_code: int = 200, error: str | None = None) -> HTMLResponse:
-        return render("login.html", None, status_code, next_url=next_url, login_id=DEMO_LOGIN_ID, error=error)
+        return render("login.html", None, status_code, next_url=next_url, login_id=DEMO_LOGIN_ID, error=error,
+                      password_required=deps.demo_password is not None)
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form(next: str | None = None) -> HTMLResponse:
@@ -589,7 +592,12 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             raise HTTPException(404)
         form = await _form(request)
         target = safe_next(form.get("next"))
-        if form.get("username", "").strip() != DEMO_LOGIN_ID or not form.get("password"):
+        password = form.get("password", "")
+        if deps.demo_password is not None:
+            password_ok = hmac.compare_digest(password.encode(), deps.demo_password.encode())
+        else:
+            password_ok = bool(password)
+        if form.get("username", "").strip() != DEMO_LOGIN_ID or not password_ok:
             return login_page(target, 422, error=_("아이디 또는 비밀번호가 올바르지 않습니다."))
         response = RedirectResponse(target, status_code=303)
         response.set_cookie(DEMO_SESSION_COOKIE, demo_session_token(login_key, int(deps.clock().timestamp())),
@@ -645,6 +653,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
     def customer(request: Request) -> Principal:
         """고객 페이지는 콘솔 역할을 묻지 않는다. 로그인(또는 데모 주체)만 있으면 된다."""
+        if login_on and deps.demo_password is not None:
+            # WAF IP 규칙을 끈 동안에는 데모 비밀번호가 유일한 진입 통제다.
+            require_demo_session(request)
         user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
         if user is None:
             raise HTTPException(401, "login required")

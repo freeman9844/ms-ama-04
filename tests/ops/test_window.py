@@ -138,3 +138,101 @@ def test_open_window_reprovisions_after_new_cert(fake_runner, monkeypatch):
     monkeypatch.setattr("ops.window.ensure_console_cert", lambda r: True)
     open_window(runner, "20.30.40.50")
     assert len(runner.commands("azd", "provision")) == 2
+
+
+FAST = {**PROVISIONED, "AZURE_SUBSCRIPTION_ID": "sub-1", "FUNCTION_APP_NAME": "func-x", "ACR_NAME": "acrx",
+        "APPGW_CERT_SECRET_ID": "https://kv/secrets/cert", "CONSOLE_IP": "1.2.3.4"}
+SUCCEEDED = '{"properties": {"provisioningState": "Succeeded"}}'
+
+
+@pytest.fixture
+def patches(monkeypatch):
+    seen = []
+    monkeypatch.setattr("ops.window.rest_patch", lambda az, url, body: seen.append((url, body)) or {})
+    return seen
+
+
+def fast_runner(fake_runner, env=FAST, states=(SUCCEEDED,)):
+    return fake_runner(env).on("az", "rest", "--method", "get", results=list(states))
+
+
+def test_open_window_fast_path_patches_only_window_resources(fake_runner, patches):
+    runner = fast_runner(fake_runner)
+    open_window(runner, "20.30.40.50")
+    assert runner.commands("azd", "provision") == []
+    urls = [url for url, _ in patches]
+    assert urls[0].endswith("/Microsoft.Web/sites/func-x/config/web?api-version=2024-04-01")
+    assert urls[1].endswith("/Microsoft.Web/sites/func-x?api-version=2024-04-01")
+    assert "/subscriptions/sub-1/resourceGroups/rg-amalend/" in urls[2]
+    assert urls[2].endswith("/Microsoft.CognitiveServices/accounts/ais-x?api-version=2025-04-01-preview")
+    web, site, account = (body["properties"] for _, body in patches)
+    assert web == {"ipSecurityRestrictionsDefaultAction": "Deny", "scmIpSecurityRestrictionsUseMain": True,
+                   "ipSecurityRestrictions": [{"name": "operator", "ipAddress": "20.30.40.50/32",
+                                               "action": "Allow", "priority": 100}]}
+    assert site == {"publicNetworkAccess": "Enabled"}
+    assert account == {"publicNetworkAccess": "Enabled", "networkAcls": {
+        "defaultAction": "Deny", "bypass": "AzureServices", "ipRules": [{"value": "20.30.40.50"}],
+        "virtualNetworkRules": []}}
+    [acr] = runner.commands("az", "acr", "update")
+    assert acr[acr.index("--public-network-enabled") + 1] == "false"
+    assert acr[acr.index("--default-action") + 1] == "Deny"
+    assert acr[-2:] == ["--subscription", "sub-1"]
+    assert runner.env["OPERATOR_IP"] == "20.30.40.50"
+    assert runner.env["CONSOLE_IP"] == "1.2.3.4"  # 콘솔 WAF 허용 IP는 창과 따로 관리합니다.
+
+
+def test_open_window_fast_path_with_acr_build_window(fake_runner, patches):
+    runner = fast_runner(fake_runner)
+    open_window(runner, "20.30.40.50", acr=True)
+    [acr] = runner.commands("az", "acr", "update")
+    assert acr[acr.index("--public-network-enabled") + 1] == "true"
+    assert acr[acr.index("--default-action") + 1] == "Allow"
+
+
+def test_close_window_fast_path_goes_private_before_dropping_rules(fake_runner, patches):
+    runner = fast_runner(fake_runner, {**FAST, "OPERATOR_IP": "20.30.40.50", "ACR_PUBLIC": "true"})
+    close_window(runner)
+    assert runner.commands("azd", "provision") == []
+    (_, site), (_, web), (_, account) = patches
+    assert site["properties"] == {"publicNetworkAccess": "Disabled"}
+    assert web["properties"]["ipSecurityRestrictions"] == []
+    assert account["properties"]["publicNetworkAccess"] == "Disabled"
+    assert account["properties"]["networkAcls"]["ipRules"] == []
+    [acr] = runner.commands("az", "acr", "update")
+    assert acr[acr.index("--public-network-enabled") + 1] == "false"
+    assert runner.index("az", "acr", "update") < runner.index("az", "rest", "--method", "get")
+    assert (runner.env["WINDOW_STATE"], runner.env["OPERATOR_IP"]) == ("closed", "closed")
+
+
+def test_fast_path_waits_for_foundry_account_update(fake_runner, patches, monkeypatch):
+    monkeypatch.setattr("ops.window.ACCOUNT_WAIT_S", 0.0)
+    running = '{"properties": {"provisioningState": "Accepted"}}'
+    runner = fast_runner(fake_runner, states=(running, running, SUCCEEDED))
+    open_window(runner, "20.30.40.50")
+    assert len(runner.commands("az", "rest", "--method", "get")) == 3
+
+
+def test_close_window_fast_path_failure_stays_closing(fake_runner, monkeypatch):
+    def boom(az, url, body):
+        raise OpsError("patch boom")
+    monkeypatch.setattr("ops.window.rest_patch", boom)
+    runner = fast_runner(fake_runner, {**FAST, "OPERATOR_IP": "20.30.40.50"})
+    with pytest.raises(OpsError, match="patch boom"):
+        close_window(runner)
+    assert window_status(runner, None).closing is True
+
+
+def test_window_provision_flag_skips_fast_path(fake_runner, patches):
+    runner = fast_runner(fake_runner)
+    open_window(runner, "20.30.40.50", full_provision=True)
+    close_window(runner, full_provision=True)
+    assert patches == []
+    assert len(runner.commands("azd", "provision")) == 2
+
+
+def test_fast_path_runs_provision_when_console_cert_changes(fake_runner, patches, monkeypatch):
+    monkeypatch.setattr("ops.window.ensure_console_cert", lambda r: True)
+    runner = fast_runner(fake_runner)
+    open_window(runner, "20.30.40.50")
+    assert len(patches) == 3
+    assert len(runner.commands("azd", "provision")) == 1

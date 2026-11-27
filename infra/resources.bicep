@@ -21,6 +21,11 @@ param consoleImage string
 param evalImage string
 @description('콘솔에 접속할 운영자 공인 IPv4(App Gateway WAF 사용자 지정 규칙). 비면 TEST-NET 주소만 허용해 사실상 막습니다(fail-closed).')
 param consoleIp string
+@description('false면 WAF 운영자 IP 사용자 지정 규칙을 끕니다(테스트 기간 전용). 관리 규칙은 그대로입니다.')
+param consoleIpFilter bool = true
+@description('데모 모드 로그인 비밀번호. IP 규칙을 끈 동안 콘솔 진입을 막습니다.')
+@secure()
+param consoleDemoPassword string = ''
 @description('false면 콘솔 Easy Auth를 끄고 앱이 고정 데모 주체로 동작합니다(WAF 운영자 IP 규칙만 남음, 데모 전용).')
 param consoleAuthEnabled bool
 @description('데모 모드의 고정 사용자 역할(CreditOfficer·CreditManager·Auditor).')
@@ -653,6 +658,8 @@ module caConsole 'modules/container-app.bicep' = {
       // 데모 장면용 로그인 화면(/login). 인증이 아니며 접근 차단은 WAF 운영자 IP 규칙입니다(ADR-007).
       { name: 'CONSOLE_DEMO_LOGIN', value: 'true' }
     ])
+    // 데모 로그인 비밀번호(비면 module이 빼므로 아무 비밀번호나 받습니다). IP 규칙을 끈 테스트 기간의 진입 차단입니다.
+    secretEnv: consoleAuthEnabled ? {} : { CONSOLE_DEMO_PASSWORD: consoleDemoPassword }
   }
 }
 
@@ -679,6 +686,7 @@ module appGateway 'modules/appgw.bicep' = {
     certSecretId: appGwCertSecretId
     backendFqdn: consoleFqdn
     allowedIp: consoleIp
+    ipFilter: consoleIpFilter
     lawId: monitoring.outputs.lawId
   }
   // 인증서 읽기 역할, 내부 도메인 DNS, 백엔드 앱이 먼저 있어야 게이트웨이가 정상 기동합니다.

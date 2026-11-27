@@ -56,6 +56,13 @@ param evalImage string = ''
 @description('심사역 콘솔 접속 허용 IPv4(App Gateway WAF 규칙, ops window open이 설정, close 후에도 유지). 비면 콘솔 진입을 막습니다.')
 param consoleIp string = ''
 
+@description('false면 WAF 운영자 IP 사용자 지정 규칙을 끕니다(azd env WAF_IP_FILTER=false, 테스트 기간 전용). 관리 규칙(DRS 2.1)은 그대로입니다.')
+param consoleIpFilter bool = true
+
+@description('데모 모드 로그인 비밀번호(azd env CONSOLE_DEMO_PASSWORD). 비면 아무 비밀번호나 받습니다(WAF IP 규칙이 켜져 있을 때만 안전).')
+@secure()
+param consoleDemoPassword string = ''
+
 @description('false면 콘솔 Easy Auth를 끄는 데모 모드(azd env CONSOLE_AUTH_ENABLED=false). WAF 운영자 IP 규칙은 그대로입니다.')
 param consoleAuthEnabled bool = true
 
@@ -127,6 +134,8 @@ module resources 'resources.bicep' = {
     consoleImage: consoleImage
     evalImage: evalImage
     consoleIp: consoleIp
+    consoleIpFilter: consoleIpFilter
+    consoleDemoPassword: consoleDemoPassword
     consoleAuthEnabled: consoleAuthEnabled
     consoleDemoRole: consoleDemoRole
     usdOriginationEnabled: usdOriginationEnabled

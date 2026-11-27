@@ -171,3 +171,16 @@ def test_console_demo_role_reaches_the_container(expand_azd):
     env = {e["name"]: e.get("value") for e in demo.one(CA, "ca-console")["properties"]["template"]["containers"][0]["env"]}
     assert env["CONSOLE_AUTH_MODE"] == "demo" and env["CONSOLE_DEMO_ROLE"] == "Auditor"
     assert env["USD_ORIGINATION_ENABLED"] == "true"
+
+
+def test_console_demo_password_is_container_secret(expand_azd):
+    # WAF IP 규칙을 끈 테스트 기간에는 데모 비밀번호가 콘솔 진입을 막습니다. 값은 비밀로만 전달합니다.
+    demo = expand_azd({"CONSOLE_AUTH_ENABLED": "false", "OPERATOR_IP": "closed",
+                       "CONSOLE_DEMO_PASSWORD": "pw-0123456789"})
+    props = demo.one(CA, "ca-console")["properties"]
+    assert [s["name"] for s in props["configuration"]["secrets"]] == ["console-demo-password"]
+    env = {e["name"]: e for e in props["template"]["containers"][0]["env"]}
+    assert env["CONSOLE_DEMO_PASSWORD"] == {"name": "CONSOLE_DEMO_PASSWORD", "secretRef": "console-demo-password"}
+    for env_vars in ({"CONSOLE_AUTH_ENABLED": "false"}, {"CONSOLE_DEMO_PASSWORD": "pw-0123456789"}):
+        other = expand_azd({**env_vars, "OPERATOR_IP": "closed"}).one(CA, "ca-console")["properties"]
+        assert "CONSOLE_DEMO_PASSWORD" not in {e["name"] for e in other["template"]["containers"][0]["env"]}

@@ -242,6 +242,17 @@ def test_build_deps_demo_login_flag(monkeypatch, value, expected):
     assert build_deps(env).demo_login is expected
 
 
+@pytest.mark.parametrize("value, expected", [(None, None), ("", None), ("pw-0123456789", "pw-0123456789")])
+def test_build_deps_demo_password(monkeypatch, value, expected):
+    monkeypatch.setattr("console.adapters.ManagedIdentityCredential", lambda **kw: None)
+    monkeypatch.setattr("console.adapters._cosmos_database", lambda *a: FakeDbAny())
+    monkeypatch.setattr("console.adapters._queue_factory", lambda *a: None)
+    monkeypatch.setattr("console.adapters.BlobRawStore", lambda *a: None)
+    env = BASE_ENV | {"CONSOLE_AUTH_MODE": "demo", "CONSOLE_DEMO_LOGIN": "true"}
+    env |= {"CONSOLE_DEMO_PASSWORD": value} if value is not None else {}
+    assert build_deps(env).demo_password == expected
+
+
 @pytest.mark.parametrize("env", [{"CONSOLE_AUTH_MODE": "demo", "CONSOLE_DEMO_ROLE": "Admin"},
                                  {"CONSOLE_AUTH_MODE": "none"}])
 def test_build_deps_rejects_unknown_auth_settings(monkeypatch, env):

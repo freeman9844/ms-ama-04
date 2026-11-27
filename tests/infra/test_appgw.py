@@ -135,6 +135,18 @@ def test_waf_rule_fails_closed_without_ip(expand_azd):
     assert exp.root_parameters()["appGwCertSecretId"] == CERT
     [rule] = exp.one(WAF, "waf-")["properties"]["customRules"]
     assert rule["matchConditions"][0]["matchValues"] == ["192.0.2.0/32"]
+    assert rule["state"] == "Enabled"
+
+
+def test_waf_ip_rule_can_be_switched_off_for_testing(expand_azd):
+    # 테스트 기간: 운영자 IP 규칙만 끄고 관리 규칙(DRS 2.1, Prevention)은 그대로 둡니다.
+    exp = expand_azd({"APPGW_CERT_SECRET_ID": CERT, "OPERATOR_IP": "closed", "WAF_IP_FILTER": "false"})
+    props = exp.one(WAF, "waf-")["properties"]
+    [rule] = props["customRules"]
+    assert (rule["name"], rule["state"]) == ("allowOperatorOnly", "Disabled")
+    assert (props["policySettings"]["state"], props["policySettings"]["mode"]) == ("Enabled", "Prevention")
+    assert props["managedRules"]["managedRuleSets"] == [
+        {"ruleSetType": "Microsoft_DefaultRuleSet", "ruleSetVersion": "2.1"}]
 
 
 def test_appgw_identity_reads_key_vault_values_only():

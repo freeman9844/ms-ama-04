@@ -20,6 +20,8 @@ param mockapiImage = readEnvironmentVariable('SERVICE_MOCKAPI_IMAGE_NAME', '')
 param consoleImage = readEnvironmentVariable('SERVICE_CONSOLE_IMAGE_NAME', '')
 param evalImage = readEnvironmentVariable('SERVICE_EVAL_IMAGE_NAME', '')
 param consoleIp = readEnvironmentVariable('CONSOLE_IP', '')
+param consoleIpFilter = readEnvironmentVariable('WAF_IP_FILTER', 'true') != 'false'
+param consoleDemoPassword = readEnvironmentVariable('CONSOLE_DEMO_PASSWORD', '')
 param consoleAuthEnabled = readEnvironmentVariable('CONSOLE_AUTH_ENABLED', 'true') != 'false'
 param consoleDemoRole = readEnvironmentVariable('CONSOLE_DEMO_ROLE', 'CreditOfficer')
 param usdOriginationEnabled = readEnvironmentVariable('USD_ORIGINATION_ENABLED', 'false') == 'true'
