@@ -9,11 +9,12 @@ Azure 서비스는 기본적으로 사설 엔드포인트 전용입니다. 이�
 
 | 명령 | 하는 일 |
 |------|---------|
-| `python -m ops window open [--ip <IP>] [--acr]` | `OPERATOR_IP`·`CONSOLE_IP`를 현재 공인 IP(또는 `--ip`)로 정하고 `azd provision`을 실행해 Foundry 계정·Functions 등에 운영자 IP 규칙을 넣습니다. `--acr`이면 `ACR_PUBLIC=true`로 ACR도 열어 `az acr build`가 가능해집니다. 운영자 IP를 넣은 뒤 단계(프로비저닝·콘솔 인증서)가 실패하면 창이 일부 열린 채일 수 있어, 오류 메시지 끝에 `python -m ops window close` 안내가 붙습니다(자동으로 닫지 않음). |
+| `python -m ops window open [--ip <IP>] [--acr] [--provision]` | `OPERATOR_IP`를 현재 공인 IP(또는 `--ip`)로 정하고 Foundry 계정·Functions에 운영자 IP 규칙을 넣습니다. `--acr`이면 `ACR_PUBLIC=true`로 ACR도 열어 `az acr build`가 가능해집니다. `CONSOLE_IP`는 비어 있을 때만 같은 IP로 정합니다(바꾸려면 `ops waf ip-filter on --ip`). 운영자 IP를 넣은 뒤 단계가 실패하면 창이 일부 열린 채일 수 있어, 오류 메시지 끝에 `python -m ops window close` 안내가 붙습니다(자동으로 닫지 않음). |
 | `python -m ops window status` | 창 상태와 현재 공인 IP를 보여 줍니다. IP가 허용값과 다르거나 이전 `window close`가 끝나지 않았으면(`닫는 중(close 미완료)`) 경고하고 종료 코드 2로 끝납니다. |
-| `python -m ops window close` | `OPERATOR_IP=closed`, `ACR_PUBLIC=false`로 다시 프로비저닝합니다. `CONSOLE_IP`는 그대로 둡니다. azd 환경의 `WINDOW_STATE`를 프로비저닝 전 `closing`, 성공 뒤 `closed`로 기록하므로 프로비저닝이 실패하면 `window status`가 닫힘으로 보이지 않습니다. 그때는 `window close`를 다시 실행합니다. |
+| `python -m ops window close [--provision]` | `OPERATOR_IP=closed`, `ACR_PUBLIC=false`로 되돌립니다. `CONSOLE_IP`는 그대로 둡니다. azd 환경의 `WINDOW_STATE`를 변경 전 `closing`, 성공 뒤 `closed`로 기록하므로 변경이 실패하면 `window status`가 닫힘으로 보이지 않습니다. 그때는 `window close`를 다시 실행합니다. |
 
-- 창은 프로비저닝을 동반하므로 몇 분이 걸립니다. 실측: 열기 3.7분·닫기 3.7분(P5b), 열기 6.6분·닫기 5.4분(P6b, job-ops·경보·Workbook 첫 생성 포함) — `docs/runbook/deploy-history.md`의 "실제 배포 기록(P5b…)"과 "실제 실행 기록(P6b…)" 표.
+- **빠른 경로(기본)**: 최초 프로비저닝과 콘솔 인증서가 끝난 환경(`FUNCTION_APP_NAME`·`ACR_NAME`·`AI_ACCOUNT_NAME`·`APPGW_CERT_SECRET_ID` 등이 azd 환경에 있음)에서는 전체 `azd provision` 대신 창이 바꾸는 세 리소스만 Bicep 선언과 같은 값으로 바꿉니다(`src/ops/window.py`의 `apply_window`). Functions는 `config/web`·사이트 `publicNetworkAccess`를 ARM PATCH, Foundry 계정은 `publicNetworkAccess`·`networkAcls`를 PATCH한 뒤 `Succeeded`까지 기다리고, ACR은 `az acr update`를 씁니다. 열 때는 규칙을 넣고 공개하며, 닫을 때는 먼저 비공개로 바꾼 뒤 규칙을 지웁니다. azd 환경 값도 같이 기록하므로 다음 프로비저닝도 같은 상태를 선언합니다.
+- `--provision`을 주거나 위 값이 없으면(첫 배포) 예전처럼 `azd provision`을 돌립니다. 실측(전체 프로비저닝): 열기 3.7분·닫기 3.7분(P5b), 열기 6.6분·닫기 5.4분(P6b) — `docs/runbook/deploy-history.md`의 "실제 배포 기록(P5b…)"과 "실제 실행 기록(P6b…)" 표. 빠른 경로 실측은 deploy-history의 "배포 단축" 절에 있습니다.
 - 일부 서비스(Key Vault, Cosmos DB, Storage)는 테넌트 정책 때문에 창을 열어도 운영자 PC에서 접근할 수 없습니다. 그 서비스의 데이터 작업은 VNet 안 Job으로 합니다([deploy-history](deploy-history.md)의 "알려진 제약" 절).
 
 ## 구성요소별 배포
@@ -29,10 +30,12 @@ Azure 서비스는 기본적으로 사설 엔드포인트 전용입니다. 이�
 | `console` | 심사역 콘솔 이미지(`src/console/Dockerfile`) | `SERVICE_CONSOLE_IMAGE_NAME` | `window open --acr` |
 | `eval` | 평가·운영 측정 Job 이미지(`src/evals/Dockerfile`) | `SERVICE_EVAL_IMAGE_NAME` | `window open --acr` |
 | `orchestrator` | Functions 코드 zip(`src/orchestrator`+`src/agents`+`src/shared`, Linux wheel 동봉) | — | `window open` |
-| `all` | 위 이미지 4개 + 프로비저닝 1회 + Functions zip | — | `window open --acr` |
+| `all` | 위 이미지 4개 + Functions zip | — | `window open --acr` |
 
-- 이미지 대상은 `az acr build`로 이미지를 만든 뒤 azd 환경에 이미지 이름을 기록하고 `azd provision`으로 Container App·Job을 갱신합니다. ACR 창이 닫혀 있으면 오류로 멈춥니다.
+- 이미지 대상은 `az acr build`로 이미지를 만든 뒤 azd 환경에 이미지 이름을 기록하고, 대상 앱·Job이 이미 ACR 이미지로 돌고 있으면 `az containerapp [job] update --image`로 이미지만 바꿉니다(수십 초, `eval`은 `job-eval`·`job-ops` 둘). 자리표시 이미지(첫 배포)이거나 `--provision`을 주면 `azd provision`을 한 번 돌립니다. Bicep도 바꿨다면 `--provision`을 씁니다. ACR 창이 닫혀 있으면 오류로 멈춥니다.
 - `orchestrator`는 운영자 IP 창이 닫혀 있으면 멈춥니다. 원격 빌드는 쓰지 않습니다.
+  - Linux wheel은 `requirements.txt` 내용·플랫폼·Python 버전 해시별로 `~/.cache/amalend/site-packages`(환경 변수 `AMALEND_OPS_CACHE`로 변경)에 캐시하고, 요구사항이 같으면 `pip install`을 건너뜁니다(실측 패키징 250초 → 캐시 적중 시 수 초).
+  - zip 배포 전에 SCM 사이트를 한 번 찔러 보고, 403이면 응답 헤더 `x-ms-forbidden-ip`의 출구 IP를 `operator-egress`(priority 110) 규칙으로 잠시 허용한 뒤 배포가 끝나면(실패해도) 지웁니다. 아래 "App Service 출구 IP가 다를 때"의 수동 절차는 이 자동 처리가 실패할 때만 씁니다.
 
 ### 공통 순서
 
@@ -49,7 +52,7 @@ Service Bus 이벤트까지 보려면 앞에 `python -m ops resume`을, 비용�
 
 - 오케스트레이터(`orchestrator`)를 배포하기 전에 실행 중인 신청 여정이 없는지 확인합니다. 원문(P5b): 배포 전에 실행 중인 신청 여정이 없는지 확인합니다(여정 코드가 바뀌어 실행 중 인스턴스는 replay가 어긋날 수 있음).
 - 배포 직후 `ops smoke`는 `journey`·`consent` 점검으로 새 코드가 실제 신청 여정을 끝까지 처리하는지 확인합니다. 점검 항목은 [operate](operate.md#smoke)에 있습니다.
-- 콘솔이 새 메시지 필드를 보내는 변경(P9의 고객 신청 `source="customer"`처럼)은 `ops deploy orchestrator`를 먼저 하고 `ops deploy all`을 합니다. `all`은 이미지·프로비저닝(콘솔 교체)을 먼저 하고 Functions를 마지막에 올리므로, 그 사이 새 콘솔의 메시지를 이전 오케스트레이터가 거절할 수 있습니다.
+- 콘솔이 새 메시지 필드를 보내는 변경(P9의 고객 신청 `source="customer"`처럼)은 `ops deploy orchestrator`를 먼저 하고 `ops deploy all`을 합니다. `all`은 이미지(콘솔 교체)를 먼저 하고 Functions를 마지막에 올리므로, 그 사이 새 콘솔의 메시지를 이전 오케스트레이터가 거절할 수 있습니다.
 - `usd-v2` 정책 규칙을 올릴 때는 오케스트레이터 → 콘솔 → 모의 API → 정책을 연이어 배포하고, 넷이 모두 끝나기 전에는 USD 신청을 넣지 않으며 `ops smoke`도 그 뒤에 합니다. 새 오케스트레이터는 정책이 모르는 필드를 보내고 옛 오케스트레이터는 `usd-v2` 판정을 거절하므로, 어긋난 동안 들어온 신청은 `policy_unavailable`로 실패합니다.
 - 롤백은 오케스트레이터와 정책을 한 쌍으로 함께 되돌립니다.
 
@@ -81,7 +84,7 @@ python -m ops smoke                      # 배포 뒤 확인
 
 ### 콘솔: WAF 운영자 IP 규칙
 
-- 평상시: `python -m ops window open --ip <새 IP>`가 `CONSOLE_IP`를 새 IP로 갱신하고 프로비저닝으로 WAF 규칙에 반영합니다. 작업 뒤 `python -m ops window close`를 해도 `CONSOLE_IP`는 유지됩니다.
+- 평상시: `python -m ops waf ip-filter on --ip <새 IP>`가 `CONSOLE_IP`를 새 IP로 갱신하고 프로비저닝으로 WAF 규칙에 반영합니다(`--ip`를 빼면 현재 공인 IP). `window open`은 `CONSOLE_IP`가 비어 있을 때만 정합니다.
 - 임시로 IP를 하나 더 허용할 때: WAF 규칙은 "운영자 IP가 아니면 차단"이라 부정 조건(`--negate true`)으로 구성돼 있고 조건은 AND로 묶입니다. 부정 조건을 하나 더 붙이면 "둘 다 아니면 차단", 곧 허용 목록이 됩니다.
 
 ```powershell
@@ -90,28 +93,45 @@ az network application-gateway waf-policy custom-rule match-condition add `
   --match-variables RemoteAddr --operator IPMatch --values <추가 IP>/32 --negate true
 ```
 
-- 다음 프로비저닝(`window open|close`, `deploy ...` 등)이 Bicep 정의로 되돌려 임시 조건이 사라집니다. 사라지면 다시 추가하거나 `window open --ip`로 `CONSOLE_IP`를 바꿉니다.
+- 다음 프로비저닝(`window open|close --provision`, `deploy ... --provision`, `waf ip-filter on` 등)이 Bicep 정의로 되돌려 임시 조건이 사라집니다. 사라지면 다시 추가하거나 `waf ip-filter on --ip`로 `CONSOLE_IP`를 바꿉니다.
 - 403이 WAF 때문인지는 Log Analytics의 `AGWFirewallLogs`로 확인합니다.
+
+### 콘솔: 테스트 기간에 IP 규칙 끄기
+
+IP가 자주 바뀌는 테스트 기간에는 IP 규칙 대신 데모 로그인 비밀번호로 콘솔 진입을 막을 수 있습니다([ADR-011](../adr/ADR-011-appgw-waf-entry.md)의 "테스트 기간 예외"). 관리 규칙(OWASP DRS 2.1, Prevention)은 그대로입니다. 콘솔이 데모 모드(`CONSOLE_AUTH_ENABLED=false`)일 때만 씁니다.
+
+| 명령 | 하는 일 |
+|------|---------|
+| `python -m ops waf ip-filter off` | `CONSOLE_DEMO_PASSWORD`가 없으면 20자 비밀번호를 만들고, 콘솔에 아직 없으면 규칙이 켜진 채로 프로비저닝해 컨테이너 비밀로 넣습니다. 그다음 `allowOperatorOnly`를 `Disabled`로 바꾸고 `WAF_IP_FILTER=false`를 기록합니다. 로그인 아이디와 비밀번호를 출력합니다. |
+| `python -m ops waf ip-filter on [--ip <IP>]` | `CONSOLE_IP`를 `--ip`(기본: 현재 공인 IP)로, `WAF_IP_FILTER=true`로 정하고 프로비저닝합니다. 비밀번호는 그대로 남아 이중으로 막습니다. |
+| `python -m ops waf ip-filter status` | 규칙 상태(`Enabled`/`Disabled`)·허용 IP·비밀번호 설정 여부를 보여 줍니다. |
+
+- 비밀번호 다시 보기: `azd env get-value CONSOLE_DEMO_PASSWORD`. 바꾸려면 `azd env set CONSOLE_DEMO_PASSWORD <새 값>` 뒤 `ops deploy console --provision`처럼 프로비저닝합니다.
+- 비밀번호가 설정되면 로그인 화면에 비밀번호를 미리 채우지 않고, 값이 정확히 같아야 들어옵니다(`src/console/app.py`의 `/login`).
+- `WAF_IP_FILTER=false`는 azd 환경에 남으므로 이후 프로비저닝도 규칙을 끈 채로 둡니다. 구축이 끝나면 반드시 `waf ip-filter on`으로 되돌립니다.
 
 ### 프로비저닝하는 명령
 
 `src/ops`에서 `azd provision`을 실행하는 명령은 다음뿐입니다(`provision()` 호출 위치).
 
-- `ops window open`, `ops window close` (`src/ops/window.py`)
+- `ops window open`, `ops window close` — `--provision`을 주거나 첫 배포일 때만. 빠른 경로는 Functions·Foundry·ACR만 바꾸며, 콘솔 인증서가 새로 생기면 한 번 프로비저닝합니다(`src/ops/window.py`).
 - `ops pause`, `ops resume` (`src/ops/lifecycle.py`)
-- `ops deploy policy|mockapi|console|eval|all` — 이미지 대상은 빌드 뒤 프로비저닝합니다(`src/ops/deploy.py`의 `deploy_images`).
+- `ops deploy policy|mockapi|console|eval|all` — `--provision`이거나 대상이 아직 자리표시 이미지일 때만(`src/ops/deploy.py`의 `deploy_images`).
+- `ops waf ip-filter on`, 그리고 콘솔에 비밀번호를 처음 넣는 `ops waf ip-filter off` (`src/ops/console_access.py`)
 
 `ops deploy orchestrator`(Functions zip만), `ops smoke`, `ops fault`는 프로비저닝하지 않습니다.
 
-Bicep이 Functions 접근 제한(`infra/modules/functions.bicep`)과 WAF 정책(`infra/modules/appgw.bicep`)을 선언하므로, 프로비저닝 뒤에는 임시 규칙이 사라질 수 있습니다. Functions의 임시 `operator-alt*` 규칙은 `window open`(프로비저닝)이 지운다는 것을 2026-11-03 리허설에서 실측으로 확인했습니다. 그래서 **프로비저닝하는 마지막 명령 뒤에** 임시 규칙을 넣습니다.
+Bicep이 Functions 접근 제한(`infra/modules/functions.bicep`)과 WAF 정책(`infra/modules/appgw.bicep`)을 선언하므로, 프로비저닝 뒤에는 임시 규칙이 사라질 수 있습니다. 빠른 경로의 `window open|close`도 Functions `config/web`의 규칙 목록을 통째로 바꾸므로 임시 규칙을 지웁니다. Functions의 임시 `operator-alt*` 규칙은 `window open`(프로비저닝)이 지운다는 것을 2026-11-03 리허설에서 실측으로 확인했습니다. 그래서 **창을 연 뒤, 프로비저닝하는 마지막 명령 뒤에** 임시 규칙을 넣습니다.
 
 ### 절차(Functions)
+
+`ops deploy orchestrator`는 SCM 403을 자동으로 처리합니다(위 "구성요소별 배포"). 아래 수동 절차는 자동 처리가 실패할 때(예: 출구 IP가 요청마다 바뀜)만 씁니다.
 
 1. 프로비저닝하는 명령(`window open --acr`, `deploy console|all` 등)을 모두 먼저 실행합니다. `ops window open --ip <IP>`로 현재 IP를 직접 지정하면 이 단계의 403을 피할 수 있습니다.
 2. 마지막 프로비저닝이 끝나면 현재 공인 IP를 임시 허용합니다(Functions: priority 110).
 3. 프로비저닝하지 않는 작업(`ops deploy orchestrator`)을 수행합니다. 중간에 다시 프로비저닝했다면 2)를 반복합니다.
 4. 임시 규칙을 지웁니다.
-5. `ops window close`로 창을 닫습니다. 이 명령도 프로비저닝이므로 Functions 규칙을 Bicep 상태로 되돌립니다.
+5. `ops window close`로 창을 닫습니다. 이 명령도 Functions 규칙 목록을 Bicep 상태(빈 목록)로 되돌립니다.
 
 ```powershell
 # 2) 현재 공인 IP를 임시 허용

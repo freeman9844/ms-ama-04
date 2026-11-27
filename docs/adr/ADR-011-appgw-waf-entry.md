@@ -29,6 +29,11 @@
 - 첫 `window open`이 두 번 프로비저닝해 더 오래 걸린다. 인증서 갱신(만료 30일 전)은 `window open`이 처리하고, 게이트웨이는 버전 없는 비밀 ID를 주기적으로 다시 읽는다.
 - 테넌트 정책이 NSG 없는 서브넷에 기본 거부 NSG를 붙여 80/443이 시간 초과되므로, `nsg-appgw`를 직접 소유한다(GatewayManager·AzureLoadBalancer·Internet 80/443 허용). IP 제한은 NSG가 아니라 WAF 사용자 지정 규칙이 맡아 비운영자는 시간 초과가 아닌 403을 받는다. 게이트웨이 서브넷은 `Microsoft.Network/applicationGateways`로 위임해야 한다(네트워크 격리).
 
+## 테스트 기간 예외(2026-11-27)
+- 운영자 출구 IP가 연결마다 바뀌어 테스트 중 WAF 예외를 반복해야 했다. 테스트 기간에는 `python -m ops waf ip-filter off`로 사용자 지정 규칙 `allowOperatorOnly`만 `Disabled`로 두고(azd 환경 `WAF_IP_FILTER=false`, `infra/modules/appgw.bicep`의 `ipFilter`), 관리 규칙(DRS 2.1, Prevention)은 그대로 둔다.
+- 그동안 진입은 데모 로그인 비밀번호(`CONSOLE_DEMO_PASSWORD`, 컨테이너 비밀)로 막는다. 비밀번호가 콘솔에 들어간 뒤에만 규칙을 끈다(`src/ops/console_access.py`). 데모 모드는 원래 "인증이 아니며 차단은 WAF IP 규칙"이었으므로(ADR-007), 이 기간에는 비밀번호가 유일한 앱 진입 통제다.
+- 구축이 끝나면 `python -m ops waf ip-filter on`으로 되돌린다. 비밀번호는 남아 이중 통제가 된다.
+
 ## 재검토 조건
 - 사용자 도메인·공인 인증서가 생기면 자체 서명과 브라우저 경고를 없앤다.
 - DRS 2.1 오탐이 콘솔 업무를 막으면 해당 규칙만 정책 제외로 둔다.
@@ -38,5 +43,6 @@
 - 스펙: `docs/superpowers/specs/2026-11-06-appgw-waf-design.md`
 - IaC: `infra/modules/appgw.bicep`, `infra/resources.bicep`
 - 인증서: `src/ops/appgw_cert.py`, `src/ops/window.py`
-- 테스트: `tests/infra/test_appgw.py`, `tests/ops/test_appgw_cert.py`
+- IP 규칙 토글: `src/ops/console_access.py`
+- 테스트: `tests/infra/test_appgw.py`, `tests/ops/test_appgw_cert.py`, `tests/ops/test_console_access.py`
 - 배포 기록: [deploy-history](../runbook/deploy-history.md)
