@@ -100,6 +100,7 @@
 
 - 개선(기준선보다 좋아짐)은 가점하지 않는다. 점수는 100을 넘지 않는다.
 - 그 주 매출이 0인 마켓은 비율 지표(취소율·반품률)를 감점하지 않는다. 평점·등급·경고는 그대로 본다.
+- 대출 전에 생긴 판매 경고는 감점하지 않는다(대출 시점 = 100). 감점 기간은 대출 뒤 주만 센다.
 - 감점 계수와 상한은 출발값이다. 구현자가 7장 장면 순서를 맞추며 조정해도 되고, 바꾸면 이 표도 고친다.
 - 출발값 검산(검토자 계산, 주력 마켓 기준): tint 취소율 1.2% → 4.0%는 약 83점, gearstore 약 2.5% → 7%는 약 73점, dailylook 등급 한 단계는 85점이다. 안정 셀러의 취소율 흔들림(±15%)은 1~2점이다.
 
@@ -111,6 +112,7 @@
 
 - `mkt_score`: 셀러 점수(정수).
 - `mkt_platform_scores`: 마켓별 점수와 대출 전 매출 비중. 예: `{"coupang": {"score": 73, "share": 0.45}, ...}`.
+- `mkt_worst_score`, `mkt_worst_platform`: 대출 전 매출 비중 20% 이상 마켓 중 가장 낮은 점수와 그 마켓. 근거 ID와 칩이 숫자 하나를 인용하도록 따로 둔다.
 - `mkt_score_parts`: 감점 내역 목록. 항목마다 `platform`, `metric`(`cancel`·`returns`·`rating`·`grade`·`penalty`), `points`(셀러 점수에서 깎인 몫 = 마켓 감점 × 가중치, 소수 1자리), `value`, `baseline`. 큰 감점 순.
 - 기존 `mkt_cancel_rate`, `mkt_rating`, `mkt_grade`, `mkt_penalties`, `mkt_pending_cents`는 남긴다(원장 표·옛 근거). 단, `mkt_cancel_rate`와 `mkt_grade`는 지금처럼 주력 마켓 값이다.
 
@@ -118,8 +120,8 @@
 
 | 신호 | 강도 | 조건(출발값) | 근거 ID |
 |---|---|---|---|
-| `market_score_drop` (새) | 약 | `mkt_score ≤ 85`, 또는 대출 전 매출 비중 20% 이상인 마켓 중 하나라도 점수 ≤ 85 | `W:n:mkt_score`, `W:n:mkt_platform_scores` |
-| `market_score_crash` (새) | 강 | `mkt_score ≤ 60`, 또는 비중 20% 이상 마켓 중 하나라도 점수 ≤ 60 | `W:n:mkt_score`, `W:n:mkt_platform_scores` |
+| `market_score_drop` (새) | 약 | `mkt_score ≤ 85`, 또는 대출 전 매출 비중 20% 이상인 마켓 중 하나라도 점수 ≤ 85 | `W:n:mkt_score`, `W:n:mkt_worst_score` |
+| `market_score_crash` (새) | 강 | `mkt_score ≤ 60`, 또는 비중 20% 이상 마켓 중 하나라도 점수 ≤ 60 | `W:n:mkt_score`, `W:n:mkt_worst_score` |
 | `account_warning` | 강 | 지금 그대로(이번 주 새 판매 경고·정지) | `W:n:mkt_penalties` |
 
 - **희석 방지(사용자 선택: 1).** 매출 비중으로 가중하면 한 마켓만 나빠질 때 셀러 점수가 거의 안 움직인다(검토자 계산: 출발값 그대로면 tint·gearstore 약 93점, dailylook 약 95점). 그래서 화면 숫자는 가중 점수 하나로 두되, 신호는 "가중 점수" 또는 "비중 20% 이상 마켓 하나"의 경계로 선다. 사용자가 기각한 다른 길: 점수 자체를 주요 마켓 최저 점수로 정의(비중이 숫자에 안 들어감), 장면이 약해지는 것을 받아들임.
