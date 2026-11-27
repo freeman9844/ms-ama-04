@@ -131,13 +131,55 @@ def test_market_score_texts_may_cite_score_breakdown():
                        accept(usd_ctx([SETTLE_STRONG, RATING_DROP], "medium"), "medium"))
 
 
+class SequencedStage:
+    """시도마다 (출력, raise_alert 인자)를 차례로 돌려주는 가짜 러너."""
+
+    def __init__(self, *attempts):
+        self.attempts = list(attempts)
+        self.inputs = []
+
+    def run(self, spec, input_text, handlers):
+        output, alert_args = self.attempts[len(self.inputs)]
+        self.inputs.append(input_text)
+        if alert_args is not None:
+            handlers["raise_alert"](json.loads(json.dumps(alert_args)))
+        conv = f"conv-{len(self.inputs)}"
+        return AgentRun(spec.name, "1", conv, spec.output_model.model_validate(output), [], 1, 1)
+
+    def delete_container(self, container_id):
+        return True
+
+
 def test_alert_severity_must_match_stage():
     ctx = usd_ctx([BANK_STRONG, RATING_DROP], "high")
     runner = ScriptedStage(out("high").model_dump(), {**ALERT_ARGS, "severity": "medium"})
     result = investigate_usd(ctx, runner=runner, model="gpt")
     assert runner.alert_reply["accepted"] is True
     assert result.agent == "fallback" and result.stage == "high" and result.decision == "fallback_alert"
-    assert result.alert.severity.value == "high" and result.conversations == ["conv-1"]
+    assert result.alert.severity.value == "high" and result.conversations == ["conv-1", "conv-1"]
+    assert len(runner.specs) == 2
+
+
+def test_invalid_stage_output_is_retried_once_with_issues():
+    ctx = usd_ctx([BANK_STRONG, RATING_DROP], "high")
+    runner = SequencedStage((out("high").model_dump(), {**ALERT_ARGS, "severity": "medium"}),
+                            (out("high").model_dump(), {**ALERT_ARGS, "severity": "high"}))
+    result = investigate_usd(ctx, runner=runner, model="gpt")
+    assert (result.agent, result.stage, result.decision) == ("agent", "high", "high")
+    assert result.alert.severity.value == "high" and result.conversations == ["conv-1", "conv-2"]
+    issue = "raise_alert: an accepted alert with severity equal to the stage is required."
+    assert issue not in runner.inputs[0] and issue in runner.inputs[1]
+    assert result.record["stage_retries"] == [[issue]] and "stage_issues" not in result.record
+
+
+def test_retry_that_still_fails_falls_back():
+    ctx = usd_ctx([SETTLE_STRONG], "medium")
+    bad = out("watch").model_dump()
+    runner = SequencedStage((bad, None), (bad, None))
+    result = investigate_usd(ctx, runner=runner, model="gpt")
+    assert (result.agent, result.decision) == ("fallback", "fallback_alert") and len(runner.inputs) == 2
+    assert result.reason == "invalid_output" and result.record["error"] == "invalid_output"
+    assert result.record["stage_retries"] == [result.record["stage_issues"]]
 
 
 def test_agent_high_alert_gets_stage_fields():
