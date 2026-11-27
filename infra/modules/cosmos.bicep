@@ -9,6 +9,8 @@ param appDatabaseName string = 'lending'
 param containers array = []
 @description('[{ principalId, roleDefinitionGuid, scope: account|database }] — Cosmos 데이터 평면 SQL 역할')
 param sqlRoleAssignments array = []
+@description('감사 로그를 보낼 Log Analytics 작업 영역 ID')
+param lawId string
 
 
 resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
@@ -71,6 +73,20 @@ resource sqlRa 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11
   }
   dependsOn: [ appDb, pe ]
 }]
+
+// 감사 로그(쓰기·삭제·접근)만 보냅니다. 대량 읽기 로그는 비용 때문에 뺍니다.
+resource auditToLaw 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'audit-to-law'
+  scope: cosmos
+  properties: {
+    workspaceId: lawId
+    logAnalyticsDestinationType: 'Dedicated'
+    logs: [
+      { category: 'ControlPlaneRequests', enabled: true }
+      { category: 'DataPlaneRequests', enabled: true }
+    ]
+  }
+}
 
 output name string = cosmos.name
 output endpoint string = cosmos.properties.documentEndpoint
