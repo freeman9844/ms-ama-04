@@ -864,10 +864,16 @@ def test_journal_market_score_signal_chips():
     weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
                                    signals=[_signal("market_score_drop", "market", "weak",
                                                     "W:2:mkt_score", "W:2:mkt_worst_score")]),
-                         mkt_score=93, mkt_worst_score=83)]
+                         mkt_score=93, mkt_worst_score=83),
+             _watch_week(3, _watch("medium", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("market_score_crash", "market", "strong",
+                                                    "W:3:mkt_score", "W:3:mkt_worst_score")]),
+                         mkt_score=58, mkt_worst_score=41)]
     card = _journal(_usd_page(weeks, "usd-score-chip"))
-    for text in ("Market · Market score drop", "Market score 93", "Lowest major market score 83"):
+    for text in ("Market · Market score drop", "Market score 93", "Lowest major market score 83",
+                 "Market · Market score crash", "Market score 58", "Lowest major market score 41"):
         assert text in card, text
+    assert "market_score_" not in card
 
 
 def test_market_snapshot_score_column():
