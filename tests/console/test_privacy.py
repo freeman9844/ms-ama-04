@@ -2,6 +2,7 @@
 import base64
 import json
 import re
+import sys
 from datetime import datetime
 
 import pytest
@@ -549,7 +550,9 @@ window.fetch = async (_, o) => ({ok:true, json:async () => ({
     page = page.replace("<head>", """<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'">""")
     path = tmp_path / "grievance.html"
     path.write_text(page.replace("</body>", stub + "<script>" + mt_js + "</script></body>"), encoding="utf-8")
-    rendered = subprocess.run([chrome, "--headless", "--disable-gpu", "--no-first-run",
+    # Ubuntu 24.04(GitHub 러너)는 AppArmor가 비특권 사용자 네임스페이스를 막아 샌드박스 없이만 뜬다.
+    no_sandbox = ["--no-sandbox"] if sys.platform.startswith("linux") else []
+    rendered = subprocess.run([chrome, "--headless", "--disable-gpu", "--no-first-run", *no_sandbox,
                                f"--user-data-dir={tmp_path / 'profile'}", "--dump-dom", path.as_uri()],
                               capture_output=True, check=True, timeout=45).stdout.decode("utf-8")
     translations = re.findall(r'<span class="mt-ref mt-done"[^>]*>([^<]*)</span>', rendered)

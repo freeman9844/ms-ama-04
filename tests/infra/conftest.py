@@ -19,7 +19,8 @@ INFRA = ROOT / "infra"
 EXPAND = INFRA / "tests" / "expand.ps1"
 
 
-@pytest.fixture(autouse=True)
+# 세션 범위라야 closed·opened 같은 세션 fixture(Bicep 펼치기)보다 먼저 돈다.
+@pytest.fixture(scope="session", autouse=True)
 def _require_opt_in():
     if os.environ.get("RUN_INFRA_TESTS") != "1":
         pytest.skip("RUN_INFRA_TESTS=1 일 때만 실행합니다")
