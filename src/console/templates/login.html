@@ -13,10 +13,10 @@
   <form class="login-form" method="post" action="/login">
     <input type="hidden" name="next" value="{{ next_url }}">
     <label>{{ _("아이디") }} <input name="username" autocomplete="username" required value="{{ login_id }}"></label>
-    <label>{{ _("비밀번호") }} <input name="password" type="password" autocomplete="current-password" required value="demo"></label>
+    <label>{{ _("비밀번호") }} <input name="password" type="password" autocomplete="current-password" required{% if not password_required %} value="demo"{% endif %}></label>
     <button type="submit">{{ _("로그인") }}</button>
   </form>
-  <p class="login-hint">{{ _("데모 계정이 미리 입력돼 있습니다.") }}</p>
+  <p class="login-hint">{% if password_required %}{{ _("데모 비밀번호는 운영자에게 받으세요.") }}{% else %}{{ _("데모 계정이 미리 입력돼 있습니다.") }}{% endif %}</p>
   {% include "_lang.html" %}
 </main>
 </body>

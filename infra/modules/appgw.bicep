@@ -14,6 +14,8 @@ param certSecretId string
 param backendFqdn string
 @description('운영자 공인 IPv4. 비면 TEST-NET 주소만 허용해 아무도 들어오지 못합니다(fail-closed).')
 param allowedIp string
+@description('false면 운영자 IP 규칙을 끕니다(테스트 기간 전용, 콘솔 데모 비밀번호와 함께). 관리 규칙은 그대로입니다.')
+param ipFilter bool = true
 param lawId string
 
 var deployGateway = !empty(certSecretId)
@@ -47,7 +49,7 @@ resource policy 'Microsoft.Network/ApplicationGatewayWebApplicationFirewallPolic
         priority: 10
         ruleType: 'MatchRule'
         action: 'Block'
-        state: 'Enabled'
+        state: ipFilter ? 'Enabled' : 'Disabled'
         matchConditions: [
           {
             matchVariables: [ { variableName: 'RemoteAddr' } ]

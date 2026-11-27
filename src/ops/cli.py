@@ -6,6 +6,7 @@ import json
 import sys
 from typing import Callable
 
+from ops import console_access
 from ops import deploy as deploy_module
 from ops import faults, opsrun
 from ops.azcli import OpsError, Runner, subprocess_runner
@@ -33,6 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     closer = actions.add_parser("close", help="배포 창 닫기")
     closer.add_argument("--provision", action="store_true", help="빠른 경로 대신 전체 프로비저닝")
     actions.add_parser("status", help="배포 창 상태와 IP 변경 확인")
+
+    waf = commands.add_parser("waf", help="콘솔 App Gateway WAF")
+    waf_actions = waf.add_subparsers(dest="action", required=True)
+    ip_filter = waf_actions.add_parser("ip-filter", help="운영자 IP 규칙 끄기(데모 비밀번호로 대신)·켜기·상태")
+    ip_filter.add_argument("mode", choices=("off", "on", "status"))
+    ip_filter.add_argument("--ip", help="on: 허용할 공인 IPv4(기본: 자동 감지)")
 
     commands.add_parser("pause", help="Service Bus Premium 삭제(비용 절감)")
     commands.add_parser("resume", help="Service Bus 다시 배포")
@@ -96,6 +103,20 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             if status.warning:
                 print(f"경고: {status.warning}", file=out)
                 return 2
+        elif args.command == "waf" and args.mode == "off":
+            password = console_access.ip_filter_off(runner)
+            print("콘솔 WAF 운영자 IP 규칙을 껐습니다(관리 규칙은 유지). 어디서든 접속되지만 데모 비밀번호가 필요합니다.",
+                  file=out)
+            print(f"데모 로그인: demo.officer / {password}  (다시 보기: azd env get-value CONSOLE_DEMO_PASSWORD)",
+                  file=out)
+            print("테스트가 끝나면 `python -m ops waf ip-filter on`으로 다시 켜세요.", file=out)
+        elif args.command == "waf" and args.mode == "on":
+            ip = console_access.ip_filter_on(runner, args.ip or public_ip())
+            print(f"콘솔 WAF 운영자 IP 규칙을 켰습니다: {ip}만 허용.", file=out)
+        elif args.command == "waf":
+            status = console_access.ip_filter_status(runner)
+            print(f"WAF 운영자 IP 규칙: {status.state}, 허용: {', '.join(status.allowed) or '-'}, "
+                  f"데모 비밀번호: {'설정됨' if status.password_set else '없음'}", file=out)
         elif args.command == "pause":
             deleted = pause(runner)
             print("Service Bus를 삭제했습니다." if deleted else "Service Bus가 이미 없습니다.", file=out)
