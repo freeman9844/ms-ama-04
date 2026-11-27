@@ -172,6 +172,8 @@ def test_none_without_journal():
     weeks, _lines = _dailylook()
     assert watch_chart(weeks, [], []) is None
     assert watch_chart([], [], []) is None
+
+
 def _scored(weeks, lines, n, score, worst, codes, parts=()):
     weeks[n - 1]["row"].update(mkt_score=score, mkt_worst_score=worst, mkt_worst_platform="coupang",
                                mkt_score_parts=list(parts))

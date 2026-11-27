@@ -694,10 +694,13 @@ def test_watch_chart_score_chip_tooltip_and_legend():
         {"platform": "coupang", "metric": "cancel", "points": 9.0, "value": 0.046, "baseline": 0.02}])
     weeks[1]["watch"]["signals"] = [_signal("market_score_drop", "market", "weak", "W:2:mkt_score", "W:2:mkt_worst_score")]
     card = _journal(_usd_page(weeks, "usd-score"))
-    assert "Week 2 market score 93 · Coupang 83 (share" in card
+    assert "Week 2 market score 93 · Coupang 83 (share 85%)" in card
     assert "Coupang cancel rate −9.0" in card
     assert "Market score (100 = at loan)</li>" in card
     assert "market-chip tone-warn" in card
+    ko = _journal(_usd_page(weeks, "usd-score", lang="ko"))
+    assert "쿠팡 83(비중 85%)" in ko and "쿠팡 취소율 −9.0" in ko
+    assert "metric|" not in ko
 
 
 def test_watch_chart_slot_without_journal_line():
