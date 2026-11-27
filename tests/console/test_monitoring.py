@@ -348,7 +348,8 @@ def test_replay_sent_page_forwards_to_loan_until_the_replay_starts(setup):
     assert re.search(r'content="7;url=/loans/app-1\?since=[0-9a-f]{12}&amp;n=1"', waiting)
     store.loans["app-1"] = make_loan(status="replaying", started_at=NOW - timedelta(minutes=1), replay_id="rp-2")
     running = client.get(m.group(1), headers=OFFICER).text
-    assert '<meta http-equiv="refresh" content="7">' in running and "7초마다" in running
+    # 재생이 시작되면 감시 일지가 주차마다 늘어나는 모습이 보이도록 더 짧게(3초) 새로 고친다.
+    assert '<meta http-equiv="refresh" content="3">' in running and "3초마다" in running
 
 
 def test_restructure_sent_page_watches_alert_changes(setup, mask):

@@ -36,6 +36,7 @@ from console.i18n import _
 from agents.monitoring import WEEKS
 from agents.pretranslate import RawScope, active_scope, raw_container, translation_scope
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
+from agents import usd_market_score as ms
 from console.assessment import assessment_panels
 from console.auth import (
     DEMO_LOGIN_ID,
@@ -142,11 +143,29 @@ LIST_LIMIT = 50
 # 홈 신청 목록 건수(테스트 신청 제외). 홈 통계는 건수 제한 없이 모든 신청을 집계한다.
 HOME_LIST_LIMIT = 20
 DEMO_APPLICANTS = (*(s.applicant_id for s in DEMO_SELLERS), *USD_ONLY_SELLER_IDS)
+# 업체 선택·새 신청 목록에는 심사·사후 시연 장면이 있는 업체만 보인다. 나머지도 직접 주소와 신청 검증에서는 받는다.
+SCENE_APPLICANTS = tuple(a for a in DEMO_APPLICANTS if a in {
+    "seller-snackbox-22", "seller-campgear-23", "seller-teahouse-24", "seller-knitroom-04", "seller-leather-14",
+    "seller-tint-17", "seller-phonecase-25", "seller-popup-29", "seller-toyland-26", "seller-vitamin-27",
+    "seller-golfgear-28", "seller-gearstore-06", "seller-linen-10", "seller-dailylook-01", "seller-tangerine-15"})
 # 큐로 보낸 작업이 반영될 때까지 결과 화면을 짧게 다시 읽는다(최대 WATCH_LIMIT회).
 # 신청 상세(/applications/{id})의 모든 자동 새로 고침 주기.
 DETAIL_REFRESH_SECONDS = 10
-# 사후 모니터링(/loans/{id})의 모든 자동 새로 고침 주기(재생 진행·요청 반영 대기).
+# 사후 모니터링(/loans/{id})의 요청 반영 대기 자동 새로 고침 주기.
 MONITORING_REFRESH_SECONDS = 7
+# 재생 진행 중 /loans/{id} 새로 고침 주기. 오케스트레이터가 주차마다 최소 3초(REPLAY_WEEK_SECONDS)를 쓰므로
+# 감시 일지가 한두 주씩 늘어나는 모습이 보인다.
+REPLAY_REFRESH_SECONDS = 3
+# 감시 그래프 '마켓 점수' 범례 팝업의 계산 설명. 숫자는 채점 모듈 상수에서 바로 가져와 설명이 어긋나지 않게 한다.
+MARKET_SCORE_RULES = {
+    "cancel_per_pp": ms.CANCEL_PER_PP, "cancel_cap": ms.CANCEL_CAP,
+    "returns_per_pp": ms.RETURNS_PER_PP, "returns_cap": ms.RETURNS_CAP,
+    "rating_per_tenth": ms.RATING_PER_STAR // 10, "rating_cap": ms.RATING_CAP,
+    "grade_per_step": ms.GRADE_PER_STEP, "grade_cap": ms.GRADE_CAP,
+    "warning": ms.PENALTY_POINTS["warning"], "suspension": ms.PENALTY_POINTS["suspension"],
+    "penalty_weeks": ms.PENALTY_DAYS // 7 + 1, "penalty_cap": ms.PENALTY_CAP,
+    "major_share_pct": round(ms.MAJOR_SHARE * 100), "drop": ms.SCORE_DROP, "crash": ms.SCORE_CRASH,
+}
 WATCH_LIMIT = 12
 # 고객 신청 현황(/apply/{id})이 문서 생성을 기다리는 최대 새로 고침 횟수(3초 × 40 = 2분).
 APPLY_WAIT_LIMIT = 40
@@ -309,8 +328,9 @@ def _templates() -> Environment:
     env.filters["usd"] = lambda v: f"${v:,.4f}" if isinstance(v, int | float) else "-"
     env.filters["num"] = lambda v, d=1: f"{v:.{d}f}" if isinstance(v, int | float) else "-"
     env.globals.update(
-        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=DEMO_APPLICANTS, demo_actions=DEMO_ACTIONS,
+        htmx_src=HTMX_SRC, htmx_sri=HTMX_SRI, demo_applicants=SCENE_APPLICANTS, demo_actions=DEMO_ACTIONS,
         monitoring_refresh_seconds=MONITORING_REFRESH_SECONDS, detail_refresh_seconds=DETAIL_REFRESH_SECONDS,
+        replay_refresh_seconds=REPLAY_REFRESH_SECONDS, msr=MARKET_SCORE_RULES,
         locale=i18n.current, lang_url=i18n.lang_url,
     )
     return env
@@ -1136,7 +1156,7 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
         user = customer(request)
         privacy()
         legacy = request.url.path.startswith("/legacy/")
-        applicants = tuple(a for a in DEMO_APPLICANTS if a not in USD_ONLY_SELLER_IDS) if legacy else DEMO_APPLICANTS
+        applicants = tuple(a for a in DEMO_APPLICANTS if a not in USD_ONLY_SELLER_IDS) if legacy else SCENE_APPLICANTS
         return render("customer_select.html", user, prefix="/legacy" if legacy else "", applicants=applicants)
 
     @app.get("/legacy/borrower/{applicant_id}", response_class=HTMLResponse)

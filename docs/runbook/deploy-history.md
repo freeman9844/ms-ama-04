@@ -1115,3 +1115,16 @@ python -m ops smoke
 - 설계 §7과 비교: linen이 관찰 3 → 중간 4에서 중간 3으로 바뀐 것은 설계가 받아들인 변화다(두 출처 약신호). 나머지 마켓 신호 주차도 오프라인 재생과 같다.
 - dailylook 높음이 7주에서 8주로 늦어졌다. 7주 기본 단계가 중간이었고, 강한 은행 신호 `projected_shortfall`이 이전 재생(7주)과 달리 8주에 섰다. 마켓 점수는 이 은행 신호의 입력이 아니고, 오프라인 결정적 재생(`tests\mockapis\test_usd_scenes.py`)은 여전히 높음 7주다. 원인은 확인하지 못했다. 재생 중 승인한 상환 사례 제안(3회차, LLM 작성) 내용이 회차 일정을 바꿨을 가능성이 있다.
 - 조사 에이전트 폴백(`invalid_output`)은 약 23회 중 5회(linen 3·4, dailylook 5·13, snackbox 3)로 지난 재측정(23%)과 비슷하다. 폴백 주에도 결정적 단계·경보는 그대로다.
+
+## 2026-11-27 PR #16: 장면 셀러만 표시·재생 주차 속도·마켓 점수 범례 설명
+
+- **변경:**
+  - `a9e0470`: 신청·고객 화면의 업체 선택에 장면 셀러 15곳만 보입니다(`SCENE_APPLICANTS`). 숨긴 셀러도 직접 URL로는 신청됩니다.
+  - `2fcad2e`: 인라인 재생(Service Bus 꺼짐)에서 한 주차가 최소 3초(`REPLAY_WEEK_SECONDS`, 앱 설정으로 바꿀 수 있음) 걸리게 했습니다. 콘솔이 감시 일지가 한두 주씩 늘어나는 모습을 보도록 하기 위해서입니다. 13주 재생이 약 36초 길어집니다.
+  - `2fcad2e`: 재생 중 `/loans/{id}` 새로 고침을 7초에서 3초(`REPLAY_REFRESH_SECONDS`)로 줄였습니다. 요청 반영 대기는 7초 그대로입니다.
+  - `2fcad2e`: 감시 그래프의 '마켓 점수' 범례를 누르면 계산 설명 팝오버(HTML `popover`, JS 없음)가 뜹니다. 숫자는 `agents.usd_market_score` 상수에서 가져옵니다.
+- **배포:** `ops window open --acr` → 콘솔(`console:pr16-a9e0470`, `ca-console--0000071`) → 같은 창에서 오케스트레이터 → 콘솔(`console:pr16-2fcad2e`) → digest 고정·ACR 잠금 → `ops window close` 순서로 진행했습니다.
+  - 오케스트레이터 Functions ZIP 배포 `ac5da0e0-372e-46a3-a2f1-353d64aaf997`(직전 `3b50d514-b3fe-4e8f-864d-bb98299d3bcf`). 회사망에서 SCM이 403이었고 응답 헤더 `x-ms-forbidden-ip`가 167.220.233.25였습니다. 이 IP를 주 사이트 임시 규칙 `operator-alt2`(priority 111)로 허용해 배포한 뒤 바로 지웠습니다.
+  - 콘솔 `ca-console--0000073`(`sha256:665bc4a57c2c04a7b9cec7fb3ae63f5f2f0fb6891fe06473aaadcf4c9f83b43f`). 되돌릴 대상은 `ca-console--0000070`(`91c029a2…`). 모의 API·정책은 바뀌지 않았습니다.
+  - `ops smoke` 성공(`job-smoke-brt91sg`). 창을 닫으면서 WAF `allowOperatorOnly`가 창 IP 하나로 바뀌어 211.234.206.213·167.220.233.25를 다시 더했습니다.
+- **되돌릴 때:** 콘솔 → 오케스트레이터 순서로 합니다. 옛 콘솔은 7초마다 새로 고칠 뿐이라 두 서비스를 따로 되돌려도 호환됩니다.

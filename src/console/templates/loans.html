@@ -13,7 +13,7 @@
 <p class="note">{{ _("승인된 대출의 사후 13주 거래 흐름을 재생해 조기경보(Early-Warning)와 추심(Collections) 에이전트를 시연합니다. 최근 %(limit)s건 기준입니다.", limit=limit) }}</p>
 <div class="grid-4">
   {{ ch.kpi(_("모니터링 대출"), _("%(n)s건", n=ui.total), _("최근 %(n)s건 기준", n=limit), "blue") }}
-  {{ ch.kpi(_("진행 중 재생"), _("%(n)s건", n=ui.replaying), _("상세 화면에서 %(n)s초마다 갱신", n=monitoring_refresh_seconds), "blue" if ui.replaying else "neutral") }}
+  {{ ch.kpi(_("진행 중 재생"), _("%(n)s건", n=ui.replaying), _("상세 화면에서 %(n)s초마다 갱신", n=replay_refresh_seconds), "blue" if ui.replaying else "neutral") }}
   {{ ch.kpi(_("13주 완주"), _("%(n)s건", n=ui.completed), _("미실행 %(n)s건", n=ui.not_started), "green") }}
   {{ ch.kpi(_("누적 경보"), _("%(n)s건", n=ui.alerts), _("조기경보 에이전트 발행"), "red" if ui.alerts else "neutral") }}
 </div>

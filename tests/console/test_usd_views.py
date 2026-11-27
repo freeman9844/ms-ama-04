@@ -699,13 +699,20 @@ def test_watch_chart_score_chip_tooltip_and_legend():
     card = _journal(_usd_page(weeks, "usd-score"))
     assert "Week 2 market score 93 · Coupang 83 (share 85%)" in card
     assert "Coupang cancel rate −9.0" in card
-    assert "Market score (100 = at loan)</li>" in card
+    assert "Market score (100 = at loan)" in card
+    # 범례를 누르면 계산 설명 팝오버가 뜬다(JS 없이 HTML popover). 숫자는 채점 상수에서 온다.
+    assert 'popovertarget="market-score-help"' in card and 'id="market-score-help" class="legend-pop" popover' in card
+    for text in ("What is the market score?", "Cancel rate: −6 per 1%p increase (max −40)",
+                 "Rating: −5 per 0.1 drop (max −25)", "kept for 4 weeks including that week",
+                 "pre-loan share 20% or more) is 85 or below", "at 60 or below, a strong signal (red)"):
+        assert text in card, text
     assert "market-chip tone-warn" in card
     assert 'class="market-chip tone-ok grade-signal"' in card  # week 3: account warning only
     css = (Path(console.__file__).parent / "static" / "console.css").read_text(encoding="utf-8")
     assert ".market-chip.grade-signal rect" in css
     ko = _journal(_usd_page(weeks, "usd-score", lang="ko"))
     assert "쿠팡 83(비중 85%)" in ko and "쿠팡 취소율 −9.0" in ko
+    assert "마켓 점수란?" in ko and "취소율: 1%p 오를 때마다 −6(최대 −40)" in ko and "60 이하면 강한 신호(적색)" in ko
     assert "metric|" not in ko
 
 
@@ -1238,6 +1245,18 @@ def test_usd_only_seller_is_listed_and_accepted_by_apply():
     client = TestClient(create_app(fixtures.build_deps()))
     assert "Mapo Snack Box" in client.get("/borrower").text
     assert client.get("/apply?applicant_id=seller-snackbox-22", follow_redirects=False).status_code == 200
+
+
+def test_pickers_list_only_scene_sellers_but_hidden_sellers_still_apply():
+    client = TestClient(create_app(fixtures.build_deps()))
+    picker = client.get("/borrower").text
+    listed = re.findall(r'href="/apply\?applicant_id=([^"]+)"', picker)
+    assert len(listed) == 15 and "seller-gearstore-06" in listed and "seller-popup-29" in listed
+    assert "Daejeon Bakery" not in picker and "Haeundae Beauty Lab" not in picker
+    new = client.get("/applications/new").text
+    assert re.findall(r'<option value="(seller-[^"]+)"', new) == listed
+    assert client.get("/apply?applicant_id=seller-bakery-20", follow_redirects=False).status_code == 200
+    assert "/legacy/borrower/seller-bakery-20" in client.get("/legacy/borrower").text
 
 
 def test_usd_only_sellers_are_in_usd_picker_with_name_initial_but_not_in_legacy_picker():
