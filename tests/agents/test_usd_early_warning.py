@@ -170,3 +170,10 @@ def test_old_alert_documents_still_validate():
     }
     alert = EarlyWarningAlert.model_validate(doc)
     assert alert.incident_id is None and alert.why_now is None and alert.signals[0].source is None
+
+
+def test_market_score_signals_have_fallback_text():
+    from agents.usd_early_warning import _SIGNAL_TEXT
+    assert _SIGNAL_TEXT["market_score_drop"][0] == "The marketplace score fell below its pre-loan level."
+    assert _SIGNAL_TEXT["market_score_crash"][0] == "The marketplace score fell sharply."
+    assert _SIGNAL_TEXT["market_score_drop"][1] == "Check the score breakdown on the marketplace accounts."
