@@ -60,6 +60,8 @@ SIGNAL_LABELS = TRIGGER_LABELS | {
     "rating_drop": "평점 하락",
     "grade_down": "등급 강등",
     "account_warning": "판매 경고·정지",
+    "market_score_drop": "마켓 점수 하락",
+    "market_score_crash": "마켓 점수 급락",
 }
 # 일지 줄의 설명. 키는 incident.py의 kind(explained·suppressed·hold·quiet·resolved_quiet·resolved_agent)와
 # 줄의 에이전트(fallback)·경보 처리(updated). normal·call은 신호와 판단이 줄을 채워 따로 설명하지 않는다.
@@ -100,6 +102,8 @@ EVIDENCE_LABELS = {
     "deduction_rate": ("공제율", "pct"),
     "mkt_rating": ("평점", "rating"),
     "mkt_penalties": ("계정 경고", "count"),
+    "mkt_score": ("마켓 점수", "count"),
+    "mkt_worst_score": ("주요 마켓 최저 점수", "count"),
     "recon_ratio": (BASIS_METRIC_LABELS["recon_ratio"], "pct"),
     "orders_vs_prior_year": (BASIS_METRIC_LABELS["orders_vs_prior_year"], "pct"),
 }
