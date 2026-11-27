@@ -3,6 +3,7 @@
 활동은 (deps, payload) -> JSON 직렬화 가능한 값. function_app이 Deps를 주입한다.
 """
 
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -130,6 +131,9 @@ class Deps:
     grievance_model: str = GRIEVANCE_MODEL
     translator: Any | None = None
     translate_model: str = TRANSLATE_MODEL
+    # 인라인 재생(Service Bus 꺼짐)에서 한 주차가 최소 이만큼 걸리도록 쉰다. 0이면 쉬지 않는다(테스트 기본).
+    week_pace_seconds: float = 0.0
+    sleep: Callable[[float], None] = time.sleep
 
 
 class Conflict(RuntimeError):

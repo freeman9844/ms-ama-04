@@ -153,7 +153,7 @@
 {%- endmacro %}
 {% from "_plan.html" import plan_items %}
 {% set l = v.loan %}{% set m = v.monitoring %}
-{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }}">{% endif %}<script src="/static/decision.js" defer></script>{% endblock %}
+{% block head %}{% if watch_url %}<meta http-equiv="refresh" content="{{ monitoring_refresh_seconds }};url={{ watch_url }}">{% elif replay_blocked %}<meta http-equiv="refresh" content="{{ replay_refresh_seconds }}">{% endif %}<script src="/static/decision.js" defer></script>{% endblock %}
 {% block title %}{{ l.id }} {{ _("사후 모니터링") }} · AMA Lending {{ _("심사 콘솔") }}{% endblock %}
 {% block main %}
 <div class="page-head">
@@ -173,7 +173,7 @@
 </div>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 {% if watch_url %}<p class="note" role="status">{{ _("요청 반영을 기다리는 중입니다. %(n)s초마다 다시 확인합니다.", n=monitoring_refresh_seconds) }}</p>
-{% elif replay_blocked %}<p class="note">{{ _("재생이 진행 중입니다. %(n)s초마다 새로 고칩니다.", n=monitoring_refresh_seconds) }}</p>{% endif %}
+{% elif replay_blocked %}<p class="note">{{ _("재생이 진행 중입니다. %(n)s초마다 새로 고칩니다.", n=replay_refresh_seconds) }}</p>{% endif %}
 {% set hold_anchor = {"collections_proposal": m.pause_case_id or m.pause_alert_id, "restructure": m.pause_case_id or m.pause_alert_id, "customer_response": "plan-offer", "plan_change": "plan-change"} %}
 {% if m.status in ("paused", "awaiting_customer") and v.holds %}
 <section class="card resume-card" aria-label="{{ _('재생 일시정지') }}">

@@ -182,7 +182,22 @@
 <li><span class="swatch swatch-outline"></span>{{ _("PG 주문") }}</li>
 <li><span class="swatch bg-blue"></span>{{ _("은행 입금") }}</li>
 <li><span class="swatch swatch-line bg-purple"></span>{{ _("예상 최저 잔액") }} ({{ _("28일 전망, 실제 잔고 아님") }})</li>
-{% if c.grades|selectattr("score", "number")|list %}<li><span class="swatch swatch-chip">100</span>{{ _("마켓 점수(대출 시점 = 100)") }}</li>{% endif %}
+{% if c.grades|selectattr("score", "number")|list %}<li><button type="button" class="legend-help" popovertarget="market-score-help" aria-haspopup="dialog"><span class="swatch swatch-chip">100</span>{{ _("마켓 점수(대출 시점 = 100)") }} <span class="legend-help-mark" aria-hidden="true">ⓘ</span></button>
+<div id="market-score-help" class="legend-pop" popover role="dialog" aria-labelledby="market-score-help-title">
+<h3 id="market-score-help-title">{{ _("마켓 점수란?") }}</h3>
+<p>{{ _("입점한 마켓(쿠팡·네이버 등)마다 판매 성과를 0–100 한 숫자로 줄인 값입니다. 대출 전 주차들의 평균 수준을 100으로 두고, 그 주 지표가 나빠진 만큼만 뺍니다(좋아져도 가점은 없음).") }}</p>
+<ul>
+<li>{{ _("취소율: 1%%p 오를 때마다 −%(p)s(최대 −%(cap)s)", p=msr.cancel_per_pp, cap=msr.cancel_cap) }}</li>
+<li>{{ _("반품률: 1%%p 오를 때마다 −%(p)s(최대 −%(cap)s)", p=msr.returns_per_pp, cap=msr.returns_cap) }}</li>
+<li>{{ _("평점: 0.1점 내릴 때마다 −%(p)s(최대 −%(cap)s)", p=msr.rating_per_tenth, cap=msr.rating_cap) }}</li>
+<li>{{ _("판매자 등급: 한 단계 내릴 때마다 −%(p)s(최대 −%(cap)s)", p=msr.grade_per_step, cap=msr.grade_cap) }}</li>
+<li>{{ _("판매 경고 −%(w)s · 판매 정지 −%(s)s, 그 주 포함 %(weeks)s주 유지(최대 −%(cap)s)", w=msr.warning, s=msr.suspension, weeks=msr.penalty_weeks, cap=msr.penalty_cap) }}</li>
+</ul>
+<p>{{ _("마켓별 점수를 대출 전 매출 비중으로 가중 평균해 칩 하나로 보여 줍니다.") }}</p>
+<p>{{ _("경보 반영: 가중 점수나 주요 마켓(대출 전 비중 %(share)s%% 이상) 최저 점수가 %(drop)s 이하면 약한 신호(황색), %(crash)s 이하면 강한 신호(적색)로 경보 단계 판단에 들어갑니다.", share=msr.major_share_pct, drop=msr.drop, crash=msr.crash) }}</p>
+<p class="note">{{ _("칩에 마우스를 올리면 그 주 감점 내역이 보입니다.") }}</p>
+<button type="button" class="button secondary" popovertarget="market-score-help" popovertargetaction="hide">{{ _("닫기") }}</button>
+</div></li>{% endif %}
 <li>💵 {{ _("상환일") }}</li>
 {% for st in ("normal", "watch", "medium", "high", "resolved") %}<li><span class="swatch stage-{{ st }}"></span>{{ st|stage_label }}</li>{% endfor %}
 </ul>

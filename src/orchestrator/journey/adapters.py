@@ -33,6 +33,8 @@ from shared.contracts import PolicyDecision, UsdPolicyDecision, UsdProduct
 FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 COGNITIVE_SCOPE = "https://cognitiveservices.azure.com/.default"
 PSEUDONYM_SECRET = "pseudonym-key"
+# 인라인 재생 한 주차의 최소 시간(초). 콘솔이 주차가 하나씩 쌓이는 모습을 보도록 한다. REPLAY_WEEK_SECONDS로 바꾼다.
+REPLAY_WEEK_SECONDS = 3.0
 SOURCE_PATHS = {
     "profile": "/mydata/profile",
     "transactions": "/mydata/transactions",
@@ -329,5 +331,6 @@ def build_deps(env: Mapping[str, str] = os.environ) -> Deps:
         cache=StoreCache(store),
         # 동의 수명주기 예약에 꼭 필요하다(없으면 시작하지 않는다).
         queue=StorageQueueSender(env["QUEUE_ENDPOINT"], credential),
+        week_pace_seconds=float(env.get("REPLAY_WEEK_SECONDS", REPLAY_WEEK_SECONDS)),
         **agent_settings(env, lambda scope: credential.get_token(scope).token),
     )

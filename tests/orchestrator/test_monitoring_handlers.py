@@ -1284,6 +1284,18 @@ def test_register_monitoring_builds_baseline_and_keeps_replay_state(mock_app):
     assert loan(deps) == before_retry
 
 
+def test_inline_replay_paces_each_week_so_the_console_sees_it_advance(mock_app):
+    slept, seen = [], []
+    deps = make_deps(mock_app)
+    deps = replace(deps, week_pace_seconds=3.0,
+                   sleep=lambda s: (slept.append(s), seen.append(loan(deps)["monitoring"]["processed_week"])))
+    approved_loan(deps)
+    replay(deps)
+    # 주차마다(마지막 주 제외) 남은 시간만큼 쉰다. 쉬는 동안 콘솔은 방금 저장된 주차까지 본다.
+    assert seen == list(range(1, WEEKS)) and all(0 < s <= 3.0 for s in slept)
+    assert loan(deps)["monitoring"]["status"] == "completed"
+
+
 def test_inline_replay_without_agents_raises_detector_alerts_for_officer(mock_app):
     deps = make_deps(mock_app)
     approved_loan(deps)

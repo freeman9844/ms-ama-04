@@ -19,6 +19,7 @@ Service Bus가 꺼져 있으면(deps.events is None) handle_replay가 같은 처
 import hashlib
 import json
 import logging
+import time
 from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
@@ -462,10 +463,14 @@ def _run_weeks(deps: Deps, loan_id: str, replay_id: str, first_week: int) -> Non
     # Service Bus가 꺼진 동안: 같은 판단(_after_week)으로 주차 순서대로 직접 한다(데모 비용 절감 모드).
     try:
         for week in range(first_week, WEEKS + 1):
+            began = time.monotonic()
             entry = process_week(deps, loan_id, replay_id, week)
             ids = _week_cases(entry or {})
             for case_id in ids:
                 run_collections(deps, loan_id, case_id)
+            # 빠른 주차(에이전트 호출 없음)가 한꺼번에 끝나지 않게 쉰다. 쉬는 사이 멈춤 요청은 _after_week가 본다.
+            if week < WEEKS and (rest := deps.week_pace_seconds - (time.monotonic() - began)) > 0:
+                deps.sleep(rest)
             if _after_week(deps, loan_id, replay_id, week, ids[0] if ids else None) != "next":
                 break
     except Exception as e:  # noqa: BLE001 - 큐 재시도는 13주를 처음부터 다시 돌린다(LLM 비용). 실패를 기록하고 콘솔에서 다시 시작한다

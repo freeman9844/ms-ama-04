@@ -699,13 +699,20 @@ def test_watch_chart_score_chip_tooltip_and_legend():
     card = _journal(_usd_page(weeks, "usd-score"))
     assert "Week 2 market score 93 · Coupang 83 (share 85%)" in card
     assert "Coupang cancel rate −9.0" in card
-    assert "Market score (100 = at loan)</li>" in card
+    assert "Market score (100 = at loan)" in card
+    # 범례를 누르면 계산 설명 팝오버가 뜬다(JS 없이 HTML popover). 숫자는 채점 상수에서 온다.
+    assert 'popovertarget="market-score-help"' in card and 'id="market-score-help" class="legend-pop" popover' in card
+    for text in ("What is the market score?", "Cancel rate: −6 per 1%p increase (max −40)",
+                 "Rating: −5 per 0.1 drop (max −25)", "kept for 4 weeks including that week",
+                 "pre-loan share 20% or more) is 85 or below", "at 60 or below, a strong signal (red)"):
+        assert text in card, text
     assert "market-chip tone-warn" in card
     assert 'class="market-chip tone-ok grade-signal"' in card  # week 3: account warning only
     css = (Path(console.__file__).parent / "static" / "console.css").read_text(encoding="utf-8")
     assert ".market-chip.grade-signal rect" in css
     ko = _journal(_usd_page(weeks, "usd-score", lang="ko"))
     assert "쿠팡 83(비중 85%)" in ko and "쿠팡 취소율 −9.0" in ko
+    assert "마켓 점수란?" in ko and "취소율: 1%p 오를 때마다 −6(최대 −40)" in ko and "60 이하면 강한 신호(적색)" in ko
     assert "metric|" not in ko
 
 
