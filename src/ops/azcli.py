@@ -87,3 +87,7 @@ def rest_post(az: Runner, url: str, body: dict) -> dict:
 
 def rest_put(az: Runner, url: str, body: dict) -> dict:
     return _rest_with_body(az, "put", url, body)
+
+
+def rest_patch(az: Runner, url: str, body: dict) -> dict:
+    return _rest_with_body(az, "patch", url, body)

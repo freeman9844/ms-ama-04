@@ -29,7 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     opener = actions.add_parser("open", help="배포 창 열기")
     opener.add_argument("--ip", help="허용할 공인 IPv4(기본: 자동 감지)")
     opener.add_argument("--acr", action="store_true", help="az acr build를 위해 ACR도 전체 공개")
-    actions.add_parser("close", help="배포 창 닫기")
+    opener.add_argument("--provision", action="store_true", help="빠른 경로 대신 전체 프로비저닝")
+    closer = actions.add_parser("close", help="배포 창 닫기")
+    closer.add_argument("--provision", action="store_true", help="빠른 경로 대신 전체 프로비저닝")
     actions.add_parser("status", help="배포 창 상태와 IP 변경 확인")
 
     commands.add_parser("pause", help="Service Bus Premium 삭제(비용 절감)")
@@ -61,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
         "scenario", choices=tuple(faults.SCENARIOS))
     deployer = commands.add_parser("deploy", help="정책·Mock·콘솔·평가 이미지(ACR Build)와 Function 코드 배포")
     deployer.add_argument("target", nargs="?", default="all", choices=deploy_module.TARGETS)
+    deployer.add_argument("--provision", action="store_true",
+                          help="이미지만 바꾸지 않고 전체 프로비저닝(Bicep 변경을 함께 반영할 때)")
     destroy = commands.add_parser("teardown", help="환경 전체 삭제")
     destroy.add_argument("--confirm", required=True, help="삭제할 리소스 그룹 이름")
     return parser
@@ -72,11 +76,11 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
     args = build_parser().parse_args(argv)
     try:
         if args.command == "window" and args.action == "open":
-            ip = open_window(runner, args.ip or public_ip(), acr=args.acr)
+            ip = open_window(runner, args.ip or public_ip(), acr=args.acr, full_provision=args.provision)
             suffix = " (ACR 전체 공개)" if args.acr else ""
             print(f"배포 창을 열었습니다: {ip}{suffix}. 작업 후 `python -m ops window close`로 닫으세요.", file=out)
         elif args.command == "window" and args.action == "close":
-            close_window(runner)
+            close_window(runner, full_provision=args.provision)
             print("배포 창을 닫았습니다.", file=out)
         elif args.command == "window":
             try:
@@ -99,7 +103,8 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess_runner,
             resume(runner)
             print("Service Bus를 다시 배포했습니다.", file=out)
         elif args.command == "deploy":
-            deployed = deploy_module.deploy(runner, args.target, root=deploy_module.ROOT)
+            deployed = deploy_module.deploy(runner, args.target, root=deploy_module.ROOT,
+                                            full_provision=args.provision)
             print("배포했습니다: " + ", ".join(deployed), file=out)
         elif args.command == "smoke":
             print(f"smoke 성공: {run_smoke(runner)}", file=out)

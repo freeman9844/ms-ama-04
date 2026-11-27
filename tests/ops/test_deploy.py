@@ -1,11 +1,12 @@
 import io
+import json
 import zipfile
 
 import pytest
 
 from ops.azcli import OpsError
 from ops.cli import main
-from ops.deploy import PIP_PLATFORMS, deploy
+from ops.deploy import EGRESS_RULE, PIP_PLATFORMS, deploy, deploy_function
 
 ENV = {
     "AZURE_SUBSCRIPTION_ID": "sub-1",
@@ -18,7 +19,25 @@ ENV = {
     "MOCK_CONSENT_SECRET": "m" * 64,
     "PSEUDONYM_KEY": "p" * 64,
 }
+APPS = {"POLICY_APP_NAME": "ca-policy", "MOCKAPI_APP_NAME": "ca-mockapi", "CONSOLE_APP_NAME": "ca-console",
+        "EVAL_JOB_NAME": "job-eval", "OPS_JOB_NAME": "job-ops"}
 ZIP_DEPLOY = ("az", "functionapp", "deployment", "source", "config-zip")
+PIP = ("-m", "pip", "install")
+
+
+@pytest.fixture(autouse=True)
+def _isolated(monkeypatch, tmp_path):
+    # 실제 SCM 호출과 운영자 PC의 패키지 캐시를 건드리지 않습니다.
+    monkeypatch.setattr("ops.deploy.scm_forbidden_ip", lambda name: None)
+    monkeypatch.setenv("AMALEND_OPS_CACHE", str(tmp_path / "pip-cache"))
+
+
+def running_image(image):
+    return json.dumps({"properties": {"template": {"containers": [{"image": image}]}}})
+
+
+def pip_calls(runner):
+    return [c for c in runner.calls if tuple(c[1:4]) == PIP]
 
 
 @pytest.fixture
@@ -90,8 +109,8 @@ def test_function_package_layout_and_linux_wheels(fake_runner, repo):
     wrapped, seen = capture_zip(runner)
     deploy(wrapped, "orchestrator", root=repo, tag="t1")
 
-    [pip] = [c for c in runner.calls if c[1:4] == ["-m", "pip", "install"]]
-    assert pip[pip.index("--target") + 1].replace("\\", "/").endswith(".python_packages/lib/site-packages")
+    [pip] = pip_calls(runner)
+    assert "pip-cache" in pip[pip.index("--target") + 1]
     assert [pip[i + 1] for i, a in enumerate(pip) if a == "--platform"] == list(PIP_PLATFORMS)
     assert "--only-binary=:all:" in pip and pip[pip.index("--python-version") + 1] == "3.12"
 
@@ -142,3 +161,103 @@ def test_eval_image_built_from_repo_root(fake_runner, repo):
     assert build[build.index("-f") + 1] == "src/evals/Dockerfile"
     assert runner.env["SERVICE_EVAL_IMAGE_NAME"] == "acrx.azurecr.io/eval:t4"
     assert runner.commands(*ZIP_DEPLOY) == []
+
+def test_image_swapped_without_provision_when_app_already_runs_acr_image(fake_runner, repo):
+    runner = fake_runner({**ENV, **APPS}).on("az", "containerapp", "show",
+                                            results=[running_image("acrx.azurecr.io/console:old")])
+    assert deploy(runner, "console", root=repo, tag="t5") == ["acrx.azurecr.io/console:t5"]
+    [update] = runner.commands("az", "containerapp", "update")
+    assert update[update.index("-n") + 1] == "ca-console"
+    assert update[update.index("--image") + 1] == "acrx.azurecr.io/console:t5"
+    assert update[-2:] == ["--subscription", "sub-1"]
+    assert runner.env["SERVICE_CONSOLE_IMAGE_NAME"] == "acrx.azurecr.io/console:t5"
+    assert runner.index("az", "acr", "build") < runner.index("az", "containerapp", "update")
+    assert runner.commands("azd", "provision") == []
+
+
+def test_eval_image_swaps_both_jobs(fake_runner, repo):
+    runner = fake_runner({**ENV, **APPS}).on("az", "containerapp", "job", "show",
+                                            results=[running_image("acrx.azurecr.io/eval:old")])
+    deploy(runner, "eval", root=repo, tag="t6")
+    names = [c[c.index("-n") + 1] for c in runner.commands("az", "containerapp", "job", "update")]
+    assert names == ["job-eval", "job-ops"]
+    assert runner.commands("azd", "provision") == []
+
+
+@pytest.mark.parametrize("env, image", [
+    ({**ENV, **APPS}, "mcr.microsoft.com/azurelinux/base/python:3.12"),  # 자리표시: 레지스트리 설정이 없습니다.
+    (ENV, "acrx.azurecr.io/console:old"),  # 앱 이름이 아직 azd 환경에 없습니다.
+])
+def test_image_deploy_falls_back_to_provision(fake_runner, repo, env, image):
+    runner = fake_runner(env).on("az", "containerapp", "show", results=[running_image(image)])
+    deploy(runner, "console", root=repo, tag="t7")
+    assert runner.commands("az", "containerapp", "update") == []
+    assert len(runner.commands("azd", "provision")) == 1
+
+
+def test_cli_deploy_provision_flag_forces_full_provision(fake_runner, repo, monkeypatch):
+    monkeypatch.setattr("ops.deploy.ROOT", repo)
+    runner = fake_runner({**ENV, **APPS}).on("az", "containerapp", "show",
+                                            results=[running_image("acrx.azurecr.io/console:old")])
+    assert main(["deploy", "console", "--provision"], runner=runner, out=io.StringIO()) == 0
+    assert runner.commands("az", "containerapp", "update") == []
+    assert len(runner.commands("azd", "provision")) == 1
+
+
+def test_function_packages_reused_until_requirements_change(fake_runner, repo):
+    runner = fake_runner(ENV)
+    deploy(runner, "orchestrator", root=repo, tag="t1")
+    deploy(runner, "orchestrator", root=repo, tag="t1")
+    assert len(pip_calls(runner)) == 1
+    (repo / "src/orchestrator/requirements.txt").write_text("pydantic==2.15.0\n", encoding="utf-8")
+    deploy(runner, "orchestrator", root=repo, tag="t1")
+    assert len(pip_calls(runner)) == 2
+
+
+def test_failed_pip_install_is_not_cached(fake_runner, repo):
+    runner = fake_runner(ENV)
+    calls = {"n": 0}
+
+    def flaky(args, *, stream=False):
+        if tuple(args[1:4]) == PIP:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OpsError("pip boom")
+        return runner(args, stream=stream)
+
+    with pytest.raises(OpsError, match="pip boom"):
+        deploy(flaky, "orchestrator", root=repo, tag="t1")
+    deploy(flaky, "orchestrator", root=repo, tag="t1")
+    assert calls["n"] == 2
+    assert len(runner.commands(*ZIP_DEPLOY)) == 1
+
+
+def test_scm_403_adds_temporary_egress_rule_then_removes_it(fake_runner, repo):
+    runner = fake_runner(ENV)
+    answers = iter(["167.220.233.25", "167.220.233.25", None])
+    waits = []
+    deploy_function(runner, repo, probe=lambda name: next(answers), sleep=waits.append)
+    [add] = runner.commands("az", "functionapp", "config", "access-restriction", "add")
+    assert add[add.index("--rule-name") + 1] == EGRESS_RULE
+    assert add[add.index("--ip-address") + 1] == "167.220.233.25/32"
+    assert add[add.index("--priority") + 1] == "110"
+    assert waits == [5.0]
+    add_at = runner.index("az", "functionapp", "config", "access-restriction", "add")
+    zip_at = runner.index(*ZIP_DEPLOY)
+    remove_at = runner.index("az", "functionapp", "config", "access-restriction", "remove")
+    assert add_at < zip_at < remove_at
+
+
+def test_scm_egress_rule_removed_even_when_zip_deploy_fails(fake_runner, repo):
+    runner = fake_runner(ENV).on(*ZIP_DEPLOY, results=[OpsError("zip boom")])
+    answers = iter(["167.220.233.25", None])
+    with pytest.raises(OpsError, match="zip boom"):
+        deploy_function(runner, repo, probe=lambda name: next(answers), sleep=lambda s: None)
+    assert len(runner.commands("az", "functionapp", "config", "access-restriction", "remove")) == 1
+
+
+def test_scm_reachable_needs_no_egress_rule(fake_runner, repo):
+    runner = fake_runner(ENV)
+    deploy_function(runner, repo, probe=lambda name: None, sleep=lambda s: None)
+    assert runner.commands("az", "functionapp", "config", "access-restriction") == []
+    assert len(runner.commands(*ZIP_DEPLOY)) == 1
