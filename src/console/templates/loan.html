@@ -30,6 +30,70 @@
 </form>
 {% endif %}
 {%- endmacro %}
+{# 주간 흐름·PG·마켓 표. folded=True면 감시 일지 화면의 접힌 원장 안에 두고, 일지 신호가 가리키는 칸을 강조한다. #}
+{% macro cell_warn(hits) -%}{% if varargs|select("in", hits)|list %} class="cell-warn"{% endif %}{%- endmacro %}
+{% macro ledger_sections(folded) -%}{% set card = "ledger-part" if folded else "card" %}{% set h = "h3" if folded else "h2" %}{%- set signal_hits = v.get("signal_hits") or {} -%}
+<section class="{{ card }}">
+<{{ h }}>{{ _("주간 흐름과 탐지기") }}</{{ h }}>
+{% if ui.chart and not folded %}
+{% call ch.columns(ui.chart, _("주간 매출과 현금 버퍼")) %}
+{% if ui.line %}{{ ch.line_overlay(ui.line, _("현금 버퍼(일)")) }}{% endif %}
+{% for mk in ui.markers %}<text class="trigger-mark" x="{{ mk.x }}" y="{{ mk.y }}" text-anchor="middle">▲<title>{{ mk.tip }}</title></text>{% endfor %}
+{% endcall %}
+{{ ch.legend(ui.legend) }}
+{% endif %}
+<table>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("기간") }}</th><th>{{ _("매출(W:n:revenue)") }}</th><th>{{ _("기대 입금") }}</th><th>{{ _("기대 대비(3주)") }}</th><th>{{ _("버퍼(일)") }}</th><th>{{ _("전망 최저 잔고") }}</th><th>{{ _("고금리 거래") }}</th><th>{{ _("트리거") }}</th><th>{{ _("조사") }}</th></tr></thead>
+  <tbody>
+{% for w in v.weeks %}{% set r = w.row %}{% set hits = signal_hits.get(w.week, ()) %}
+<tr>
+  {% set ratio = r.revenue_vs_expected|default(r.revenue_ratio) %}
+  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue_cents|usd_cents if usd else r.revenue|krw }}</td><td>{{ r.expected_revenue_cents|usd_cents if usd else r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td{{ cell_warn(hits, "revenue_vs_expected") }}>{{ ratio if ratio is number else "-" }}</td>
+  <td>{{ r.buffer_days if r.buffer_days is number else "-" }}</td><td{{ cell_warn(hits, "projected_min_balance_cents", "due_balance_cents") }}>{{ r.projected_min_balance_cents|usd_cents if usd else r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count if r.high_cost_count is number else "-" }}</td>
+  <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}{% if w.explained %}<span class="chip ok">{{ _("설명됨") }}</span>{% endif %}</td>
+  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% for cid in w.case_ids or ([w.case_id] if w.case_id else []) %} · <a href="#{{ cid }}">{{ _("미납") }}</a>{% endfor %}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+<p><small>{{ _("노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.") }}</small></p>
+</section>
+<section class="{{ card }}">
+<{{ h }}>{{ _("주간 정산(PG 원장)") }}</{{ h }}>
+{% if v.ledger_rows %}
+<table>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("반품") }}</th><th>{{ _("보류") }}</th><th>{{ _("공제") }}</th><th>{{ _("지급") }}</th></tr></thead>
+  <tbody>
+{% for r in v.ledger_rows %}{% set hits = signal_hits.get(r.week, ()) %}
+<tr>
+  <td>{{ r.week }}</td><td{{ cell_warn(hits, "order_gross_cents", "expected_orders_cents", "orders_vs_expected") }}>{{ r.order_gross_cents|usd_cents if usd else r.order_gross|krw }}</td><td{{ cell_warn(hits, "return_rate") }}>{{ r.returns_cents|usd_cents if usd else r.returns|krw }}</td><td{{ cell_warn(hits, "held_cents") }}>{{ r.held_cents|usd_cents if usd else r.held|krw }}</td><td{{ cell_warn(hits, "deduction_rate") }}>{{ r.deductions_cents|usd_cents if usd else r.deductions|krw }}</td><td>{{ r.settle_net_cents|usd_cents if usd else r.settle_net|krw }}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="note">{{ v.ledger_note }}</p>{% endif %}
+</section>
+{% if v.market_rows %}
+<section id="market-snapshot" class="{{ card }}">
+<{{ h }}>{{ _("주간 마켓 스냅샷") }}</{{ h }}>
+<table>
+  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("취소율") }}</th><th>{{ _("평점") }}</th><th>{{ _("등급") }}</th><th>{{ _("경고") }}</th><th>{{ _("정산 대기") }}</th></tr></thead>
+  <tbody>
+{% for r in v.market_rows %}{% set hits = signal_hits.get(r.week, ()) %}
+<tr>
+  <td>{{ r.week }}</td><td>{{ r.mkt_gross_cents|usd_cents if r.mkt_gross_cents is number else "-" }}</td><td{{ cell_warn(hits, "mkt_cancel_rate") }}>{{ r.mkt_cancel_rate|pct }}</td><td{{ cell_warn(hits, "mkt_rating") }}>{{ r.mkt_rating if r.mkt_rating is number else "-" }}</td><td{{ cell_warn(hits, "mkt_grade") }}>{{ r.mkt_grade or "-" }}</td><td{{ cell_warn(hits, "mkt_penalties") }}>{{ r.mkt_penalties if r.mkt_penalties is number else "-" }}</td><td>{{ r.mkt_pending_cents|usd_cents if r.mkt_pending_cents is number else "-" }}</td>
+</tr>
+{% endfor %}
+  </tbody>
+</table>
+</section>
+{% elif v.market_note %}
+<section class="{{ card }}">
+<{{ h }}>{{ _("주간 마켓 스냅샷") }}</{{ h }}>
+<p class="note">{{ v.market_note }}</p>
+</section>
+{% endif %}
+{%- endmacro %}
 {% macro proposal_block(doc_id, p, decidable) -%}{% set ev = p.evidence or {} %}
 <h3>{{ _("추심 제안") }} <small>{{ p.status|proposal_label }}</small></h3>
 <div class="decision-layout">
@@ -162,15 +226,18 @@
 {% else %}<p class="pii">{{ _("가명 표시 중.") }}</p>{% endif %}
 
 {% if v.weeks %}
-{% if v.journal %}{% set jn = v.journal %}
+{% set folded = usd and v.journal and ui.watch_chart %}{% if v.journal %}{% set jn = v.journal %}
 <section id="watch-journal" class="card">
 <h2>{{ _("에이전트 감시 일지") }}{% if jn.open %} <small class="status {{ 'sev-high' if jn.open.stage == 'high' else 'sev-medium' if jn.open.stage == 'medium' else 'sev-low' }}">{{ _("열린 사건: %(stage)s · %(week)s주차부터", stage=jn.open.stage|stage_label, week=jn.open.since) }}</small>{% endif %}</h2>
+{% if folded %}{{ ch.watch_chart(ui.watch_chart, _("주간 신호와 현금 여력")) }}
+{{ ch.watch_legend(ui.watch_chart) }}
+{% endif %}
 <ul class="claims">
 {% for j in jn.lines %}
   <li id="journal-w{{ j.week }}"><strong>{{ _("%(n)s주차", n=j.week) }}</strong> <span class="status {{ 'sev-high' if j.stage == 'high' else 'sev-medium' if j.stage == 'medium' else 'sev-low' if j.stage == 'watch' else 'ok' if j.stage == 'resolved' else '' }}">{{ j.stage|stage_label }}</span>
     {% if j.notes %}<small>{{ j.notes|join(" · ") }}</small>{% endif %}
     {% if j.alert_id %}<a href="#{{ j.alert_id }}">{{ _("경보 카드") }}</a>{% endif %}
-    <div>{% for s in j.sources %}{% if s.state == "signal" %}{% for g in s.signals %}<span class="chip warn">{{ s.source|source_label }} · {{ g.code|signal_label }}</span>{% for id, val in g.evidence %}<span class="chip{% if val is none %} warn{% endif %}">{{ id }} = {{ val|usd_cents if id.endswith('_cents') else val if val is not none else _("없음") }}</span>{% endfor %}{% endfor %}
+    <div>{% for s in j.sources %}{% if s.state == "signal" %}{% for g in s.signals %}<span class="chip warn">{{ s.source|source_label }} · {{ g.code|signal_label }}</span>{% for e in g.evidence %}{% set val = e.value %}<span class="chip{% if val is none %} warn{% endif %}" title="{{ e.id }}">{% if e.label %}{{ _(e.label) }} {% if val is none %}{{ _("없음") }}{% elif e.unit == "pct" %}{{ val|pct }}{% elif e.unit == "usd" %}{{ val|usd_cents }}{% elif e.unit == "rating" %}{{ "%.2f"|format(val) if val is number else val }}{% else %}{{ val }}{% endif %}{% else %}{{ e.id }} = {{ val|usd_cents if e.id.endswith('_cents') else val if val is not none else _("없음") }}{% endif %}</span>{% endfor %}{% endfor %}
       {% else %}<span class="chip">{{ s.source|source_label }} · {% if s.state == "missing" %}{{ pgettext("journal", "자료 없음") }}{% else %}{{ _("정상") }}{% endif %}</span>{% endif %}{% endfor %}</div>
     {% if j.why_now or j.outlook %}<div>{% if j.why_now %}<strong>{{ _("왜 지금") }}</strong> {{ j.why_now|mt }} {% endif %}{% if j.outlook %}<strong>{{ _("다음 예상") }}</strong> {{ j.outlook|mt }}{% endif %}</div>{% endif %}
     {% if j.adjust_reason %}<div><strong>{{ _("조정 이유") }}</strong> {{ j.adjust_reason|mt }}</div>{% endif %}
@@ -193,66 +260,9 @@
 </ul>
 </section>
 {% endif %}
-<section class="card">
-<h2>{{ _("주간 흐름과 탐지기") }}</h2>
-{% if ui.chart %}
-{% call ch.columns(ui.chart, _("주간 매출과 현금 버퍼")) %}
-{% if ui.line %}{{ ch.line_overlay(ui.line, _("현금 버퍼(일)")) }}{% endif %}
-{% for mk in ui.markers %}<text class="trigger-mark" x="{{ mk.x }}" y="{{ mk.y }}" text-anchor="middle">▲<title>{{ mk.tip }}</title></text>{% endfor %}
-{% endcall %}
-{{ ch.legend(ui.legend) }}
-{% endif %}
-<table>
-  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("기간") }}</th><th>{{ _("매출(W:n:revenue)") }}</th><th>{{ _("기대 입금") }}</th><th>{{ _("기대 대비(3주)") }}</th><th>{{ _("버퍼(일)") }}</th><th>{{ _("전망 최저 잔고") }}</th><th>{{ _("고금리 거래") }}</th><th>{{ _("트리거") }}</th><th>{{ _("조사") }}</th></tr></thead>
-  <tbody>
-{% for w in v.weeks %}{% set r = w.row %}
-<tr>
-  {% set ratio = r.revenue_vs_expected|default(r.revenue_ratio) %}
-  <td>{{ w.week }}</td><td>{{ r.start }} ~ {{ r.end }}</td><td>{{ r.revenue_cents|usd_cents if usd else r.revenue|krw }}</td><td>{{ r.expected_revenue_cents|usd_cents if usd else r.expected_revenue|krw if r.expected_revenue is defined else "-" }}</td><td>{{ ratio if ratio is number else "-" }}</td>
-  <td>{{ r.buffer_days if r.buffer_days is number else "-" }}</td><td>{{ r.projected_min_balance_cents|usd_cents if usd else r.projected_min_balance|krw if r.projected_min_balance is defined else "-" }}{% if r.shortfall_date %} <small class="error">({{ _("%(date)s 부족", date=r.shortfall_date) }})</small>{% endif %}</td><td>{{ r.high_cost_count if r.high_cost_count is number else "-" }}</td>
-  <td>{% for t in w.triggers %}<span class="chip{% if t in w.new_triggers %} warn{% endif %}">{{ t|trigger_label }}</span>{% endfor %}{% if w.explained %}<span class="chip ok">{{ _("설명됨") }}</span>{% endif %}</td>
-  <td>{% if w.investigation %}{{ w.investigation.decision }}{% if w.alert_id %} · <a href="#{{ w.alert_id }}">{{ _("경보") }}</a>{% endif %}{% else %}-{% endif %}{% for cid in w.case_ids or ([w.case_id] if w.case_id else []) %} · <a href="#{{ cid }}">{{ _("미납") }}</a>{% endfor %}</td>
-</tr>
-{% endfor %}
-  </tbody>
-</table>
-<p><small>{{ _("노란 트리거는 이번 재생에서 처음 걸린 것으로, 이때만 조기경보 에이전트가 조사합니다.") }}</small></p>
-</section>
-<section class="card">
-<h2>{{ _("주간 정산(PG 원장)") }}</h2>
-{% if v.ledger_rows %}
-<table>
-  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("반품") }}</th><th>{{ _("보류") }}</th><th>{{ _("공제") }}</th><th>{{ _("지급") }}</th></tr></thead>
-  <tbody>
-{% for r in v.ledger_rows %}
-<tr>
-  <td>{{ r.week }}</td><td>{{ r.order_gross_cents|usd_cents if usd else r.order_gross|krw }}</td><td>{{ r.returns_cents|usd_cents if usd else r.returns|krw }}</td><td>{{ r.held_cents|usd_cents if usd else r.held|krw }}</td><td>{{ r.deductions_cents|usd_cents if usd else r.deductions|krw }}</td><td>{{ r.settle_net_cents|usd_cents if usd else r.settle_net|krw }}</td>
-</tr>
-{% endfor %}
-  </tbody>
-</table>
-{% else %}<p class="note">{{ v.ledger_note }}</p>{% endif %}
-</section>
-{% if v.market_rows %}
-<section id="market-snapshot" class="card">
-<h2>{{ _("주간 마켓 스냅샷") }}</h2>
-<table>
-  <thead><tr><th>{{ _("주차") }}</th><th>{{ _("주문액") }}</th><th>{{ _("취소율") }}</th><th>{{ _("평점") }}</th><th>{{ _("등급") }}</th><th>{{ _("경고") }}</th><th>{{ _("정산 대기") }}</th></tr></thead>
-  <tbody>
-{% for r in v.market_rows %}
-<tr>
-  <td>{{ r.week }}</td><td>{{ r.mkt_gross_cents|usd_cents if r.mkt_gross_cents is number else "-" }}</td><td>{{ r.mkt_cancel_rate|pct }}</td><td>{{ r.mkt_rating if r.mkt_rating is number else "-" }}</td><td>{{ r.mkt_grade or "-" }}</td><td>{{ r.mkt_penalties if r.mkt_penalties is number else "-" }}</td><td>{{ r.mkt_pending_cents|usd_cents if r.mkt_pending_cents is number else "-" }}</td>
-</tr>
-{% endfor %}
-  </tbody>
-</table>
-</section>
-{% elif v.market_note %}
-<section class="card">
-<h2>{{ _("주간 마켓 스냅샷") }}</h2>
-<p class="note">{{ v.market_note }}</p>
-</section>
-{% endif %}
+{% if folded %}<details id="ledger-all" class="card"{% if ledger_open %} open{% endif %}><summary><a href="{{ ledger_toggle_url }}#ledger-all">{{ _("원장 전체 보기") }}</a></summary>
+{{ ledger_sections(true) }}
+</details>{% else %}{{ ledger_sections(false) }}{% endif %}
 {% if l.repayment %}
 <section class="card">
 <h2>{{ _("상환 원장") }}</h2>

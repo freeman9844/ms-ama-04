@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 
 from console.adapters import CosmosApplications
 from console.adapters import CosmosMonitoring, CosmosOps, CosmosPrivacy
-from console.app import create_app
+from console.app import create_app, state_tag
 from console.auth import AUDITOR, Principal
-from console.monitoring import load_monitoring_raw, loan_view
+from console.monitoring import load_monitoring_raw, loan_view, signal_metrics
 from consolepreview import fixtures
 from journey.entry import handle_decision, handle_start
 from journey.validation import validate_officer_decision
@@ -540,14 +540,17 @@ def test_usd_loan_s004_basis_has_no_approved_value_and_never_renders_none():
     assert "None" not in page and "Approved" not in page
 
 
-def _usd_page(weeks, loan_id, alerts=(), lang="en"):
+def _usd_page(weeks, loan_id, alerts=(), lang="en", query="", watching=False):
+    """watching=True면 결정 반영을 기다리는 화면(?since=<지금 지문>)을 연다."""
     deps = fixtures.build_deps()
     loan = dict(USD, id=loan_id, application_id=loan_id, applicant_id=SELLER, industry="Food",
                 amount_cents=500001, tenor_months=6, decision="approve",
                 baseline={"avg_weekly_revenue_cents": 484000, "cash_buffer_days": 12},
                 monitoring={"status": "completed", "replay_id": "rp", "processed_week": len(weeks), "weeks": weeks})
     deps.monitoring = fixtures.MemoryMonitoring([loan], list(alerts))
-    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang={lang}").text
+    if watching:
+        query += "&since=" + state_tag(deps.monitoring.get_loan(loan_id), deps.monitoring.list_alerts(loan_id, "rp"))
+    return TestClient(create_app(deps)).get(f"/loans/{loan_id}?lang={lang}{query}").text
 
 
 def _watch(stage, kind="call", **fields):
@@ -601,14 +604,140 @@ def test_journal_newest_first_with_source_chips():
     assert "Agent watch journal" in card
     assert re.findall(r'id="journal-w(\d+)"', card) == ["5", "4", "3", "2", "1"]
     assert "Open incident: High · since week 2" in card
-    for text in ("Market · Cancel rate up", "W:2:mkt_cancel_rate = 0.046", "Settlement · Settlement hold",
-                 "W:3:held_cents = $3800", "Market · Seller warning/suspension", "Bank · Projected shortfall",
-                 "F:5:projected_min_balance_cents = -$480", "Why now", "Outlook", "7/14 상환일 잔고 부족",
+    for text in ("Market · Cancel rate up", "Cancel rate 4.6%", "Settlement · Settlement hold",
+                 "Held $3800", "Market · Seller warning/suspension", "Account warnings 1", "Bank · Projected shortfall",
+                 "Projected min balance -$480", "Why now", "Outlook", "7/14 상환일 잔고 부족",
                  "No change · stage kept", "Cause updated"):
         assert text in card, text
     week1 = card[card.index('id="journal-w1"'):]
     assert week1.count("Normal") >= 4  # stage badge and three source chips
     assert 'href="#ew-5"' in card and 'href="#ew-3"' in card
+
+
+def test_journal_chips_hide_metric_ids():
+    card = _journal(_usd_page(_scene_weeks(), "usd-chipids"))
+    visible = re.sub(r"<[^>]+>", " ", card)
+    assert "W:" not in visible and "F:" not in visible
+    assert 'title="W:3:held_cents"' in card and 'title="F:5:projected_min_balance_cents"' in card
+
+
+def test_journal_unknown_metric_falls_back_to_id():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("cancel_rise", "market", "weak", "W:2:mystery_metric")]),
+                         mystery_metric=7)]
+    assert "W:2:mystery_metric = 7" in _journal(_usd_page(weeks, "usd-mystery"))
+
+
+def test_journal_chip_units():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("rating_drop", "market", "weak", "W:2:mkt_rating",
+                                                    "W:2:mkt_grade", "W:2:orders_vs_expected")]),
+                         mkt_rating=4.25, mkt_grade="B", orders_vs_expected=0.7)]
+    card = _journal(_usd_page(weeks, "usd-units"))
+    for text in ("Rating 4.25", "Market grade B", "Settlement orders vs expected 70.0%"):
+        assert text in card, text
+
+
+def test_journal_rating_chip_non_numeric():
+    weeks = [_watch_week(2, _watch("watch", incident_id="in-rp-w02", base_stage="watch",
+                                   signals=[_signal("rating_drop", "market", "weak", "W:2:mkt_rating")]),
+                         mkt_rating="4.5")]
+    assert "Rating 4.5" in _journal(_usd_page(weeks, "usd-rating-str"))
+
+
+def test_signal_metrics_by_week():
+    assert signal_metrics(_scene_weeks()) == {1: set(), 2: {"mkt_cancel_rate"},
+                                              3: {"held_cents", "mkt_penalties"}, 4: {"held_cents"},
+                                              5: {"projected_min_balance_cents"}}
+
+
+_PG_ROW = {"order_gross_cents": 600000, "expected_orders_cents": 584400, "returns_cents": 12000, "held_cents": 0,
+           "deductions_cents": 9000, "settle_net_cents": 579000}
+
+
+def _ledger_scene():
+    weeks = _scene_weeks()
+    for w in weeks:
+        w["row"] = {**_PG_ROW, **_market_row(w["week"]), **w["row"]}
+    return weeks
+
+
+def _table_cells(html):
+    """표마다 tbody 행의 `<td …>` 속성 목록."""
+    return [[re.findall(r"<td([^>]*)>", tr) for tr in re.findall(r"<tr>(.*?)</tr>", table.split("<tbody>")[1], re.S)]
+            for table in re.findall(r"<table>.*?</table>", html, re.S)]
+
+
+def test_watch_chart_inside_journal_card():
+    card = _journal(_usd_page(_scene_weeks(), "usd-chart"))
+    assert 'class="chart watch-chart"' in card
+    assert card.index('class="chart watch-chart"') < card.index('id="journal-w')
+    assert 'aria-label="Weekly signals and cash headroom"' in card
+    for n in range(1, 6):
+        assert f'href="#journal-w{n}"' in card
+    assert 'href="#journal-w6"' not in card
+    assert card.count('class="slot-empty"') == 8
+    assert 'class="stage-high"' in card and "🔔 High" in card
+    for text in ("Settlement orders (3 wks)", "Settlement orders (1 wk)", "Bank revenue (3 wks)",
+                 "Projected min balance", "Week 5 projected min balance -$480", "Week 3 · Medium"):
+        assert text in card, text
+    assert "Week 5 projected min balance -$480 (28-day forecast, not the actual balance)</title>" in card
+    assert "Projected min balance (28-day forecast, not the actual balance)</li>" in card
+
+
+def test_watch_chart_slot_without_journal_line():
+    weeks = [{"week": 1, "row": {"week": 1, "revenue_cents": 404123}, "triggers": []},
+             _watch_week(2, _watch("normal", "normal"))]
+    card = _journal(_usd_page(weeks, "usd-nostage"))
+    assert 'class="stage-none"' in card and 'href="#journal-w1"' in card
+
+
+def test_ledger_folded_with_signal_cells():
+    page = _usd_page(_ledger_scene(), "usd-fold")
+    match = re.search(r'(<details id="ledger-all"[^>]*>)(.*?)</details>', page, re.S)
+    assert match and " open" not in match.group(1)
+    ledger = match.group(2)
+    for text in ("Full ledger", "Weekly flow and detectors", "Weekly settlement (PG ledger)", "Weekly market snapshot"):
+        assert text in ledger, text
+    assert page.index('id="watch-journal"') < page.index('id="ledger-all"')
+    flow, pg, market = _table_cells(ledger)
+    warn = ' class="cell-warn"'
+    assert flow[4][6] == warn  # 5주차 전망 최저 잔고
+    assert pg[2][3] == warn and pg[3][3] == warn  # 3·4주차 보류
+    assert market[1][2] == warn and market[2][5] == warn  # 2주차 취소율, 3주차 경고
+    assert page.count("cell-warn") == 5
+    assert all(warn not in cell for table in (flow, pg, market) for cell in table[0])
+    assert 'aria-label="Weekly revenue and cash buffer"' not in page
+
+
+def test_ledger_open_flag_survives_refresh():
+    closed = _usd_page(_ledger_scene(), "usd-ledger")
+    assert re.search(r'<details id="ledger-all" class="card"><summary><a href="/loans/usd-ledger\?lang=en&amp;ledger=open#ledger-all">',
+                     closed)
+    opened = _usd_page(_ledger_scene(), "usd-ledger", query="&ledger=open")
+    assert re.search(r'<details id="ledger-all" class="card" open><summary><a href="/loans/usd-ledger\?lang=en#ledger-all">',
+                     opened)
+    waiting = _usd_page(_ledger_scene(), "usd-ledger", query="&ledger=open", watching=True)
+    refresh = re.search(r'http-equiv="refresh" content="\d+;url=([^"]+)"', waiting).group(1)
+    assert "since=" in refresh and "ledger=open" in refresh
+
+
+def test_watch_chart_one_tab_stop_per_week():
+    card = _journal(_usd_page(_ledger_scene(), "usd-tabs"))
+    chart = card[card.index("<svg"):card.index("</svg>")]
+    links = re.findall(r"<a [^>]*>", chart)
+    assert len(links) > 5
+    assert [a for a in links if 'tabindex="-1"' not in a] == [f'<a href="#journal-w{n}">' for n in range(1, 6)]
+
+
+def test_krw_and_legacy_usd_layout_unchanged():
+    weeks = [_track_week(1, [], [], []), _track_week(2, [], ["inflow_drop"], [{"trigger": "inflow_drop"}]),
+             _track_week(3, ["basis_breach"], [], [])]
+    krw = TestClient(create_app(fixtures.build_deps())).get("/loans/app-20261103-p03?lang=en").text
+    for page in (_usd_page(weeks, "usd-legacy-layout"), krw):
+        for text in ("watch-chart", "ledger-all", "<details", "cell-warn"):
+            assert text not in page, text
+        assert "Weekly flow and detectors" in page and 'aria-label="Weekly revenue and cash buffer"' in page
 
 
 def test_journal_market_missing_shows_no_data_chip():

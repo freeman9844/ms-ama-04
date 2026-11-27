@@ -14,6 +14,7 @@ from console.i18n import _
 from console.monitoring import CONTACT_STATUS_LABELS, PROPOSAL_LABELS, SEVERITY_LABELS, TRIGGER_LABELS
 from console.statuses import FLAG_LABELS, STATUS_LABELS, TERMINAL
 from console.translate import data as dt
+from console.watch_chart import watch_chart
 from opsmetrics.labels import STEP_LABELS
 from shared.contracts import MKT_FEATURES
 from shared.product_context import product_of
@@ -558,6 +559,7 @@ def _repayment(loan: Mapping[str, Any]) -> dict[str, int] | None:
 
 def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
     loan, mon, weeks, alerts = view["loan"], view["monitoring"] or {}, view["weeks"], view["alerts"]
+    journal = view.get("journal")
     usd = loan.get("currency") == "USD"
     suffix = "_cents" if usd else ""
     money = usd_tick if usd else krw_text
@@ -613,6 +615,8 @@ def loan_summary(view: Mapping[str, Any]) -> dict[str, Any]:
         "repayment": _repayment(loan),
         **_expected_vs_actual(weeks, usd=usd),
         "forecast": _forecast(weeks, usd=usd),
+        "watch_chart": watch_chart(weeks, journal["lines"], (loan.get("repayment") or {}).get("schedule") or [],
+                                   total=REPLAY_WEEKS) if usd and journal else None,
     }
 
 
