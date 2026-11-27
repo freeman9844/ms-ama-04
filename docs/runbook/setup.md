@@ -74,7 +74,7 @@ Bicep `loadTextContent`로 Job에 들어가므로 수정 후에는 `azd provisio
 `python -m ops smoke`는 두 가지를 확인합니다(`src/ops/cli.py`의 `smoke` 명령).
 
 1. VNet 안에서 smoke Job을 실행해 Private Endpoint 경로·모델·데이터 서비스·정책/Mock 상태·신청 여정까지 점검합니다. 점검 항목 이름은 [operate](operate.md#smoke)에 있습니다. 점검 개수는 단계마다 늘어 최초 배포(P2)는 21개, 이후 24개(P5b)였습니다.
-2. 운영자 PC에서 콘솔 관문을 확인합니다(`src/ops/console_gate.py`). 게이트웨이 인증서가 자체 서명이라 TLS 검증은 건너뜁니다. 로그인 없이 들어가면 Entra 로그인으로 리디렉션되거나(데모 모드에서는 200), 403이면 WAF 운영자 IP 규칙이 막은 것입니다. 인증서 비밀 ID(`APPGW_CERT_SECRET_ID`)가 없으면 `window open`을 먼저 실행하라는 오류가 납니다.
+2. 운영자 PC에서 콘솔 관문을 확인합니다(`src/ops/console_gate.py`). 게이트웨이 인증서가 자체 서명이라 TLS 검증은 건너뜁니다. 로그인 없이 들어가면 Entra 로그인으로 리디렉션되거나(데모 모드에서는 데모 로그인 화면 `/login`으로 303), 403이면 WAF 운영자 IP 규칙이 막은 것입니다. 인증서 비밀 ID(`APPGW_CERT_SECRET_ID`)가 없으면 `window open`을 먼저 실행하라는 오류가 납니다.
 
 콘솔 접속 주소는 App Gateway 주소입니다. azd 환경 값 `APPGW_FQDN`(또는 `CONSOLE_URL`, `https://<APPGW_FQDN>`)을 씁니다.
 
@@ -94,14 +94,15 @@ azd env get-value CONSOLE_URL
 테넌트 정책 때문에 Entra 로그인을 쓸 수 없을 때(예: 사용자 동의가 막혀 "관리자 승인 필요")의 데모 전용 스위치입니다.
 Easy Auth를 끄고, 콘솔은 모든 요청을 고정 데모 사용자(`CONSOLE_DEMO_ROLE`, 기본 `CreditOfficer`)로 처리합니다.
 진입 통제는 WAF 운영자 IP 규칙(`CONSOLE_IP`/32)만 남습니다. 화면 상단에 "데모 모드" 배너가 보입니다.
+심사역 화면 앞에는 장면용 데모 로그인 화면(`/login`, 아이디 `demo.officer` 미리 입력, 비밀번호는 비어 있지만 않으면 통과, 8시간 유지)이 뜹니다(`CONSOLE_DEMO_LOGIN=true`). 인증이 아니며 결정 기록은 그대로 `demo-operator`입니다([ADR-007](../adr/ADR-007-demo-auth-mode.md)).
 
 ```powershell
 azd env set CONSOLE_AUTH_ENABLED false     # 다시 켜려면 true
 azd env set CONSOLE_DEMO_ROLE Auditor      # 선택: 감사자(가명 읽기 전용) 데모. 기본 CreditOfficer
-python -m ops window open --acr            # 프로비저닝: authConfigs platform.enabled=false, CONSOLE_AUTH_MODE=demo
+python -m ops window open --acr            # 프로비저닝: authConfigs platform.enabled=false, CONSOLE_AUTH_MODE=demo, CONSOLE_DEMO_LOGIN=true
 python -m ops deploy console               # 데모 모드를 아는 콘솔 이미지
 python -m ops window close
-python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 200(데모 모드)
+python -m ops smoke                        # 콘솔 관문: 운영자 IP에서 / → /login 303, /login 200(데모 모드)
 ```
 
 증분 배포는 리소스를 지우지 않으므로 Easy Auth 설정(`authConfigs`)은 남기고 `platform.enabled`만 끕니다. Entra 앱 등록도 그대로입니다.

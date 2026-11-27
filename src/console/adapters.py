@@ -359,6 +359,7 @@ def build_deps(env: Mapping[str, str] = os.environ) -> ConsoleDeps:
         queue=StorageQueueSender(_queue_factory(cfg["QUEUE_ENDPOINT"], credential)),
         pseudonym_key=load_pseudonym_key(env, credential),
         demo_principal=demo,
+        demo_login=env.get("CONSOLE_DEMO_LOGIN") == "true",
         usd_origination_enabled=env.get("USD_ORIGINATION_ENABLED") == "true",
         ops=CosmosOps(db.get_container_client(APPLICATIONS)),
         translations=CosmosTranslations(db.get_container_client(TRANSLATIONS)),

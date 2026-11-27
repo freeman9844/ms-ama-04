@@ -129,19 +129,31 @@ def test_cli_smoke_checks_console_gate_after_job(fake_runner, monkeypatch):
 DEMO_ENV = ENV | {"CONSOLE_AUTH_ENABLED": "false"}
 
 
-def test_gate_in_demo_mode_expects_console_open_to_operator_ip():
-    fetch, calls = fake_fetch({f"{ENV['CONSOLE_URL']}/": (200, None)})
+def test_gate_in_demo_mode_expects_redirect_to_demo_login():
+    base = ENV["CONSOLE_URL"]
+    fetch, calls = fake_fetch({f"{base}/": (303, "/login?next=/"), f"{base}/login": (200, None)})
     result = check_console_gate(DEMO_ENV, fetch)
-    assert "데모 모드" in result and "App Gateway" in result
-    assert calls == [f"{ENV['CONSOLE_URL']}/"]
+    assert "데모 로그인" in result and "App Gateway" in result
+    assert calls == [f"{base}/", f"{base}/login"]
 
 
-@pytest.mark.parametrize("status, location, message", [
-    (403, None, "window open"),
-    (302, LOGIN, "Easy Auth"),
-    (500, None, "HTTP 500"),
+def test_gate_in_demo_mode_accepts_absolute_login_redirect_on_same_host():
+    base = ENV["CONSOLE_URL"]
+    fetch, _ = fake_fetch({f"{base}/": (303, f"{base}/login?next=/"), f"{base}/login": (200, None)})
+    assert "데모 로그인" in check_console_gate(DEMO_ENV, fetch)
+
+
+@pytest.mark.parametrize("responses, message", [
+    ({"/": (403, None)}, "window open"),
+    ({"/": (302, LOGIN)}, "Easy Auth"),
+    ({"/": (303, "https://evil.example/login")}, "Easy Auth"),
+    ({"/": (200, None)}, "CONSOLE_DEMO_LOGIN"),
+    ({"/": (200, None)}, "deploy console"),
+    ({"/": (303, "/login?next=/"), "/login": (403, None)}, "window open"),
+    ({"/": (303, "/login?next=/"), "/login": (500, None)}, "HTTP 500"),
+    ({"/": (500, None)}, "HTTP 500"),
 ])
-def test_gate_in_demo_mode_failures(status, location, message):
-    fetch, _ = fake_fetch({f"{ENV['CONSOLE_URL']}/": (status, location)})
+def test_gate_in_demo_mode_failures(responses, message):
+    fetch, _ = fake_fetch({ENV["CONSOLE_URL"] + path: r for path, r in responses.items()})
     with pytest.raises(OpsError, match=message):
         check_console_gate(DEMO_ENV, fetch)

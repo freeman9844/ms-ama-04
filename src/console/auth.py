@@ -15,6 +15,9 @@ CREDIT_OFFICER = "CreditOfficer"
 CREDIT_MANAGER = "CreditManager"
 AUDITOR = "Auditor"
 PRINCIPAL_HEADER = "x-ms-client-principal"
+DEMO_LOGIN_ID = "demo.officer"
+DEMO_SESSION_COOKIE = "ama_demo_session"
+DEMO_SESSION_TTL_S = 28800
 
 _ROLE_CLAIMS = {"roles", "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"}
 _OID_CLAIMS = ("http://schemas.microsoft.com/identity/claims/objectidentifier", "oid")
@@ -72,3 +75,34 @@ def csrf_token(key: bytes, user_id: str) -> str:
 
 def verify_csrf(key: bytes, user_id: str, token: str | None) -> bool:
     return bool(token) and hmac.compare_digest(csrf_token(key, user_id), token)
+
+
+def _demo_signature(key: bytes, issued_at: int) -> str:
+    return hmac.new(key, f"demo-login:{issued_at}".encode(), hashlib.sha256).hexdigest()
+
+
+def demo_session_token(key: bytes, issued_at: int) -> str:
+    """데모 로그인 장면용 세션 값. 인증이 아니라 '로그인했다'는 표시만 서명해 둔다(ADR-007)."""
+    return f"{issued_at}.{_demo_signature(key, issued_at)}"
+
+
+def verify_demo_session(key: bytes, token: str | None, now: int) -> bool:
+    issued, _, signature = (token or "").partition(".")
+    if not (issued.isascii() and issued.isdigit()) or len(issued) > 12 or not signature:
+        return False
+    issued_at = int(issued)
+    return hmac.compare_digest(_demo_signature(key, issued_at), signature) and 0 <= now - issued_at < DEMO_SESSION_TTL_S
+
+
+def safe_next(target: str | None) -> str:
+    """로그인 뒤 돌아갈 곳은 이 콘솔 안의 경로만 허용한다(열린 리디렉션 방지)."""
+    if (
+        not target
+        or not target.startswith("/")
+        or target.startswith(("//", "/\\"))
+        or "\r" in target
+        or "\n" in target
+        or target.split("?", 1)[0] == "/login"
+    ):
+        return "/"
+    return target
