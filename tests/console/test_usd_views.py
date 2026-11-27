@@ -685,6 +685,21 @@ def test_watch_chart_inside_journal_card():
     assert "Projected min balance (28-day forecast, not the actual balance)</li>" in card
 
 
+def test_watch_chart_score_chip_tooltip_and_legend():
+    weeks = _scene_weeks()
+    weeks[1]["row"].update(mkt_score=93, mkt_worst_score=83, mkt_worst_platform="coupang",
+                           mkt_platform_scores={"coupang": {"score": 83, "share": 0.85},
+                                                "naver_smart_store": {"score": 100, "share": 0.15}},
+                           mkt_score_parts=[
+        {"platform": "coupang", "metric": "cancel", "points": 9.0, "value": 0.046, "baseline": 0.02}])
+    weeks[1]["watch"]["signals"] = [_signal("market_score_drop", "market", "weak", "W:2:mkt_score", "W:2:mkt_worst_score")]
+    card = _journal(_usd_page(weeks, "usd-score"))
+    assert "Week 2 market score 93 · Coupang 83 (share" in card
+    assert "Coupang cancel rate −9.0" in card
+    assert "Market score (100 = at loan)</li>" in card
+    assert "market-chip tone-warn" in card
+
+
 def test_watch_chart_slot_without_journal_line():
     weeks = [{"week": 1, "row": {"week": 1, "revenue_cents": 404123}, "triggers": []},
              _watch_week(2, _watch("normal", "normal"))]

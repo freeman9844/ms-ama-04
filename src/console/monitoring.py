@@ -103,6 +103,9 @@ EVIDENCE_LABELS = {
     "recon_ratio": (BASIS_METRIC_LABELS["recon_ratio"], "pct"),
     "orders_vs_prior_year": (BASIS_METRIC_LABELS["orders_vs_prior_year"], "pct"),
 }
+# 감시 그래프 점수 칩 툴팁: 마켓 플랫폼 코드(usd_market_score 주차 행) → 이름, 감점 지표 → 문장 속 이름.
+PLATFORM_LABELS = {"coupang": "쿠팡", "naver_smart_store": "네이버 스마트스토어", "own_store": "자사몰", "11st": "11번가"}
+METRIC_LABELS = {"cancel": "취소율", "returns": "반품률", "rating": "평점", "grade": "등급", "penalty": "판매 경고"}
 # 재생을 멈춘 대기 항목(2026-11-11). 이 순서대로 멈춤 배너에 보인다(journey.holds.HOLD_ORDER와 같은 순서).
 HOLD_LABELS = {
     "collections_proposal": "추심 승인 대기",
@@ -165,6 +168,7 @@ MONITORING_FILTERS = {
     "basis_metric_label": BASIS_METRIC_LABELS,
     "source_label": SOURCE_LABELS,
     "signal_label": SIGNAL_LABELS,
+    "platform_label": PLATFORM_LABELS,
 }
 # 조기경보 원인 라벨(2026-11-11). 경보 문서 primary_cause·secondary_causes 값(str)을 그대로 키로 쓴다.
 CAUSE_LABELS = {
@@ -380,6 +384,12 @@ def stage_label(stage: str | None) -> str:
     text = STAGE_LABELS.get(stage or "", stage or "-")
     # "관찰"은 조치 라벨(Monitor)과 영어가 달라 문맥을 둔다.
     return i18n.pgettext("stage", text) if stage == "watch" else _(text)
+
+
+def metric_label(metric: str | None) -> str:
+    """점수 감점 지표 이름. 문장 속에 들어가 영어가 소문자인 문맥("Coupang cancel rate −9.0")을 둔다."""
+    text = METRIC_LABELS.get(metric or "")
+    return i18n.pgettext("metric", text) if text else metric or "-"
 
 
 def _basis_cards(loan: Mapping[str, Any], weeks: list[dict[str, Any]]) -> list[dict[str, Any]]:

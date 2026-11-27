@@ -1,6 +1,6 @@
 """USD 감시 일지 두 단 그래프 기하(순수 함수). 마크업은 `templates/_charts.html` 매크로가 그린다.
 
-세로 배치(위에서 아래로): 경보 글자 → 단계 띠 → 위 단(기대 대비 비율) → 마켓 칩 줄 → 아래 단(현금 여력)
+세로 배치(위에서 아래로): 경보 글자 → 단계 띠 → 위 단(기대 대비 비율) → 마켓 칩 줄(점수, 옛 행은 등급) → 아래 단(현금 여력)
 → 상환일 줄 → 주차 축 글자. 가로는 `charts.PAD_L`/`PAD_R` 안을 `total`칸으로 고르게 나눈다.
 """
 
@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
 
+from agents.usd_market_score import SCORE_DROP
 from console.charts import PAD_L, PAD_R, PAD_T, _r, is_num
 
 BAND_Y, BAND_H = PAD_T + 18, 14
@@ -19,7 +20,9 @@ DUE_Y = CASH_BASE + 18
 LABEL_Y = DUE_Y + 20
 HEIGHT = LABEL_Y + 8
 TICK_GAP = 10
-CHIP_GAP, CHIP_PAD, GLYPH_W = 8, 4, 6.5  # 마켓 등급 칩: 칸과의 여백, 칩 안쪽 여백, 굵은 10px 글자 한 자 폭 어림
+CHIP_PARTS = 3  # 점수 칩 툴팁에 싣는 감점 조각 수
+MARKET_TONES = {"market_score_crash": "bad", "market_score_drop": "warn"}
+CHIP_GAP, CHIP_PAD, GLYPH_W = 8, 4, 6.5  # 마켓 칩: 칸과의 여백, 칩 안쪽 여백, 굵은 10px 글자 한 자 폭 어림
 
 
 def _orders1(row: Mapping[str, Any]) -> Any:
@@ -102,9 +105,29 @@ def watch_chart(weeks: list[dict[str, Any]], lines: list[dict[str, Any]], instal
                   for k, get in series.items()},
     }
 
+    def market_sources(week: int) -> list[dict[str, Any]]:
+        return [s for s in (by_week.get(week) or {}).get("sources") or () if s.get("source") == "market"]
+
     def market_signal(week: int) -> bool:
-        sources = (by_week.get(week) or {}).get("sources") or ()
-        return any(s.get("source") == "market" and s.get("state") == "signal" for s in sources)
+        return any(s.get("state") == "signal" for s in market_sources(week))
+
+    def market_tone(week: int) -> str:
+        codes = {sig.get("code") for s in market_sources(week) for sig in s.get("signals") or ()}
+        return next((tone for code, tone in MARKET_TONES.items() if code in codes), "ok")
+
+    def market_chip(week: int) -> dict[str, Any]:
+        """점수 칩 값. `mkt_score`가 없는 옛 행은 점수 키가 비어 등급 칩으로 그린다."""
+        row = rows[week]
+        score = row.get("mkt_score")
+        if not is_num(score):
+            return {"score": None, "tone": None, "worst": None, "share_pct": None, "parts": []}
+        worst, platform = row.get("mkt_worst_score"), row.get("mkt_worst_platform")
+        share = ((row.get("mkt_platform_scores") or {}).get(platform) or {}).get("share")
+        return {"score": score, "tone": market_tone(week),
+                "worst": {"platform": platform, "score": worst}
+                if is_num(worst) and worst <= SCORE_DROP and platform else None,
+                "share_pct": round(share * 100) if is_num(share) else None,
+                "parts": list(row.get("mkt_score_parts") or ())[:CHIP_PARTS]}
 
     chip_w = _r(slot - CHIP_GAP)
 
@@ -114,7 +137,7 @@ def watch_chart(weeks: list[dict[str, Any]], lines: list[dict[str, Any]], instal
         return inner if grade and len(str(grade)) * GLYPH_W > inner else None
 
     grades = [{"week": n, "cx": cx(n), "y": GRADE_Y, "w": chip_w, "fit_w": chip_fit(rows[n].get("mkt_grade")),
-               "grade": rows[n].get("mkt_grade"), "signal": market_signal(n)}
+               "grade": rows[n].get("mkt_grade"), "signal": market_signal(n), **market_chip(n)}
               for n in done]
 
     bar_keys = (("orders", "order_gross_cents"), ("inflow", "revenue_cents"))

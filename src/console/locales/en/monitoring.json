@@ -341,6 +341,17 @@
   "%(week)s주차 은행 입금 %(v)s": "Week %(week)s bank inflow %(v)s",
   "%(week)s주차 예상 최저 잔액 %(v)s": "Week %(week)s projected min balance %(v)s",
   "%(week)s주차 마켓 등급 %(v)s": "Week %(week)s market grade %(v)s",
+  "%(week)s주차 마켓 점수 %(v)s": "Week %(week)s market score %(v)s",
+  "%(platform)s %(score)s(비중 %(share)s)": "%(platform)s %(score)s (share %(share)s)",
+  "감점 없음": "no deductions",
+  "마켓 점수(대출 시점 = 100)": "Market score (100 = at loan)",
+  "네이버 스마트스토어": "Naver Smart Store",
+  "판매 경고": "Seller warning",
+  "metric|취소율": "cancel rate",
+  "metric|반품률": "return rate",
+  "metric|평점": "rating",
+  "metric|등급": "grade",
+  "metric|판매 경고": "seller warning",
   "%(date)s 상환": "Due %(date)s",
   "%(week)s주차 · %(stage)s": "Week %(week)s · %(stage)s"
 }
