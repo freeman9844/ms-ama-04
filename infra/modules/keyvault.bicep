@@ -9,6 +9,8 @@ param roleAssignments array = []
 @secure()
 @description('{ 비밀 이름: 값 }. 값이 빈 항목은 만들지 않습니다.')
 param secrets object = {}
+@description('감사 로그를 보낼 Log Analytics 작업 영역 ID')
+param lawId string
 
 
 resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
@@ -60,6 +62,19 @@ resource ra 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for a in rol
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', a.roleId)
   }
 }]
+
+// 감사 로그(쓰기·삭제·접근)만 보냅니다. 대량 읽기 로그는 비용 때문에 뺍니다.
+resource auditToLaw 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'audit-to-law'
+  scope: kv
+  properties: {
+    workspaceId: lawId
+    logAnalyticsDestinationType: 'Dedicated'
+    logs: [
+      { category: 'AuditEvent', enabled: true }
+    ]
+  }
+}
 
 output name string = kv.name
 output uri string = kv.properties.vaultUri

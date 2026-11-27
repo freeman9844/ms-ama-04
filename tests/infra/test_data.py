@@ -85,10 +85,11 @@ def test_cosmos_sql_roles_scope(closed):
     }
 
 
-def test_search_is_basic_private_and_aad_enabled(closed):
+def test_search_is_basic_private_and_keyless(closed):
     search = closed.one("Microsoft.Search/searchServices", "srch-")
     assert search["sku"]["name"] == "basic"
-    assert search["properties"]["authOptions"]["aadOrApiKey"]["aadAuthFailureMode"] == "http401WithBearerChallenge"
+    assert search["properties"]["disableLocalAuth"] is True
+    assert "authOptions" not in search["properties"]
     assert closed.private_endpoints("srch-") == {"searchService": {"privatelink.search.windows.net"}}
 
 

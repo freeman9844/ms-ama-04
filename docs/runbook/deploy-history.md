@@ -1113,7 +1113,8 @@ python -m ops smoke
 | tint `app-20261126-c5780d` | 관찰 6 → 해소 8 → 관찰 11 → 해소 13 | 6주 86/83 하락 한 주 | 2 | 0 |
 
 - 설계 §7과 비교: linen이 관찰 3 → 중간 4에서 중간 3으로 바뀐 것은 설계가 받아들인 변화다(두 출처 약신호). 나머지 마켓 신호 주차도 오프라인 재생과 같다.
-- dailylook 높음이 7주에서 8주로 늦어졌다. 7주 기본 단계가 중간이었고, 강한 은행 신호 `projected_shortfall`이 이전 재생(7주)과 달리 8주에 섰다. 마켓 점수는 이 은행 신호의 입력이 아니고, 오프라인 결정적 재생(`tests\mockapis\test_usd_scenes.py`)은 여전히 높음 7주다. 원인은 확인하지 못했다. 재생 중 승인한 상환 사례 제안(3회차, LLM 작성) 내용이 회차 일정을 바꿨을 가능성이 있다.
+- dailylook 높음이 7주에서 8주로 늦어졌다. 7주 기본 단계가 중간이었고, 강한 은행 신호 `projected_shortfall`이 이전 재생(7주)과 달리 8주에 섰다. 마켓 점수는 이 은행 신호의 입력이 아니고, 오프라인 결정적 재생(`tests/mockapis/test_usd_scenes.py`)은 여전히 높음 7주다. 원인은 확인하지 못했다. 재생 중 승인한 상환 사례 제안(3회차, LLM 작성) 내용이 회차 일정을 바꿨을 가능성이 있다.
+  - 후속 확인: 원인은 흐름 기준일이다. 모의 API는 `MOCK_AS_OF`가 없으면 컨테이너 시작일을 기준일로 흐름을 만든다. 오프라인 기준일 2026-11-24는 높음 7주인데, 2026-11-26~12-08로 옮기면 8주가 된다. `test_dailylook_high_week_follows_flow_start_date`가 세 기준일의 사다리를 고정한다.
 - 조사 에이전트 폴백(`invalid_output`)은 약 23회 중 5회(linen 3·4, dailylook 5·13, snackbox 3)로 지난 재측정(23%)과 비슷하다. 폴백 주에도 결정적 단계·경보는 그대로다.
 
 ## 2026-11-27 PR #16: 장면 셀러만 표시·재생 주차 속도·마켓 점수 범례 설명
@@ -1152,3 +1153,13 @@ python -m ops smoke
   - 허용 목록에 없는 IP(167.220.233.71)에서 `/`·`/apply`·`/borrower`는 `/login`으로 넘어가고, 틀린 비밀번호는 422, 맞는 비밀번호는 303 뒤 홈 200이었습니다. `/healthz`만 로그인 없이 열립니다.
   - `ops smoke` 성공(`job-smoke-ddivld5`).
 - **다시 켤 때:** `python -m ops waf ip-filter on --ip <운영자 IP>`(프로비저닝 1회). 데모 비밀번호는 `azd env get-value CONSOLE_DEMO_PASSWORD`로 봅니다.
+## 2026-11-28 PR #19: Search 키 인증 끄기·감사 로그·조사 재시도
+
+- `fix/review-improvements`의 `933fbf3`을 `git archive`로 묶어 배포했습니다. `ops window open`(빠른 경로 30초) → `ops deploy orchestrator`(159초) → `ops window close --provision`(전체 프로비저닝 4분 9초) 순서입니다. `ops deploy --provision`은 이미지 서비스에만 적용되어 오케스트레이터만 배포할 때는 프로비저닝하지 않습니다. 그래서 창을 닫으며 프로비저닝했습니다.
+- **결과:**
+  - AI Search `srch-gaz7yh2zic7zc`의 `disableLocalAuth=true`. Foundry 프로젝트 연결은 이미 AAD라 바꿀 것이 없었습니다.
+  - 진단 설정 `audit-to-law`(→ `log-amalend`)가 생겼습니다. Key Vault `AuditEvent`, Cosmos `ControlPlaneRequests`·`DataPlaneRequests`, ACR `ContainerRegistryLoginEvents`·`ContainerRegistryRepositoryEvents`, Search `OperationLogs`, 스토리지 3개 blob 서비스 `StorageWrite`·`StorageDelete`입니다.
+  - 오케스트레이터 Functions ZIP 배포 `042e7667-6434-41e7-8965-bd74040723de`(조사 단계 검사가 실패하면 걸린 항목을 알려 한 번 다시 부름). 직전은 `822c0f1e-1cca-4aab-a810-fbf5a405cf84`입니다.
+  - 프로비저닝이 콘솔 새 리비전 `ca-console--0000076`을 만들었지만 이미지는 같습니다(`a9de9652…`). WAF `allowOperatorOnly`는 Disabled 그대로이고, 창은 닫혔습니다(ACR 공개 False).
+  - `ops smoke` 성공(`job-smoke-q1sanm2`, Search 키 없이 심사 흐름 정상).
+- **되돌릴 때:** Search 키 인증이 필요하면 `infra/modules/search.bicep`의 `disableLocalAuth`를 되돌리고 프로비저닝합니다. 오케스트레이터는 직전 ZIP으로 되돌리면 재시도만 빠집니다.

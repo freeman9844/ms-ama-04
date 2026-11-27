@@ -286,6 +286,14 @@ def test_scene_stage_ladder(seller):
     assert all(abs(w - e) <= 1 for (_, w), (_, e) in zip(got, STAGE_SCENES[seller])), got
 
 
+# 운영 mock API는 MOCK_AS_OF가 없으면 컨테이너 시작일을 기준일로 흐름을 만든다. 그래서 같은 셀러라도 재생한 날에 따라
+# dailylook의 높음 첫 주가 7주와 8주를 오간다(운영 8주 · 오프라인 7주, deploy-history 2026-11-27 항목).
+@pytest.mark.parametrize("as_of,high_week", [(date(2026, 11, 24), 7), (date(2026, 11, 26), 8), (date(2026, 12, 10), 7)])
+def test_dailylook_high_week_follows_flow_start_date(as_of, high_week):
+    got = ladder(scene_replay("seller-dailylook-01", as_of=as_of))
+    assert got == [("watch", 4), ("medium", 5), ("high", high_week)], got
+
+
 def test_gearstore_sources_spread_market_then_settlement_then_bank():
     first = {}
     for line in scene_replay("seller-gearstore-06"):

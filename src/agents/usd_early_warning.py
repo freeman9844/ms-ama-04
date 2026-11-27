@@ -1,7 +1,7 @@
 """USD 단계형 조기경보 조사(스펙 §5.4).
 
 사건 상태 기계(incident.py)가 정한 기본 단계를 에이전트가 ±1 단계 안에서 조정한다. 출력은 결정적 검사(check_stage)를
-통과해야 쓰이고, 실패하거나 에이전트를 못 쓰면 기본 단계와 숫자 없는 고정 문장으로 폴백한다.
+통과해야 쓰인다. 실패하면 걸린 항목을 알려 한 번 다시 묻고, 그래도 실패하거나 에이전트를 못 쓰면 기본 단계와 숫자 없는 고정 문장으로 폴백한다.
 모델과 사람이 보는 문장은 모두 영어다.
 """
 
@@ -33,6 +33,7 @@ from shared.contracts import EarlyWarningAlert
 
 LEVEL = {"resolve": -1, "watch": 0, "medium": 1, "high": 2}
 TEXT_MAX = 200
+STAGE_RETRIES = 1
 _ID = re.compile(r"[WFB]:[A-Za-z0-9_.:-]+")
 _BANK_FIELDS = ("end_balance_cents", "buffer_days")
 
@@ -301,9 +302,10 @@ def investigate_usd(ctx: EwContext, *, runner: AgentRunner | None, model: str,
     if runner is None:
         return fallback_stage(ctx, "agents_disabled")
     session = _Session(runner, checkpoint)
+    spec = usd_ew_spec(model)
     codes = ", ".join(f"{s.get('source')}:{s.get('code')}:{s.get('strength')}" for s in ctx.signals) or "none"
     text = ctx.mask(f"Decide the stage for week {ctx.week}. Base stage: {_base(ctx)}. Signals: {codes}.")
-    run, _error = session.run(usd_ew_spec(model), text, ctx.handlers())
+    run, _error = session.run(spec, text, ctx.handlers())
 
     def fallback(reason: str, record: dict[str, Any]) -> EwResult:
         result = fallback_stage(ctx, reason)
@@ -313,9 +315,24 @@ def investigate_usd(ctx: EwContext, *, runner: AgentRunner | None, model: str,
 
     if run is None:
         return fallback("investigator_unavailable", {"rejected": ctx.rejected})
-    record = {**usd_language.run_record(run, ctx.product), "model": model, "rejected": ctx.rejected}
     out: UsdStageOutput = run.output  # type: ignore[assignment]
-    if issues := check_stage(out, ctx):
+    issues = check_stage(out, ctx)
+    retries: list[list[str]] = []
+    # 검사에 걸리면 걸린 항목을 알려 주고 새 대화로 한 번만 다시 묻는다. 그래도 걸리면 폴백한다.
+    while issues and len(retries) < STAGE_RETRIES:
+        retries.append(issues)
+        ctx.accepted = None
+        feedback = "\n".join(f"- {i}" for i in issues)
+        retry, _error = session.run(spec, f"{text}\nYour previous answer failed these checks. Fix them:\n{feedback}",
+                                    ctx.handlers())
+        if retry is None:
+            break
+        run, out = retry, retry.output  # type: ignore[assignment]
+        issues = check_stage(out, ctx)
+    record = {**usd_language.run_record(run, ctx.product), "model": model, "rejected": ctx.rejected}
+    if retries:
+        record["stage_retries"] = retries
+    if issues:
         return fallback("invalid_output", {**record, "stage_issues": issues})
     why_now, outlook, adjust = out.why_now.strip(), out.outlook.strip(), out.adjust_reason.strip() or None
     alert = None

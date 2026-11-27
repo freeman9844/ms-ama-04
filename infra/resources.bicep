@@ -185,6 +185,7 @@ module monitoring 'modules/monitoring.bicep' = {
 module keyVault 'modules/keyvault.bicep' = {
   name: 'keyvault'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.kv
     location: location
     tags: tags
@@ -218,6 +219,7 @@ output APPS_IDENTITY_CLIENT_ID string = identities.outputs.appsClientId
 module stAgents 'modules/storage.bicep' = {
   name: 'storage-agents'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.stAgents
     location: location
     tags: tags
@@ -230,6 +232,7 @@ module stAgents 'modules/storage.bicep' = {
 module stData 'modules/storage.bicep' = {
   name: 'storage-data'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.stData
     location: location
     tags: tags
@@ -251,6 +254,7 @@ module stData 'modules/storage.bicep' = {
 module stFunc 'modules/storage.bicep' = {
   name: 'storage-functions'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.stFunc
     location: location
     tags: tags
@@ -279,6 +283,7 @@ module stFunc 'modules/storage.bicep' = {
 module cosmos 'modules/cosmos.bicep' = {
   name: 'cosmos'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.cosmos
     location: location
     tags: tags
@@ -311,6 +316,7 @@ module cosmos 'modules/cosmos.bicep' = {
 module search 'modules/search.bicep' = {
   name: 'search'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.search
     location: location
     tags: tags
@@ -443,6 +449,7 @@ output SERVICEBUS_FQDN string = serviceBusEnabled ? '${names.sb}.servicebus.wind
 module acr 'modules/acr.bicep' = {
   name: 'acr'
   params: {
+    lawId: monitoring.outputs.lawId
     name: names.acr
     location: location
     tags: tags
