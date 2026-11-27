@@ -1153,3 +1153,13 @@ python -m ops smoke
   - 허용 목록에 없는 IP(167.220.233.71)에서 `/`·`/apply`·`/borrower`는 `/login`으로 넘어가고, 틀린 비밀번호는 422, 맞는 비밀번호는 303 뒤 홈 200이었습니다. `/healthz`만 로그인 없이 열립니다.
   - `ops smoke` 성공(`job-smoke-ddivld5`).
 - **다시 켤 때:** `python -m ops waf ip-filter on --ip <운영자 IP>`(프로비저닝 1회). 데모 비밀번호는 `azd env get-value CONSOLE_DEMO_PASSWORD`로 봅니다.
+## 2026-11-28 PR #19: Search 키 인증 끄기·감사 로그·조사 재시도
+
+- `fix/review-improvements`의 `933fbf3`을 `git archive`로 묶어 배포했습니다. `ops window open`(빠른 경로 30초) → `ops deploy orchestrator`(159초) → `ops window close --provision`(전체 프로비저닝 4분 9초) 순서입니다. `ops deploy --provision`은 이미지 서비스에만 적용되어 오케스트레이터만 배포할 때는 프로비저닝하지 않습니다. 그래서 창을 닫으며 프로비저닝했습니다.
+- **결과:**
+  - AI Search `srch-gaz7yh2zic7zc`의 `disableLocalAuth=true`. Foundry 프로젝트 연결은 이미 AAD라 바꿀 것이 없었습니다.
+  - 진단 설정 `audit-to-law`(→ `log-amalend`)가 생겼습니다. Key Vault `AuditEvent`, Cosmos `ControlPlaneRequests`·`DataPlaneRequests`, ACR `ContainerRegistryLoginEvents`·`ContainerRegistryRepositoryEvents`, Search `OperationLogs`, 스토리지 3개 blob 서비스 `StorageWrite`·`StorageDelete`입니다.
+  - 오케스트레이터 Functions ZIP 배포 `042e7667-6434-41e7-8965-bd74040723de`(조사 단계 검사가 실패하면 걸린 항목을 알려 한 번 다시 부름). 직전은 `822c0f1e-1cca-4aab-a810-fbf5a405cf84`입니다.
+  - 프로비저닝이 콘솔 새 리비전 `ca-console--0000076`을 만들었지만 이미지는 같습니다(`a9de9652…`). WAF `allowOperatorOnly`는 Disabled 그대로이고, 창은 닫혔습니다(ACR 공개 False).
+  - `ops smoke` 성공(`job-smoke-q1sanm2`, Search 키 없이 심사 흐름 정상).
+- **되돌릴 때:** Search 키 인증이 필요하면 `infra/modules/search.bicep`의 `disableLocalAuth`를 되돌리고 프로비저닝합니다. 오케스트레이터는 직전 ZIP으로 되돌리면 재시도만 빠집니다.
