@@ -45,7 +45,8 @@ def _rate(cents: int, gross: int) -> float | None:
 
 
 def _deductions(market: list[UsdMarketWeek], start: date, hi: date) -> list[tuple[str, float, Any, Any]]:
-    """(metric, deduction, value, baseline) for one market's snapshots, deductions above zero only."""
+    """(metric, deduction, value, baseline) for one market's snapshots, deductions above zero only.
+    Precondition: the market has pre-loan weeks (`pre` non-empty); market_score only calls it for such markets."""
     pre = sorted((w for w in market if w.week_end < start), key=lambda w: w.week_end)
     now = next((w for w in market if w.week_end == hi), None)
     out: list[tuple[str, float, Any, Any]] = []
@@ -90,10 +91,12 @@ def market_score(weeks: Sequence[UsdMarketWeek], start: date, hi: date) -> Marke
     parts: list[dict[str, Any]] = []
     for code in order:
         found = _deductions(by_platform[code], start, hi)
-        exact[code] = 100 - min(100, sum(d for _, d, _, _ in found))
+        raw = sum(d for _, d, _, _ in found)
+        exact[code] = 100 - min(100, raw)
         platforms[code] = {"score": round(exact[code]), "share": round(shares[code], 3)}
+        scale = min(1.0, 100 / raw) if raw else 1.0  # parts add up to the capped market deduction
         for metric, deduction, value, baseline in sorted(found, key=lambda f: METRICS.index(f[0])):
-            points = round(deduction * shares[code], 1)
+            points = round(deduction * scale * shares[code], 1)
             if points:
                 parts.append({"platform": code, "metric": metric, "points": points, "value": value,
                               "baseline": baseline})

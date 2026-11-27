@@ -49,6 +49,18 @@ def test_deductions_are_capped():
     assert s.platforms["coupang"]["score"] == 60
 
 
+def test_parts_scale_to_the_capped_market_deduction():
+    # 취소 40 + 반품 25 + 평점 25 + 등급 15 + 제재 40 = 145 → 시장 감점 100에 맞춰 줄인다.
+    post = {"coupang": {"cancel": 300_000, "returns": 300_000, "rating": 4.0, "grade": "Silver",
+                        "penalties": penalty(1, "suspension")}}
+    s = market_score(flow({1: post}), START, end(1))
+    assert s.platforms["coupang"]["score"] == 0
+    points = [p["points"] for p in s.parts if p["platform"] == "coupang"]
+    assert len(points) == 5
+    assert sum(points) == pytest.approx(0.5 * 100, abs=0.3)
+    assert sum(p / 0.5 for p in points) <= 100.5
+
+
 def test_returns_rating_and_grade_add_up():
     s = market_score(flow({1: {"coupang": {"returns": 60_000, "rating": 4.2, "grade": "Silver"}}}), START, end(1))
     assert s.platforms["coupang"]["score"] == 62  # 반품 8 + 평점 15 + 등급 15
