@@ -172,7 +172,7 @@
 | ⑥ 설명된 감소 | campgear | 사건 없음. 그대로 |
 | ⑦ 일시 흔들림 | tint-17 | 한 주 취소율 급등이 점수 하락(약) 한 주로. 관찰 뒤 해소, 경보 없음이어야 한다 |
 
-- 평가 고정값(`evals\suites\early_warning_usd.py`: tint 6주 관찰, gearstore 3주 중간, linen 4주 중간, dailylook 7주)은 지키는 것이 기본이다. linen처럼 4.2에서 받아들인 대가로 바뀌는 주차만 고정값을 고친다.
+- 평가 고정값(`evals\suites\early_warning_usd.py`: tint 6주 관찰, gearstore 3주 중간, linen 3주 중간, dailylook 7주)은 지키는 것이 기본이다. linen처럼 4.2에서 받아들인 대가로 바뀌는 주차만 고정값을 고친다. linen은 4주(정산 약+마켓 강)에서 3주(`returns_rising`+`market_score_drop`, 두 출처의 약신호 → 중간)로 옮겼다.
 
 ## 8. 구현자에게 맡기는 것
 

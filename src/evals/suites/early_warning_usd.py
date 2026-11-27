@@ -25,7 +25,7 @@ SUITE = "early_warning_usd"
 CASES: tuple[tuple[str, int, frozenset[str]], ...] = (
     ("seller-tint-17", 6, frozenset({"watch"})),  # 마켓 약신호 하나뿐이라 관찰 유지
     ("seller-snackbox-22", 3, frozenset({"medium"})),  # 강한 정산 신호뿐: high를 고르면 거절돼야 한다
-    ("seller-linen-10", 4, frozenset({"medium"})),  # 정산 반품 급증(약)과 마켓 점수 급락(강). 강한 은행 신호가 없어 high는 거절된다
+    ("seller-linen-10", 3, frozenset({"medium"})),  # 정산 약(반품률 상승)+마켓 약(점수 하락): 두 출처의 약신호. 강한 은행 신호가 없어 high는 거절된다
     ("seller-gearstore-06", 3, frozenset({"medium"})),  # 강한 비은행 신호(계정 경고·마켓 점수 급락·정산 보류)만 있고 강한 은행 신호가 없어 high는 거절된다
     ("seller-tangerine-15", 3, frozenset({"watch"})),  # 비용 신호만 있어 관찰 유지
     ("seller-dailylook-01", 7, frozenset({"medium", "high"})),  # 기본 high의 첫 주(w6 medium → w7 high). 한 단계 낮춤 허용
