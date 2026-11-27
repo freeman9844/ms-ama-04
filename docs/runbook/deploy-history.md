@@ -1082,3 +1082,27 @@ python -m ops smoke
 - `1538cc8`: 비율 단과 현금 단을 각각 120px에서 180px로 늘렸다(viewBox 높이 506). 잔액 범례와 주차별 잔액 툴팁에 "(28일 전망, 실제 잔고 아님)"을 붙였다(영문 "28-day forecast, not the actual balance").
 - azd env와 운영 리비전 이미지가 같은 것을 확인한 뒤 `ops window open --acr` → `console:pr13-1538cc8` 배포 → azd env 콘솔 이미지를 digest(`sha256:3943ecda29a30bb0ab78d539879c3a5f372433d1bcacf8dcb8d7e66eae0a0a5b`)로 고정 → `ops window close` 순서로 진행했다. 최종 `ca-console--0000065`(100%, Healthy), mockapi `0000027`·policy `0000026` 유지, ACR Disabled·IP 규칙 0개. 되돌릴 대상은 `ca-console--0000063`.
 - 운영 확인: dailylook 화면에서 범례 1개와 13주 툴팁 모두 새 문구가 나온다.
+
+## 2026-11-27 USD 마켓 점수(오케스트레이터·모의 API·콘솔)
+
+- PR #15 브랜치 `feat/usd-market-score`의 `e4c9d88`을 `git archive`로 묶어 배포했다. 배포 전 azd env 이미지와 운영 리비전 이미지가 같은 것을 확인했다(드리프트 없음). `ops window open --acr` → 오케스트레이터 → 모의 API → 콘솔 → azd env digest 고정·ACR 이미지 잠금(쓰기·삭제 금지) → `ops window close` 순서로 진행했다. `UsdMarketWeek`가 `extra="forbid"`라 새 `returns_cents`를 받으려면 오케스트레이터가 먼저 나가야 한다.
+  - 오케스트레이터 Functions ZIP 활성 배포 `3b50d514-b3fe-4e8f-864d-bb98299d3bcf`(직전 `c4b892a8-b0f4-4835-932a-6409fc748db1`). 이번에는 운영자 IP 하나로 SCM 배포가 됐다.
+  - 모의 API `ca-mockapi--0000029`(`mockapi:pr15-e4c9d88`, `sha256:5f8dc270dafdac101c596a5da00cea07206fb32cf98871fadc6e448b1c55b522`). 되돌릴 대상은 `ca-mockapi--0000027`(`b18c0561…`).
+  - 콘솔 `ca-console--0000070`(`console:pr15-e4c9d88`, `sha256:91c029a2ad892f51057e710ce5d053e9386b4ee72667bb052483f1797d7a0e71`). 되돌릴 대상은 `ca-console--0000068`(`78ccdfe1…`). 정책 `ca-policy--0000026`은 바뀌지 않았다.
+  - ACR 공용 접근 Disabled·IP 규칙 0개, `ops smoke` 성공(`job-smoke-gtnrx90`, 콘솔 관문 정상).
+- **되돌릴 때는 반대 순서**(콘솔 → 모의 API → 오케스트레이터)로 한다. 새 모의 API가 살아 있는 채 오케스트레이터만 먼저 되돌리면 옛 모델이 `returns_cents`를 거부해 마켓 데이터가 "No marketplace data"로 빠진다.
+- 장면 재생: job-ops(`job-ops-3ss7txb`, 데모 로그인 뒤 콘솔 폼으로 진행)에서 기존 7건을 한 건씩 13주 재생했다. 모두 `completed`, 오류 없음.
+
+| 셀러 | 단계 사다리(주차) | 마켓 점수(가중/주요 마켓 최저)와 신호 | 조사 호출 | 경보 |
+|---|---|---|---|---|
+| snackbox `app-20261125-5ea829` | 중간 3 | 100/99 안팎, 마켓 신호 없음 | 3 | 1 |
+| campgear `app-20261125-a64c65` | 관찰 11 → 해소 13 | 100, 마켓 신호 없음 | 1 | 0 |
+| dailylook `app-20261124-803ef5` | 관찰 4 → 중간 5 → 높음 8(1단계·2단계 연락) | 5–13주 93/85 안팎 `market_score_drop` | 6 | 2 |
+| gearstore `app-20261124-d96249` | 관찰 2 → 중간 3 → 해소 8 → 관찰 11 → 해소 13 | 2주 84/68 하락, 3–6주 77~74/55~47 급락(+3주 `account_warning`) | 4 | 1 |
+| linen `app-20261125-baae81` | 중간 3 → 해소 10 → 관찰 11 → 해소 13 | 3주 74/73 하락, 4–8주 68/60 급락, 9주부터 약 91 | 3 | 1 |
+| tangerine `app-20261126-b55cdd` | 관찰 3(13주까지 유지) | 100, 마켓 신호 없음 | 4 | 0 |
+| tint `app-20261126-c5780d` | 관찰 6 → 해소 8 → 관찰 11 → 해소 13 | 6주 86/83 하락 한 주 | 2 | 0 |
+
+- 설계 §7과 비교: linen이 관찰 3 → 중간 4에서 중간 3으로 바뀐 것은 설계가 받아들인 변화다(두 출처 약신호). 나머지 마켓 신호 주차도 오프라인 재생과 같다.
+- dailylook 높음이 7주에서 8주로 늦어졌다. 7주 기본 단계가 중간이었고, 강한 은행 신호 `projected_shortfall`이 이전 재생(7주)과 달리 8주에 섰다. 마켓 점수는 이 은행 신호의 입력이 아니고, 오프라인 결정적 재생(`tests\mockapis\test_usd_scenes.py`)은 여전히 높음 7주다. 원인은 확인하지 못했다. 재생 중 승인한 상환 사례 제안(3회차, LLM 작성) 내용이 회차 일정을 바꿨을 가능성이 있다.
+- 조사 에이전트 폴백(`invalid_output`)은 약 23회 중 5회(linen 3·4, dailylook 5·13, snackbox 3)로 지난 재측정(23%)과 비슷하다. 폴백 주에도 결정적 단계·경보는 그대로다.
