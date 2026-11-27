@@ -514,9 +514,13 @@ def test_demo_password_required_when_configured(make_doc, raw, key):
         resp = login(client, password=wrong)
         assert resp.status_code == 422 and "set-cookie" not in resp.headers
     assert client.get("/").status_code == 303
+    for path in ("/apply", "/borrower"):  # 고객 화면도 비밀번호 없이 열리면 안 됩니다.
+        assert client.get(path).headers["location"].startswith("/login?next=")
+    assert client.post("/apply", data={}).status_code == 401
     resp = login(client, password="s3cret-pass-123")
     assert resp.status_code == 303 and resp.headers["set-cookie"].startswith("ama_demo_session=")
     assert client.get("/").status_code == 200
+    assert client.get("/apply").headers["location"] == "/borrower"
 
 
 def test_login_routes_absent_when_demo_login_off(env, demo_env):

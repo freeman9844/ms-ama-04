@@ -653,6 +653,9 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
 
     def customer(request: Request) -> Principal:
         """고객 페이지는 콘솔 역할을 묻지 않는다. 로그인(또는 데모 주체)만 있으면 된다."""
+        if login_on and deps.demo_password is not None:
+            # WAF IP 규칙을 끈 동안에는 데모 비밀번호가 유일한 진입 통제다.
+            require_demo_session(request)
         user = deps.demo_principal or parse_principal(request.headers.get(PRINCIPAL_HEADER))
         if user is None:
             raise HTTPException(401, "login required")
