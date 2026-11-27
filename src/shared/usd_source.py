@@ -79,6 +79,7 @@ class UsdMarketWeek(UsdProduct):
     orders: int = Field(ge=0)
     gross_cents: Cents
     cancel_cents: Cents
+    returns_cents: Cents = 0  # 그 주 주문 반품 합. 기본값은 옛 스냅샷 호환용
     rating: float = Field(ge=1, le=5)
     seller_grade: str
     pending_settlement_cents: Cents

@@ -44,8 +44,9 @@ def build_usd_market_flow(base: UsdMarketplace, start: date, orders: Sequence[Us
         for platform in base.platforms:
             code = platform.platform_code
             is_main = code == main_code
-            gross = sum(o.gross_cents for o in orders
-                       if o.platform_code == code and week_start <= o.order_on <= week_end)
+            week_orders = [o for o in orders if o.platform_code == code and week_start <= o.order_on <= week_end]
+            gross = sum(o.gross_cents for o in week_orders)
+            returns = sum(o.returns_cents for o in week_orders)
             rate = (platform.cancel_90d_cents / platform.gross_90d_cents) if platform.gross_90d_cents else 0.0
             jitter = rng.randint(*JITTER_PERCENT) / 100
             mult = hooks.cancel_mult(week_end) if is_main else 1.0
@@ -64,6 +65,6 @@ def build_usd_market_flow(base: UsdMarketplace, start: date, orders: Sequence[Us
                              if is_main and week_start <= p.occurred_on <= week_end)
             weeks.append(UsdMarketWeek(
                 **USD_V1.model_dump(), week_end=week_end, platform_code=code, orders=gross // average_order,
-                gross_cents=gross, cancel_cents=cancel, rating=rating, seller_grade=grade,
+                gross_cents=gross, cancel_cents=cancel, returns_cents=returns, rating=rating, seller_grade=grade,
                 pending_settlement_cents=pending, penalties=penalties))
     return UsdMarketFlow(**USD_V1.model_dump(), weeks=tuple(weeks))

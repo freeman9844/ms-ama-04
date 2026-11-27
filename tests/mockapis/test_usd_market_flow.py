@@ -118,3 +118,34 @@ def test_pending_grows_during_gearstore_hold():
     week1 = week_rows(flow, 1, platform)[0].pending_settlement_cents
     week5 = week_rows(flow, 5, platform)[0].pending_settlement_cents
     assert week5 > week1
+
+
+@pytest.mark.parametrize("seller", ["seller-gearstore-06", "seller-linen-10"])
+def test_market_week_returns_are_order_returns_of_that_week(seller):
+    case, flow = flow_for(seller)
+    for n in (-3, 1, 5):
+        end = flow.start + timedelta(days=7 * n - 1)
+        for w in week_rows(flow, n):
+            want = sum(o.returns_cents for o in flow.orders
+                       if o.platform_code == w.platform_code and end - timedelta(days=6) <= o.order_on <= end)
+            assert w.returns_cents == want
+
+
+def test_linen_returns_rise_on_every_platform():
+    case, flow = flow_for("seller-linen-10")
+
+    def rate(n, code):
+        w = week_rows(flow, n, code)[0]
+        return w.returns_cents / w.gross_cents
+
+    for p in case.marketplace.platforms:
+        base = sum(rate(n, p.platform_code) for n in range(-7, 1)) / 8
+        assert rate(4, p.platform_code) >= base + 0.04
+
+
+def test_market_week_without_returns_still_reads():
+    from shared.usd_source import UsdMarketWeek
+    _case, flow = flow_for("seller-gearstore-06")
+    payload = flow.market_weeks[0].model_dump(mode="json")
+    del payload["returns_cents"]
+    assert UsdMarketWeek.model_validate(payload).returns_cents == 0
