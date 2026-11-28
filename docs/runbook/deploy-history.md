@@ -1176,3 +1176,12 @@ python -m ops smoke
 - **비용 실측:** Cost Management 2026-11-04\~11-27(24일) $592.30(30일 환산 약 $740, Foundry 포함). 보고서 고정비는 2026-11-20\~11-26 일평균 × 30 = 월 $671.36(Foundry Models 제외, Service Bus 끈 상태)입니다. [비용 모델](../cost-model.md)을 이 값으로 고쳤습니다.
 - **끝 상태:** Service Bus 꺼짐(`SERVICEBUS_ENABLED=false`), App Gateway Running, WAF `allowOperatorOnly` Enabled(현재 운영자 IP 하나).
 - **되돌릴 때:** `infra/resources.bicep`의 게이트웨이 TPM과 `infra/main.bicep`의 용량을 되돌리고 프로비저닝합니다. 경보는 `infra/modules/ops-insights.bicep`에 있습니다.
+
+## 2026-11-28 거래 분류 Decision-1.1 전환 (`e5b0020`)
+
+- **이유:** `Microsoft-Decision-1`이 Deprecating(2027-02-04 종료)이고, 같은 계정에 `Microsoft-Decision-1.1`이 GA(GlobalStandard·DataZoneStandard, 쿼터 별도)였습니다. 프로브로 systemone 요청·응답 형식이 같음을 확인했습니다.
+- **용량 주의:** 프로브 배포를 용량 1로 만든 뒤 50으로 올렸더니 ARM에는 50으로 보였지만 실제 호출 제한(`x-ratelimit-limit-requests`)은 분당 1회로 남았습니다. 새로 50으로 만들자 정상이었습니다. Decision 배포는 처음부터 최종 용량으로 만드세요.
+- **평가:** 배포 `decision-1-1`(용량 50)을 먼저 만들고 분류 suite만 `DECISION_DEPLOYMENT=decision-1-1`로 돌렸습니다(`job-eval-yprpqzo`). 같은 날 기준선(`job-eval-059ekf3`) 대비 정확도 99.3% → 100.0%, LLM 폴백 26.9% → 3.9%(남은 4건은 재시도 뒤 429, 기권 0), Decision p50 269 → 223ms입니다([ADR-005](../adr/ADR-005-classification-model.md#decision-11-전환2026-11-28)).
+- **배포:** PR #22 병합 → `window open --acr`(빠른 경로라 프로비저닝 없음) → `azd provision --no-prompt`(4분 6초) → `ops deploy orchestrator`(2분 13초) → `ops smoke` 성공(`job-smoke-ao0uviy`, decision 점검 0.68초) → **`window close`**. Function 설정과 `job-eval` 환경의 `DECISION_DEPLOYMENT=decision-1-1`, 계정 `publicNetworkAccess` Disabled, WAF `allowOperatorOnly` 운영자 IP 유지를 확인했습니다.
+- **캐시:** `PIPELINE_VERSION`을 `semantic-v2`로 올려 Decision-1 시절 Cosmos 캐시 라벨은 더 이상 쓰지 않습니다. 전환 직후 신청은 캐시 적중이 잠시 낮습니다.
+- **되돌릴 때:** `infra/main.bicep`·`infra/resources.bicep`의 배포 이름을 `decision-1`로 되돌리고 프로비저닝·오케스트레이터 배포를 합니다. `decision-1` 배포는 2027-02-04 종료 전까지 남겨 둡니다(증분 배포라 자동으로 지워지지 않음).
