@@ -1,0 +1,1472 @@
+{
+  "run_id": "job-eval-bwyuy87",
+  "mode": "azure",
+  "started_at": "2026-11-28T12:37:45+00:00",
+  "finished_at": "2026-11-28T12:59:07+00:00",
+  "disclaimer": "합성 데이터 기준 결과다. 실제 고객·실제 성능을 나타내지 않으며, 수치는 같은 시드에서도 LLM 응답 변동이 있다.",
+  "budget_usd": 10.0,
+  "spent_usd": 4.392197,
+  "partial": false,
+  "dataset": {
+    "as_of": "2026-11-01",
+    "seeds": {
+      "classify": [
+        101,
+        102
+      ],
+      "underwriting": 201,
+      "early_warning": 301
+    },
+    "classify": {
+      "apps": 10,
+      "hard_bank": 32,
+      "labelled_txns": 2420,
+      "labels": {
+        "high_cost_lender": 66,
+        "loan_repayment": 120,
+        "other_operating": 610,
+        "owner_transfer": 120,
+        "payroll": 224,
+        "rent": 120,
+        "supplier": 676,
+        "tax_or_insurance": 484
+      }
+    },
+    "underwriting": {
+      "cases": 17,
+      "injected": 11,
+      "counterfactual_pairs": 6
+    },
+    "early_warning": {
+      "paths": [
+        {
+          "path_id": "ev-eheals",
+          "archetype": "healthy_seasonal",
+          "scenario": "sales_slump",
+          "cause": "sales_slump",
+          "onset_week": 2,
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-estres",
+          "archetype": "stressed",
+          "scenario": "sales_slump",
+          "cause": "sales_slump",
+          "onset_week": 2,
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-ehealh",
+          "archetype": "healthy_seasonal",
+          "scenario": "settlement_hold",
+          "cause": "settlement_hold",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estreh",
+          "archetype": "stressed",
+          "scenario": "settlement_hold",
+          "cause": "settlement_hold",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-ehealr",
+          "archetype": "healthy_seasonal",
+          "scenario": "return_spike",
+          "cause": "return_spike",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estrer",
+          "archetype": "stressed",
+          "scenario": "return_spike",
+          "cause": "return_spike",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-ehealc",
+          "archetype": "healthy_seasonal",
+          "scenario": "cost_surge",
+          "cause": "cost_surge",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estrec",
+          "archetype": "stressed",
+          "scenario": "cost_surge",
+          "cause": "cost_surge",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "cause": null,
+          "onset_week": null,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "cause": null,
+          "onset_week": null,
+          "default_on": null
+        }
+      ]
+    }
+  },
+  "models": {
+    "full": "gpt-5.6-sol",
+    "mini": "gpt-5.6-luna",
+    "decision": "decision-1-1",
+    "reviewer": "gpt-5.6-luna",
+    "judge": "gpt-5.4"
+  },
+  "prices_source": "Azure OpenAI Global Standard 단가(USD/1M 토큰), azurespeed.com 집계·Azure 가격 페이지 기준 2026-11 확인. 캐시 입력 할인은 반영하지 않아 상한 추정이다. gpt-5.6-luna는 Azure 단가를 확인하지 못해 OpenAI API 공개 단가(2026-07-30 인하 반영)를 쓴다. Decision-1·1.1은 공개 단가를 확인하지 못해 비용 집계에서 '단가 미확인' 호출 수로만 남긴다(decision-1은 이전 기록용).",
+  "suites": {
+    "early_warning": {
+      "partial": false,
+      "skipped": 0,
+      "configs": {
+        "gpt-5.6-luna": {
+          "paths": 10,
+          "evaluated": 10,
+          "tp": 8,
+          "fp": 0,
+          "fn": 0,
+          "tn": 2,
+          "precision": 1.0,
+          "recall": 1.0,
+          "investigations": 23,
+          "decisions": {
+            "alert": 22,
+            "no_alert": 1
+          },
+          "rejected_attempt_rate": 0.3043,
+          "cause_accuracy": 1.0,
+          "last_cause_accuracy": 1.0,
+          "in_window_rate": 1.0,
+          "mean_lead_days": 60.0,
+          "lead_days": [
+            46,
+            74
+          ],
+          "stage1_paths": 4,
+          "stage2_paths": 2,
+          "model_calls": 185,
+          "cost_usd": 0.207113,
+          "unpriced_calls": 0
+        },
+        "gpt-5.6-sol": {
+          "paths": 10,
+          "evaluated": 9,
+          "tp": 7,
+          "fp": 0,
+          "fn": 0,
+          "tn": 2,
+          "precision": 1.0,
+          "recall": 1.0,
+          "investigations": 18,
+          "decisions": {
+            "alert": 18
+          },
+          "rejected_attempt_rate": 0.7222,
+          "cause_accuracy": 1.0,
+          "last_cause_accuracy": 1.0,
+          "in_window_rate": 1.0,
+          "mean_lead_days": 46.0,
+          "lead_days": [
+            46
+          ],
+          "stage1_paths": 1,
+          "stage2_paths": 0,
+          "model_calls": 185,
+          "cost_usd": 4.185084,
+          "unpriced_calls": 0
+        }
+      },
+      "cases": [
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-eheals",
+          "archetype": "healthy_seasonal",
+          "scenario": "sales_slump",
+          "positive": true,
+          "status": "ok",
+          "investigations": 4,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 5,
+          "true_cause": "sales_slump",
+          "onset_week": 2,
+          "first_alert_cause": "sales_slump",
+          "last_alert_cause": "sales_slump",
+          "detector_cause": "sales_slump",
+          "in_window": true,
+          "default_on": "2027-01-20",
+          "lead_days": 46,
+          "escalation": {
+            "stage1_week": 6,
+            "stage2_week": 7
+          },
+          "weeks": [
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "sales_slump"
+              ],
+              "candidates": [
+                "sales_slump"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "inflow_drop",
+                "buffer_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "volatility_spike",
+                "cost_surge"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-02",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-estres",
+          "archetype": "stressed",
+          "scenario": "sales_slump",
+          "positive": true,
+          "status": "ok",
+          "investigations": 5,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 1,
+          "true_cause": "sales_slump",
+          "onset_week": 2,
+          "first_alert_cause": null,
+          "last_alert_cause": "sales_slump",
+          "detector_cause": "sales_slump",
+          "in_window": true,
+          "default_on": "2027-01-20",
+          "lead_days": 74,
+          "escalation": {
+            "stage1_week": 6,
+            "stage2_week": 7
+          },
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-07",
+              "new_triggers": [
+                "buffer_drop"
+              ],
+              "candidates": [],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": null
+            },
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "sales_slump"
+              ],
+              "candidates": [
+                "sales_slump"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "inflow_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "volatility_spike",
+                "cost_surge"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-02",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 2,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-ehealh",
+          "archetype": "healthy_seasonal",
+          "scenario": "settlement_hold",
+          "positive": true,
+          "status": "ok",
+          "investigations": 3,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 3,
+          "true_cause": "settlement_hold",
+          "onset_week": 3,
+          "first_alert_cause": "settlement_hold",
+          "last_alert_cause": "settlement_hold",
+          "detector_cause": "settlement_hold",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": 6,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 3,
+              "as_of": "2026-11-21",
+              "new_triggers": [
+                "settlement_hold"
+              ],
+              "candidates": [
+                "settlement_hold"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "inflow_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high",
+              "primary_cause": "settlement_hold"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-estreh",
+          "archetype": "stressed",
+          "scenario": "settlement_hold",
+          "positive": true,
+          "status": "ok",
+          "investigations": 3,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 5,
+          "true_cause": "settlement_hold",
+          "onset_week": 3,
+          "first_alert_cause": "settlement_hold",
+          "last_alert_cause": "settlement_hold",
+          "detector_cause": "settlement_hold",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": 6,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "settlement_hold"
+              ],
+              "candidates": [
+                "settlement_hold"
+              ],
+              "decision": "no_alert",
+              "rejected_attempts": 0,
+              "severity": null,
+              "primary_cause": null
+            },
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "inflow_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high",
+              "primary_cause": "settlement_hold"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-ehealr",
+          "archetype": "healthy_seasonal",
+          "scenario": "return_spike",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "return_spike",
+          "onset_week": 3,
+          "first_alert_cause": "return_spike",
+          "last_alert_cause": "return_spike",
+          "detector_cause": "return_spike",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "return_spike"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-26",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-estrer",
+          "archetype": "stressed",
+          "scenario": "return_spike",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "return_spike",
+          "onset_week": 3,
+          "first_alert_cause": "return_spike",
+          "last_alert_cause": "return_spike",
+          "detector_cause": "return_spike",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "return_spike"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-26",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-ehealc",
+          "archetype": "healthy_seasonal",
+          "scenario": "cost_surge",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "cost_surge",
+          "onset_week": 3,
+          "first_alert_cause": "cost_surge",
+          "last_alert_cause": "cost_surge",
+          "detector_cause": "cost_surge",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "cost_surge"
+              ],
+              "candidates": [
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "cost_surge"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "new_debt"
+              ],
+              "candidates": [
+                "cost_surge",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "cost_surge"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-estrec",
+          "archetype": "stressed",
+          "scenario": "cost_surge",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "cost_surge",
+          "onset_week": 3,
+          "first_alert_cause": "cost_surge",
+          "last_alert_cause": "cost_surge",
+          "detector_cause": "cost_surge",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "cost_surge"
+              ],
+              "candidates": [
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "cost_surge"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "new_debt"
+              ],
+              "candidates": [
+                "cost_surge",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "cost_surge"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "true_cause": null,
+          "onset_week": null,
+          "first_alert_cause": null,
+          "last_alert_cause": null,
+          "detector_cause": null,
+          "in_window": false,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "true_cause": null,
+          "onset_week": null,
+          "first_alert_cause": null,
+          "last_alert_cause": null,
+          "detector_cause": null,
+          "in_window": false,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-eheals",
+          "archetype": "healthy_seasonal",
+          "scenario": "sales_slump",
+          "positive": true,
+          "status": "ok",
+          "investigations": 4,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 5,
+          "true_cause": "sales_slump",
+          "onset_week": 2,
+          "first_alert_cause": "sales_slump",
+          "last_alert_cause": "sales_slump",
+          "detector_cause": "sales_slump",
+          "in_window": true,
+          "default_on": "2027-01-20",
+          "lead_days": 46,
+          "escalation": {
+            "stage1_week": 9,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "sales_slump"
+              ],
+              "candidates": [
+                "sales_slump"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "inflow_drop",
+                "buffer_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "volatility_spike",
+                "cost_surge"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-02",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-estres",
+          "archetype": "stressed",
+          "scenario": "sales_slump",
+          "positive": true,
+          "status": "error",
+          "investigations": 5,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 6,
+          "true_cause": "sales_slump",
+          "onset_week": 2,
+          "first_alert_cause": "sales_slump",
+          "last_alert_cause": "sales_slump",
+          "detector_cause": "sales_slump",
+          "in_window": false,
+          "default_on": "2027-01-20",
+          "lead_days": 39,
+          "escalation": {
+            "stage1_week": 9,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 1,
+              "as_of": "2026-11-07",
+              "new_triggers": [
+                "buffer_drop"
+              ],
+              "candidates": [],
+              "decision": "no_alert",
+              "rejected_attempts": 0,
+              "severity": null,
+              "primary_cause": null
+            },
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "sales_slump"
+              ],
+              "candidates": [
+                "sales_slump"
+              ],
+              "decision": "no_alert",
+              "rejected_attempts": 0,
+              "severity": null,
+              "primary_cause": null
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "inflow_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "sales_slump"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "volatility_spike",
+                "cost_surge"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "fallback_alert",
+              "rejected_attempts": 1,
+              "severity": null,
+              "primary_cause": null
+            },
+            {
+              "week": 9,
+              "as_of": "2027-01-02",
+              "new_triggers": [
+                "projected_shortfall"
+              ],
+              "candidates": [
+                "sales_slump",
+                "high_cost_borrowing",
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "high",
+              "primary_cause": "sales_slump"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-ehealh",
+          "archetype": "healthy_seasonal",
+          "scenario": "settlement_hold",
+          "positive": true,
+          "status": "ok",
+          "investigations": 3,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 3,
+          "true_cause": "settlement_hold",
+          "onset_week": 3,
+          "first_alert_cause": "settlement_hold",
+          "last_alert_cause": "settlement_hold",
+          "detector_cause": "settlement_hold",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 3,
+              "as_of": "2026-11-21",
+              "new_triggers": [
+                "settlement_hold"
+              ],
+              "candidates": [
+                "settlement_hold"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "low",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "inflow_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "settlement_hold"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-estreh",
+          "archetype": "stressed",
+          "scenario": "settlement_hold",
+          "positive": true,
+          "status": "ok",
+          "investigations": 3,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "settlement_hold",
+          "onset_week": 3,
+          "first_alert_cause": "settlement_hold",
+          "last_alert_cause": "settlement_hold",
+          "detector_cause": "settlement_hold",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "settlement_hold"
+              ],
+              "candidates": [
+                "settlement_hold"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 5,
+              "as_of": "2026-12-05",
+              "new_triggers": [
+                "inflow_drop",
+                "new_debt"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "settlement_hold"
+            },
+            {
+              "week": 6,
+              "as_of": "2026-12-12",
+              "new_triggers": [
+                "volatility_spike"
+              ],
+              "candidates": [
+                "settlement_hold",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "settlement_hold"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-ehealr",
+          "archetype": "healthy_seasonal",
+          "scenario": "return_spike",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "return_spike",
+          "onset_week": 3,
+          "first_alert_cause": "return_spike",
+          "last_alert_cause": "return_spike",
+          "detector_cause": "return_spike",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "return_spike"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-26",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-estrer",
+          "archetype": "stressed",
+          "scenario": "return_spike",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "return_spike",
+          "onset_week": 3,
+          "first_alert_cause": "return_spike",
+          "last_alert_cause": "return_spike",
+          "detector_cause": "return_spike",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "return_spike"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "low",
+              "primary_cause": "return_spike"
+            },
+            {
+              "week": 8,
+              "as_of": "2026-12-26",
+              "new_triggers": [
+                "inflow_drop"
+              ],
+              "candidates": [
+                "return_spike"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "return_spike"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-ehealc",
+          "archetype": "healthy_seasonal",
+          "scenario": "cost_surge",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "cost_surge",
+          "onset_week": 3,
+          "first_alert_cause": "cost_surge",
+          "last_alert_cause": "cost_surge",
+          "detector_cause": "cost_surge",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "cost_surge"
+              ],
+              "candidates": [
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "low",
+              "primary_cause": "cost_surge"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "new_debt"
+              ],
+              "candidates": [
+                "cost_surge",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "medium",
+              "primary_cause": "cost_surge"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-estrec",
+          "archetype": "stressed",
+          "scenario": "cost_surge",
+          "positive": true,
+          "status": "ok",
+          "investigations": 2,
+          "detector_alerted": true,
+          "agent_alerted": true,
+          "first_alert_week": 4,
+          "true_cause": "cost_surge",
+          "onset_week": 3,
+          "first_alert_cause": "cost_surge",
+          "last_alert_cause": "cost_surge",
+          "detector_cause": "cost_surge",
+          "in_window": true,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": [
+            {
+              "week": 4,
+              "as_of": "2026-11-28",
+              "new_triggers": [
+                "cost_surge"
+              ],
+              "candidates": [
+                "cost_surge"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 1,
+              "severity": "low",
+              "primary_cause": "cost_surge"
+            },
+            {
+              "week": 7,
+              "as_of": "2026-12-19",
+              "new_triggers": [
+                "new_debt"
+              ],
+              "candidates": [
+                "cost_surge",
+                "high_cost_borrowing"
+              ],
+              "decision": "alert",
+              "rejected_attempts": 0,
+              "severity": "medium",
+              "primary_cause": "cost_surge"
+            }
+          ]
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "true_cause": null,
+          "onset_week": null,
+          "first_alert_cause": null,
+          "last_alert_cause": null,
+          "detector_cause": null,
+          "in_window": false,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": []
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "positive": false,
+          "status": "ok",
+          "investigations": 0,
+          "detector_alerted": false,
+          "agent_alerted": false,
+          "first_alert_week": null,
+          "true_cause": null,
+          "onset_week": null,
+          "first_alert_cause": null,
+          "last_alert_cause": null,
+          "detector_cause": null,
+          "in_window": false,
+          "default_on": null,
+          "lead_days": null,
+          "escalation": {
+            "stage1_week": null,
+            "stage2_week": null
+          },
+          "weeks": []
+        }
+      ],
+      "failures": [
+        {
+          "type": "ew_wrong_cause",
+          "suite": "early_warning",
+          "config": "gpt-5.6-luna",
+          "case": "ev-estres",
+          "detail": "첫 경보 주원인 None ≠ 정답 sales_slump"
+        },
+        {
+          "type": "agent_error",
+          "suite": "early_warning",
+          "config": "gpt-5.6-sol",
+          "case": "ev-estres",
+          "detail": "조사 에이전트 실패(탐지기 단독 경보로 대체)"
+        },
+        {
+          "type": "ew_missed",
+          "suite": "early_warning",
+          "config": "gpt-5.6-sol",
+          "case": "ev-estres",
+          "detail": "원인 시작 2주차 + 3주 안에 경보 없음(첫 경보 6주차)"
+        }
+      ],
+      "detector_only": {
+        "paths": 10,
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "tn": 2,
+        "precision": 1.0,
+        "recall": 1.0,
+        "cause_accuracy": 1.0
+      }
+    }
+  },
+  "by_model": {
+    "gpt-5.6-luna": {
+      "calls": 185,
+      "errors": 0,
+      "retries": 0,
+      "p50_ms": 2322,
+      "p95_ms": 5648,
+      "input_tokens": 844602,
+      "output_tokens": 31826,
+      "cost_usd": 0.207113
+    },
+    "gpt-5.6-sol": {
+      "calls": 185,
+      "errors": 0,
+      "retries": 0,
+      "p50_ms": 3235,
+      "p95_ms": 9275,
+      "input_tokens": 891206,
+      "output_tokens": 31013,
+      "cost_usd": 4.185084
+    }
+  },
+  "failure_counts": {
+    "ew_wrong_cause": 1,
+    "agent_error": 1,
+    "ew_missed": 1
+  },
+  "cleanup": {
+    "deleted": 46,
+    "absent": 0,
+    "failed": 0
+  },
+  "errors": [],
+  "gateway": {
+    "enabled": true,
+    "content_blocked": 0,
+    "rate_limited": 0
+  }
+}

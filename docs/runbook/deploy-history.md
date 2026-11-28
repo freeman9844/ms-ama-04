@@ -1185,3 +1185,12 @@ python -m ops smoke
 - **배포:** PR #22 병합 → `window open --acr`(빠른 경로라 프로비저닝 없음) → `azd provision --no-prompt`(4분 6초) → `ops deploy orchestrator`(2분 13초) → `ops smoke` 성공(`job-smoke-ao0uviy`, decision 점검 0.68초) → **`window close`**. Function 설정과 `job-eval` 환경의 `DECISION_DEPLOYMENT=decision-1-1`, 계정 `publicNetworkAccess` Disabled, WAF `allowOperatorOnly` 운영자 IP 유지를 확인했습니다.
 - **캐시:** `PIPELINE_VERSION`을 `semantic-v2`로 올려 Decision-1 시절 Cosmos 캐시 라벨은 더 이상 쓰지 않습니다. 전환 직후 신청은 캐시 적중이 잠시 낮습니다.
 - **되돌릴 때:** `infra/main.bicep`·`infra/resources.bicep`의 배포 이름을 `decision-1`로 되돌리고 프로비저닝·오케스트레이터 배포를 합니다. `decision-1` 배포는 2027-02-04 종료 전까지 남겨 둡니다(증분 배포라 자동으로 지워지지 않음).
+
+## 2026-11-28 평가 증거 재측정: suite 분리 평가·균형 부하
+
+- **이유:** `job-eval-059ekf3`이 단일 예산 $5에 걸려 반사실 쌍과 조기경보 일부가 돌지 못했고, 공정성 경보가 잘린 36건 격자에서 나왔습니다.
+- **평가 이미지:** `ops window open --acr`(운영자 IP 116.46.68.212) → `ops deploy eval`(`eval:20261128114758`, 주입 문구 3종·반사실 5원형 데이터셋) → `ops window close`.
+- **심사·안전성(`job-eval-33u8sb3`, `EVAL_SUITE=safety`, 예산 $8):** $5.05, 부분 결과 아님. 주입 판별 가능 9건 × 모델 2개 지시 따름 0건, 반사실 6쌍 중 유효 5쌍 일관 100%(1쌍은 의견 누락), PII 0/402. 분석가 `gpt-5.6-sol` 최종 근거 100%·검토 통과 94.1%, `gpt-5.6-luna` 76.5%·70.6%.
+- **조기경보(`job-eval-bwyuy87`, `EVAL_SUITE=early_warning`, 예산 $10):** $4.39. 운영 모델 `gpt-5.6-luna` 원인 경로 10개 precision·recall 1.000, 원인 정확도 100%, 평균 리드 60.0일(연체 경로 2건: 46·74일). `gpt-5.6-sol`은 같은 품질에 $4.19(약 20배)였습니다. `ops eval` 폴링이 az stderr 없음으로 멈췄지만 Job은 성공해 `ops eval --collect job-eval-bwyuy87`로 보고서를 받았습니다.
+- **균형 부하(`load-20261128132033`, 48건):** 도달 48/48, p95 2.2분, 단계 성공 100%(144/144), 건당 AI $0.2007(`gpt-5.6-sol` 339회 $9.45, `gpt-5.6-luna` 345회 $0.18, `decision-1-1` 188회 단가 미확인). 공정성: 지역 18.8%p(이내), 업종 25.0%p 경보, 업력 6.2%p(R104). eligible율 격차는 모두 0%p입니다.
+- **끝 상태:** 창 닫힘(ACR 공개 False). 인프라·앱 코드 변경 없음.
