@@ -137,3 +137,9 @@ python -m ops pause
    - 재생 버튼 두 번 누름 경쟁: `replay_in_progress` 확인이 원자적이지 않아 두 실행이 모두 통과하고 모니터링 동의가 2개 생겼습니다. `start_replay`가 ETag 조건부 교체로 대출을 먼저 선점하고, 실패하면 "동시 재생 요청 무시"로 끝나게 했습니다.
    - 수정 뒤 Service Bus 모드 첫 라이브 재생이 성공했습니다(사전 대출 B, 약 3.1분. 인라인 모드 참고 실측 132초보다 김).
 6. **회사 NAT 출구 IP가 회전했습니다.** 임시 규칙이 여러 개 필요했고(`operator-alt`, `operator-alt2` …), 프로비저닝이 Functions 임시 규칙을 지웠습니다. [deploy](../runbook/deploy.md#운영자-ip가-바뀔-때)에 반영했습니다.
+
+## 2026-11-28 Service Bus 모드 재생 리허설
+
+- `ops resume` 직후 콘솔에서 `app-20261127-d4751d`(Seongsu Leather Studio, 직전 재생은 인라인)를 한 번 재생했습니다. `rp-3881211bf0`, 모드 `servicebus`, 13주를 약 62초에 마쳤고 "Replay completed"로 끝났습니다.
+- 두 구독(`flow.updated/early-warning`, `repayment.updated/collections`)의 규칙은 `subject-label`이었고, 재생 뒤 DLQ·활성 메시지는 0이었습니다.
+- 첫 Service Bus 모드 재생(2026-11-03, 약 3.1분)보다 빨랐습니다. 리허설 뒤 `ops pause`로 Service Bus를 다시 내렸습니다([운영 실행 기록](../runbook/deploy-history.md)).

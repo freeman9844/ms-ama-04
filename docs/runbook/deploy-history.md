@@ -1163,3 +1163,16 @@ python -m ops smoke
   - 프로비저닝이 콘솔 새 리비전 `ca-console--0000076`을 만들었지만 이미지는 같습니다(`a9de9652…`). WAF `allowOperatorOnly`는 Disabled 그대로이고, 창은 닫혔습니다(ACR 공개 False).
   - `ops smoke` 성공(`job-smoke-q1sanm2`, Search 키 없이 심사 흐름 정상).
 - **되돌릴 때:** Search 키 인증이 필요하면 `infra/modules/search.bicep`의 `disableLocalAuth`를 되돌리고 프로비저닝합니다. 오케스트레이터는 직전 ZIP으로 되돌리면 재시도만 빠집니다.
+
+## 2026-11-28 운영 증거 재측정: TPM 상향·경보·Service Bus 리허설
+
+- `fix/ops-evidence-refresh`의 `0f15019`(검토 에이전트 TPM 15K → 50K, `gpt-5.6-luna` 용량 280, 경보 2개·액션 그룹 `ag-ops`)를 `ops resume`(305초, 프로비저닝 5분 1초)으로 배포했습니다. 경보 4개와 `ag-ops`(메일 수신자 1명, Enabled)를 확인했습니다.
+- **App Gateway 정지:** `agw-amalend`이 2026-11-27 15:50 UTC에 사용자가 아닌 테넌트 거버넌스 서비스 주체(`da847d8c-ee71-44de-b462-6775e7d649a7`)에 의해 Stopped였습니다. WAF IP 규칙이 꺼진 직후였습니다. `ops waf ip-filter on --ip <운영자 IP>`(프로비저닝 4분 23초)로 규칙을 다시 켜고 `az network application-gateway start`로 올렸습니다. 운영자 IP가 두 번 바뀌어 `allowOperatorOnly`에 `<IP>/32`를 직접 더했고(재배포 없이 1분 안에 반영), `ops pause`의 프로비저닝이 목록을 `CONSOLE_IP` 하나로 되돌렸습니다.
+- **Service Bus 모드 리허설:** 재개 직후 구독 규칙이 `subject-label`(`flow.updated/early-warning`, `repayment.updated/collections`)인 것을 확인했습니다. 콘솔에서 `app-20261127-d4751d`를 재생해 `rp-3881211bf0`(모드 `servicebus`)이 13주를 약 62초에 마쳤고, 두 구독의 DLQ·활성 메시지는 0이었습니다. `ops smoke` 성공(`job-smoke-avsk4zb`).
+- **부하 44건(`load-20261128052837`):** p95 3.7분(SLO 충족), 단계 성공 83.2%(114/137, **SLO 미달**). 데이터 수집 degraded 18건(`agent_fallback`), 신용 평가 failed 5건입니다. 건당 AI $0.2003. 같은 시간 APIM 429는 `gw-data-assembly` 197/412(48%), `gw-analyst` 136/470(29%), `gw-reviewer` 0/55였습니다. 1분 피크는 analyst 162K(한도 150K), data-assembly 36.5K(17K), reviewer 27.4K였습니다. 첫 시도(`load-20261128033140`)는 48건 예상 $8.50으로 예산 가드에 걸려 멈췄고, 44건으로 줄였습니다.
+- **TPM 상향(`f587dab`):** `gw-analyst` 150K → 250K·`gpt-5.6-sol` 용량 150 → 250(쿼터 1,000), `gw-data-assembly` 17K → 40K·`gpt-5.6-luna` 용량 280 → 300. 종량제라 고정비는 늘지 않습니다. `ops pause`(385초, 프로비저닝 4분 9초)로 Service Bus를 지우며 배포했고, 배포 용량 sol 250·luna 300과 APIM 제품 정책 `tokens-per-minute` analyst 250000·data-assembly 40000·reviewer 50000을 확인했습니다.
+- **부하 36건(`load-20261128063941`):** p95 1.8분, 단계 성공 100%(108/108), 건당 AI $0.1919(`gpt-5.6-sol` 245회 $6.78, `gpt-5.6-luna` 292회 $0.13). 44건은 3건 표본 예상 $9.06으로 예산 가드(`BUDGET_GUARD_USD = 8.0`)에 걸려 36건으로 줄였습니다. 업종·지역 approve율 격차 33.3%p 경보가 났는데, 잘린 격자와 LLM 변동 탓일 수 있어 [한계](../limitations.md#측정-표본)에 적었습니다.
+- **전체 평가(`job-eval-059ekf3`, 2,573초):** $5.45로 예산 $5에 걸려 부분 결과입니다. 분류 macro F1 0.999(decision-1+luna), 심사 `gpt-5.6-sol` 최종 근거·검토 통과 100%(11/11), 조기경보 luna precision·recall 1.000, 주입 저항률 100%, PII 0건입니다. 조기경보 `gpt-5.6-sol` 구성이 경로 4개에 $3.04를 써서 나머지 경로와 반사실 쌍은 돌지 못했습니다.
+- **비용 실측:** Cost Management 2026-11-04\~11-27(24일) $592.30(30일 환산 약 $740, Foundry 포함). 보고서 고정비는 2026-11-20\~11-26 일평균 × 30 = 월 $671.36(Foundry Models 제외, Service Bus 끈 상태)입니다. [비용 모델](../cost-model.md)을 이 값으로 고쳤습니다.
+- **끝 상태:** Service Bus 꺼짐(`SERVICEBUS_ENABLED=false`), App Gateway Running, WAF `allowOperatorOnly` Enabled(현재 운영자 IP 하나).
+- **되돌릴 때:** `infra/resources.bicep`의 게이트웨이 TPM과 `infra/main.bicep`의 용량을 되돌리고 프로비저닝합니다. 경보는 `infra/modules/ops-insights.bicep`에 있습니다.

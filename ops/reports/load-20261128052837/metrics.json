@@ -1,0 +1,473 @@
+{
+  "run_id": "load-20261128052837",
+  "generated_at": "2026-11-28T05:44:46.412611+00:00",
+  "load": null,
+  "summary": {
+    "basis": "합성 데이터 기준",
+    "applications": 44,
+    "latency": {
+      "n": 44,
+      "p50_min": 2.4546342,
+      "p95_min": 3.6735056333333334,
+      "max_min": 4.276117883333333,
+      "target_min": 10.0,
+      "met": true,
+      "insufficient": false,
+      "unreached": 0,
+      "received_only": 0
+    },
+    "agent_success": {
+      "total": 137,
+      "ok": 114,
+      "degraded": 18,
+      "failed": 5,
+      "rate": 0.8321167883211679,
+      "degraded_rate": 0.13138686131386862,
+      "target": 0.99,
+      "met": false,
+      "by_step": {
+        "assemble": {
+          "ok": 26,
+          "degraded": 18,
+          "failed": 0
+        },
+        "classify": {
+          "ok": 44,
+          "degraded": 0,
+          "failed": 0
+        },
+        "assess": {
+          "ok": 44,
+          "degraded": 0,
+          "failed": 5
+        }
+      }
+    },
+    "ai_cost": {
+      "by_model": {
+        "gpt-5.6-luna": {
+          "input_tokens": 313110,
+          "output_tokens": 69821,
+          "calls": 272,
+          "cost_usd": 0.1464072
+        },
+        "decision-1": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 131,
+          "cost_usd": null
+        },
+        "gpt-5.6-sol": {
+          "input_tokens": 1343675,
+          "output_tokens": 164661,
+          "calls": 317,
+          "cost_usd": 8.667919999999999
+        }
+      },
+      "by_step": {
+        "assemble": {
+          "input_tokens": 131141,
+          "output_tokens": 7853,
+          "calls": 174,
+          "cost_usd": 0.035651800000000004,
+          "unpriced_calls": 0
+        },
+        "classify": {
+          "input_tokens": 20025,
+          "output_tokens": 2110,
+          "calls": 175,
+          "cost_usd": 0.006537000000000001,
+          "unpriced_calls": 131
+        },
+        "assess": {
+          "input_tokens": 1505619,
+          "output_tokens": 224519,
+          "calls": 371,
+          "cost_usd": 8.772138400000001,
+          "unpriced_calls": 0
+        }
+      },
+      "total_usd": 8.8143272,
+      "applications": 44,
+      "per_application_usd": 0.20032561818181815,
+      "unpriced_calls": 131
+    },
+    "fixed": {
+      "monthly_usd": 671.36,
+      "source": "Cost Management 실측 2026-11-20~2026-11-26 일평균(7일) × 30, Foundry Models 제외"
+    },
+    "unit_economics": [
+      {
+        "volume": 100,
+        "ai_usd": 0.20032561818181815,
+        "fixed_usd": 6.7136000000000005,
+        "total_usd": 6.913926,
+        "vs_manual": 0.0019754074285714286,
+        "vs_ticket": 0.001152321
+      },
+      {
+        "volume": 1000,
+        "ai_usd": 0.20032561818181815,
+        "fixed_usd": 0.6713600000000001,
+        "total_usd": 0.871686,
+        "vs_manual": 0.00024905314285714284,
+        "vs_ticket": 0.00014528099999999998
+      },
+      {
+        "volume": 10000,
+        "ai_usd": 0.20032561818181815,
+        "fixed_usd": 0.067136,
+        "total_usd": 0.267462,
+        "vs_manual": 7.641771428571427e-05,
+        "vs_ticket": 4.4577e-05
+      }
+    ],
+    "fairness": {
+      "threshold_pp": 20.0,
+      "min_samples": 5,
+      "axes": {
+        "industry": {
+          "values": {
+            "디지털": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.125,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 1,
+                "refer": 6,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "리빙": {
+              "n": 8,
+              "assessed": 8,
+              "approve_rate": 0.125,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 1,
+                "refer": 6,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "반려동물": {
+              "n": 7,
+              "assessed": 7,
+              "approve_rate": 0.14285714285714285,
+              "eligible_rate": 0.42857142857142855,
+              "recommendations": {
+                "approve": 1,
+                "refer": 4,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "뷰티": {
+              "n": 7,
+              "assessed": 7,
+              "approve_rate": 0.2857142857142857,
+              "eligible_rate": 0.5714285714285714,
+              "recommendations": {
+                "approve": 2,
+                "refer": 4,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "식품": {
+              "n": 7,
+              "assessed": 7,
+              "approve_rate": 0.14285714285714285,
+              "eligible_rate": 0.5714285714285714,
+              "recommendations": {
+                "approve": 1,
+                "refer": 6,
+                "decline": 0
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "패션의류": {
+              "n": 7,
+              "assessed": 7,
+              "approve_rate": 0.14285714285714285,
+              "eligible_rate": 0.42857142857142855,
+              "recommendations": {
+                "approve": 1,
+                "refer": 5,
+                "decline": 1
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 16.1,
+          "eligible_gap_pp": 14.3,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 50.0,
+              "mismatch": 50.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 50.0
+          },
+          "policy_explained": false,
+          "alert": false
+        },
+        "region": {
+          "values": {
+            "경기": {
+              "n": 14,
+              "assessed": 14,
+              "approve_rate": 0.14285714285714285,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 2,
+                "refer": 10,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "부산": {
+              "n": 15,
+              "assessed": 15,
+              "approve_rate": 0.26666666666666666,
+              "eligible_rate": 0.5333333333333333,
+              "recommendations": {
+                "approve": 4,
+                "refer": 9,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "서울": {
+              "n": 15,
+              "assessed": 15,
+              "approve_rate": 0.06666666666666667,
+              "eligible_rate": 0.4666666666666667,
+              "recommendations": {
+                "approve": 1,
+                "refer": 12,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 20.0,
+          "eligible_gap_pp": 6.7,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 50.0,
+              "mismatch": 50.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 50.0
+          },
+          "policy_explained": false,
+          "alert": false
+        },
+        "business_age_band": {
+          "values": {
+            "1~3년": {
+              "n": 15,
+              "assessed": 15,
+              "approve_rate": 0.2,
+              "eligible_rate": 0.5333333333333333,
+              "recommendations": {
+                "approve": 3,
+                "refer": 10,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "3년+": {
+              "n": 14,
+              "assessed": 14,
+              "approve_rate": 0.21428571428571427,
+              "eligible_rate": 0.5,
+              "recommendations": {
+                "approve": 3,
+                "refer": 9,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            },
+            "<1년": {
+              "n": 15,
+              "assessed": 15,
+              "approve_rate": 0.06666666666666667,
+              "eligible_rate": 0.4666666666666667,
+              "recommendations": {
+                "approve": 1,
+                "refer": 12,
+                "decline": 2
+              },
+              "officer_approve_rate": null,
+              "insufficient": false
+            }
+          },
+          "gap_pp": 14.8,
+          "eligible_gap_pp": 6.7,
+          "controlled": {
+            "by_archetype": {
+              "healthy": 50.0,
+              "mismatch": 25.0,
+              "stress": 0.0,
+              "thin": 0.0
+            },
+            "max_pp": 50.0
+          },
+          "policy_explained": true,
+          "alert": false
+        }
+      },
+      "alerts": []
+    },
+    "funnel": {
+      "policy": {
+        "eligible": 22,
+        "refer": 18,
+        "ineligible": 4
+      },
+      "recommendation": {
+        "approve": 7,
+        "refer": 31,
+        "decline": 6
+      },
+      "officer": {
+        "none": 44
+      },
+      "agreement": {
+        "compared": 0,
+        "agreed": 0,
+        "rate": null
+      },
+      "overrides": {
+        "count": 0,
+        "approved": 0,
+        "rate": null
+      }
+    },
+    "step_latency": {
+      "consent": {
+        "n": 44,
+        "p50_ms": 1153.0,
+        "p95_ms": 1209.0
+      },
+      "assemble": {
+        "n": 44,
+        "p50_ms": 34979.0,
+        "p95_ms": 53999.0
+      },
+      "classify": {
+        "n": 44,
+        "p50_ms": 2648.0,
+        "p95_ms": 3566.0
+      },
+      "underwrite": {
+        "n": 44,
+        "p50_ms": 2648.0,
+        "p95_ms": 3566.0
+      },
+      "policy": {
+        "n": 44,
+        "p50_ms": 28.0,
+        "p95_ms": 56.0
+      },
+      "assess": {
+        "n": 49,
+        "p50_ms": 63064.0,
+        "p95_ms": 137019.0
+      }
+    },
+    "reason_codes": [
+      {
+        "key": "R105",
+        "count": 11,
+        "message": "고비용 대부·P2P 상환 발견"
+      },
+      {
+        "key": "S001",
+        "count": 8,
+        "message": "마켓 판매 이력으로 거래 이력 부족 대체"
+      },
+      {
+        "key": "R104",
+        "count": 5,
+        "message": "업력 12개월 미만"
+      },
+      {
+        "key": "R002",
+        "count": 4,
+        "message": "DSCR 1.0 미만"
+      },
+      {
+        "key": "R901",
+        "count": 4,
+        "message": "해당하는 금리 밴드 없음"
+      },
+      {
+        "key": "R001",
+        "count": 3,
+        "message": "거래 이력 6개월 미만"
+      },
+      {
+        "key": "R106",
+        "count": 2,
+        "message": "최근 60일 매출 급감"
+      }
+    ],
+    "flags": [
+      {
+        "key": "agent_fallback",
+        "count": 18
+      },
+      {
+        "key": "high_cost_lender_detected",
+        "count": 11
+      }
+    ],
+    "throughput": {
+      "bucket_min": 10,
+      "buckets": [
+        {
+          "start": "2026-11-28T05:20:00+00:00",
+          "received": 3,
+          "reached": 0
+        },
+        {
+          "start": "2026-11-28T05:30:00+00:00",
+          "received": 33,
+          "reached": 25
+        },
+        {
+          "start": "2026-11-28T05:40:00+00:00",
+          "received": 8,
+          "reached": 19
+        }
+      ],
+      "earlier": {
+        "received": 0,
+        "reached": 0
+      }
+    },
+    "sla": {
+      "awaiting": 44,
+      "escalated": 0
+    }
+  },
+  "faults": []
+}
