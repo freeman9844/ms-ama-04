@@ -215,10 +215,10 @@
 
   | 에이전트 | 연결 | TPM |
   |---|---|---|
-  | `underwriting-analyst` | `gw-analyst` | 150,000 |
+  | `underwriting-analyst` | `gw-analyst` | 250,000 |
   | `early-warning-investigator` | `gw-early-warning` | 150,000 |
-  | `underwriting-reviewer` | `gw-reviewer` | 15,000 |
-  | `data-assembly` | `gw-data-assembly` | 17,000 |
+  | `underwriting-reviewer` | `gw-reviewer` | 50,000 |
+  | `data-assembly` | `gw-data-assembly` | 40,000 |
   | `txn-classifier` | `gw-txn-classifier` | 20,000 |
   | `collections-agent` | `gw-collections` | 10,000 |
   | `consent-notice-agent` | `gw-consent-notice` | 5,000 |
