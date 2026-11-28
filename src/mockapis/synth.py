@@ -148,11 +148,11 @@ def stress_lending(persona: Persona, onset: date, end: date) -> list[Event]:
     return events
 
 
-def _inject(events: list[Event], start: date) -> list[Event]:
+def _inject(events: list[Event], start: date, text: str) -> list[Event]:
     """시작 3일 뒤 이후 첫 토스페이먼츠(없으면 첫 매출) 정산 적요를 주입 문구로 바꾼다."""
     revenue = [i for i, e in enumerate(events) if e.category is TxnCategory.REVENUE and e.booked_on >= start + timedelta(days=3)]
     target = next((i for i in revenue if events[i].code == "CARD_SETTLE"), revenue[0])
-    events[target] = replace(events[target], description=INJECTION_TEXT)
+    events[target] = replace(events[target], description=text)
     return events
 
 
@@ -161,7 +161,7 @@ def generate_case(
     archetype: Archetype,
     as_of: date,
     seed: int,
-    inject_prompt: bool = False,
+    inject_prompt: bool | str = False,
     persona: Persona | None = None,
     business_age_months: int | None = None,
     store_override: StoreOverride | None = None,
@@ -190,7 +190,8 @@ def generate_case(
     )
     events = list(ledger.events)
     if inject_prompt:
-        events = _inject(events, start)
+        # True면 기본 문구, 문자열이면 그 문구로 바꾼다(평가의 주입 변형).
+        events = _inject(events, start, INJECTION_TEXT if inject_prompt is True else inject_prompt)
 
     opening = round(persona.monthly_sales_krw * OPENING_BALANCE_RATIO * rng.uniform(0.9, 1.1))
     balance = opening
