@@ -1,4 +1,4 @@
-"""--fake 모드용 Foundry·Decision-1 HTTP 에뮬레이터. 운영 클라이언트(FoundryAgents, DecisionClient)와
+"""--fake 모드용 Foundry·Decision HTTP 에뮬레이터. 운영 클라이언트(FoundryAgents, DecisionClient)와
 계측 transport를 그대로 거치게 해 파이프라인 전체를 비용 없이 검증한다. 점수는 의미가 없다(배선 확인용).
 """
 

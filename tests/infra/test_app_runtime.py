@@ -148,7 +148,7 @@ def test_function_app_settings_point_to_runtime(closed, variant):
     assert settings["AI_PROJECT_ENDPOINT"].endswith("/api/projects/proj-lending")
     assert settings["DATA_ASSEMBLY_MODEL"] == "gpt-5.6-luna"
     assert settings["AI_ACCOUNT_ENDPOINT"].endswith(".services.ai.azure.com")
-    assert settings["DECISION_DEPLOYMENT"] == "decision-1"
+    assert settings["DECISION_DEPLOYMENT"] == "decision-1-1"
     assert (settings["ANALYST_MODEL"], settings["REVIEWER_MODEL"]) == ("gpt-5.6-sol", "gpt-5.6-luna")
     assert settings["CLASSIFIER_MODEL"] == "gpt-5.6-luna"
     assert (settings["EW_MODEL"], settings["COLLECTIONS_MODEL"]) == ("gpt-5.6-luna", "gpt-5.6-luna")
@@ -184,4 +184,4 @@ def test_smoke_job_has_e2e_config(closed):
     assert config["mockapi_url"].startswith("https://ca-mockapi.")
     assert config["e2e_applicant"] == "seller-dailylook-01"
     assert config["ai_account_endpoint"].endswith(".services.ai.azure.com")
-    assert config["decision_deployment"] == "decision-1"
+    assert config["decision_deployment"] == "decision-1-1"

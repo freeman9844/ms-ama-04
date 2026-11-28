@@ -293,7 +293,7 @@ def load_pseudonym_key(env: Mapping[str, str], credential: Any) -> bytes:
 
 
 def agent_settings(env: Mapping[str, str], token: Callable[[str], str]) -> dict[str, Any]:
-    """Foundry 에이전트·Decision-1·모델 설정. 엔드포인트가 없으면 해당 기능은 꺼진다."""
+    """Foundry 에이전트·Decision·모델 설정. 엔드포인트가 없으면 해당 기능은 꺼진다."""
     settings: dict[str, Any] = {}
     if endpoint := env.get("AI_PROJECT_ENDPOINT"):
         agents = FoundryAgents(endpoint, lambda: token(FOUNDRY_SCOPE))

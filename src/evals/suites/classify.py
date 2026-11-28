@@ -1,4 +1,4 @@
-"""분류 suite: classify_unresolved를 구성별(Decision-1+mini 폴백 / mini만 / gpt-5.4만)로 돌려 정답과 비교한다.
+"""분류 suite: classify_unresolved를 구성별(Decision+mini 폴백 / mini만 / gpt-5.4만)로 돌려 정답과 비교한다.
 
 macro F1은 파이프라인이 완료된 신청(apps)의 정답 있는 고유 적요 그룹만 채점한다.
 완료된 신청의 미분류는 오답이다. 신청 실패율의 분모는 예산으로 건너뛴 신청을 제외한 전체 시도다.

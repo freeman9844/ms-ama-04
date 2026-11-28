@@ -108,7 +108,7 @@ def _classify(s: dict[str, Any]) -> list[str]:
     out += _table(["구성", "채점 그룹", "macro F1(성공 신청)", "정확도", "거래 가중 정확도", "미해결", "캐시 적중", "폴백 비율", "신청당 호출", "비용"], rows)
     for name, c in s["configs"].items():
         if c.get("threshold_curve"):
-            out += [f"Decision-1 신뢰도 임계값별(구성 {name}, 운영값 0.7):", ""]
+            out += [f"Decision 신뢰도 임계값별(구성 {name}, 운영값 0.7):", ""]
             out += _table(["임계값", "채택", "채택분 정확도", "폴백 비율"],
                           [[t["threshold"], t["accepted"], _pct(t["accuracy"]), _pct(t["fallback_rate"])] for t in c["threshold_curve"]])
             out += ["라벨별 F1:", ""]
@@ -264,7 +264,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
               "- 심사·조기경보는 규칙 분류 카테고리만 쓴다(의미 분류 효과는 분류 suite에서 따로 본다).",
               "- 반사실·주입은 케이스당 1회 실행이라 LLM 변동과 구분되지 않는다.",
               "- 판정자 점수는 LLM 평가라 참고값이며 사람 검토 표본과 같이 본다.",
-              "- Decision-1은 공개 단가를 확인하지 못해 비용에서 빠져 있다(호출 수만 표시)."]
+              "- Decision 모델은 공개 단가를 확인하지 못해 비용에서 빠져 있다(호출 수만 표시)."]
     f1 = [c.get("macro_f1") for c in s.get("classify", {}).get("configs", {}).values()]
     if len(f1) > 1 and None not in f1 and min(f1) >= CEILING_F1:
         lines.append(f"- 분류 구성 {len(f1)}개 모두 성공 신청의 macro F1이 {min(f1):.2f} 이상이다(천장 효과). "

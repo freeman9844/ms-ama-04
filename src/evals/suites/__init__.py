@@ -19,7 +19,7 @@ def budget_left(meter: Meter, result: dict[str, Any]) -> bool:
 
 
 def cost_of(calls: list[CallRecord]) -> dict[str, Any]:
-    """단가를 아는 호출의 합계와 단가 미확인 호출 수(Decision-1 등)."""
+    """단가를 아는 호출의 합계와 단가 미확인 호출 수(Decision 등)."""
     return {
         "model_calls": len(calls),
         "cost_usd": round(sum(c.cost_usd for c in calls if c.cost_usd is not None), 6),

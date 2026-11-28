@@ -16,7 +16,7 @@ from journey import telemetry
 METER_KEY = "_meter"
 TAGS_KEY = "_tags"
 DETAIL_MAX = 200
-DECISION_MODEL = "decision-1"
+DECISION_MODEL = "decision-1-1"
 AGENT_STEPS = frozenset({"assemble", "classify", "assess"})
 STEPS = {
     "request_consent": "consent",

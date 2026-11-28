@@ -3,7 +3,7 @@
 1. 결정적 규칙(classify-v1)으로 분류하고, 남은(unclassified) 거래만 대상으로 한다.
 2. 가명처리 → 정규화 → (업종, 방향, 거래유형, 적요) 단위로 중복 제거한다.
 3. 캐시에 있으면 재사용한다. 가명 토큰이 들어 있는 적요와 이체 적요는 캐시에 넣지도 찾지도 않는다.
-4. 고유 적요마다 Microsoft-Decision-1에 고정 선택지(+cannot_tell)로 병렬 질의한다.
+4. 고유 적요마다 Microsoft-Decision-1.1에 고정 선택지(+cannot_tell)로 병렬 질의한다.
 5. 기권·저신뢰·오류 항목만 mini LLM 폴백에 한 번에 묻고, 그래도 모르면 미분류로 둔다.
 6. 특성 반영은 보수적으로: 출금이 부채상환·고금리 상환으로 분류된 경우만 override를 만든다.
    대표자 이체로 분류된 출금은 신호로만 센다(영업비용에서 빼면 DSCR이 올라가므로).
@@ -26,7 +26,8 @@ from agents.classify import Category, classify
 from agents.runtime import AgentError, AgentRun, AgentSpec, ToolHandler
 from shared.contracts import Transaction
 
-PIPELINE_VERSION = "semantic-v1"
+# 모델·선택지 기준이 바뀌면 올린다(캐시 키에 들어가 이전 라벨 재사용을 막는다). v2: Decision-1 → 1.1(2026-11-28).
+PIPELINE_VERSION = "semantic-v2"
 ABSTAIN = "cannot_tell"
 DEFAULT_THRESHOLD = 0.7
 DEFAULT_WORKERS = 8
@@ -91,7 +92,7 @@ def normalize(text: str) -> str:
 
 
 class DecisionClient:
-    """Microsoft-Decision-1 systemone 호출(probe 2026-10-31 확인 형태)."""
+    """Microsoft-Decision systemone 호출(probe 2026-10-31 확인 형태, 1.1도 같은 형식 2026-11-28 확인)."""
 
     def __init__(
         self,

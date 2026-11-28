@@ -586,7 +586,7 @@ module functions 'modules/functions.bicep' = {
       AI_PROJECT_ENDPOINT: aiProjectEndpoint
       DATA_ASSEMBLY_MODEL: 'gpt-5.6-luna'
       AI_ACCOUNT_ENDPOINT: 'https://${names.ais}.services.ai.azure.com'
-      DECISION_DEPLOYMENT: 'decision-1'
+      DECISION_DEPLOYMENT: 'decision-1-1'
       ANALYST_MODEL: 'gpt-5.6-sol'
       REVIEWER_MODEL: 'gpt-5.6-luna'
       CLASSIFIER_MODEL: 'gpt-5.6-luna'
@@ -751,7 +751,7 @@ module smokeJob 'modules/smoke-job.bicep' = {
       mockapi_url: mockapiUrl
       e2e_applicant: 'seller-dailylook-01'
       ai_account_endpoint: 'https://${names.ais}.services.ai.azure.com'
-      decision_deployment: 'decision-1'
+      decision_deployment: 'decision-1-1'
     }
   }
 }
@@ -785,7 +785,7 @@ module evalJob 'modules/eval-job.bicep' = {
     envVars: [
       { name: 'AI_PROJECT_ENDPOINT', value: aiProjectEndpoint }
       { name: 'AI_ACCOUNT_ENDPOINT', value: 'https://${names.ais}.services.ai.azure.com' }
-      { name: 'DECISION_DEPLOYMENT', value: 'decision-1' }
+      { name: 'DECISION_DEPLOYMENT', value: 'decision-1-1' }
       { name: 'EVAL_FULL_MODEL', value: 'gpt-5.6-sol' }
       { name: 'EVAL_MINI_MODEL', value: 'gpt-5.6-luna' }
       { name: 'REVIEWER_MODEL', value: 'gpt-5.6-luna' }
