@@ -107,4 +107,4 @@ python -m ops metrics --run load-<시각> --fault-runs fault-<…> fault-<…>  
 | 모델, Functions, Container Apps, Cosmos serverless | 사용량 기반 | 유휴 시 거의 0 |
 | Application Gateway WAF v2 | 약 $370 | 콘솔 진입점, 상시([ADR-011](../adr/ADR-011-appgw-waf-entry.md)) |
 
-월 고정비의 실측 추정은 `ops/reports/load-20261102110233/report.md`(Cost Management 일평균 × 30)를 봅니다.
+월 고정비의 실측 추정은 최신 `ops/reports/load-20261128063941/report.md`(Cost Management 2026-11-20\~11-26 일평균 × 30, Service Bus 끈 상태 월 $671.36)를 봅니다. 위 표와 집계 방식이 달라 직접 비교하지 않습니다([비용 모델](../cost-model.md#월-고정비)).
