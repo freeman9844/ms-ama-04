@@ -12,7 +12,7 @@ from agents.officer_facts import evidence_menu
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from console.app import ConsoleDeps, create_app
 from console.auth import csrf_token
-from console.officer_chat import CHAT_SUGGESTIONS
+from console.officer_chat import CHAT_TOPICS
 from tests.agents.test_officer_chat import FakeRunner, _run
 from tests.console.test_app import AUDITOR_H, NO_ROLE, OFFICER, FakeQueue, FakeStore
 
@@ -278,8 +278,9 @@ def test_decision_tab_renders_chat_panel(make_doc, raw, key):
     assert 'data-url="/applications/app-1/chat"' in page
     assert re.search(r'data-csrf="([0-9a-f]{64})"', page).group(1) == _token(key)
     assert '<script src="/static/officer_chat.js" defer></script>' in page
-    for q in CHAT_SUGGESTIONS:
-        assert f">{q}</button>" in page
+    chips = re.findall(r'data-chat-topic="([a-z_]+)">([^<]+)</button>', page)
+    assert chips and all(CHAT_TOPICS[t] == q for t, q in chips)
+    assert ("policy", CHAT_TOPICS["policy"]) in chips
     assert 'maxlength="500"' in page
     assert 'name="decision"' in page  # 결정 폼은 그대로
 
@@ -300,3 +301,39 @@ def test_chat_script_is_static_and_keeps_history_in_memory(make_doc, raw, key):
     r = _client(make_doc, raw, key, FakeChat()).get("/static/officer_chat.js")
     assert r.status_code == 200
     assert "X-CSRF-Token" in r.text and "localStorage" not in r.text and "sessionStorage" not in r.text
+
+
+def test_topic_chip_answers_from_snapshot_without_model(make_doc, raw, key, caplog):
+    caplog.set_level(logging.INFO, logger="console.chat")
+    chat = FakeChat()
+    r = _post(_client(make_doc, raw, key, chat), key, {"question": "정책 판정과 사유는?", "topic": "policy"})
+    assert r.status_code == 200 and not chat.calls
+    assert "정책 판정: 적격" in r.json()["answer"]
+    assert "topic=policy" in caplog.text and "정책 판정과" not in caplog.text
+
+
+def test_unknown_topic_is_rejected(make_doc, raw, key):
+    chat = FakeChat()
+    client = _client(make_doc, raw, key, chat)
+    for topic in ("approve_it", [], {}):
+        r = _post(client, key, {"question": "q", "topic": topic})
+        assert r.status_code == 400
+    assert not chat.calls
+
+
+def test_usd_chips_follow_the_application_evidence(usd_chat_case, key):
+    doc, raw = usd_chat_case
+    client = _client(lambda: doc, raw, key, FakeChat())
+    page = client.get("/applications/usd-1", headers=OFFICER).text
+    topics = re.findall(r'data-chat-topic="([a-z_]+)"', page)
+    assert {"policy", "limit", "market", "cash_only"} <= set(topics) and "capacity" not in topics
+    answer = _post(client, key, {"question": "q", "topic": "cash_only"}, path="/applications/usd-1/chat").json()["answer"]
+    assert "Eligible, limit $4,100.00" in answer
+    answer = _post(client, key, {"question": "q", "topic": "market"}, path="/applications/usd-1/chat").json()["answer"]
+    assert "Marketplace rating: 4.8" in answer
+
+    doc["underwriting"]["monthly"][0]["operating_out_cents"] = 950
+    page = client.get("/applications/usd-1", headers=OFFICER).text
+    assert 'data-chat-topic="capacity"' in page
+    answer = _post(client, key, {"question": "q", "topic": "capacity"}, path="/applications/usd-1/chat").json()["answer"]
+    assert "2026-01: Revenue less operating outflows" in answer and "Short months: 1 of 1" in answer

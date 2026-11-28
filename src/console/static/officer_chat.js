@@ -29,7 +29,8 @@
     button.textContent = busy ? TEXT.busy : TEXT.send;
   };
 
-  const ask = async (raw) => {
+  // topic이 있으면(제안 칩) 서버가 정해진 근거로 바로 답한다. question은 대화 기록에 남길 칩 문구다.
+  const ask = async (raw, topic) => {
     const question = raw.trim();
     if (!question || button.disabled) return;
     append("user", question);
@@ -39,14 +40,14 @@
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": form.dataset.csrf },
-        body: JSON.stringify({ question, history: history.slice(-MAX_MESSAGES) }),
+        body: JSON.stringify({ question, ...(topic ? { topic } : {}), history: history.slice(-MAX_MESSAGES) }),
       });
       const body = await response.json().catch(() => ({}));
       if (response.ok && typeof body.answer === "string") {
         append("assistant", body.answer);
         history.push({ role: "user", text: question.slice(0, MAX_TEXT) },
                      { role: "assistant", text: body.answer.slice(0, MAX_TEXT) });
-        input.value = "";
+        if (!topic) input.value = "";
       } else {
         append("system", body.error || TEXT.failed);
       }
@@ -62,5 +63,5 @@
     event.preventDefault();
     ask(input.value);
   });
-  suggestions.forEach((b) => b.addEventListener("click", () => ask(b.textContent)));
+  suggestions.forEach((b) => b.addEventListener("click", () => ask(b.textContent, b.dataset.chatTopic)));
 })();

@@ -11,6 +11,7 @@ from agents.officer_chat import (
     Answer,
     OfficerChat,
     officer_spec,
+    selected_paths,
 )
 from agents.runtime import AgentError, AgentRun, GatewayThrottled
 
@@ -312,3 +313,18 @@ def test_capacity_question_explains_the_selected_shortfall_month(language, want)
     runner = FakeRunner(result=_run("cashflow.capacity.short_months"))
     answer = OfficerChat(runner, "m").ask({"cashflow": cf}, [], "Why?", language)
     assert "2026-09" in answer.answer and want in answer.answer
+
+def test_wrong_path_does_not_discard_valid_evidence_and_item_paths_expand():
+    snapshot = {"application": {"requested_amount_krw": 5_000_000},
+                "policy": {"decision": "refer", "reason_codes": [{"code": "R111", "message": "취소율 급증",
+                                                                   "observed": 0.13, "threshold": 0.08}]}}
+    runner = FakeRunner(result=_run("snapshot.policy.decision\npolicy.reason_codes.0\nagent_opinion.claims.9"))
+    answer = OfficerChat(runner, "m").ask(snapshot, [], "회부 사유는?", "ko").answer
+    assert "refer" in answer and "취소율 급증" in answer and "0.13" in answer and "0.08" in answer
+    assert "추가로 확인된 근거가 없습니다." not in answer
+
+
+def test_broad_paths_are_not_expanded():
+    menu = {f"policy.rules.refers.{i}.code": f"R{i}" for i in range(9)} | {"policy.decision": "refer"}
+    assert selected_paths("policy.rules\npolicy.decision", menu) == ["policy.decision"]
+    assert selected_paths("\n".join(["policy.decision"] * 7), menu) == ["policy.decision"]
