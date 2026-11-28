@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from agents.officer_facts import SETTLEMENT_RATE, counteroffer, evidence_menu
+from agents.officer_topics import scoped, topic_lines
 from agents.runtime import AgentError, AgentSpec
 from shared.opinions import CURRENT
 from shared.product_context import product_of
@@ -20,6 +21,9 @@ from shared.product_context import product_of
 OFFICER_AGENT = "officer-assistant"
 # 게이트웨이 429는 런타임이 지수 백오프로 최대 5번 다시 보낸다(조기경보와 같은 값).
 CHAT_THROTTLE_RETRIES = 5
+MAX_SELECTED_PATHS = 6
+# 모델이 객체·배열 항목 경로(예: policy.reason_codes.0)를 고르면 그 아래 값을 이 개수까지만 펼친다.
+MAX_EXPANDED_CHILDREN = 8
 _RATE_QUESTION = re.compile(r"정산\s*(?:입금\s*)?대사\s*(?:율|비율)|^대사율|pg_reconciliation_ratio|"
                             r"\bsettlement\s+reconciliation\s+(?:rate|ratio|percentage)\b", re.I)
 
@@ -111,6 +115,35 @@ def _full_request_answer(snapshot: Mapping[str, Any], language: str) -> str:
     return answer
 
 
+def selected_paths(text: str, menu: Mapping[str, str]) -> list[str]:
+    """모델이 고른 경로 중 메뉴에 있는 것만 남긴다. 틀린 경로 하나 때문에 맞는 근거를 버리지 않는다."""
+    picked: list[str] = []
+    for line in text.strip().splitlines()[:MAX_SELECTED_PATHS]:
+        key = line.strip().strip("-*•` ").removeprefix("snapshot.")
+        if not key:
+            continue
+        if key in menu:
+            found = [key]
+        else:
+            children = [k for k in menu if k.startswith(key.rstrip(".") + ".")]
+            found = children if len(children) <= MAX_EXPANDED_CHILDREN else []
+        picked.extend(k for k in found if k not in picked)
+    return picked
+
+
+def answer_topic(snapshot: Mapping[str, Any], topic: str, language: str = "ko") -> str:
+    """제안 칩 답변. 모델을 부르지 않고 서버가 정해진 근거를 고른다."""
+    snapshot = scoped(snapshot)
+    if product_of(snapshot.get("application") or {}):
+        language = "en"
+    lines = [_full_request_answer(snapshot, language), *topic_lines(snapshot, topic, language)]
+    if len(lines) == 1:
+        lines.append("No additional verified evidence selected." if language == "en" else "추가로 확인된 근거가 없습니다.")
+    if snapshot.get("truncated"):
+        lines.append("Some records were omitted." if language == "en" else "일부 자료가 생략되었습니다.")
+    return "\n".join(lines)
+
+
 class OfficerChat:
     def __init__(self, runner: Any, model: str) -> None:
         self._runner = runner
@@ -126,9 +159,7 @@ class OfficerChat:
         product = product_of(app)
         if product:
             language = "en"
-            opinion = snapshot.get("agent_opinion") or {}
-            if opinion.get("review_passed") is not True and opinion.get("state") != "legacy":
-                snapshot = {**snapshot, "agent_opinion": None}
+            snapshot = scoped(snapshot)
         requested = app.get("requested_amount_cents" if product else "requested_amount_krw")
         menu = evidence_menu(snapshot, language)
         lines = [_full_request_answer(snapshot, language)]
@@ -146,16 +177,18 @@ class OfficerChat:
                               "answer_language": language}, ensure_ascii=False)
         try:
             spec = replace(self._spec, instructions="Select up to six relevant verified evidence paths from the USD "
-                           "snapshot. Return only one exact key per line, no prose or amounts. Never propose alternative "
-                           "credit terms or infer an officer decision.") if product else self._spec
+                           "snapshot. Return only one exact key per line, no prose or amounts. Use dotted paths with "
+                           "numeric list indexes, for example policy.reason_codes.0.message, cashflow.capacity.short_months, "
+                           "cashflow.features.mkt_return_rate_90d or agent_opinion.officer_checks.0. Never propose "
+                           "alternative credit terms or infer an officer decision.") if product else self._spec
             run = self._runner.run(spec, payload, {})
         except AgentError as e:
             self._delete(e.conversation_id)
             raise
         self._delete(run.conversation_id)
         output: Answer = run.output  # type: ignore[assignment]
-        keys = list(dict.fromkeys(output.answer.strip().splitlines()))
-        if 0 < len(keys) <= 6 and all(key in menu for key in keys):
+        keys = selected_paths(output.answer, menu)
+        if keys:
             for key in keys:
                 if menu[key] not in lines:
                     lines.append(menu[key])

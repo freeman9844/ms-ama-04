@@ -34,6 +34,7 @@ from agents.repayment import current_quoted_installment
 from console import i18n
 from console.i18n import _
 from agents.monitoring import WEEKS
+from agents.officer_chat import answer_topic
 from agents.pretranslate import RawScope, active_scope, raw_container, translation_scope
 from agents.runtime import AgentError, GatewayBlocked, GatewayThrottled
 from agents import usd_market_score as ms
@@ -80,7 +81,7 @@ from console.monitoring import (
     metric_label,
     stage_label,
 )
-from console.officer_chat import CHAT_ERRORS, CHAT_SUGGESTIONS, build_snapshot, clean_history, validate_question
+from console.officer_chat import CHAT_ERRORS, CHAT_TOPICS, build_snapshot, chat_topics, clean_history, validate_question
 from console.opinion import opinion_panel, policy_cents_ids, review_history
 from console.ops import (
     AXIS_LABELS,
@@ -569,7 +570,8 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
                       v=view, ui=detail_summary(view), panels=assessment_panels(view),
                       op=opinion_panel(view), history=review_history(doc, published=bool(view["assessment"])),
                       in_progress=in_progress, state=state,
-                      consents=consents, chat_enabled=deps.chat is not None, chat_suggestions=CHAT_SUGGESTIONS,
+                      consents=consents, chat_enabled=deps.chat is not None,
+                      chat_topics=chat_topics(view) if deps.chat is not None and view.get("policy") else [],
                       **ctx)
 
     @app.get("/healthz")
@@ -783,9 +785,14 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             return _chat_error("disabled", usd)
         if doc is None:
             return _chat_error("not_found")
-        question = validate_question(body.get("question"))
-        if question is None:
-            return _chat_error("invalid_question", usd)
+        topic = body.get("topic")
+        if topic is not None and (not isinstance(topic, str) or topic not in CHAT_TOPICS):
+            return _chat_error("bad_request", usd)
+        question = None
+        if topic is None:
+            question = validate_question(body.get("question"))
+            if question is None:
+                return _chat_error("invalid_question", usd)
         # 스냅샷은 원천 없이(raw=None) 저장된 가명 텍스트로만 만든다. 원천은 심사역이 쓴 질문·대화를 그 건의
         # 가명처리기로 가리는 데만 쓴다. 원천을 읽다 오류가 나면 엔티티 없이 가린 문장을 보내지 않고 실패로 답한다.
         raw, readable = await run_in_threadpool(read_raw, lambda: load_raw(deps.raw, doc), application_id)
@@ -806,6 +813,10 @@ def create_app(deps: ConsoleDeps) -> FastAPI:
             snapshot = build_snapshot(detail_view(doc, None, deps.pseudonym_key, restore=False), translate=translate)
         except ValueError:
             return _chat_error("failed", usd)
+        if topic is not None:
+            chat_log.info("officer_chat application_id=%s result=ok topic=%s latency_ms=0 input_tokens=0 output_tokens=0",
+                          application_id, topic)
+            return JSONResponse({"answer": answer_topic(snapshot, topic, "en" if usd else i18n.current())})
         started = time.monotonic()
         result, answer = "ok", None
         try:

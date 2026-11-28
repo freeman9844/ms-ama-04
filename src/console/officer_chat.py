@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from agents.features import ANNUAL_RATE
 from agents.officer_facts import reviewed_detail
+from agents.officer_topics import TOPICS, available_topics
 from policy.engine import LIMIT_UNIT_KRW, explain
 from policy.rules import AMENDED_IN_PLACE, RuleSet, UsdRuleSet, is_usd_rules, rules_for_version
 from shared.contracts import CashFlowFeatures, UsdCashFlowFeatures, UsdPolicyDecision
@@ -27,9 +28,18 @@ MONTHLY_KEYS = ("month", "revenue", "operating_out", "debt_service", "owner_draw
 SETTLEMENT_KEYS = ("available", "pg_reconciliation_ratio", "pg_top_platform_share", "pg_take_rate_trend_pp",
                    "pg_cash_conversion_days", "pg_offset_rate_trend_pp", "pg_advance_share",
                    "pg_advance_suspected_count", "unmatched_count", "settlement_count", "period")
-# 추천 질문·오류 문구는 화면에 낼 때 번역한다(템플릿 `_()`, app의 `_chat_error`). TRACE_NOTES는 모델 입력이라 번역하지 않는다.
-CHAT_SUGGESTIONS = ("상환 여력이 부족한 달과 이유는?", "정책 판정과 회부 사유는?", "에이전트가 이 권고를 낸 근거는?",
-                    "마켓 반품률·취소율과 정산 예정금을 계좌 입금과 비교하면 무엇을 확인해야 하나요?")
+# 제안 칩·오류 문구는 화면에 낼 때 번역한다(템플릿 `_()`, app의 `_chat_error`). TRACE_NOTES는 모델 입력이라 번역하지 않는다.
+# 칩은 신청에 근거가 있을 때만 보이고, 누르면 서버가 정해진 근거로 바로 답한다(agents.officer_topics).
+CHAT_TOPICS: dict[str, str] = {
+    "policy": "정책 판정과 사유는?",
+    "limit": "한도와 금리 구간 계산은?",
+    "capacity": "상환 여력이 부족한 달과 이유는?",
+    "opinion": "에이전트 권고의 근거는?",
+    "checks": "결정 전에 확인할 사항은?",
+    "market": "마켓·정산 위험 신호는?",
+    "cash_only": "마켓·정산 자료 없이 보면 판정은?",
+}
+assert tuple(CHAT_TOPICS) == TOPICS
 TRACE_NOTES = {
     "unknown_version": "적용 규정 버전을 콘솔에서 찾을 수 없어 계산 과정을 만들지 않았습니다.",
     "invalid_features": "저장된 특성 값이 불완전해 계산 과정을 만들지 않았습니다.",
@@ -140,6 +150,7 @@ def verified_policy(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[
             return None
     limit = "max_amount_cents" if product else "max_amount_krw"
     rules = rules_for_version(version)
+    alt_data = isinstance(rules, UsdRuleSet) and bool(rules.alt_data_features)
     if rules is not None and isinstance(rules, UsdRuleSet) != (limit == "max_amount_cents"):
         raise ValueError("Policy and ruleset products differ")
     if rules is None:
@@ -151,6 +162,7 @@ def verified_policy(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[
         trace, note = None, TRACE_NOTES["invalid_features"]
     else:
         trace, note = _trace(rules, policy, features)
+    cash = policy.get("cash_only")
     return {
         "decision": policy.get("decision"),
         "rules_version": policy.get("rules_version"),
@@ -158,6 +170,14 @@ def verified_policy(doc: Mapping[str, Any], policy: Any, features: Any) -> dict[
         "rate_band": policy.get("rate_band"),
         "reason_codes": [{k: r.get(k) for k in ("code", "message", "observed", "threshold")}
                          for r in policy.get("reason_codes") or ()],
+        # 비교 판정. usd-v2~는 마켓뿐 아니라 대안 데이터(PG·마켓) 전체를 빼고 본 판정이다(views._policy_compare).
+        "cash_only": {
+            "decision": cash.get("decision"),
+            limit: cash.get(limit),
+            "reason_codes": [{k: r.get(k) for k in ("code", "message", "observed", "threshold")}
+                             for r in cash.get("reason_codes") or () if isinstance(r, Mapping)],
+            "excludes": "alt_data" if alt_data else "marketplace",
+        } if isinstance(cash, Mapping) else None,
         "rules": _rules(rules) if rules else None,
         "trace": trace,
         "trace_note": "The stored evidence could not verify this policy trace." if note and limit == "max_amount_cents" else note,
@@ -273,6 +293,15 @@ def build_snapshot(view: Mapping[str, Any], *, translate: Callable[[str], str | 
         elif not product and translate and (translated := translate(original)) and reviewed_detail(translated, doc.get("requested_amount_krw")):
             row["text"] = translated
     return _fit(snapshot)
+
+
+def chat_topics(view: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """이 신청에 근거가 있는 제안 칩 (topic, 한국어 문구). 스냅샷을 만들 수 없는 건은 칩이 없다."""
+    try:
+        snapshot = build_snapshot(view)
+    except ValueError:
+        return []
+    return [(t, CHAT_TOPICS[t]) for t in available_topics(snapshot)]
 
 
 def validate_question(value: Any) -> str | None:
