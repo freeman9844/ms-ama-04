@@ -3,7 +3,7 @@
 운영 에이전트는 Foundry 프로젝트의 APIM 연결(gw-*)을 거쳐 모델을 부른다. 에이전트 정의의 모델을
 '<연결>/<배포>'로 바꾸면 Agent Service가 그 연결(APIM 구독 = 에이전트별 토큰 한도)로 호출한다.
 연결 이름은 infra/resources.bicep의 gateways 표와 같아야 한다(테스트가 교차 확인).
-Decision-1은 APIM decision API(호출자 Entra 토큰 검증)로 보낸다. AI_GATEWAY=off면 둘 다 직접 호출한다.
+Decision 모델은 APIM decision API(호출자 Entra 토큰 검증)로 보낸다. AI_GATEWAY=off면 둘 다 직접 호출한다.
 """
 
 import dataclasses

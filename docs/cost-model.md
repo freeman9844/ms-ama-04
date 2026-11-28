@@ -12,7 +12,7 @@
 
 - **건당 AI 비용**: 실측 토큰 × 모델 단가의 합을 신청 수로 나눈 값. 토큰 집계와 단가 적용은 `src/opsmetrics/cost.py`의 `ai_cost`가, 물량별 건당 환산은 `unit_economics`가 계산한다. 단가는 `src/evals/prices.json`(Azure OpenAI Global Standard, USD/1M 토큰)에서 읽는다.
 - **월 고정비**: 모델 사용량과 무관하게 매달 드는 인프라 비용. 물량이 늘수록 건당 분담액이 줄어 규모의 경제가 작동한다.
-- 단가를 확인하지 못한 호출(`decision-1`)은 토큰이 0으로 집계되어 금액에 들어가지 않고 "단가 미확인 호출 수"로만 남는다(`src/evals/prices.json`에서 `decision-1`의 단가는 `null`).
+- 단가를 확인하지 못한 호출(`decision-1-1`, 이전 `decision-1`)은 토큰이 0으로 집계되어 금액에 들어가지 않고 "단가 미확인 호출 수"로만 남는다(`src/evals/prices.json`에서 두 배포의 단가는 `null`).
 
 ## 건당 AI 비용
 

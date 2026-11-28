@@ -1,0 +1,1298 @@
+{
+  "run_id": "job-eval-yprpqzo",
+  "mode": "azure",
+  "started_at": "2026-11-28T08:49:32+00:00",
+  "finished_at": "2026-11-28T08:52:15+00:00",
+  "disclaimer": "합성 데이터 기준 결과다. 실제 고객·실제 성능을 나타내지 않으며, 수치는 같은 시드에서도 LLM 응답 변동이 있다.",
+  "budget_usd": 5.0,
+  "spent_usd": 0.107938,
+  "partial": false,
+  "dataset": {
+    "as_of": "2026-11-01",
+    "seeds": {
+      "classify": [
+        101,
+        102
+      ],
+      "underwriting": 201,
+      "early_warning": 301
+    },
+    "classify": {
+      "apps": 10,
+      "hard_bank": 32,
+      "labelled_txns": 2420,
+      "labels": {
+        "high_cost_lender": 66,
+        "loan_repayment": 120,
+        "other_operating": 610,
+        "owner_transfer": 120,
+        "payroll": 224,
+        "rent": 120,
+        "supplier": 676,
+        "tax_or_insurance": 484
+      }
+    },
+    "underwriting": {
+      "cases": 11,
+      "injected": 5,
+      "counterfactual_pairs": 3
+    },
+    "early_warning": {
+      "paths": [
+        {
+          "path_id": "ev-eheals",
+          "archetype": "healthy_seasonal",
+          "scenario": "sales_slump",
+          "cause": "sales_slump",
+          "onset_week": 2,
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-estres",
+          "archetype": "stressed",
+          "scenario": "sales_slump",
+          "cause": "sales_slump",
+          "onset_week": 2,
+          "default_on": "2027-01-20"
+        },
+        {
+          "path_id": "ev-ehealh",
+          "archetype": "healthy_seasonal",
+          "scenario": "settlement_hold",
+          "cause": "settlement_hold",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estreh",
+          "archetype": "stressed",
+          "scenario": "settlement_hold",
+          "cause": "settlement_hold",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-ehealr",
+          "archetype": "healthy_seasonal",
+          "scenario": "return_spike",
+          "cause": "return_spike",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estrer",
+          "archetype": "stressed",
+          "scenario": "return_spike",
+          "cause": "return_spike",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-ehealc",
+          "archetype": "healthy_seasonal",
+          "scenario": "cost_surge",
+          "cause": "cost_surge",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-estrec",
+          "archetype": "stressed",
+          "scenario": "cost_surge",
+          "cause": "cost_surge",
+          "onset_week": 3,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-ehealb",
+          "archetype": "healthy_seasonal",
+          "scenario": "stable",
+          "cause": null,
+          "onset_week": null,
+          "default_on": null
+        },
+        {
+          "path_id": "ev-etax_b",
+          "archetype": "tax_mismatch",
+          "scenario": "stable",
+          "cause": null,
+          "onset_week": null,
+          "default_on": null
+        }
+      ]
+    }
+  },
+  "models": {
+    "full": "gpt-5.6-sol",
+    "mini": "gpt-5.6-luna",
+    "decision": "decision-1-1",
+    "reviewer": "gpt-5.6-luna",
+    "judge": "gpt-5.4"
+  },
+  "prices_source": "Azure OpenAI Global Standard 단가(USD/1M 토큰), azurespeed.com 집계·Azure 가격 페이지 기준 2026-11 확인. 캐시 입력 할인은 반영하지 않아 상한 추정이다. gpt-5.6-luna는 Azure 단가를 확인하지 못해 OpenAI API 공개 단가(2026-07-30 인하 반영)를 쓴다. Decision-1은 공개 단가를 확인하지 못해 비용 집계에서 '단가 미확인' 호출 수로만 남긴다.",
+  "suites": {
+    "classify": {
+      "partial": false,
+      "skipped": 0,
+      "configs": {
+        "decision-1-1+gpt-5.6-luna": {
+          "attempted_apps": 10,
+          "apps": 10,
+          "failed_apps": 0,
+          "app_success_rate": 1.0,
+          "app_failure_rate": 0.0,
+          "groups": 152,
+          "macro_f1": 1.0,
+          "accuracy": 1.0,
+          "txn_accuracy": 1.0,
+          "per_label": {
+            "high_cost_lender": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "loan_repayment": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "other_operating": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 46
+            },
+            "owner_transfer": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "payroll": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "rent": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "supplier": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 38
+            },
+            "tax_or_insurance": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 28
+            }
+          },
+          "sources": {
+            "decision": 99,
+            "cache": 49,
+            "fallback": 4
+          },
+          "unresolved_rate": 0.0,
+          "cache_hit_rate": 0.3224,
+          "fallback_rate": 0.0388,
+          "model_calls_per_app": 10.4,
+          "model_calls": 104,
+          "cost_usd": 0.000256,
+          "unpriced_calls": 103,
+          "cost_per_group_usd": 2e-06,
+          "threshold_curve": [
+            {
+              "threshold": 0.5,
+              "accepted": 72,
+              "accuracy": 1.0,
+              "fallback_rate": 0.0
+            },
+            {
+              "threshold": 0.6,
+              "accepted": 72,
+              "accuracy": 1.0,
+              "fallback_rate": 0.0
+            },
+            {
+              "threshold": 0.7,
+              "accepted": 72,
+              "accuracy": 1.0,
+              "fallback_rate": 0.0
+            },
+            {
+              "threshold": 0.8,
+              "accepted": 68,
+              "accuracy": 1.0,
+              "fallback_rate": 0.0556
+            },
+            {
+              "threshold": 0.9,
+              "accepted": 64,
+              "accuracy": 1.0,
+              "fallback_rate": 0.1111
+            }
+          ]
+        },
+        "gpt-5.6-luna": {
+          "attempted_apps": 10,
+          "apps": 10,
+          "failed_apps": 0,
+          "app_success_rate": 1.0,
+          "app_failure_rate": 0.0,
+          "groups": 152,
+          "macro_f1": 0.9913,
+          "accuracy": 0.9605,
+          "txn_accuracy": 0.9648,
+          "per_label": {
+            "high_cost_lender": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "loan_repayment": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "other_operating": {
+              "precision": 1.0,
+              "recall": 0.8696,
+              "f1": 0.9303,
+              "support": 46
+            },
+            "owner_transfer": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "payroll": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "rent": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "supplier": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 38
+            },
+            "tax_or_insurance": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 28
+            }
+          },
+          "sources": {
+            "fallback": 101,
+            "none": 6,
+            "cache": 45
+          },
+          "unresolved_rate": 0.0395,
+          "cache_hit_rate": 0.2961,
+          "fallback_rate": 1.0,
+          "model_calls_per_app": 1.0,
+          "model_calls": 10,
+          "cost_usd": 0.005802,
+          "unpriced_calls": 0,
+          "cost_per_group_usd": 3.8e-05,
+          "threshold_curve": null
+        },
+        "gpt-5.6-sol": {
+          "attempted_apps": 10,
+          "apps": 10,
+          "failed_apps": 0,
+          "app_success_rate": 1.0,
+          "app_failure_rate": 0.0,
+          "groups": 152,
+          "macro_f1": 0.9897,
+          "accuracy": 0.9539,
+          "txn_accuracy": 0.9572,
+          "per_label": {
+            "high_cost_lender": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "loan_repayment": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "other_operating": {
+              "precision": 1.0,
+              "recall": 0.8478,
+              "f1": 0.9176,
+              "support": 46
+            },
+            "owner_transfer": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "payroll": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "rent": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 8
+            },
+            "supplier": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 38
+            },
+            "tax_or_insurance": {
+              "precision": 1.0,
+              "recall": 1.0,
+              "f1": 1.0,
+              "support": 28
+            }
+          },
+          "sources": {
+            "fallback": 101,
+            "none": 7,
+            "cache": 44
+          },
+          "unresolved_rate": 0.0461,
+          "cache_hit_rate": 0.2895,
+          "fallback_rate": 1.0,
+          "model_calls_per_app": 1.0,
+          "model_calls": 10,
+          "cost_usd": 0.10188,
+          "unpriced_calls": 0,
+          "cost_per_group_usd": 0.00067,
+          "threshold_curve": null
+        }
+      },
+      "cases": [
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1010",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 186,
+            "unique_descriptions": 16,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 16,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 16,
+          "correct": 16
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1011",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 174,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1012",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1013",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 70,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1014",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1020",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 186,
+            "unique_descriptions": 16,
+            "cache_hits": 10,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 16,
+          "correct": 16
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1021",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 168,
+            "unique_descriptions": 15,
+            "cache_hits": 10,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 4,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 4,
+            "fallback_resolved": 4,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1022",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1023",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 70,
+            "unique_descriptions": 15,
+            "cache_hits": 10,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1024",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 10,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 0,
+            "abstained": 0,
+            "low_confidence": 0,
+            "fallback_items": 0,
+            "fallback_resolved": 0,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1010",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 186,
+            "unique_descriptions": 16,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 16,
+            "decision_errors": 0,
+            "abstained": 16,
+            "low_confidence": 0,
+            "fallback_items": 16,
+            "fallback_resolved": 15,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 16,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1011",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 174,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 15,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1012",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1013",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 70,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1014",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1020",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 186,
+            "unique_descriptions": 16,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 7,
+            "decision_errors": 0,
+            "abstained": 7,
+            "low_confidence": 0,
+            "fallback_items": 7,
+            "fallback_resolved": 7,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 16,
+          "correct": 16
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1021",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 168,
+            "unique_descriptions": 15,
+            "cache_hits": 10,
+            "cache_errors": 0,
+            "decision_calls": 5,
+            "decision_errors": 0,
+            "abstained": 5,
+            "low_confidence": 0,
+            "fallback_items": 5,
+            "fallback_resolved": 5,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1022",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 8,
+            "cache_errors": 0,
+            "decision_calls": 7,
+            "decision_errors": 0,
+            "abstained": 7,
+            "low_confidence": 0,
+            "fallback_items": 7,
+            "fallback_resolved": 7,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1023",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 70,
+            "unique_descriptions": 15,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 5,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1024",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 5,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1010",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 186,
+            "unique_descriptions": 16,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 16,
+            "decision_errors": 0,
+            "abstained": 16,
+            "low_confidence": 0,
+            "fallback_items": 16,
+            "fallback_resolved": 15,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 16,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1011",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 174,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1012",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1013",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 70,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1014",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 0,
+            "cache_errors": 0,
+            "decision_calls": 15,
+            "decision_errors": 0,
+            "abstained": 15,
+            "low_confidence": 0,
+            "fallback_items": 15,
+            "fallback_resolved": 14,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1020",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 186,
+            "unique_descriptions": 16,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 7,
+            "decision_errors": 0,
+            "abstained": 7,
+            "low_confidence": 0,
+            "fallback_items": 7,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 16,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1021",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 168,
+            "unique_descriptions": 15,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 0
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1022",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 8,
+            "cache_errors": 0,
+            "decision_calls": 7,
+            "decision_errors": 0,
+            "abstained": 7,
+            "low_confidence": 0,
+            "fallback_items": 7,
+            "fallback_resolved": 7,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1023",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 70,
+            "unique_descriptions": 15,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 5,
+            "fallback_errors": 0,
+            "unresolved": 1,
+            "override_txns": 4,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 14
+        },
+        {
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1024",
+          "status": "ok",
+          "metrics": {
+            "pipeline": "semantic-v1",
+            "threshold": 0.7,
+            "unclassified_txns": 184,
+            "unique_descriptions": 15,
+            "cache_hits": 9,
+            "cache_errors": 0,
+            "decision_calls": 6,
+            "decision_errors": 0,
+            "abstained": 6,
+            "low_confidence": 0,
+            "fallback_items": 6,
+            "fallback_resolved": 6,
+            "fallback_errors": 0,
+            "unresolved": 0,
+            "override_txns": 2,
+            "owner_transfer_txns": 2
+          },
+          "groups": 15,
+          "correct": 15
+        }
+      ],
+      "failures": [
+        {
+          "type": "agent_error",
+          "suite": "classify",
+          "config": "decision-1-1+gpt-5.6-luna",
+          "case": "ev-c1021",
+          "detail": "decision 오류 4건, 폴백 오류 0건"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1010",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1012",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1013",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1014",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1023",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-luna",
+          "case": "ev-c1024",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1010",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1011",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1012",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1013",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1014",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1020",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        },
+        {
+          "type": "classification_unresolved",
+          "suite": "classify",
+          "config": "gpt-5.6-sol",
+          "case": "ev-c1023",
+          "detail": "'신한카드 결제대금' 정답 other_operating"
+        }
+      ],
+      "total_txns": 6718,
+      "rule_resolved_ratio": 0.7633
+    }
+  },
+  "by_model": {
+    "decision-1-1": {
+      "calls": 103,
+      "errors": 4,
+      "retries": 49,
+      "p50_ms": 223,
+      "p95_ms": 1101,
+      "input_tokens": 31597,
+      "output_tokens": 99,
+      "cost_usd": null
+    },
+    "gpt-5.6-luna": {
+      "calls": 11,
+      "errors": 0,
+      "retries": 0,
+      "p50_ms": 3254,
+      "p95_ms": 4404,
+      "input_tokens": 10803,
+      "output_tokens": 3249,
+      "cost_usd": 0.006058
+    },
+    "gpt-5.6-sol": {
+      "calls": 10,
+      "errors": 0,
+      "retries": 1,
+      "p50_ms": 3807,
+      "p95_ms": 8225,
+      "input_tokens": 10265,
+      "output_tokens": 3041,
+      "cost_usd": 0.10188
+    }
+  },
+  "failure_counts": {
+    "classification_unresolved": 13,
+    "agent_error": 1
+  },
+  "cleanup": {
+    "deleted": 21,
+    "absent": 0,
+    "failed": 0
+  },
+  "errors": [],
+  "gateway": {
+    "enabled": true,
+    "content_blocked": 0,
+    "rate_limited": 0
+  }
+}

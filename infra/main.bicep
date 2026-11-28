@@ -30,7 +30,7 @@ param deployCapabilityHost bool = true
 param chatModelSku string = 'GlobalStandard'
 
 @allowed([ 'GlobalStandard', 'DataZoneStandard' ])
-@description('Microsoft-Decision-1 배포 SKU. APAC Global Standard 지원이 문서와 CLI에서 엇갈리므로 실패 시 DataZoneStandard로 전환합니다.')
+@description('Microsoft-Decision-1.1 배포 SKU. APAC Global Standard 지원이 문서와 CLI에서 엇갈리므로 실패 시 DataZoneStandard로 전환합니다.')
 param decisionModelSku string = 'GlobalStandard'
 
 @secure()
@@ -99,14 +99,17 @@ var tags = {
 // gpt-6.1-sol 50 = 보유만. 게이트웨이 연결(chat completions)에서 함수 도구 + 추론을 거부해(400) 분석가로 쓰지 않습니다.
 // gpt-6-luna 250 = 콘솔 전용: 심사역 채팅(gw-officer-chat 200K) + 영문 화면 기계 번역(gw-translator 50K). 오케스트레이터 에이전트와 나누지 않습니다(2026-11-09 쿼터 100/250에서 전량으로 증설).
 // DataZoneStandard 쿼터는 100이라 100으로 낮추며, 이때는 APIM TPM보다 배포 한도(100K)가 먼저 걸립니다.
-// ARM은 리소스 이름에 예약어 MICROSOFT를 허용하지 않으므로 Decision-1은 배포 이름을 따로 둡니다.
+// ARM은 리소스 이름에 예약어 MICROSOFT를 허용하지 않으므로 Decision 모델은 배포 이름을 따로 둡니다.
+// Decision-1(배포 decision-1)은 2027-02-04 종료 예정이라 2026-11-28 GA인 Decision-1.1로 바꿨습니다(ADR-005).
+// 기존 decision-1 배포는 증분 배포라 지워지지 않으며 되돌리기용으로 남겨 둡니다.
+// 용량을 기존 배포에서 올리면 실제 제한이 늦게 반영되므로(2026-11-28 확인) 새 배포를 처음부터 50으로 만듭니다.
 var modelDeployments = [
   { name: 'gpt-5.4', format: 'OpenAI', version: '2026-03-05', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 200 : 100 }
   { name: 'gpt-5.6-luna', format: 'OpenAI', version: '2026-07-09',   sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 300 : 100 }
   { name: 'gpt-6.1-sol', format: 'OpenAI', version: '2026-09-29', sku: chatModelSku, capacity: 50 }
   { name: 'gpt-5.6-sol', format: 'OpenAI', version: '2026-07-09', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 250 : 100 }
   { name: 'gpt-6-luna', format: 'OpenAI', version: '2026-09-22', sku: chatModelSku, capacity: chatModelSku == 'GlobalStandard' ? 250 : 100 }
-  { name: 'Microsoft-Decision-1', deploymentName: 'decision-1', format: 'Microsoft', version: '1', sku: decisionModelSku, capacity: 50 }
+  { name: 'Microsoft-Decision-1.1', deploymentName: 'decision-1-1', format: 'Microsoft', version: '1', sku: decisionModelSku, capacity: 50 }
 ]
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {

@@ -9,7 +9,7 @@
 | 에이전트 | 단계 | 자율성 | 모델(기본) | 도구(handler) | 쓰기 권한 | 실패 시 동작 | 코드 |
 |---|---|---|---|---|---|---|---|
 | `data-assembly` | 데이터 수집 | L3 | `gpt-5.6-luna` | `fetch_source` | 없음(읽기) | 안전망 수집 + `agent_fallback` 플래그 | `src/agents/data_assembly.py` |
-| `txn-classifier` | 거래 분류 | L2 | `gpt-5.6-luna`(폴백), `decision-1`(주) | 없음(구조화 출력) | 없음 | 규칙 분류만으로 심사 계속 | `src/agents/txn_classify.py`, `src/agents/classify.py` |
+| `txn-classifier` | 거래 분류 | L2 | `gpt-5.6-luna`(폴백), `decision-1-1`(주) | 없음(구조화 출력) | 없음 | 규칙 분류만으로 심사 계속 | `src/agents/txn_classify.py`, `src/agents/classify.py` |
 | `underwriting-analyst` | 신용 평가 | L2 | `gpt-5.6-sol` | `get_metrics`, `get_monthly_series`, `get_settlement_summary`, `query_transactions`, `code_interpreter` | 없음 | 1라운드 실패 시 평가 없음 → 1회 재시도 후 신청 `failed` | `src/agents/underwriting.py` |
 | `underwriting-reviewer` | 신용 평가 | L2 | `gpt-5.6-luna` | 없음 | 없음 | 검토 미통과 시 의견 없음 | `src/agents/underwriting.py` |
 | `early-warning-investigator` | 사후 조기경보 | L4 | `gpt-5.6-luna` | `get_weekly_series`, `get_baseline`, `get_peer_cohort`, `get_settlement_ledger`, `query_transactions`, `raise_alert` | 경보(`raise_alert`). 높음 경보의 단계별 자동 안내는 LLM 밖 결정적 정책(`src/agents/escalation.py`) | 탐지기 단독 medium 경보(fail-safe) | `src/agents/early_warning.py` |
@@ -36,14 +36,14 @@
 ## 거래 분류
 
 - **목적:** 규칙으로 못 나눈 비정형 적요를 고정 카테고리로 분류한다. 거래마다 LLM을 호출하지 않는다(심사 지표 산출 단계의 하위 단계).
-- **Decision-1 경로(`src/agents/classify.py` → `src/agents/txn_classify.py`):**
+- **Decision 경로(`src/agents/classify.py` → `src/agents/txn_classify.py`):**
   1. 결정적 규칙 `classify-v1`(`classify` 함수, 거래유형 코드 + 적요 키워드)로 먼저 분류하고 미분류(`unclassified_in/out`)만 대상으로 한다.
   2. 가명처리 → 정규화 → (업종, 방향, 거래유형, 적요) 단위 중복 제거.
   3. 캐시 재사용(가명 토큰·이체 적요 `TRANSFER_IN/OUT`은 캐시에 넣지도 찾지도 않음).
-  4. 고유 적요마다 Microsoft-Decision-1(`DECISION_DEPLOYMENT=decision-1`, REST `/providers/microsoft/v1/systemone`)에 고정 선택지(+`cannot_tell`)로 병렬 질의.
+  4. 고유 적요마다 Microsoft-Decision-1.1(`DECISION_DEPLOYMENT=decision-1-1`, 2026-11-28 Decision-1에서 전환, REST `/providers/microsoft/v1/systemone`)에 고정 선택지(+`cannot_tell`)로 병렬 질의.
   5. 기권·저신뢰(`DEFAULT_THRESHOLD=0.7`)·오류만 mini LLM 폴백 에이전트 `txn-classifier`에 한 번에 묻고, 그래도 모르면 미분류.
 - **가드레일:** 모델로 가는 적요는 가명처리. 적요는 데이터일 뿐 지시가 아니라고 지시문에 명시. 특성 반영은 보수적(출금의 부채상환·고금리 상환만 override).
-- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 2장 — 규칙만으로 80.0% 분류, 캐시 적중 25.0%. `decision-1+gpt-5.4-mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. `decision-1+gpt-5.4-mini` 구성의 분류 호출은 신청당 8.375회(Decision-1 7.5회 + mini 폴백)지만 Decision-1 단가 미확인이라 건당 총비용 효과는 미검증이다(보고서의 mini 단독 $0.0123·1.000회 vs `decision-1+mini` $0.0047은 Decision-1 단가를 제외한 값). 세 구성 모두 macro F1 1.000(천장 효과)이라 품질이 아니라 폴백 비율·지연으로 가린다.
+- **모델 근거:** `eval/reports/job-eval-9imbutm/report.md` 2장 — 규칙만으로 80.0% 분류, 캐시 적중 25.0%. `decision-1+gpt-5.4-mini` 구성은 범용 LLM 폴백 비율 25.0%(mini 단독 100.0%)로 범용 LLM 호출을 줄인다. `decision-1+gpt-5.4-mini` 구성의 분류 호출은 신청당 8.375회(Decision-1 7.5회 + mini 폴백)지만 Decision-1 단가 미확인이라 건당 총비용 효과는 미검증이다(보고서의 mini 단독 $0.0123·1.000회 vs `decision-1+mini` $0.0047은 Decision-1 단가를 제외한 값). 세 구성 모두 macro F1 1.000(천장 효과)이라 품질이 아니라 폴백 비율·지연으로 가린다. Decision-1.1 전환 비교(같은 suite, 2026-11-28)는 정확도 99.3% → 100.0%, LLM 폴백 비율 26.9% → 3.9%였다([ADR-005](adr/ADR-005-classification-model.md#decision-11-전환2026-11-28)).
 
 ## 심사(분석가·검토자)
 

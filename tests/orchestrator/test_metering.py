@@ -102,7 +102,7 @@ def test_run_metered_records_classify_substep():
     out = run_metered("underwrite", lambda d, p: uw, FakeDeps(Clock(), Runner()), {"application_id": "a"})
     (sub,) = out[METER_KEY]["substeps"]
     assert sub["step"] == "classify" and sub["outcome"] == "ok"
-    assert {"model": "decision-1", "input_tokens": 0, "output_tokens": 0, "calls": 3} in sub["usage"]
+    assert {"model": "decision-1-1", "input_tokens": 0, "output_tokens": 0, "calls": 3} in sub["usage"]
     assert out[METER_KEY]["usage"] == []
 
 

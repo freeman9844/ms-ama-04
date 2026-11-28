@@ -43,7 +43,7 @@ class Models:
 
     full: str = "gpt-5.6-sol"
     mini: str = "gpt-5.6-luna"
-    decision: str = "decision-1"
+    decision: str = "decision-1-1"
     reviewer: str = "gpt-5.6-luna"
     judge: str = "gpt-5.4"
 

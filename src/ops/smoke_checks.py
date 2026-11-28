@@ -174,7 +174,7 @@ def check_agent(cfg: dict, http: Http, token: TokenProvider, name: str = "p2-smo
 
 
 def check_decision(cfg: dict, http: Http, token: TokenProvider) -> str:
-    """Microsoft-Decision-1 systemone 선택형 질문 1건(거래 의미 분류 경로)."""
+    """Microsoft-Decision systemone 선택형 질문 1건(거래 의미 분류 경로)."""
     url = f"{cfg['ai_account_endpoint'].rstrip('/')}/providers/microsoft/v1/systemone"
     payload = {"model": cfg["decision_deployment"], "state": {"text": "smoke"},
                "questions": {"ping": {"type": "choice", "instructions": "Answer yes.",
