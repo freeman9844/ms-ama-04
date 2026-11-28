@@ -72,8 +72,10 @@ def test_alerts_and_workbook(variant):
     queries = {r["name"]: r["properties"]["criteria"]["allOf"][0]["query"] for r in rules}
     assert any("journey.step" in q for q in queries.values())
     assert any("policy.circuit" in q for q in queries.values())
+    assert 'ResultCode == "429"' in queries["alert-gateway-throttle"]
+    assert "Success == false" in queries["alert-function-failures"]
     windows = sorted(r["properties"]["windowSize"] for r in rules)
-    assert windows == ["PT15M", "PT1H"]
+    assert windows == ["PT15M", "PT1H", "PT1H", "PT1H"]
     wb = variant.one("Microsoft.Insights/workbooks")
     data = json.loads(wb["properties"]["serializedData"])
     assert "journey.step" in json.dumps(data) and wb["properties"]["category"] == "workbook"

@@ -10,7 +10,7 @@ METRICS_PUBLISHER = "3913510d-42f4-4e42-8a64-420c390055eb"
 GATEWAYS = {
     "gw-analyst": 150000,
     "gw-early-warning": 150000,
-    "gw-reviewer": 15000,
+    "gw-reviewer": 50000,
     "gw-data-assembly": 17000,
     "gw-txn-classifier": 20000,
     "gw-collections": 10000,

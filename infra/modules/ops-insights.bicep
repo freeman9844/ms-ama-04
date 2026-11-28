@@ -1,4 +1,4 @@
-// 운영 지표: Workbook, 경보 2개(에이전트 단계 실패율, Policy 서킷 open), Foundry 프로젝트 → App Insights 트레이스 연결.
+// 운영 지표: Workbook, 경보 4개(에이전트 단계 실패율, Policy 서킷 open, 게이트웨이 429 비율, 함수 실패), Foundry 프로젝트 → App Insights 트레이스 연결.
 param location string
 param tags object
 param lawId string
@@ -81,6 +81,20 @@ var alerts = [
     window: 'PT15M'
     frequency: 'PT5M'
     query: 'AppTraces | where Message == "policy.circuit" and tostring(Properties.state) == "open"'
+  }
+  {
+    name: 'alert-gateway-throttle'
+    description: 'AI 게이트웨이(APIM) 429 비율 > 5% (1시간, 표본 ≥ 20). 에이전트 TPM이 부하보다 낮다는 신호'
+    window: 'PT1H'
+    frequency: 'PT15M'
+    query: 'AppRequests | where AppRoleName startswith "apim-" | summarize total = count(), throttled = countif(ResultCode == "429") | where total >= 20 and throttled * 100.0 / total > 5'
+  }
+  {
+    name: 'alert-function-failures'
+    description: '오케스트레이터 함수 실행 실패 ≥ 3건 (1시간)'
+    window: 'PT1H'
+    frequency: 'PT15M'
+    query: 'AppRequests | where AppRoleName startswith "func-" and Success == false | summarize failed = count() | where failed >= 3'
   }
 ]
 
